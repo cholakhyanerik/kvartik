@@ -26,6 +26,14 @@ env:
   # здесь, а не скачивается вместе с архивом: подменённый выпуск принёс бы
   # и подменённую сумму.
   TRUNK_SHA256: 42c208270e9f12fe44e88a5acbd2f2ffa3d8534944af06d1a664793a0c7bc3e0
+  # Проверка зависимостей по `deny.toml` (Правило 13). 0.20.2 — последняя на
+  # GitHub 2026-10-10. Формат `deny.toml` между версиями меняется: сменилась
+  # версия — сверить его по исходникам нового выпуска. Сумма архива
+  # `cargo-deny-<версия>-x86_64-unknown-linux-musl.tar.gz` взята из файла
+  # `.sha256` рядом с ним и совпала со сводкой выпуска на GitHub (2026-10-10);
+  # записана здесь по той же причине, что у Trunk.
+  CARGO_DENY_VERSION: 0.20.2
+  CARGO_DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
 
 jobs:
   check:
@@ -53,6 +61,17 @@ jobs:
           rm trunk.tar.gz
           trunk --version
 
+      # Тем же путём, что Trunk: готовая сборка, сумма — из `env` выше.
+      - name: cargo-deny
+        run: |
+          curl -sSfL -o cargo-deny.tar.gz \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          echo "${CARGO_DENY_SHA256}  cargo-deny.tar.gz" | sha256sum -c -
+          tar -xzf cargo-deny.tar.gz -C "$HOME/.cargo/bin" --strip-components=1 \
+            "cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl/cargo-deny"
+          rm cargo-deny.tar.gz
+          cargo deny --version
+
       # Ровно те команды, что перечислены в Правиле 2 CLAUDE.md, и в том же
       # порядке. Клиппи дважды: на машине окно собирается как обычная
       # программа, и ветки `#[cfg(target_arch = "wasm32")]` видит только
@@ -63,3 +82,6 @@ jobs:
       - run: cargo test --workspace
       - run: trunk build --release
         working-directory: crates/app
+      # Новая запись в базе RustSec краснит прогон и без нашего изменения —
+      # так и задумано: что с ней делать, решает человек (`deny.toml`).
+      - run: cargo deny check
