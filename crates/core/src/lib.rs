@@ -9,3 +9,4 @@
 //! приходят параметром.
 
 pub mod i18n;
+pub mod model;
