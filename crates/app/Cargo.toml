@@ -1,0 +1,21 @@
+[package]
+name = "kvartik-app"
+description = "Окно Kvartik в браузере: Leptos (CSR) в WebAssembly"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# Каждую зависимость окна скачивает каждый пользователь на первом заходе
+# (Правило 1): размер `dist/` меряется до и после неё, а причина пишется
+# рядом.
+[dependencies]
+kvartik-core = { path = "../core" }
+# Реактивность и разметка окна. Только `csr`: сервера у нас нет, страница
+# собирается в браузере. API меняется между минорными версиями — сверять по
+# исходникам в реестре, а не по примерам из интернета (Правило 3).
+leptos = { version = "0.8.22", features = ["csr"] }
+# Без него паника в wasm видна в консоли только как `unreachable`,
+# и причину не найти (Правило 6).
+console_error_panic_hook = "0.1.7"

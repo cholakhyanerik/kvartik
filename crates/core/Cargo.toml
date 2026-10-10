@@ -1,0 +1,13 @@
+[package]
+name = "kvartik-core"
+description = "Ядро Kvartik: всё, что проверяется без браузера"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# Ни одной браузерной зависимости, и не появится: ядро собирается и проходит
+# тесты обычным `cargo test` на любой машине («Архитектура» в CLAUDE.md).
+# Причина каждой будущей зависимости пишется здесь же, рядом с ней.
+[dependencies]

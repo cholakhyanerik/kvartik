@@ -1,0 +1,13 @@
+[package]
+name = "kvartik-keygen"
+description = "Выпуск ключей лицензии Kvartik на машине автора"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# Программа автора: в сайт не попадает никогда, и окно от неё не зависит.
+# Закрытый ключ читается из пути вне рабочей копии (задача 26, «Общее»
+# в CLAUDE.md).
+[dependencies]

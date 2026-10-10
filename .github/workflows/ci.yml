@@ -1,0 +1,65 @@
+# Проверка на каждый push и pull request.
+#
+# Одна ОС, Linux: wasm одинаков на всех системах, а ядро не трогает ничего
+# системного. Матрица ОС понадобится только с настольной версией (задача 40).
+# Репозиторий приватный, и минуты здесь считаются (Правило 11 в CLAUDE.md).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Новый push в ту же ветку отменяет предыдущий прогон: держать очередь
+# из устаревших сборок незачем.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Та же версия, что в `trunk-version` у crates/app/Trunk.toml: старше Trunk
+  # откажется собирать. Меняется версия — меняются оба места и сумма ниже.
+  TRUNK_VERSION: v0.22.0-rc.2
+  # Сумма архива `trunk-x86_64-unknown-linux-gnu.tar.gz` этого выпуска
+  # (файл `.sha256` рядом с архивом на GitHub, сверено 2026-10-10). Записана
+  # здесь, а не скачивается вместе с архивом: подменённый выпуск принёс бы
+  # и подменённую сумму.
+  TRUNK_SHA256: 42c208270e9f12fe44e88a5acbd2f2ffa3d8534944af06d1a664793a0c7bc3e0
+
+jobs:
+  check:
+    name: Linux
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Готовая сборка с GitHub, а не `cargo install`: та собирается
+      # из исходников минут восемь на каждом прогоне.
+      - name: Trunk
+        run: |
+          curl -sSfL -o trunk.tar.gz \
+            "https://github.com/trunk-rs/trunk/releases/download/${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${TRUNK_SHA256}  trunk.tar.gz" | sha256sum -c -
+          tar -xzf trunk.tar.gz -C "$HOME/.cargo/bin" trunk
+          rm trunk.tar.gz
+          trunk --version
+
+      # Ровно те команды, что перечислены в Правиле 2 CLAUDE.md, и в том же
+      # порядке. Клиппи дважды: на машине окно собирается как обычная
+      # программа, и ветки `#[cfg(target_arch = "wasm32")]` видит только
+      # второй прогон.
+      - run: cargo build --workspace
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy -p kvartik-app --target wasm32-unknown-unknown -- -D warnings
+      - run: cargo test --workspace
+      - run: trunk build --release
+        working-directory: crates/app
