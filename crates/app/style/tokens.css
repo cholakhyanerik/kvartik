@@ -1,0 +1,116 @@
+/* Единственное место, где живут цвета, отступы, радиусы и шрифты окна
+   (Правило 4). Остальной CSS и Rust берут их только через var(--…): цвет
+   литералом вне этого файла не пройдёт тест crates/app/tests/tokens.rs.
+
+   Две темы: светлая и тёмная — по настройке системы (prefers-color-scheme;
+   решение человека 2026-10-11). Каждый цвет светлой темы обязан быть
+   и в тёмной: иначе тёмная взяла бы светлый цвет на тёмном фоне.
+
+   Цвет — только #rrggbb, без прозрачности: контраст полупрозрачного цвета
+   зависит от того, что под ним, и тест его посчитать не может.
+
+   Имя цвета говорит, с чем он обязан контрастировать (WCAG 2.1, тест
+   перебирает все сочетания в обеих темах):
+     --surface…           фоны: страница, карточка, поле ввода;
+     --text…, …-text      текст: 4.5:1 на каждом фоне;
+     --on-X               текст на заливке --X: 4.5:1 на ней;
+     --border-strong,     рамки полей и кнопок, кольцо фокуса, заливка
+     --focus, --accent    кнопки: 3:1 на каждом фоне (WCAG 1.4.11);
+     --border             разделитель, который только украшает: без порога.
+   В комментарии у цвета — его коэффициенты, округлённые вниз; тест
+   сверяет и их, так что число в комментарии не устаревает молча.
+   Не проходит порог — менять цвет, а не порог.
+
+   Статус никогда не говорит одним цветом: «оплачен», «просрочен» — это
+   слово и значок, а цвет только помогает (Правило 4). */
+
+:root {
+  /* Встроенные части браузера (полосы прокрутки, поля дат) берут тему
+     отсюда же. */
+  color-scheme: light dark;
+
+  /* Фоны. */
+  --surface: #f6f7f9;
+  --surface-raised: #ffffff;
+  --surface-sunken: #eceef1;
+
+  /* Текст. */
+  --text: #1a1d21; /* 15.7 на surface; 16.9 на surface-raised; 14.5 на surface-sunken */
+  --text-muted: #555e69; /* 6.1 на surface; 6.5 на surface-raised; 5.6 на surface-sunken */
+
+  /* Рамки. */
+  --border: #dde1e6;
+  --border-strong: #7b8591; /* 3.4 на surface; 3.7 на surface-raised; 3.2 на surface-sunken */
+  --focus: #1f5fcc; /* 5.4 на surface; 5.8 на surface-raised; 5.0 на surface-sunken */
+
+  /* Акцент: главная кнопка и ссылки. */
+  --accent: #1f5fcc; /* 5.4 на surface; 5.8 на surface-raised; 5.0 на surface-sunken */
+  --on-accent: #ffffff; /* 5.8 на accent */
+  --accent-text: #1b57bd; /* 6.2 на surface; 6.6 на surface-raised; 5.7 на surface-sunken */
+
+  /* Статусы: оплачен, срок близко, просрочен или ошибка. */
+  --success-text: #17734a; /* 5.4 на surface; 5.8 на surface-raised; 5.0 на surface-sunken */
+  --warning-text: #8a5200; /* 5.9 на surface; 6.3 на surface-raised; 5.4 на surface-sunken */
+  --danger-text: #bb2229; /* 5.8 на surface; 6.2 на surface-raised; 5.3 на surface-sunken */
+
+  /* Шрифт: Noto Sans и Noto Sans Armenian (fonts.css). Системные — пока
+     файл не пришёл и для знаков, которых в нём нет. Начертаний два: другой
+     вес браузер нарисовал бы утолщением, а это выглядит грязно. */
+  --font-sans: "Kvartik Sans", system-ui, sans-serif;
+  --weight-regular: 400;
+  --weight-strong: 600;
+
+  /* Размеры текста. В rem: человек, увеличивший шрифт в системе, получает
+     крупнее всё окно. */
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.25rem;
+  --font-size-xl: 1.5rem;
+  --font-size-2xl: 2rem;
+  /* Межстрочный: армянские буквы выше и глубже латинских, и 1.5 им нужно,
+     чтобы строки не слипались. */
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+
+  /* Отступы: шаг 4 px. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  /* Радиусы. */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-round: 999px;
+
+  /* Наименьшая цель для пальца — 44 px (Apple, Human Interface Guidelines). */
+  --touch: 2.75rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #15171b;
+    --surface-raised: #1e2126;
+    --surface-sunken: #0e1013;
+
+    --text: #e7e9ec; /* 14.7 на surface; 13.2 на surface-raised; 15.6 на surface-sunken */
+    --text-muted: #a2aab5; /* 7.6 на surface; 6.8 на surface-raised; 8.1 на surface-sunken */
+
+    --border: #2e333a;
+    --border-strong: #6c7581; /* 3.8 на surface; 3.4 на surface-raised; 4.0 на surface-sunken */
+    --focus: #86b0ff; /* 8.2 на surface; 7.4 на surface-raised; 8.7 на surface-sunken */
+
+    --accent: #2f6ee0; /* 3.7 на surface; 3.4 на surface-raised; 4.0 на surface-sunken */
+    --on-accent: #ffffff; /* 4.7 на accent */
+    --accent-text: #86b0ff; /* 8.2 на surface; 7.4 на surface-raised; 8.7 на surface-sunken */
+
+    --success-text: #5ccf97; /* 9.2 на surface; 8.3 на surface-raised; 9.8 на surface-sunken */
+    --warning-text: #eeb648; /* 9.7 на surface; 8.7 на surface-raised; 10.3 на surface-sunken */
+    --danger-text: #ff8c87; /* 7.9 на surface; 7.1 на surface-raised; 8.4 на surface-sunken */
+  }
+}

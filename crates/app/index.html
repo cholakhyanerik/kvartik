@@ -1,11 +1,27 @@
 <!doctype html>
 <!-- Страница, по которой Trunk собирает сайт. `lang` и `title` — до выбора
-     языка окна и имени программы (задачи 4 и 16): потом их ставит окно. -->
+     языка окна и имени программы (задачи 53 и 16): потом их ставит окно. -->
 <html lang="hy">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Тёмная тема с первого кадра: без этого браузер успевает показать
+         белый фон, пока не пришёл CSS. -->
+    <meta name="color-scheme" content="light dark" />
     <title>Kvartik</title>
+    <!-- Оформление (Правило 4): переменные, шрифты, основа — в этом порядке. -->
+    <link data-trunk rel="css" href="style/tokens.css" />
+    <link data-trunk rel="css" href="style/fonts.css" />
+    <link data-trunk rel="css" href="style/base.css" />
+    <!-- Файлы шрифтов — в dist/fonts/, без хэша в имени: на них ссылается
+         fonts.css, а `url()` внутри CSS Trunk не переписывает (по исходникам
+         trunk 0.22.0-rc.2: pipelines/copy_dir.rs, pipelines/css.rs). -->
+    <link data-trunk rel="copy-dir" href="public/fonts" />
+    <!-- Предзагрузки шрифта (`rel="preload" as="font"`) нет, и это замер,
+         а не забывчивость: на телефоне по образцу Lighthouse с ней первый
+         текст появлялся на 0,17 с позже и шрифты были готовы на 0,17 с позже
+         (2026-10-11, медиана пяти; цифры — в CLAUDE.md, Правило 1). Она делит
+         узкий канал с wasm, а CSS со шрифтами браузер находит и так раньше. -->
     <!-- wasm окна. `s` — wasm-opt на размер, только в `trunk build --release`
          (Правило 1; замер — в CLAUDE.md). -->
     <link data-trunk rel="rust" data-wasm-opt="s" />

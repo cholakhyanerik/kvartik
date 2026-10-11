@@ -17,3 +17,6 @@ dist/
 *.key
 *.pem
 keys/
+# Окружение Python для пересборки шрифтов (tools/fonts.py): fontTools
+# ставится туда, а не в систему, и в репозитории ему не место.
+/.venv-fonts/

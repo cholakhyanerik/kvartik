@@ -1,0 +1,39 @@
+/* Основа страницы: фон, текст и шрифт. Только переменные из tokens.css
+   (Правило 4). */
+
+html {
+  font-family: var(--font-sans);
+  font-weight: var(--weight-regular);
+  line-height: var(--leading-normal);
+  color: var(--text);
+  background: var(--surface);
+  /* Цифры одной ширины везде, а не только в таблицах: окно почти целиком
+     из сумм и дат, и столбец не «пляшет» и у системного шрифта, пока свой
+     не пришёл (Правило 4). У Noto Sans цифры табличные и так. */
+  font-variant-numeric: tabular-nums;
+  /* Телефон в альбомной ориентации не увеличивает текст сам. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  padding: var(--space-4);
+}
+
+h1 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-xl);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
+}
+
+/* Фокус с клавиатуры виден всегда: кольцо цвета --focus, 3:1 на каждом
+   фоне. Мышь кольца не рисует (:focus-visible). */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
