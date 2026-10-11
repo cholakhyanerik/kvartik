@@ -12,14 +12,27 @@
 //! и восстановление — `delete` и `restore`. Пока команд нет, эти методы
 //! открыты всем; первая команда ядра сужает их до `pub(crate)`, чтобы окно
 //! не могло поставить метку в обход команды.
+//!
+//! В данных поля записываются так: `{"id":"…","modified":1760000000000,
+//! "deleted":null}`. Читаются — с проверкой каждого поля (Правило 13):
+//! момент — только в пределах дат JS, удаление — не позже последней правки.
 
+use std::fmt;
+
+use serde::de::{self, Deserializer};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Постоянный идентификатор записи — случайный UUID версии 4.
 ///
 /// Случайный, а не порядковый номер: две копии и два устройства (задача 41)
 /// создают записи независимо, и номера по порядку у них совпали бы.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+///
+/// В данных — строка `xxxxxxxx-xxxx-…` в нижнем регистре. Читается любой
+/// UUID, не только версии 4: другой версии он стать не может, а запись
+/// с ним — всё равно запись, и терять её нельзя.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct RecordId(Uuid);
 
 impl RecordId {
@@ -41,6 +54,14 @@ impl RecordId {
     }
 }
 
+/// Строка UUID в нижнем регистре, как в данных: `0f8c…-…`. Это не текст для
+/// человека, а ключ — например, записи в хранилище окна.
+impl fmt::Display for RecordId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0.hyphenated(), f)
+    }
+}
+
 /// Момент времени: миллисекунды от 1970-01-01 00:00 UTC.
 ///
 /// Только для служебных отметок — когда запись изменили и когда удалили.
@@ -49,14 +70,32 @@ impl RecordId {
 /// бывает много, и при слиянии копий (задача 41) важно, какая из них позже.
 /// Берёт его оболочка у часов устройства и передаёт параметром — ядро часов
 /// не спрашивает (Архитектура, «Время — параметр»).
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+///
+/// Только в пределах дат JS — `±MAX_MILLIS`. Других моментов часы браузера
+/// не дают, а за краем `Date` в JS их и не прочесть; в данных такой момент —
+/// признак порчи, и разбор его отвергает (`Deserialize` ниже).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize)]
+#[serde(transparent)]
 pub struct Timestamp(i64);
 
 impl Timestamp {
+    /// Край дат JS: ровно 100 000 000 суток в обе стороны от 1970-01-01, это
+    /// ±8,64·10¹⁵ мс — до 13 сентября 275 760 года (по спецификации
+    /// ECMAScript, «Time Values and Time Range»).
+    pub const MAX_MILLIS: i64 = 8_640_000_000_000_000;
+
     /// Момент по числу миллисекунд от 1970-01-01 00:00 UTC — в тех же
-    /// единицах, что `js_sys::Date::now()`.
+    /// единицах, что `js_sys::Date::now()`. За краем дат JS — край
+    /// (`MAX_MILLIS`): часы браузера туда не заходят, а значение, которое
+    /// нельзя ни записать, ни прочесть обратно, типу не нужно.
     pub const fn from_unix_millis(millis: i64) -> Self {
-        Self(millis)
+        Self(if millis > Self::MAX_MILLIS {
+            Self::MAX_MILLIS
+        } else if millis < -Self::MAX_MILLIS {
+            -Self::MAX_MILLIS
+        } else {
+            millis
+        })
     }
 
     /// Миллисекунды от 1970-01-01 00:00 UTC.
@@ -65,16 +104,65 @@ impl Timestamp {
     }
 }
 
+/// Момент читается только в пределах дат JS. Не прижимается к краю, как
+/// у `from_unix_millis`, а отвергается: часы такого не дают, и в данных это
+/// порча, а не время.
+impl<'de> Deserialize<'de> for Timestamp {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let millis = i64::deserialize(deserializer)?;
+        if millis.unsigned_abs() > Self::MAX_MILLIS.unsigned_abs() {
+            return Err(de::Error::invalid_value(
+                de::Unexpected::Signed(millis),
+                &"момент в пределах дат JS: ±8 640 000 000 000 000 мс",
+            ));
+        }
+        Ok(Self(millis))
+    }
+}
+
 /// Общие поля записи.
 ///
 /// Без `Copy`, хотя все поля копируются: у типа есть изменяющие методы,
 /// и с `Copy` `запись.meta().delete(now)` молча удалил бы копию, а запись
 /// осталась бы живой. Без него такой код не соберётся.
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize)]
 pub struct RecordMeta {
     id: RecordId,
     modified: Timestamp,
     deleted: Option<Timestamp>,
+}
+
+/// Поля `RecordMeta`, как они лежат в данных, — до проверки.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecordMetaFields {
+    id: RecordId,
+    modified: Timestamp,
+    deleted: Option<Timestamp>,
+}
+
+/// Читается с проверкой, которую иначе держат методы: удаление — тоже
+/// правка, поэтому метка удаления не бывает позже момента изменения
+/// (`delete`). Запись, удалённая «в будущем», при слиянии копий (задача 41)
+/// спорила бы с правками, сделанными после её удаления.
+impl<'de> Deserialize<'de> for RecordMeta {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let RecordMetaFields {
+            id,
+            modified,
+            deleted,
+        } = RecordMetaFields::deserialize(deserializer)?;
+        if deleted.is_some_and(|deleted| deleted > modified) {
+            return Err(de::Error::custom(
+                "метка удаления позже момента изменения, а удаление — тоже правка",
+            ));
+        }
+        Ok(Self {
+            id,
+            modified,
+            deleted,
+        })
+    }
 }
 
 impl RecordMeta {
@@ -112,13 +200,13 @@ impl RecordMeta {
     /// Момент изменения только растёт: если часы устройства перевели назад
     /// (Правило 6, «Часы устройства могут врать») или две правки пришлись на
     /// одну миллисекунду, новая всё равно позже прежней — иначе при слиянии
-    /// копий (задача 41) победила бы старая. Расти некуда только у края
-    /// `i64`, а туда попадает лишь испорченный файл копии: моменты за
-    /// пределами дат JS (±8,64·10¹⁵ мс) разбор копии обязан отвергать
-    /// (задача 7).
+    /// копий (задача 41) победила бы старая. Расти некуда только у края дат
+    /// JS (`Timestamp::MAX_MILLIS`, 275 760 год): там момент останавливается,
+    /// и две правки получают один момент. Дальше края тип не заходит, иначе
+    /// запись не прочиталась бы обратно.
     pub fn touch(&mut self, now: Timestamp) {
         let after_previous = self.modified.0.saturating_add(1);
-        self.modified = Timestamp(now.0.max(after_previous));
+        self.modified = Timestamp::from_unix_millis(now.0.max(after_previous));
     }
 
     /// Пометить запись удалённой. Запись не стирается: её можно восстановить,
@@ -223,5 +311,95 @@ mod tests {
         // Удаление после перевода часов назад тоже позже прежней правки.
         meta.delete(at(100));
         assert_eq!(meta.deleted(), Some(at(9_001)));
+    }
+
+    /// За краем дат JS момента нет: значение прижимается к краю, и `touch`
+    /// у края останавливается, а не уходит туда, откуда запись не прочесть.
+    #[test]
+    fn moments_stay_within_js_dates() {
+        let edge = Timestamp::MAX_MILLIS;
+        assert_eq!(Timestamp::from_unix_millis(i64::MAX).unix_millis(), edge);
+        assert_eq!(Timestamp::from_unix_millis(i64::MIN).unix_millis(), -edge);
+        assert_eq!(Timestamp::from_unix_millis(edge).unix_millis(), edge);
+
+        let mut meta = RecordMeta::new(at(edge - 1));
+        meta.touch(at(0));
+        assert_eq!(meta.modified(), at(edge));
+        meta.touch(at(0));
+        assert_eq!(meta.modified(), at(edge), "у края момент стоит");
+        let text = serde_json::to_string(&meta).expect("поля записываются");
+        assert_eq!(
+            serde_json::from_str::<RecordMeta>(&text).ok(),
+            Some(meta),
+            "запись у края читается обратно"
+        );
+    }
+
+    /// Строка UUID — та же, что в данных.
+    #[test]
+    fn id_is_shown_as_in_data() {
+        let id = RecordId::random();
+        assert_eq!(
+            serde_json::to_string(&id).expect("идентификатор записывается"),
+            format!("\"{id}\"")
+        );
+        let id: RecordId = serde_json::from_str("\"0F8C3A52-5B1E-4C7D-9A2B-6E4F1D3C2B1A\"")
+            .expect("UUID читается");
+        assert_eq!(id.to_string(), "0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a");
+    }
+
+    /// Поля в данных выписаны человеком: что прочитано, то и записывается
+    /// обратно, слово в слово. Поменялась запись — это новая версия формата
+    /// (Правило 5), а не правка теста.
+    #[test]
+    fn data_shape_is_pinned() {
+        let samples = [
+            r#"{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":1760000000000,"deleted":null}"#,
+            r#"{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":1760000000500,"deleted":1760000000000}"#,
+            r#"{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":8640000000000000,"deleted":8640000000000000}"#,
+            r#"{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":-8640000000000000,"deleted":null}"#,
+        ];
+        let mut wrong = Vec::new();
+        for sample in samples {
+            match serde_json::from_str::<RecordMeta>(sample)
+                .map(|meta| serde_json::to_string(&meta))
+            {
+                Ok(Ok(back)) if back == sample => {}
+                other => wrong.push(format!("{sample} → {other:?}")),
+            }
+        }
+        let meta: RecordMeta = serde_json::from_str(samples[1]).expect("образец читается");
+        assert_eq!(
+            (meta.modified(), meta.deleted()),
+            (at(1_760_000_000_500), Some(at(1_760_000_000_000)))
+        );
+        assert!(wrong.is_empty(), "запись полей изменилась: {wrong:#?}");
+    }
+
+    /// Каждое поле проверяется при чтении: момент — в пределах дат JS,
+    /// удаление — не позже правки, идентификатор — UUID, лишних полей нет.
+    #[test]
+    fn data_rejects_broken_fields() {
+        let id = r#""id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a""#;
+        let rejected = [
+            format!(r#"{{{id},"modified":1000,"deleted":1001}}"#),
+            format!(r#"{{{id},"modified":8640000000000001,"deleted":null}}"#),
+            format!(r#"{{{id},"modified":-8640000000000001,"deleted":null}}"#),
+            format!(r#"{{{id},"modified":9223372036854775807,"deleted":null}}"#),
+            format!(r#"{{{id},"modified":1000.5,"deleted":null}}"#),
+            format!(r#"{{{id},"modified":"1000","deleted":null}}"#),
+            format!(r#"{{{id},"deleted":null}}"#),
+            format!(r#"{{{id},"modified":1000,"deleted":null,"color":"red"}}"#),
+            r#"{"id":"не-uuid","modified":1000,"deleted":null}"#.to_owned(),
+            r#"{"id":[15,140,58,82,91,30,76,125,154,43,110,79,29,60,43,26],"modified":1000,"deleted":null}"#.to_owned(),
+            r#"{"modified":1000,"deleted":null}"#.to_owned(),
+        ];
+        let mut wrong = Vec::new();
+        for text in &rejected {
+            if let Ok(meta) = serde_json::from_str::<RecordMeta>(text) {
+                wrong.push(format!("{text} прочитано как {meta:?}"));
+            }
+        }
+        assert!(wrong.is_empty(), "прочитаны испорченные поля: {wrong:#?}");
     }
 }

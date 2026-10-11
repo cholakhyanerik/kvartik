@@ -20,7 +20,13 @@ body {
   margin: 0;
 }
 
+/* Блоки каркаса — по одному на язык (задача 53 оставит один). Ширина
+   строки — не больше ~70 знаков: длинную строку глаз теряет при переходе
+   на следующую. */
 main {
+  display: grid;
+  gap: var(--space-6);
+  max-width: 40rem;
   padding: var(--space-4);
 }
 
@@ -29,6 +35,37 @@ h1 {
   font-size: var(--font-size-xl);
   font-weight: var(--weight-strong);
   line-height: var(--leading-tight);
+}
+
+h2 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--font-size-md);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
+}
+
+p {
+  margin: 0;
+}
+
+/* Ошибка — словами, а цвет только помогает их заметить (Правило 4). */
+[role="alert"] {
+  color: var(--danger-text);
+}
+
+/* Главная кнопка: заливка --accent, текст --on-accent, высота — цель для
+   пальца. Шрифт браузер кнопке сам не передаёт. */
+button {
+  min-height: var(--touch);
+  margin-top: var(--space-3);
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-weight: var(--weight-strong);
+  cursor: pointer;
 }
 
 /* Фокус с клавиатуры виден всегда: кольцо цвета --focus, 3:1 на каждом

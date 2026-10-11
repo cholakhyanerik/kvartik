@@ -34,6 +34,14 @@ env:
   # записана здесь по той же причине, что у Trunk.
   CARGO_DENY_VERSION: 0.20.2
   CARGO_DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+  # Раннер браузерных тестов — из выпуска wasm-bindgen ровно той версии, что
+  # в Cargo.lock (Правило 3): соседняя версия может пройти молча и проверить
+  # не тот wasm. Шаг ниже сверяет её с замком. Сумма архива
+  # `wasm-bindgen-<версия>-x86_64-unknown-linux-musl.tar.gz` — из файла
+  # `.tar.gz.sha256sum` рядом с ним; совпала с полем `digest` в API GitHub
+  # (2026-10-12).
+  WASM_BINDGEN_VERSION: 0.2.129
+  WASM_BINDGEN_SHA256: 82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e
 
 jobs:
   check:
@@ -72,14 +80,40 @@ jobs:
           rm cargo-deny.tar.gz
           cargo deny --version
 
+      # Тем же путём: готовая сборка, сумма — из `env` выше. Из архива нужен
+      # один `wasm-bindgen-test-runner`; версия — только та, что в замке.
+      - name: wasm-bindgen-test-runner
+        run: |
+          grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | grep -qx "version = \"${WASM_BINDGEN_VERSION}\"" \
+            || { echo "wasm-bindgen в Cargo.lock — не ${WASM_BINDGEN_VERSION}: поднять версию и сумму в ci.yml"; exit 1; }
+          curl -sSfL -o wasm-bindgen.tar.gz \
+            "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${WASM_BINDGEN_VERSION}/wasm-bindgen-${WASM_BINDGEN_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          echo "${WASM_BINDGEN_SHA256}  wasm-bindgen.tar.gz" | sha256sum -c -
+          tar -xzf wasm-bindgen.tar.gz -C "$HOME/.cargo/bin" --strip-components=1 \
+            "wasm-bindgen-${WASM_BINDGEN_VERSION}-x86_64-unknown-linux-musl/wasm-bindgen-test-runner"
+          rm wasm-bindgen.tar.gz
+          wasm-bindgen-test-runner --version
+
       # Ровно те команды, что перечислены в Правиле 2 CLAUDE.md, и в том же
       # порядке. Клиппи дважды: на машине окно собирается как обычная
-      # программа, и ветки `#[cfg(target_arch = "wasm32")]` видит только
-      # второй прогон.
+      # программа, и ветки `#[cfg(target_arch = "wasm32")]` — среди них
+      # браузерные тесты — видит только второй прогон.
       - run: cargo build --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo clippy -p kvartik-app --target wasm32-unknown-unknown -- -D warnings
+      - run: cargo clippy -p kvartik-app --target wasm32-unknown-unknown --all-targets -- -D warnings
       - run: cargo test --workspace
+      # Браузерные тесты — в headless Chrome образа. Драйвер — явно: иначе
+      # раннер первым найдёт в PATH geckodriver, и тесты уйдут в Firefox.
+      # При нуле тестов раннер выходит с кодом 0 («no tests to run!») —
+      # тесты, выключенные `cfg` по ошибке, дали бы зелёный прогон, поэтому
+      # число прошедших проверяется. `shell: bash` — ради `pipefail`: без
+      # него `tee` проглотил бы код ошибки `cargo`.
+      - name: cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app
+        shell: bash
+        run: |
+          CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver" \
+            cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app 2>&1 | tee browser-tests.log
+          grep -E "test result: ok\. [1-9][0-9]* passed" browser-tests.log
       - run: trunk build --release
         working-directory: crates/app
       # Новая запись в базе RustSec краснит прогон и без нашего изменения —

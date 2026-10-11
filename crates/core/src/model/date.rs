@@ -16,13 +16,17 @@
 //! больше всего каркаса 0.0.1). Свой календарь на стандартной библиотеке —
 //! сотня строк под тестами.
 //!
-//! Пока здесь только то, что нужно сейчас: проверка даты, квартал и день
-//! месяца после квартала. Сложение дней, день недели и запись ISO
-//! (`2026-10-10`) были в пробе и добавятся с задачами, которым они нужны:
-//! срок оплаты счёта, перенос срока на рабочий день, файл копии. В пробе дни
-//! считал алгоритм `days_from_civil` Говарда Хиннанта — его и брать.
+//! Пока здесь только то, что нужно сейчас: проверка даты, квартал, день
+//! месяца после квартала и запись ISO (`2026-10-10`) — так дата лежит
+//! в данных и в файле копии (`format`). Сложение дней и день недели были
+//! в пробе и добавятся с задачами, которым они нужны: срок оплаты счёта,
+//! перенос срока на рабочий день. В пробе дни считал алгоритм
+//! `days_from_civil` Говарда Хиннанта — его и брать.
 
 use std::fmt;
+
+use serde::de::{self, Deserializer, Visitor};
+use serde::{Deserialize, Serialize, Serializer};
 
 /// Календарная дата: год, месяц и день, без часового пояса.
 ///
@@ -81,6 +85,34 @@ impl Date {
             number: (self.month - 1) / 3 + 1,
         }
     }
+
+    /// Дата из записи ISO 8601 `ГГГГ-ММ-ДД` (`2026-03-31`) — так дата лежит
+    /// в данных и в файле копии. `None` — запись не такая или такого дня нет
+    /// в календаре.
+    ///
+    /// Разбор строгий: ровно десять знаков, цифры ASCII и дефисы на своих
+    /// местах. `2026-3-31`, `31.03.2026`, `2026-03-31T00:00`, пробел по краям —
+    /// не даты: что записывает программа, то она и читает, а всё прочее —
+    /// испорченные данные, и угадывать их нельзя (Правило 13). Человеку дату
+    /// показывает и читает у него `i18n`, а не эта функция.
+    pub fn from_iso(text: &str) -> Option<Self> {
+        let bytes = text.as_bytes();
+        if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+            return None;
+        }
+        // Не больше четырёх цифр: 9999 помещается в `u16`.
+        let number = |digits: &[u8]| {
+            digits.iter().try_fold(0_u16, |value, &digit| {
+                digit
+                    .is_ascii_digit()
+                    .then(|| value * 10 + u16::from(digit - b'0'))
+            })
+        };
+        let year = number(&bytes[..4])?;
+        let month = u8::try_from(number(&bytes[5..7])?).ok()?;
+        let day = u8::try_from(number(&bytes[8..])?).ok()?;
+        Self::new(year, month, day)
+    }
 }
 
 /// Запись ISO 8601 (`2026-03-31`) — для тестов и отладки. Человеку дату
@@ -89,6 +121,40 @@ impl Date {
 impl fmt::Debug for Date {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:04}-{:02}-{:02}", self.year, self.month, self.day)
+    }
+}
+
+/// В данных дата — строка ISO 8601: `"2026-03-31"`.
+impl Serialize for Date {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(&format_args!(
+            "{:04}-{:02}-{:02}",
+            self.year, self.month, self.day
+        ))
+    }
+}
+
+/// Читает дату только через `Date::from_iso`, а значит, через `Date::new`.
+/// Выведенный `Deserialize` принял бы поля как есть, и месяц 0 из
+/// испорченного файла копии уронил бы `quarter` переполнением (Правило 13).
+impl<'de> Deserialize<'de> for Date {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Iso;
+
+        impl Visitor<'_> for Iso {
+            type Value = Date;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("дату ISO 8601 вида ГГГГ-ММ-ДД, которая есть в календаре")
+            }
+
+            fn visit_str<E: de::Error>(self, text: &str) -> Result<Date, E> {
+                Date::from_iso(text)
+                    .ok_or_else(|| E::invalid_value(de::Unexpected::Str(text), &self))
+            }
+        }
+
+        deserializer.deserialize_str(Iso)
     }
 }
 
@@ -354,5 +420,80 @@ mod tests {
     fn debug_is_iso() {
         assert_eq!(format!("{:?}", date(2026, 3, 1)), "2026-03-01");
         assert_eq!(format!("{:?}", date(1, 1, 1)), "0001-01-01");
+    }
+
+    /// В данных дата — строка ISO, и каждый день 2000–2100 годов и края типа
+    /// читаются обратно в тот же день.
+    #[test]
+    fn data_keeps_dates_as_iso() {
+        assert_eq!(
+            serde_json::to_string(&date(2026, 3, 1)).expect("дата записывается"),
+            "\"2026-03-01\""
+        );
+        let mut days = vec![date(1, 1, 1), date(9999, 12, 31)];
+        for year in 2000..=2100 {
+            for month in 1..=12 {
+                days.extend((1..=31).filter_map(|day| Date::new(year, month, day)));
+            }
+        }
+        let mut lost = Vec::new();
+        for day in days {
+            let text = serde_json::to_string(&day).expect("дата записывается");
+            match serde_json::from_str::<Date>(&text) {
+                Ok(back) if back == day => {}
+                other => lost.push(format!("{day:?} → {text} → {other:?}")),
+            }
+        }
+        assert!(lost.is_empty(), "дата не читается обратно: {lost:#?}");
+    }
+
+    /// Читается только то, что программа пишет сама, и только дни календаря.
+    /// Месяц 0 — тот самый случай, ради которого разбор идёт через
+    /// `Date::new`: выведенный `Deserialize` пропустил бы его, и `quarter`
+    /// упал бы на `0 - 1`.
+    #[test]
+    fn data_rejects_what_is_not_an_iso_calendar_day() {
+        let rejected = [
+            "2026-00-10",
+            "2026-13-01",
+            "2026-02-29",
+            "2026-04-31",
+            "2026-01-00",
+            "0000-01-01",
+            "2026-3-31",
+            "2026-03-1",
+            "26-03-31",
+            "+2026-03-31",
+            "-2026-03-31",
+            "2026-03-31T00:00:00Z",
+            "2026-03-31 ",
+            " 2026-03-31",
+            "2026/03/31",
+            "31.03.2026",
+            "20260331",
+            "2026-03-3a",
+            "２０２６-03-31",
+            "",
+        ];
+        let mut wrong = Vec::new();
+        for text in rejected {
+            if let Some(day) = Date::from_iso(text) {
+                wrong.push(format!("«{text}» принята как {day:?}"));
+            }
+            let json = serde_json::to_string(text).expect("строка записывается");
+            if let Ok(day) = serde_json::from_str::<Date>(&json) {
+                wrong.push(format!("{json} прочитана как {day:?}"));
+            }
+        }
+        // Не строка — тоже не дата.
+        for json in ["20260331", "null", "{\"year\":2026,\"month\":0,\"day\":10}"] {
+            if let Ok(day) = serde_json::from_str::<Date>(json) {
+                wrong.push(format!("{json} прочитана как {day:?}"));
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "прочитано то, что датой не является: {wrong:#?}"
+        );
     }
 }

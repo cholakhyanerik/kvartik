@@ -1,0 +1,9 @@
+# Браузерные тесты окна (Правило 2 в CLAUDE.md): `cargo test` под wasm32
+# запускает тестовый wasm программой `wasm-bindgen-test-runner`, а она —
+# в headless-браузере через его WebDriver (chromedriver). Программа — той же
+# версии, что `wasm-bindgen` в Cargo.lock; где её взять — Правило 3.
+#
+# Только для `cargo run` и `cargo test` под wasm32: `cargo build`, которым
+# собирает сайт Trunk, раннер не зовёт.
+[target.wasm32-unknown-unknown]
+runner = "wasm-bindgen-test-runner"

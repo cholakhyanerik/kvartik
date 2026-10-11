@@ -9,6 +9,14 @@
 //! и не 1 (Правило 6): с нулём доход в драмах стал бы нулём, и налог
 //! занизился бы молча. Перевод в драмы с округлением написан один раз —
 //! `Money::to_amd`.
+//!
+//! В данных: сумма — `{"minor":150000,"currency":"USD"}`, курс —
+//! `{"currency":"USD","per_unit_e4":3619300,"date":"2026-10-09",
+//! "source":"central_bank"}`. Числа — целые, как в типах: дробная сумма или
+//! курс в данных — порча, а не значение.
+
+use serde::de::{self, Deserializer};
+use serde::{Deserialize, Serialize};
 
 use super::date::Date;
 
@@ -17,7 +25,11 @@ use super::date::Date;
 /// Варианты добавляются (у Грузии будет `GEL`, задача 39), а смысл
 /// существующих не меняется (Правило 2). `match` по валюте — без `_`: новую
 /// валюту каждое место, где валюта что-то решает, должно увидеть само.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+///
+/// В данных — код ISO 4217: `"AMD"`, `"USD"`, `"EUR"`. Код — часть формата:
+/// имя варианта менять можно, а его — только миграцией (Правило 2).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
 pub enum Currency {
     /// Армянский драм.
     Amd,
@@ -43,7 +55,12 @@ impl Currency {
 ///
 /// Сравнения «больше — меньше» у типа нет: суммы разных валют несравнимы,
 /// а суммы одной валюты сравниваются по `minor`.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+///
+/// Чтение выведено, а не написано через конструктор: запретных значений
+/// у суммы нет — любое целое в любой валюте — сумма, и `Money::new` ничего
+/// не проверяет.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Money {
     minor: i64,
     currency: Currency,
@@ -152,8 +169,9 @@ pub const RATE_DIGITS: u32 = 4;
 /// Знаменатель курса: 361,93 ֏ за доллар — это 3 619 300.
 pub const RATE_SCALE: i64 = 10_i64.pow(RATE_DIGITS);
 
-/// Откуда взят курс.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+/// Откуда взят курс. В данных — `"manual"` и `"central_bank"`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RateSource {
     /// Курс ввёл человек.
     Manual,
@@ -163,12 +181,42 @@ pub enum RateSource {
 }
 
 /// Курс валюты к драму на дату.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize)]
 pub struct ExchangeRate {
     currency: Currency,
     per_unit_e4: i64,
     date: Date,
     source: RateSource,
+}
+
+/// Поля `ExchangeRate`, как они лежат в данных, — до проверки.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExchangeRateFields {
+    currency: Currency,
+    per_unit_e4: i64,
+    date: Date,
+    source: RateSource,
+}
+
+/// Курс читается только через `ExchangeRate::new`: нулевой курс из
+/// испорченных данных обнулил бы доход в драмах, и налог занизился бы молча
+/// (Правило 6).
+impl<'de> Deserialize<'de> for ExchangeRate {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let ExchangeRateFields {
+            currency,
+            per_unit_e4,
+            date,
+            source,
+        } = ExchangeRateFields::deserialize(deserializer)?;
+        Self::new(currency, per_unit_e4, date, source).map_err(|error| {
+            de::Error::custom(match error {
+                RateError::NotPositive => "курс не больше нуля",
+                RateError::Amd => "курс драма к драму",
+            })
+        })
+    }
 }
 
 impl ExchangeRate {
@@ -375,7 +423,12 @@ mod tests {
         let rate = ExchangeRate::new(Currency::Usd, 3_619_300, date, manual)
             .expect("настоящий курс принят");
         assert_eq!(
-            (rate.currency(), rate.per_unit_e4(), rate.date(), rate.source()),
+            (
+                rate.currency(),
+                rate.per_unit_e4(),
+                rate.date(),
+                rate.source()
+            ),
             (Currency::Usd, 3_619_300, date, manual)
         );
     }
@@ -458,5 +511,86 @@ mod tests {
             usd(100).try_add(eur(100)),
             Err(MoneyError::CurrencyMismatch)
         );
+    }
+
+    /// Запись в данных выписана человеком: что прочитано, то и записывается
+    /// обратно, слово в слово. Поменялась запись — это новая версия формата
+    /// (Правило 5), а не правка теста.
+    #[test]
+    fn data_shape_is_pinned() {
+        let mut wrong = Vec::new();
+        let mut check = |sample: &str, back: Result<String, serde_json::Error>| match back {
+            Ok(back) if back == sample => {}
+            other => wrong.push(format!("{sample} → {other:?}")),
+        };
+        for sample in [
+            r#"{"minor":150000,"currency":"USD"}"#,
+            r#"{"minor":-5,"currency":"EUR"}"#,
+            r#"{"minor":9223372036854775807,"currency":"AMD"}"#,
+        ] {
+            let back = serde_json::from_str::<Money>(sample).map(|sum| serde_json::to_string(&sum));
+            check(sample, back.and_then(|text| text));
+        }
+        for sample in [
+            r#"{"currency":"USD","per_unit_e4":3619300,"date":"2026-10-09","source":"central_bank"}"#,
+            r#"{"currency":"EUR","per_unit_e4":1,"date":"2026-01-01","source":"manual"}"#,
+        ] {
+            let back = serde_json::from_str::<ExchangeRate>(sample)
+                .map(|rate| serde_json::to_string(&rate));
+            check(sample, back.and_then(|text| text));
+        }
+        assert!(
+            wrong.is_empty(),
+            "запись сумм и курсов изменилась: {wrong:#?}"
+        );
+        assert_eq!(
+            serde_json::from_str::<Money>(r#"{"minor":150000,"currency":"USD"}"#).ok(),
+            Some(usd(150_000))
+        );
+        assert_eq!(
+            serde_json::from_str::<ExchangeRate>(
+                r#"{"currency":"USD","per_unit_e4":3619300,"date":"2026-10-09","source":"central_bank"}"#
+            )
+            .ok(),
+            Some(usd_rate())
+        );
+    }
+
+    /// Курс из данных проходит те же проверки, что у конструктора: нулевой
+    /// курс обнулил бы доход в драмах (Правило 6). И нигде — дробей, чужих
+    /// валют и лишних полей.
+    #[test]
+    fn data_rejects_what_the_types_forbid() {
+        let money = [
+            r#"{"minor":1.5,"currency":"USD"}"#,
+            r#"{"minor":"150","currency":"USD"}"#,
+            r#"{"minor":9223372036854775808,"currency":"USD"}"#,
+            r#"{"minor":150,"currency":"usd"}"#,
+            r#"{"minor":150,"currency":"RUB"}"#,
+            r#"{"minor":150}"#,
+            r#"{"minor":150,"currency":"USD","note":"x"}"#,
+        ];
+        let rates = [
+            r#"{"currency":"USD","per_unit_e4":0,"date":"2026-10-09","source":"central_bank"}"#,
+            r#"{"currency":"USD","per_unit_e4":-3619300,"date":"2026-10-09","source":"manual"}"#,
+            r#"{"currency":"AMD","per_unit_e4":10000,"date":"2026-10-09","source":"manual"}"#,
+            r#"{"currency":"USD","per_unit_e4":361.93,"date":"2026-10-09","source":"manual"}"#,
+            r#"{"currency":"USD","per_unit_e4":3619300,"date":"2026-00-09","source":"manual"}"#,
+            r#"{"currency":"USD","per_unit_e4":3619300,"date":"2026-10-09","source":"bank"}"#,
+            r#"{"currency":"USD","per_unit_e4":3619300,"date":"2026-10-09"}"#,
+            r#"{"currency":"USD","per_unit_e4":3619300,"date":"2026-10-09","source":"manual","x":1}"#,
+        ];
+        let mut wrong = Vec::new();
+        for text in money {
+            if let Ok(sum) = serde_json::from_str::<Money>(text) {
+                wrong.push(format!("{text} прочитано как {sum:?}"));
+            }
+        }
+        for text in rates {
+            if let Ok(rate) = serde_json::from_str::<ExchangeRate>(text) {
+                wrong.push(format!("{text} прочитано как {rate:?}"));
+            }
+        }
+        assert!(wrong.is_empty(), "прочитано запретное: {wrong:#?}");
     }
 }
