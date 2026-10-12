@@ -357,6 +357,61 @@ async fn newer_and_damaged_records_are_refused() {
     probe.delete().await;
 }
 
+/// Список не прячет целые записи за испорченной: нечитаемая пропускается
+/// и считается, запись чужого вида в список не попадает, а запись новее
+/// программы — отказ целиком: список без неё был бы неполным молча.
+#[wasm_bindgen_test]
+async fn list_skips_damaged_and_refuses_newer() {
+    let probe = Probe::new();
+    let store = probe.open(DB_VERSION).await.expect("база открыта");
+    let (first, second) = (note("первая"), note("вторая"));
+    let tag = Tag {
+        meta: RecordMeta::new(at(1_760_000_000_000)),
+    };
+    let mut writes = Writes::default();
+    writes.insert(&first);
+    writes.insert(&second);
+    writes.insert(&tag);
+    store
+        .write()
+        .expect("транзакция записи")
+        .commit(writes)
+        .await
+        .expect("записано");
+    let broken = note("испорченная");
+    put_raw(&store, &key(Note::KIND, broken.meta.id()), "не JSON").await;
+    put_raw(&store, &key(Tag::KIND, RecordId::random()), "не JSON").await;
+
+    let listed = store
+        .read()
+        .expect("транзакция чтения")
+        .list::<Note>()
+        .await
+        .expect("список читается");
+    let texts: BTreeSet<String> = listed.records.iter().map(|note| note.text.clone()).collect();
+    assert_eq!(
+        texts,
+        BTreeSet::from(["первая".to_owned(), "вторая".to_owned()])
+    );
+    assert_eq!(listed.unreadable, 1, "испорченная запись своего вида не посчитана");
+
+    let newer = format!(
+        r#"{{"format_version":{},"record":{{"wings":2}}}}"#,
+        FORMAT_VERSION + 1
+    );
+    put_raw(&store, &key(Note::KIND, broken.meta.id()), &newer).await;
+    let refused = store
+        .read()
+        .expect("транзакция чтения")
+        .list::<Note>()
+        .await
+        .map(|listed| listed.records.len());
+    assert_eq!(refused, Err(StoreError::Newer));
+
+    drop(store);
+    probe.delete().await;
+}
+
 /// Новая версия базы в другой вкладке: старое соединение закрывается само,
 /// новое открывается без ожидания, а старое дальше только отказывает
 /// словами «программа обновилась».

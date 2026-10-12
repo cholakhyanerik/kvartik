@@ -11,7 +11,7 @@
 //! # Одно действие — одна транзакция
 //!
 //! Действие человека — одна транзакция `readwrite`: прочитать
-//! ([`Tx::get`], [`Tx::all`]), посчитать (ядро, без ожидания), записать
+//! ([`Tx::get`], [`Tx::all`], [`Tx::list`]), посчитать (ядро, без ожидания), записать
 //! ([`Tx::commit`]). Транзакция IndexedDB завершается сама, как только ей
 //! нечего ждать (Правило 6), поэтому внутри неё можно ждать только её же
 //! запросов: продолжение после их `await` выполняется в микрозадаче сразу
@@ -368,20 +368,54 @@ impl<M> Tx<M> {
         decode(&value).map(Some)
     }
 
-    /// Все записи вида `T`, включая помеченные удалёнными.
+    /// Все записи вида `T`, включая помеченные удалёнными. Хоть одна не
+    /// читается — отказ целиком ([`StoreError::Damaged`]): так читается то,
+    /// что окно показывает одной записью, — профиль.
     pub async fn all<T: Stored>(&self) -> Result<Vec<T>, StoreError> {
+        self.values(T::KIND)
+            .await?
+            .iter()
+            .map(|value| decode(&value))
+            .collect()
+    }
+
+    /// Все записи вида `T` для списка — клиенты, документы, — включая
+    /// помеченные удалёнными. Нечитаемая запись не прячет остальные:
+    /// пропускается и считается в [`Listed::unreadable`] (задача 10). Иначе
+    /// одна испорченная запись оставила бы человека без всех клиентов, хотя
+    /// остальные целы. Запись новее программы — отказ целиком
+    /// ([`StoreError::Newer`]): список без неё был бы неполным молча, а нужна
+    /// перезагрузка — новой версией (Правило 2).
+    pub async fn list<T: Stored>(&self) -> Result<Listed<T>, StoreError> {
+        let mut listed = Listed {
+            records: Vec::new(),
+            unreadable: 0,
+        };
+        for value in self.values(T::KIND).await?.iter() {
+            match decode(&value) {
+                Ok(record) => listed.records.push(record),
+                Err(StoreError::Damaged) => listed.unreadable += 1,
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(listed)
+    }
+
+    /// Значения всех записей вида `kind` — строки JSON, как они лежат.
+    async fn values(&self, kind: &str) -> Result<Array, StoreError> {
         let range = IdbKeyRange::bound(
-            &Array::of1(&T::KIND.into()),
-            &Array::of2(&T::KIND.into(), &Array::new()),
+            &Array::of1(&kind.into()),
+            &Array::of2(&kind.into(), &Array::new()),
         )
         .map_err(|error| failure("bound", Some(error)))?;
         let request = self
             .records
             .get_all_with_key(&range)
             .map_err(|error| failure("getAll", Some(error)))?;
-        let values = wait(request).await?;
-        let values: Array = values.dyn_into().map_err(|_| StoreError::Damaged)?;
-        values.iter().map(|value| decode(&value)).collect()
+        wait(request)
+            .await?
+            .dyn_into()
+            .map_err(|_| StoreError::Damaged)
     }
 
     /// Все записи базы как они лежат, любого вида, — для файла копии
@@ -432,6 +466,16 @@ impl<M> Tx<M> {
             .as_f64()
             .is_none_or(|count| count < 1.0))
     }
+}
+
+/// Записи одного вида для списка: прочитанные и число нечитаемых.
+#[derive(Debug)]
+pub struct Listed<T> {
+    /// Прочитанные записи, включая помеченные удалёнными.
+    pub records: Vec<T>,
+    /// Сколько записей вида не читается. Человеку окно говорит число,
+    /// подробность — в консоли браузера.
+    pub unreadable: usize,
 }
 
 /// Запись базы как она лежит: вид и идентификатор из ключа, строка JSON

@@ -88,9 +88,9 @@ web-sys = { version = "0.3.106", features = [
 # `wasm-bindgen-test-runner` нужна той же версии (Правило 3). `serde` —
 # записи для проб. `Response` у `web-sys` — тест читает файл копии по его
 # адресу `blob:`, `NodeList` — тест плашки считает её копии,
-# `DataTransfer` — тест окна кладёт файл копии в поле выбора файла; фичи
-# dev-зависимостей в сборку сайта не попадают
-# (резолвер 3).
+# `DataTransfer` — тест окна кладёт файл копии в поле выбора файла,
+# `HtmlSelectElement` — тест клиентов выбирает страну и валюту; фичи
+# dev-зависимостей в сборку сайта не попадают (резолвер 3).
 # Машинные тесты окна (`tests/*.rs`): манифест программы — JSON, и тест
 # читает его разбором, а не поиском строк (`tests/pwa.rs`, `tests/tokens.rs`).
 # Крейт уже в дереве через ядро — новых авторов нет.
@@ -104,6 +104,7 @@ web-sys = { version = "0.3.106", features = [
     "DataTransfer",
     "DataTransferItem",
     "DataTransferItemList",
+    "HtmlSelectElement",
     "NodeList",
     "Response",
 ] }

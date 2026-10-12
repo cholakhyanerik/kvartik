@@ -64,6 +64,7 @@ use serde_json::value::RawValue;
 use super::{
     FIRST_VERSION, FORMAT_VERSION, FormatError, Stored, base64, decode_record, split, wrap,
 };
+use crate::model::client::Client;
 use crate::model::date::Date;
 use crate::model::logo::Logo;
 use crate::model::profile::Profile;
@@ -161,7 +162,11 @@ impl Kind {
 /// нечитаемыми и скажет об этом словами, а браузерный тест копии с ним
 /// упадёт. Новый вид — это ещё и новая версия формата (шапка
 /// `format/mod.rs`), и образец копии с его записью (Правило 2).
-pub const KINDS: &[Kind] = &[Kind::of::<Profile>(), Kind::of::<Logo>()];
+pub const KINDS: &[Kind] = &[
+    Kind::of::<Profile>(),
+    Kind::of::<Logo>(),
+    Kind::of::<Client>(),
+];
 
 fn find(kinds: &[Kind], name: &str) -> Option<Kind> {
     kinds.iter().copied().find(|kind| kind.name == name)

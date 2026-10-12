@@ -8,11 +8,14 @@
 
 use js_sys::Promise;
 use kvartik_core::format::Stored;
-use kvartik_core::i18n::{ALL_KEYS, Key, Lang, t};
+use kvartik_core::i18n::{ALL_KEYS, Key, Lang, fill, t};
+use kvartik_core::model::client::Client;
+use kvartik_core::model::country::Country;
+use kvartik_core::model::money::Currency;
 use kvartik_core::model::profile::Profile;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
-use web_sys::{Document, Element, HtmlElement, HtmlInputElement};
+use web_sys::{Document, Element, HtmlElement, HtmlInputElement, HtmlSelectElement};
 
 use super::App;
 use crate::store::device::Device;
@@ -109,6 +112,32 @@ fn type_into(input: &HtmlInputElement, text: &str) {
     input.dispatch_event(&event).expect("событие отправлено");
 }
 
+/// Список выбора внутри подписи `label` — `nth`-й такой, считая с нуля.
+fn select(host: &HtmlElement, label: &str, nth: usize) -> Option<HtmlSelectElement> {
+    let labels = host.query_selector_all("label").ok()?;
+    (0..labels.length())
+        .filter_map(|at| labels.item(at))
+        .map(|node| node.unchecked_into::<Element>())
+        .filter(|element| {
+            element
+                .first_child()
+                .and_then(|text| text.text_content())
+                .is_some_and(|text| text.trim() == label)
+        })
+        .nth(nth)?
+        .query_selector("select")
+        .ok()
+        .flatten()
+        .map(JsCast::unchecked_into)
+}
+
+/// Выбрать вариант, как человек: значение и событие `change`.
+fn pick(select: &HtmlSelectElement, value: &str) {
+    select.set_value(value);
+    let event = web_sys::Event::new("change").expect("событие создаётся");
+    select.dispatch_event(&event).expect("событие отправлено");
+}
+
 /// Строки других языков, оставшиеся в тексте окна на языке `lang`: строка,
 /// собранная один раз, при смене языка остаётся прежней (Правило 4).
 /// Шаблон сверяется кусками между `{}`, и только длинными: короткий кусок
@@ -137,7 +166,8 @@ fn leftovers(text: &str, lang: Lang) -> Vec<String> {
 /// остаётся ни строки на прежнем языке, `lang` у страницы — новый,
 /// и выбор запомнен на устройстве, а введённое в поле остаётся в нём. Окно
 /// открывается языком, выбранным раньше. Форма профиля открыта, и в каждом
-/// её списке есть строка: их подписи тоже должны перевестись.
+/// её списке есть строка: их подписи тоже должны перевестись. Форма
+/// клиента открыта тоже: список стран — на языке окна и по его алфавиту.
 #[wasm_bindgen_test]
 async fn choosing_a_language_translates_the_whole_window() {
     let document = document();
@@ -160,7 +190,7 @@ async fn choosing_a_language_translates_the_whole_window() {
         None => wrong.push("нет кнопки профиля".to_owned()),
     }
     sleep(50).await;
-    for add in [Key::AccountAdd, Key::ActivityAdd, Key::StopAdd] {
+    for add in [Key::AccountAdd, Key::ActivityAdd, Key::StopAdd, Key::ClientAdd] {
         match button(&host, &[t(Lang::Am, add)]) {
             Some(add) => add.click(),
             None => wrong.push(format!("нет кнопки {add:?}")),
@@ -193,10 +223,29 @@ async fn choosing_a_language_translates_the_whole_window() {
         sleep(50).await;
         let text = host.text_content().unwrap_or_default();
         steps.push(format!("{lang:?}: {} знаков", text.chars().count()));
-        for key in [Key::BackupTitle, Key::ProfileAccounts, Key::StopFrom] {
+        for key in [Key::BackupTitle, Key::ProfileAccounts, Key::StopFrom, Key::ClientCountry] {
             if !text.contains(t(lang, key)) {
                 wrong.push(format!("{lang:?}: нет {key:?} на этом языке"));
             }
+        }
+        match select(&host, t(lang, Key::ClientCountry), 0)
+            .and_then(|countries| countries.query_selector_all("option").ok())
+        {
+            Some(options) => {
+                // Первый вариант — «не выбрано».
+                let shown: Vec<String> = (1..options.length())
+                    .filter_map(|at| options.item(at))
+                    .filter_map(|option| option.text_content())
+                    .collect();
+                let expected: Vec<&str> = Country::by_name(lang).map(|c| c.name(lang)).collect();
+                if shown != expected {
+                    wrong.push(format!(
+                        "{lang:?}: список стран не тот: {:?}…",
+                        shown.iter().take(3).collect::<Vec<_>>()
+                    ));
+                }
+            }
+            None => wrong.push(format!("{lang:?}: нет списка стран")),
         }
         let left = leftovers(&text, lang);
         if !left.is_empty() {
@@ -427,4 +476,316 @@ async fn profile_is_saved_and_read_back() {
         let _ = storage.remove_item("kvartik.lang");
     }
     assert!(wrong.is_empty(), "профиль: {wrong:#?}");
+}
+
+/// Названия живых клиентов в списке — по порядку.
+fn client_names(host: &HtmlElement) -> Vec<String> {
+    let Ok(names) = host.query_selector_all("ul.clients:not(.deleted) .client-name") else {
+        return Vec::new();
+    };
+    (0..names.length())
+        .filter_map(|at| names.item(at))
+        .filter_map(|name| name.text_content())
+        .collect()
+}
+
+/// Кнопка `label` у клиента `name` в списке `list` (CSS).
+fn row_button(host: &HtmlElement, list: &str, name: &str, label: &str) -> Option<HtmlElement> {
+    let items = host.query_selector_all(&format!("{list} li")).ok()?;
+    let item = (0..items.length())
+        .filter_map(|at| items.item(at))
+        .map(|node| node.unchecked_into::<HtmlElement>())
+        .find(|item| {
+            item.query_selector(".client-name")
+                .ok()
+                .flatten()
+                .and_then(|title| title.text_content())
+                .as_deref()
+                == Some(name)
+        })?;
+    button(&item, &[label])
+}
+
+/// Клиенты: форма не сохраняет без названия, с неверным ՀՎՀՀ и сроком
+/// больше года и говорит об этом у поля; ՀՎՀՀ спрашивается только
+/// у армянской фирмы; сохранённое видно в списке и лежит в базе; поиск
+/// находит по части названия без учёта «ё»; удалённый уходит из списка
+/// и возвращается — из сообщения об удалении и из списка удалённых; после
+/// нового открытия клиенты на месте.
+#[wasm_bindgen_test]
+async fn clients_are_added_found_deleted_and_restored() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount();
+    let mut wrong = Vec::new();
+    let press = |label: &str, wrong: &mut Vec<String>| match button(&host, &[label]) {
+        Some(button) => button.click(),
+        None => wrong.push(format!("нет кнопки «{label}»")),
+    };
+    if !wait_for(&host, t(lang, Key::ClientsAbout)).await {
+        wrong.push("пустая база — а о клиентах ни слова".to_owned());
+    }
+    press(t(lang, Key::ClientAdd), &mut wrong);
+    sleep(50).await;
+    press(t(lang, Key::ProfileSave), &mut wrong);
+    sleep(50).await;
+    let text = host.text_content().unwrap_or_default();
+    if !text.contains(t(lang, Key::ClientNameMissing)) || !text.contains(t(lang, Key::ProfileFix)) {
+        wrong.push("клиент без названия сохранился без слова".to_owned());
+    }
+    if field(&host, t(lang, Key::ProfileTin), 0).is_some() {
+        wrong.push("ՀՎՀՀ спрошен, когда страна не выбрана".to_owned());
+    }
+
+    let name = "ООО Семён и партнёры";
+    match field(&host, t(lang, Key::ClientName), 0) {
+        Some(input) => type_into(&input, name),
+        None => wrong.push("нет поля названия".to_owned()),
+    }
+    match select(&host, t(lang, Key::ClientCountry), 0) {
+        Some(countries) => pick(&countries, "AM"),
+        None => wrong.push("нет списка стран".to_owned()),
+    }
+    sleep(50).await;
+    let tin = field(&host, t(lang, Key::ProfileTin), 0);
+    match &tin {
+        Some(input) => type_into(input, "0005432"),
+        None => wrong.push("у армянской фирмы не спрошен ՀՎՀՀ".to_owned()),
+    }
+    match select(&host, t(lang, Key::ClientCurrency), 0) {
+        Some(currencies) => pick(&currencies, "USD"),
+        None => wrong.push("нет списка валют".to_owned()),
+    }
+    match select(&host, t(lang, Key::ClientLang), 0) {
+        Some(langs) => pick(&langs, "en"),
+        None => wrong.push("нет списка языков".to_owned()),
+    }
+    let days = field(&host, t(lang, Key::ClientPaymentDays), 0);
+    match &days {
+        Some(input) => type_into(input, "400"),
+        None => wrong.push("нет поля срока оплаты".to_owned()),
+    }
+    press(t(lang, Key::ProfileSave), &mut wrong);
+    sleep(50).await;
+    let text = host.text_content().unwrap_or_default();
+    let days_problem = t(lang, Key::PaymentDaysInvalid).split("{}").next().unwrap_or_default();
+    if !text.contains(t(lang, Key::TinInvalid)) || !text.contains(days_problem) {
+        wrong.push("семь цифр ՀՎՀՀ и срок 400 дней сохранились без слова".to_owned());
+    }
+    if let Some(input) = &tin {
+        type_into(input, "00054321");
+    }
+    if let Some(input) = &days {
+        type_into(input, "15");
+    }
+    press(t(lang, Key::ProfileSave), &mut wrong);
+    if !wait_for(&host, t(lang, Key::ClientSaved)).await {
+        wrong.push("сохранение не подтвердилось".to_owned());
+    }
+    let text = host.text_content().unwrap_or_default();
+    for shown in [
+        name.to_owned(),
+        "Армения".to_owned(),
+        fill(t(lang, Key::TinShort), &["00054321"]),
+        "USD".to_owned(),
+        "English".to_owned(),
+        fill(t(lang, Key::ClientPaymentTerm), &["15\u{A0}дней"]),
+    ] {
+        if !text.contains(&shown) {
+            wrong.push(format!("в списке нет «{shown}»"));
+        }
+    }
+
+    press(t(lang, Key::ClientAdd), &mut wrong);
+    sleep(50).await;
+    if let Some(input) = field(&host, t(lang, Key::ClientName), 0) {
+        type_into(&input, "Acme Inc.");
+    }
+    if let Some(countries) = select(&host, t(lang, Key::ClientCountry), 0) {
+        pick(&countries, "US");
+    }
+    press(t(lang, Key::ProfileSave), &mut wrong);
+    if !wait_for(&host, "Acme Inc.").await {
+        wrong.push("второй клиент не появился".to_owned());
+    }
+    let both = vec!["Acme Inc.".to_owned(), name.to_owned()];
+    if client_names(&host) != both {
+        wrong.push(format!("порядок списка: {:?}", client_names(&host)));
+    }
+
+    let search = field(&host, t(lang, Key::ClientSearch), 0);
+    for (query, expected) in [("семен", vec![name.to_owned()]), ("zzz", Vec::new()), ("", both.clone())] {
+        match &search {
+            Some(input) => type_into(input, query),
+            None => wrong.push("нет поиска".to_owned()),
+        }
+        sleep(50).await;
+        if client_names(&host) != expected {
+            wrong.push(format!("поиск «{query}»: {:?}", client_names(&host)));
+        }
+        let none = host.text_content().unwrap_or_default().contains(t(lang, Key::ClientsNotFound));
+        if none != expected.is_empty() {
+            wrong.push(format!("поиск «{query}»: «никого не нашлось» — {none}"));
+        }
+    }
+
+    let gone = "ul.clients:not(.deleted)";
+    match row_button(&host, gone, "Acme Inc.", t(lang, Key::ClientDelete)) {
+        Some(delete) => delete.click(),
+        None => wrong.push("нет кнопки удаления".to_owned()),
+    }
+    if !wait_for(&host, &fill(t(lang, Key::ClientDeleted), &["Acme Inc."])).await {
+        wrong.push("удаление не подтвердилось".to_owned());
+    }
+    if client_names(&host) != [name] {
+        wrong.push(format!("удалённый в списке: {:?}", client_names(&host)));
+    }
+    press(t(lang, Key::ClientRestore), &mut wrong);
+    if !wait_for(&host, &fill(t(lang, Key::ClientRestored), &["Acme Inc."])).await {
+        wrong.push("восстановление из сообщения не подтвердилось".to_owned());
+    }
+    if client_names(&host) != both {
+        wrong.push(format!("после восстановления: {:?}", client_names(&host)));
+    }
+    if let Some(delete) = row_button(&host, gone, "Acme Inc.", t(lang, Key::ClientDelete)) {
+        delete.click();
+    }
+    let toggle = fill(t(lang, Key::ClientsDeleted), &["1"]);
+    if !wait_for(&host, &toggle).await {
+        wrong.push("нет кнопки удалённых".to_owned());
+    }
+    press(&toggle, &mut wrong);
+    sleep(50).await;
+    match row_button(&host, "ul.clients.deleted", "Acme Inc.", t(lang, Key::ClientRestore)) {
+        Some(restore) => restore.click(),
+        None => wrong.push("удалённого нет в списке удалённых".to_owned()),
+    }
+    sleep(100).await;
+    if client_names(&host) != both {
+        wrong.push(format!("после восстановления из списка: {:?}", client_names(&host)));
+    }
+
+    match row_button(&host, gone, name, t(lang, Key::ClientEdit)) {
+        Some(edit) => edit.click(),
+        None => wrong.push("нет кнопки «Изменить»".to_owned()),
+    }
+    sleep(50).await;
+    match field(&host, t(lang, Key::ClientName), 0) {
+        Some(input) if input.value() == name => {}
+        other => wrong.push(format!("форма правки без названия: {:?}", other.map(|i| i.value()))),
+    }
+    if let Some(input) = field(&host, t(lang, Key::ClientPaymentDays), 0) {
+        type_into(&input, "30");
+    }
+    press(t(lang, Key::ProfileSave), &mut wrong);
+    if !wait_for(&host, &fill(t(lang, Key::ClientPaymentTerm), &["30\u{A0}дней"])).await {
+        wrong.push("правка не видна в списке".to_owned());
+    }
+
+    match stored_clients().await {
+        Ok(clients) => {
+            let alive: Vec<&Client> = clients.iter().filter(|c| !c.is_deleted()).collect();
+            let semyon = alive.iter().find(|c| c.data().name.as_str() == name);
+            match semyon.map(|c| c.data()) {
+                Some(data)
+                    if alive.len() == 2
+                        && data.country == Some(Country::ARMENIA)
+                        && data.tin.as_ref().map(|tin| tin.as_str()) == Some("00054321")
+                        && data.currency == Some(Currency::Usd)
+                        && data.lang == Some(Lang::En)
+                        && data.payment_days == Some(30) => {}
+                other => wrong.push(format!("в базе не то: живых {}, {other:?}", alive.len())),
+            }
+        }
+        Err(error) => wrong.push(format!("клиенты не читаются: {error:?}")),
+    }
+
+    drop(mounted);
+    host.remove();
+    let (host, mounted) = mount();
+    if !wait_for(&host, name).await || !wait_for(&host, "Acme Inc.").await {
+        wrong.push("после нового открытия клиентов не видно".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten())
+    {
+        let _ = storage.remove_item("kvartik.lang");
+    }
+    assert!(wrong.is_empty(), "клиенты: {wrong:#?}");
+}
+
+/// Восстановление из копии меняет базу в обход разделов окна, и раздел
+/// клиентов обязан перечитать её, как профиль: иначе после восстановления
+/// на новом устройстве окно показывает пустой список. Копия — образец версии
+/// 0.0.14: два живых клиента и один удалённый.
+#[wasm_bindgen_test]
+async fn restoring_a_backup_shows_its_clients() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount();
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::ClientsAbout)).await {
+        wrong.push("пустая база — а о клиентах ни слова".to_owned());
+    }
+    if !wait_for(&host, t(lang, Key::BackupChooseFile)).await {
+        wrong.push("раздела копии нет".to_owned());
+    }
+    match host
+        .query_selector(r#"input[type="file"][accept=".json,application/json"]"#)
+        .ok()
+        .flatten()
+    {
+        Some(input) => choose_file(
+            input.unchecked_ref(),
+            "kvartik-2026-10-13.json",
+            include_str!("../../../core/tests/backups/v3/kvartik-2026-10-13.json"),
+        ),
+        None => wrong.push("нет поля выбора копии".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::BackupFilePassword)).await {
+        wrong.push("копия не открылась".to_owned());
+    }
+    match field(&host, t(lang, Key::BackupFilePassword), 0) {
+        Some(password) => type_into(&password, "Պահուստ копия sample 0.0.14"),
+        None => wrong.push("нет поля пароля копии".to_owned()),
+    }
+    match button(&host, &[t(lang, Key::BackupRestore)]) {
+        Some(restore) => restore.click(),
+        None => wrong.push("нет кнопки «Восстановить»".to_owned()),
+    }
+    let done = t(lang, Key::BackupRestored).split("{}").next().unwrap_or_default();
+    if !wait_for(&host, done).await {
+        wrong.push("восстановление не завершилось".to_owned());
+    }
+    if !wait_for(&host, "Acme Inc.").await {
+        wrong.push("после восстановления раздел клиентов не показал клиентов копии".to_owned());
+    }
+    let alive = vec!["Acme Inc.".to_owned(), "«Արարատ» ՍՊԸ".to_owned()];
+    if client_names(&host) != alive {
+        wrong.push(format!("живые клиенты копии: {:?}", client_names(&host)));
+    }
+    if !host
+        .text_content()
+        .is_some_and(|text| text.contains(&fill(t(lang, Key::ClientsDeleted), &["1"])))
+    {
+        wrong.push("удалённый клиент копии не в удалённых".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten())
+    {
+        for name in ["kvartik.lang", "kvartik.backup_key", "kvartik.last_backup"] {
+            let _ = storage.remove_item(name);
+        }
+    }
+    assert!(wrong.is_empty(), "восстановление клиентов: {wrong:#?}");
+}
+
+/// Клиенты из базы программы, включая удалённых.
+async fn stored_clients() -> Result<Vec<Client>, StoreError> {
+    let store = Store::open(|_| {}).await?;
+    Ok(store.read()?.list::<Client>().await?.records)
 }

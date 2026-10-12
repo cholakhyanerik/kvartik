@@ -26,6 +26,9 @@ mod locale;
 
 pub use locale::{ParseError, amount, date, integer, money, parse_money, parse_rate, rate};
 
+use serde::de::{self, Deserializer};
+use serde::{Deserialize, Serialize, Serializer};
+
 /// Язык окна или документа.
 ///
 /// Вариант армянского называется `Am`, как в Arpa и Savio, но код в файлах
@@ -84,6 +87,25 @@ impl Lang {
                     .find(|lang| lang.code().eq_ignore_ascii_case(primary))
             })
             .unwrap_or(Lang::Am)
+    }
+}
+
+/// В данных язык — его код (`"hy"`, `"ru"`, `"en"`): язык документов
+/// у клиента (задача 10) и у документа (задача 11). Имя варианта в данные не
+/// идёт, как и в настройки окна.
+impl Serialize for Lang {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.code())
+    }
+}
+
+/// Читается только код из `Lang::code`: `"am"` (амхарский) или `"HY"` — порча.
+impl<'de> Deserialize<'de> for Lang {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        Self::from_code(&text).ok_or_else(|| {
+            de::Error::invalid_value(de::Unexpected::Str(&text), &"код языка: hy, ru или en")
+        })
     }
 }
 
@@ -629,6 +651,83 @@ strings! {
     /// Текст длиннее предела типа (`model::text`): поле ввода до него не
     /// пускает, так что это вставка в обход поля.
     TextTooLong = "Текст слишком длинный.", "The text is too long.", "Տեքստը չափազանց երկար է։";
+
+    /// Раздел клиентов (задача 10). Пока экрана клиентов нет, раздел стоит
+    /// на единственном экране каркаса, под профилем.
+    ClientsTitle = "Клиенты", "Clients", "Հաճախորդներ";
+    /// Клиентов ещё нет: зачем их заводить.
+    ClientsAbout =
+        "Клиенты\u{A0}— те, кому вы выписываете счета и акты. Их реквизиты, валюта, язык документов и срок оплаты будут подставляться в новые документы сами.",
+        "Clients are those you issue invoices and acts to. Their details, currency, document language and payment term will fill in new documents on their own.",
+        "Հաճախորդներն այն կազմակերպություններն ու անձինք են, որոնց դուք հաշիվներ և ակտեր եք դուրս գրում։ Նրանց վավերապայմանները, արժույթը, փաստաթղթերի լեզուն և վճարման ժամկետը նոր փաստաթղթերում կլրացվեն ինքնաբերաբար։";
+    /// Кнопка: открыть пустую форму клиента.
+    ClientAdd = "Добавить клиента", "Add a client", "Ավելացնել հաճախորդ";
+    /// Кнопка у клиента в списке: открыть его форму.
+    ClientEdit = "Изменить", "Edit", "Փոփոխել";
+    /// Кнопка у клиента в списке: пометить удалённым (Правило 2).
+    ClientDelete = "Удалить", "Delete", "Ջնջել";
+    /// Кнопка у удалённого клиента и в сообщении об удалении.
+    ClientRestore = "Восстановить", "Restore", "Վերականգնել";
+    /// Поле поиска над списком клиентов.
+    ClientSearch = "Поиск по названию", "Search by name", "Որոնում ըստ անվանման";
+    /// По запросу поиска никого нет.
+    ClientsNotFound = "Никого не нашлось.", "No clients found.", "Ոչ ոք չգտնվեց։";
+    /// Кнопка: показать удалённых клиентов; в скобках — сколько их.
+    ClientsDeleted = "Удалённые клиенты ({})", "Deleted clients ({})", "Ջնջված հաճախորդներ ({})";
+    /// Кнопка: спрятать список удалённых.
+    ClientsDeletedHide = "Скрыть удалённых", "Hide deleted clients", "Թաքցնել ջնջվածները";
+    /// Записи клиентов, которые не читаются (`Tx::list`): остальные клиенты
+    /// видны.
+    ClientsUnreadable =
+        "Не читаются записей клиентов: {}. Восстановите их из резервной копии.",
+        "Client records that can't be read: {}. Restore them from a backup.",
+        "Չեն կարդացվում հաճախորդների գրառումներ՝ {}։ Վերականգնեք դրանք պահուստային պատճենից։";
+    /// Клиент сохранён — до диска (Правило 2).
+    ClientSaved = "Клиент сохранён.", "Client saved.", "Հաճախորդը պահպանվեց։";
+    /// Клиент помечен удалённым; рядом — кнопка «Восстановить».
+    ClientDeleted =
+        "Клиент «{}» удалён. Его можно восстановить.",
+        "Client “{}” deleted. You can restore it.",
+        "«{}» հաճախորդը ջնջվեց։ Այն կարելի է վերականգնել։";
+    /// Удалённый клиент восстановлен.
+    ClientRestored = "Клиент «{}» восстановлен.", "Client “{}” restored.", "«{}» հաճախորդը վերականգնվեց։";
+    /// Поле: название клиента.
+    ClientName = "Название", "Name", "Անվանում";
+    ClientNameHint =
+        "Так, как оно должно стоять в счёте и акте.",
+        "As it should appear on invoices and acts.",
+        "Այնպես, ինչպես այն պետք է գրված լինի հաշվում և ակտում։";
+    ClientNameMissing = "Укажите название клиента.", "Enter the client's name.", "Նշեք հաճախորդի անվանումը։";
+    /// Поле: страна клиента — список стран ISO 3166-1 (`model::country`).
+    ClientCountry = "Страна", "Country", "Երկիր";
+    /// Первый вариант списка выбора: ничего не выбрано (Правило 6).
+    NotChosen = "Не выбрано", "Not selected", "Ընտրված չէ";
+    ClientAddress = "Адрес", "Address", "Հասցե";
+    /// Группа полей формы клиента: что новый документ берёт по умолчанию.
+    ClientDefaults = "Для новых документов", "For new documents", "Նոր փաստաթղթերի համար";
+    ClientCurrency = "Валюта документов", "Document currency", "Փաստաթղթերի արժույթը";
+    ClientLang = "Язык документов", "Document language", "Փաստաթղթերի լեզուն";
+    ClientPaymentDays = "Срок оплаты, дней", "Payment term, days", "Վճարման ժամկետ, օր";
+    ClientPaymentDaysHint =
+        "Сколько дней после даты счёта у клиента есть на оплату.",
+        "How many days after the invoice date the client has to pay.",
+        "Հաշվի ամսաթվից հետո քանի օր ունի հաճախորդը վճարելու համար։";
+    /// Срок оплаты не прочитан; в шаблоне — самый долгий срок
+    /// (`ClientData::MAX_PAYMENT_DAYS`).
+    PaymentDaysInvalid =
+        "Срок оплаты\u{A0}— целое число дней от 0 до {}.",
+        "The payment term is a whole number of days from 0 to {}.",
+        "Վճարման ժամկետը պետք է լինի ամբողջ թիվ՝ 0-ից մինչև {} օր։";
+    /// ՀՎՀՀ клиента в строке списка: коротко, с номером.
+    TinShort = "ИНН (ՀՎՀՀ) {}", "TIN (ՀՎՀՀ) {}", "ՀՎՀՀ {}";
+    /// Срок оплаты клиента в строке списка; число дней — `DaysOne` и т. д.
+    ClientPaymentTerm = "Срок оплаты: {}", "Payment term: {}", "Վճարման ժամկետ՝ {}";
+    /// Число дней — формы слова при числе (`plural`). В армянском при
+    /// числительном — единственное число. Неразрывный пробел: «15» в конце
+    /// строки, а «дней» в начале следующей читаются плохо.
+    DaysOne = "{}\u{A0}день", "{}\u{A0}day", "{}\u{A0}օր";
+    DaysFew = "{}\u{A0}дня", "{}\u{A0}days", "{}\u{A0}օր";
+    DaysMany = "{}\u{A0}дней", "{}\u{A0}days", "{}\u{A0}օր";
 }
 
 /// Подставляет значения в шаблон вместо `{}`, по порядку.
@@ -859,6 +958,21 @@ mod tests {
         }
         assert!(lost.is_empty(), "код не читается обратно: {lost:?}");
         assert_eq!(Lang::from_code("am"), None);
+    }
+
+    /// В данных язык — код, а не имя варианта: `Am` записался бы `"Am"`,
+    /// а это амхарский.
+    #[test]
+    fn data_keeps_the_code() {
+        let written: Vec<String> = Lang::ALL
+            .iter()
+            .filter_map(|lang| serde_json::to_string(lang).ok())
+            .collect();
+        assert_eq!(written, [r#""hy""#, r#""ru""#, r#""en""#]);
+        assert_eq!(serde_json::from_str::<Lang>(r#""hy""#).ok(), Some(Lang::Am));
+        for json in [r#""am""#, r#""Am""#, r#""HY""#, r#""hy-AM""#, r#""""#, "0"] {
+            assert!(serde_json::from_str::<Lang>(json).is_err(), "{json} прочитан");
+        }
     }
 
     /// Язык при первом заходе — первый знакомый из языков браузера, а не

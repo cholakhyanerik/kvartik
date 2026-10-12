@@ -90,6 +90,31 @@ impl Lines {
     }
 }
 
+/// Текст для поиска и сортировки: строчными буквами, «ё» — как «е»,
+/// армянская «և» — как «եւ», пробелы по краям и подряд не важны.
+///
+/// Человек ищет «Семен» и находит «Семён», ищет «եւ» и находит «և»:
+/// и так, и так пишут одно и то же слово, а на телефоне второй буквы часто
+/// нет на клавиатуре. Сортировка по свёрнутому тексту ставит имена по
+/// алфавиту внутри каждого письма: армянский и русский алфавиты идут
+/// в Unicode по порядку.
+pub fn fold(text: &str) -> String {
+    let mut folded = String::with_capacity(text.len());
+    for word in text.split_whitespace() {
+        if !folded.is_empty() {
+            folded.push(' ');
+        }
+        for c in word.chars().flat_map(char::to_lowercase) {
+            match c {
+                'ё' => folded.push('е'),
+                'և' => folded.push_str("եւ"),
+                c => folded.push(c),
+            }
+        }
+    }
+    folded
+}
+
 /// Обрезанный текст, если он не длиннее `max` знаков. Знак — точка кода
 /// Unicode: армянская буква — два байта UTF-8, но один знак.
 fn within(text: &str, max: usize) -> Result<String, TextError> {
@@ -158,6 +183,30 @@ mod tests {
             wrong.push(format!("адрес: {address:?}"));
         }
         assert!(wrong.is_empty(), "текст приведён не так: {wrong:#?}");
+    }
+
+    /// Свёртка для поиска: регистр, «ё», армянская «և» и пробелы не важны.
+    /// Ожидаемое выписано человеком.
+    #[test]
+    fn fold_ignores_case_yo_and_ligature() {
+        let cases = [
+            ("Семён", "семен"),
+            ("ЁЛКА", "елка"),
+            ("  Acme   Inc. ", "acme inc."),
+            ("ԱՐԱՐԱՏ ՍՊԸ", "արարատ սպը"),
+            ("Երևան", "երեւան"),
+            ("Եւ", "եւ"),
+            ("Côte d’Ivoire", "côte d’ivoire"),
+            ("", ""),
+        ];
+        let mut wrong = Vec::new();
+        for (text, expected) in cases {
+            let got = fold(text);
+            if got != expected {
+                wrong.push(format!("«{text}» → «{got}», а не «{expected}»"));
+            }
+        }
+        assert!(wrong.is_empty(), "свёртка: {wrong:#?}");
     }
 
     /// Предел — в знаках: 300 армянских букв — это 600 байтов, но годятся.

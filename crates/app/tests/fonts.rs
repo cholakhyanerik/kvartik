@@ -16,6 +16,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use kvartik_core::i18n::{self, ALL_KEYS, Lang, t};
+use kvartik_core::model::country::Country;
 use kvartik_core::model::date::Date;
 use kvartik_core::model::money::{Currency, Money};
 
@@ -203,9 +204,9 @@ impl Font {
 }
 
 /// Знаки, которые окно может показать: вся таблица строк на трёх языках,
-/// записи сумм, курсов и дат, знаки, которые Правило 4 называет поимённо,
-/// и целые алфавиты трёх языков — их человек вводит сам: имена, адреса,
-/// названия услуг.
+/// названия стран (`model::country`, задача 10), записи сумм, курсов и дат,
+/// знаки, которые Правило 4 называет поимённо, и целые алфавиты трёх
+/// языков — их человек вводит сам: имена, адреса, названия услуг.
 fn needed() -> BTreeSet<char> {
     let mut text = String::new();
     for (key, _) in ALL_KEYS {
@@ -222,6 +223,9 @@ fn needed() -> BTreeSet<char> {
             text += &i18n::date(lang, day);
         }
         text += &i18n::rate(lang, 3_619_349);
+        for country in Country::by_name(lang) {
+            text += country.name(lang);
+        }
     }
     text += "№«»“”‘’—–…֏€$";
     text.extend((' '..='~').chain('А'..='я').chain(['Ё', 'ё']));

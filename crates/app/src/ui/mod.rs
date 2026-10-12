@@ -6,6 +6,8 @@
 //! в `var(--…)` ловит тест `crates/app/tests/tokens.rs`.
 
 mod backup;
+mod clients;
+mod form;
 mod lang;
 pub mod panic;
 mod profile;
@@ -19,6 +21,7 @@ use leptos::prelude::*;
 
 use crate::store::{self, Store};
 use backup::{BackupReminder, BackupSection, Backups};
+use clients::{Clients, ClientsSection};
 use lang::{LangSwitch, WindowLang};
 use profile::{ProfileSection, Profiles};
 use pwa::{InstallSection, Program, UpdateNotice};
@@ -73,8 +76,8 @@ impl Base {
 }
 
 /// Корень окна. Пока — экран каркаса: название и выбор языка, новая версия,
-/// напоминание о копии, установка, профиль ИП, раздел о хранении данных
-/// и раздел о резервной копии.
+/// напоминание о копии, установка, профиль ИП, клиенты, раздел о хранении
+/// данных и раздел о резервной копии.
 ///
 /// Установка — выше профиля: на iPhone программу ставят до того, как
 /// вводить данные (Правило 6). Напоминание о копии — над всем, что растёт:
@@ -94,6 +97,7 @@ pub fn App() -> impl IntoView {
     let base = Base::new();
     let backups = Backups::new(base);
     let profiles = Profiles::new();
+    let clients = Clients::new();
     leptos::task::spawn_local(async move {
         match Store::open(move |event| storage.update(|state| state.apply(event))).await {
             Ok(store) => {
@@ -107,10 +111,12 @@ pub fn App() -> impl IntoView {
                 };
                 backups.opened(has_data);
                 profiles.load(&store).await;
+                clients.load(&store).await;
                 let persistence = store::persistence().await;
                 storage.update(|state| state.opened(persistence));
             }
-            // Профиль остаётся пустым: почему, скажет раздел о хранении.
+            // Профиль и клиенты остаются пустыми: почему, скажет раздел
+            // о хранении.
             Err(error) => storage.set(Storage::Failed(error)),
         }
     });
@@ -126,6 +132,7 @@ pub fn App() -> impl IntoView {
                 <BackupReminder lang backups />
                 <InstallSection lang program />
                 <ProfileSection lang profiles base backups />
+                <ClientsSection lang clients base backups />
                 <StorageSection lang storage />
                 <BackupSection lang backups storage />
             </section>
