@@ -259,6 +259,11 @@ async fn restoring_a_backup_shows_its_profile() {
     if !wait_for(&host, t(lang, Key::ProfileFill)).await {
         wrong.push("пустая база — а профиль не предлагают заполнить".to_owned());
     }
+    // Раздел копии появляется позже профиля: после ответа браузера
+    // о постоянном хранении, а он в CI бывает небыстрым.
+    if !wait_for(&host, t(lang, Key::BackupChooseFile)).await {
+        wrong.push("раздела копии нет".to_owned());
+    }
     let input: Option<HtmlInputElement> = host
         .query_selector(r#"input[type="file"][accept=".json,application/json"]"#)
         .ok()
