@@ -430,6 +430,9 @@ fn facts(lang: Lang, data: &ClientData) -> Vec<String> {
     if let Some(tin) = &data.tin {
         facts.push(fill(t(lang, Key::TinShort), &[tin.as_str()]));
     }
+    if !data.tax_id.is_empty() {
+        facts.push(fill(t(lang, Key::TaxIdShort), &[data.tax_id.as_str()]));
+    }
     if let Some(currency) = data.currency {
         facts.push(currency_code(currency).to_owned());
     }
@@ -475,6 +478,7 @@ struct Form {
     country: RwSignal<Option<Country>>,
     address: RwSignal<String>,
     tin: RwSignal<String>,
+    tax_id: RwSignal<String>,
     currency: RwSignal<Option<Currency>>,
     doc_lang: RwSignal<Option<Lang>>,
     days: RwSignal<String>,
@@ -496,6 +500,7 @@ impl Form {
                     .map(|tin| tin.as_str().to_owned())
                     .unwrap_or_default(),
             ),
+            tax_id: RwSignal::new(data.map(|d| d.tax_id.as_str().to_owned()).unwrap_or_default()),
             currency: RwSignal::new(data.and_then(|d| d.currency)),
             doc_lang: RwSignal::new(data.and_then(|d| d.lang)),
             days: RwSignal::new(
@@ -513,6 +518,12 @@ impl Form {
         self.country.get() == Some(Country::ARMENIA)
     }
 
+    /// Налоговый номер своей страны — у фирмы любой другой выбранной
+    /// страны. Пока страна не выбрана, не спрашивается ни он, ни ՀՎՀՀ.
+    fn asks_tax_id(&self) -> bool {
+        self.country.get().is_some_and(|country| country != Country::ARMENIA)
+    }
+
     /// Данные клиента из полей; `None` — где-то ошибка, и её видно у поля.
     fn data(&self) -> Option<ClientData> {
         let country = self.country.get_untracked();
@@ -523,11 +534,18 @@ impl Form {
         } else {
             None
         };
+        // И наоборот: номер чужой страны у армянской фирмы не сохраняется.
+        let tax_id = if country.is_some_and(|country| country != Country::ARMENIA) {
+            Line::new(&self.tax_id.get_untracked()).ok()?
+        } else {
+            Line::default()
+        };
         let data = ClientData {
             name: Line::new(&self.name.get_untracked()).ok()?,
             country,
             address: Lines::new(&self.address.get_untracked()).ok()?,
             tin,
+            tax_id,
             currency: self.currency.get_untracked(),
             lang: self.doc_lang.get_untracked(),
             payment_days: ClientData::parse_payment_days(&self.days.get_untracked()).ok()?,
@@ -609,6 +627,16 @@ fn ClientForm(
                         hint=Key::ProfileTinHint
                         max=Tin::DIGITS
                         check=|text| (!text.trim().is_empty() && Tin::parse(text).is_err()).then_some(Key::TinInvalid)
+                    />
+                </Show>
+                <Show when=move || form.asks_tax_id()>
+                    <TextField
+                        lang
+                        label=Key::ClientTaxId
+                        value=form.tax_id
+                        tried
+                        autocomplete="off"
+                        hint=Key::ClientTaxIdHint
                     />
                 </Show>
             </fieldset>

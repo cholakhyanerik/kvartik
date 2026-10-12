@@ -16,16 +16,17 @@
 
 Что берётся (CLDR 48.2.3, сверено 2026-10-13):
 
-- **Коды — назначенные коды ISO 3166-1 alpha-2, и только они.** Из
+- **Коды — назначенные коды ISO 3166-1 alpha-2 и Косово.** Из
   `codeMappings.json` — две латинские буквы с числовым кодом ISO меньше 900
   (900–999 стандарт оставляет пользователям: `EU`, `XK`, `ZZ`), минус
   устаревшие — те, что CLDR переводит в новые (`territoryAlias`
   в `aliases.json`: `SU`, `YU`, `AN`…). Без числового кода остаются
   и исключительно зарезервированные `AC`, `CP`, `DG`, `EA`, `IC`, `TA`.
-  Вышло 249 — столько назначенных кодов в ISO 3166-1 на 2026 год, и скрипт
+  Назначенных вышло 249 — столько их в ISO 3166-1 на 2026 год, и скрипт
   останавливается, если число изменилось: новая страна — повод посмотреть
-  глазами. Новый код в таблице — новая версия формата данных: прежняя
-  версия программы прочла бы его как порчу (шапка `model/country.rs`).
+  глазами. Сверх них — Косово, `XK` ([`EXTRA`]). Новый код в таблице —
+  новая версия формата данных: прежняя версия программы прочла бы его как
+  порчу (шапка `model/country.rs`).
 - **Названия — основные**, без вариантов `-alt-short` и `-alt-variant`:
   «Hong Kong SAR China», а не «Hong Kong». Так же их показывает
   `Intl.DisplayNames` в Chrome и Firefox.
@@ -85,6 +86,12 @@ LANGS = ["hy", "ru", "en"]
 # Назначенных кодов ISO 3166-1 alpha-2 на 2026 год.
 EXPECTED = 249
 
+# Коды сверх назначенных. Косово ISO кода не назначило, но `XK` пишут
+# Еврокомиссия и банки (IBAN Косово начинается с XK), а у CLDR есть его
+# названия на всех трёх языках. Клиент из Косово — настоящий клиент, и без
+# кода ему не выбрать страну (решение человека 2026-10-13, 0.0.15).
+EXTRA = ["XK"]
+
 
 def download(url: str, sha256: str) -> dict:
     with urllib.request.urlopen(url) as response:
@@ -122,15 +129,16 @@ def main() -> None:
     names = {
         lang: data[lang]["main"][lang]["localeDisplayNames"]["territories"] for lang in LANGS
     }
-    codes = sorted(
+    assigned = [
         code
         for code, mapping in mappings.items()
         if re.fullmatch("[A-Z]{2}", code)
         and int(mapping.get("_numeric", "999")) < 900
         and code not in aliases
-    )
-    if len(codes) != EXPECTED:
-        sys.exit(f"кодов {len(codes)}, а ждали {EXPECTED}: ISO 3166-1 изменился — сверить глазами")
+    ]
+    if len(assigned) != EXPECTED:
+        sys.exit(f"кодов {len(assigned)}, а ждали {EXPECTED}: ISO 3166-1 изменился — сверить глазами")
+    codes = sorted(set(assigned) | set(EXTRA))
     missing = [f"{code} ({lang})" for code in codes for lang in LANGS if code not in names[lang]]
     if missing:
         sys.exit(f"нет названий: {missing}")

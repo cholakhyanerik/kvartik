@@ -605,9 +605,20 @@ async fn clients_are_added_found_deleted_and_restored() {
     if let Some(countries) = select(&host, t(lang, Key::ClientCountry), 0) {
         pick(&countries, "US");
     }
+    sleep(50).await;
+    if field(&host, t(lang, Key::ProfileTin), 0).is_some() {
+        wrong.push("у американской фирмы спрошен ՀՎՀՀ".to_owned());
+    }
+    match field(&host, t(lang, Key::ClientTaxId), 0) {
+        Some(input) => type_into(&input, "EIN 12-3456789"),
+        None => wrong.push("у американской фирмы не спрошен налоговый номер".to_owned()),
+    }
     press(t(lang, Key::ProfileSave), &mut wrong);
     if !wait_for(&host, "Acme Inc.").await {
         wrong.push("второй клиент не появился".to_owned());
+    }
+    if !wait_for(&host, &fill(t(lang, Key::TaxIdShort), &["EIN 12-3456789"])).await {
+        wrong.push("налогового номера нет в списке".to_owned());
     }
     let both = vec!["Acme Inc.".to_owned(), name.to_owned()];
     if client_names(&host) != both {
@@ -694,8 +705,14 @@ async fn clients_are_added_found_deleted_and_restored() {
                         && data.tin.as_ref().map(|tin| tin.as_str()) == Some("00054321")
                         && data.currency == Some(Currency::Usd)
                         && data.lang == Some(Lang::En)
-                        && data.payment_days == Some(30) => {}
+                        && data.payment_days == Some(30)
+                        && data.tax_id.is_empty() => {}
                 other => wrong.push(format!("в базе не то: живых {}, {other:?}", alive.len())),
+            }
+            let acme = alive.iter().find(|c| c.data().name.as_str() == "Acme Inc.");
+            match acme.map(|c| (c.data().tin.is_none(), c.data().tax_id.as_str())) {
+                Some((true, "EIN 12-3456789")) => {}
+                other => wrong.push(format!("Acme в базе: {other:?}")),
             }
         }
         Err(error) => wrong.push(format!("клиенты не читаются: {error:?}")),

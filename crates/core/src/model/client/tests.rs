@@ -18,6 +18,7 @@ fn named(name: &str) -> ClientData {
         country: None,
         address: Lines::default(),
         tin: None,
+        tax_id: Line::default(),
         currency: None,
         lang: None,
         payment_days: None,
@@ -28,15 +29,31 @@ fn named(name: &str) -> ClientData {
 const SAMPLE: &str = concat!(
     r#"{"meta":{"id":"5b0e8f9a-3c2d-4e1f-8a7b-9c6d5e4f3a2b","modified":1760000000000,"deleted":null},"#,
     r#""data":{"name":"«Արարատ» ՍՊԸ","country":"AM","#,
-    r#""address":"ք. Երևան, Տիգրան Մեծի 10\n0010","tin":"07654321","#,
+    r#""address":"ք. Երևան, Տիգրան Մեծի 10\n0010","tin":"07654321","tax_id":"","#,
     r#""currency":"AMD","lang":"hy","payment_days":10}}"#
 );
 
 /// Иностранный клиент, у которого заполнено только название.
 const BARE: &str = concat!(
     r#"{"meta":{"id":"5b0e8f9a-3c2d-4e1f-8a7b-9c6d5e4f3a2b","modified":1760000000000,"deleted":null},"#,
-    r#""data":{"name":"Acme Inc.","country":null,"address":"","tin":null,"#,
+    r#""data":{"name":"Acme Inc.","country":null,"address":"","tin":null,"tax_id":"","#,
     r#""currency":null,"lang":null,"payment_days":null}}"#
+);
+
+/// Немецкая фирма с налоговым номером своей страны.
+const FOREIGN: &str = concat!(
+    r#"{"meta":{"id":"5b0e8f9a-3c2d-4e1f-8a7b-9c6d5e4f3a2b","modified":1760000000000,"deleted":null},"#,
+    r#""data":{"name":"Beispiel GmbH","country":"DE","address":"Hauptstraße 1\n10115 Berlin","#,
+    r#""tin":null,"tax_id":"DE123456789","currency":"EUR","lang":"en","payment_days":14}}"#
+);
+
+/// Та же армянская фирма, что в `SAMPLE`, как её записала 0.0.14 (версия
+/// формата 3): поля `tax_id` тогда не было.
+const SAMPLE_V3: &str = concat!(
+    r#"{"meta":{"id":"5b0e8f9a-3c2d-4e1f-8a7b-9c6d5e4f3a2b","modified":1760000000000,"deleted":null},"#,
+    r#""data":{"name":"«Արարատ» ՍՊԸ","country":"AM","#,
+    r#""address":"ք. Երևան, Տիգրան Մեծի 10\n0010","tin":"07654321","#,
+    r#""currency":"AMD","lang":"hy","payment_days":10}}"#
 );
 
 /// Образцы читаются в ожидаемые значения, а их запись — слово в слово
@@ -59,6 +76,21 @@ fn data_shape_is_pinned() {
     let bare: Client = serde_json::from_str(BARE).expect("голый читается");
     assert_eq!(bare.data(), &named("Acme Inc."));
     assert_eq!(serde_json::to_string(&bare).ok().as_deref(), Some(BARE));
+
+    let foreign: Client = serde_json::from_str(FOREIGN).expect("иностранный читается");
+    assert_eq!(foreign.data().tax_id.as_str(), "DE123456789");
+    assert_eq!(foreign.data().country, Country::from_code("DE"));
+    assert_eq!(serde_json::to_string(&foreign).ok().as_deref(), Some(FOREIGN));
+}
+
+/// Запись версии 3 — без налогового номера — читается с пустым номером,
+/// а пишется уже с полем (Правило 2).
+#[test]
+fn version_3_records_still_read() {
+    let old: Client = serde_json::from_str(SAMPLE_V3).expect("запись 0.0.14 читается");
+    let current: Client = serde_json::from_str(SAMPLE).expect("образец читается");
+    assert_eq!(old, current);
+    assert_eq!(serde_json::to_string(&old).ok().as_deref(), Some(SAMPLE));
 }
 
 /// Испорченное не читается: незнакомое поле, запретное значение в любом
@@ -71,8 +103,10 @@ fn data_rejects_what_the_types_forbid() {
         SAMPLE.replace(r#""name":"«Արարատ» ՍՊԸ""#, r#""name":" Արարատ""#),
         SAMPLE.replace(r#""country":"AM""#, r#""country":"am""#),
         SAMPLE.replace(r#""country":"AM""#, r#""country":"ARM""#),
-        SAMPLE.replace(r#""country":"AM""#, r#""country":"XK""#),
+        SAMPLE.replace(r#""country":"AM""#, r#""country":"EU""#),
         SAMPLE.replace(r#""tin":"07654321""#, r#""tin":"7654321""#),
+        SAMPLE.replace(r#""tax_id":"""#, r#""tax_id":" DE1""#),
+        SAMPLE.replace(r#""tax_id":"""#, r#""tax_id":null"#),
         SAMPLE.replace(r#""currency":"AMD""#, r#""currency":"RUB""#),
         SAMPLE.replace(r#""lang":"hy""#, r#""lang":"am""#),
         SAMPLE.replace(r#""lang":"hy""#, r#""lang":"Am""#),

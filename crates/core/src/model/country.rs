@@ -6,8 +6,8 @@
 //! другая страна»: в счёте иностранному клиенту страна — часть адреса.
 //!
 //! Таблицу пишет `tools/countries.py` в `country/names.rs`: 249 назначенных
-//! кодов ISO 3166-1, названия CLDR 48.2.3 и порядок по названию на каждом
-//! языке — что берётся и почему, в шапке скрипта. Знаки названий есть
+//! кодов ISO 3166-1 и Косово (`XK`, с 0.0.15), названия CLDR 48.2.3 и порядок
+//! по названию на каждом языке — что берётся и почему, в шапке скрипта. Знаки названий есть
 //! в шрифтах окна — это держит тест `crates/app/tests/fonts.rs`.
 //!
 //! **Новый код в таблице — новая версия формата** (Правило 5): код
@@ -63,8 +63,8 @@ impl Country {
             let middle = (low + high) / 2;
             let at = COUNTRIES[middle].code;
             if at[0] == code[0] && at[1] == code[1] {
-                // Строк в таблице 249 — номер помещается в `u8` (это
-                // проверяет `BY_NAME_*`: их тип — `[u8; 249]`).
+                // Строк в таблице 250 — номер помещается в `u8` (это
+                // проверяет `BY_NAME_*`: их тип — `[u8; 250]`).
                 return Some(Self(middle as u8));
             }
             if at[0] < code[0] || (at[0] == code[0] && at[1] < code[1]) {
@@ -173,7 +173,7 @@ mod tests {
             }
         }
         assert!(wrong.is_empty(), "код не читается обратно: {wrong:?}");
-        for code in ["", "A", "am", "Am", "ARM", "ZZ", "XK", "EU", "SU", "AC", "А М", "Ա"] {
+        for code in ["", "A", "am", "Am", "ARM", "ZZ", "XA", "EU", "SU", "AC", "А М", "Ա"] {
             assert_eq!(Country::from_code(code), None, "«{code}» прочитан");
         }
     }
@@ -188,6 +188,7 @@ mod tests {
             ("US", "Միացյալ Նահանգներ", "Соединенные Штаты", "United States"),
             ("CI", "Կոտ դ՚Իվուար", "Кот-д’Ивуар", "Côte d’Ivoire"),
             ("TR", "Թուրքիա", "Турция", "Türkiye"),
+            ("XK", "Կոսովո", "Косово", "Kosovo"),
         ];
         let mut wrong = Vec::new();
         for (code, hy, ru, en) in cases {
@@ -243,7 +244,7 @@ mod tests {
         let armenia = Country::ARMENIA;
         assert_eq!(serde_json::to_string(&armenia).ok().as_deref(), Some(r#""AM""#));
         assert_eq!(serde_json::from_str::<Country>(r#""AM""#).ok(), Some(armenia));
-        for json in [r#""am""#, r#""ARM""#, r#""XK""#, r#""""#, "51", "null"] {
+        for json in [r#""am""#, r#""ARM""#, r#""ZZ""#, r#""""#, "51", "null"] {
             assert!(serde_json::from_str::<Country>(json).is_err(), "{json} прочитан");
         }
     }
