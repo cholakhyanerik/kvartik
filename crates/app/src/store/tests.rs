@@ -17,6 +17,8 @@ use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
 use super::*;
 
+mod backup;
+
 wasm_bindgen_test_configure!(run_in_browser);
 
 /// Запись для проб.

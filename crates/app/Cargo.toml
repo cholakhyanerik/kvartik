@@ -23,17 +23,27 @@ leptos = { version = "0.8.22", features = ["csr"] }
 # Без него паника в wasm видна в консоли только как `unreachable`,
 # и причину не найти (Правило 6).
 console_error_panic_hook = "0.1.7"
-# Привязки к браузеру для хранилища (`src/store/`): IndexedDB, просьба
-# о постоянном хранении, консоль для причин ошибок. Все три крейта уже были
-# в дереве через Leptos — новых авторов нет; версии — те же, что в замке.
-# Фичи `web-sys` — ровно нужные интерфейсы: каждая лишняя — привязки,
-# которые никто не зовёт. Будущее Rust из `Promise` и `spawn_local` даёт
-# сам `js-sys` (с 0.3.106 там живёт то, что было `wasm-bindgen-futures`).
+# Привязки к браузеру для хранилища (`src/store/`) и платформы
+# (`src/platform/`): IndexedDB и `localStorage`, просьба о постоянном
+# хранении, шифр WebCrypto и файлы копии (задача 7), консоль для причин
+# ошибок. Все три крейта уже были в дереве через Leptos — новых авторов
+# нет; версии — те же, что в замке. Фичи `web-sys` — ровно нужные
+# интерфейсы: каждая лишняя — привязки, которые никто не зовёт. Будущее
+# Rust из `Promise` и `spawn_local` даёт сам `js-sys` (с 0.3.106 там живёт
+# то, что было `wasm-bindgen-futures`).
 wasm-bindgen = "0.2.129"
 js-sys = "0.3.106"
 web-sys = { version = "0.3.106", features = [
+    "AesGcmParams",
+    "Blob",
+    "BlobPropertyBag",
     "console",
+    "Crypto",
+    "CryptoKey",
     "DomException",
+    "File",
+    "FileList",
+    "HtmlInputElement",
     "IdbDatabase",
     "IdbFactory",
     "IdbKeyRange",
@@ -45,7 +55,11 @@ web-sys = { version = "0.3.106", features = [
     "IdbVersionChangeEvent",
     "Location",
     "Navigator",
+    "Pbkdf2Params",
+    "Storage",
     "StorageManager",
+    "SubtleCrypto",
+    "Url",
     "Window",
 ] }
 
@@ -54,7 +68,10 @@ web-sys = { version = "0.3.106", features = [
 # собирает. Версия `wasm-bindgen-test` идёт в паре с `wasm-bindgen`
 # (0.3.79 ↔ 0.2.129: в его Cargo.toml — точные `=`), и программа
 # `wasm-bindgen-test-runner` нужна той же версии (Правило 3). `serde` —
-# записи для проб.
+# записи для проб. `Response` у `web-sys` — тест читает файл копии по его
+# адресу `blob:`; фичи dev-зависимостей в сборку сайта не попадают
+# (резолвер 3).
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3.79"
 serde = { version = "1.0.229", features = ["derive"] }
+web-sys = { version = "0.3.106", features = ["Response"] }

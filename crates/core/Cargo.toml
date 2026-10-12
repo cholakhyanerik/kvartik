@@ -29,7 +29,12 @@ uuid = { version = "1.28.0", default-features = false, features = ["v4", "serde"
 # там, где у типа нет запретных значений; где есть — чтение пишется руками
 # через конструктор типа (Правило 13).
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.154"
+# `raw_value` — запись внутри конверта и файла копии читается сначала
+# нетронутым куском JSON, а разбирается потом — своим видом и по версии
+# формата (`format/`). Без него каждую запись пришлось бы строить деревом
+# `serde_json::Value`. Своих зависимостей у фичи нет (по исходникам
+# serde_json 1.0.154, Cargo.toml; 2026-10-12).
+serde_json = { version = "1.0.154", features = ["raw_value"] }
 
 [features]
 # Источник случайности на wasm32 — WebCrypto (`crypto.getRandomValues`):

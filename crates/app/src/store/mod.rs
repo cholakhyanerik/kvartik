@@ -55,6 +55,8 @@
 //! ([`StoreError::Replaced`]); при новой версии формата — отказывается
 //! читать и переписывать записи новее себя ([`StoreError::Newer`]).
 
+pub mod backup;
+pub mod device;
 mod settle;
 
 use std::cell::Cell;
@@ -62,6 +64,7 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 
 use js_sys::{Array, Object, Promise, Reflect};
+use kvartik_core::format::backup::{Entry, Raw};
 use kvartik_core::format::{self, FORMAT_VERSION, FormatError, Stored};
 use kvartik_core::model::record::RecordId;
 use wasm_bindgen::closure::Closure;
@@ -353,6 +356,13 @@ pub struct Tx<M> {
 
 impl<M> Tx<M> {
     /// Запись вида `T` с этим идентификатором; `None` — такой нет.
+    #[cfg_attr(
+        not(all(test, target_arch = "wasm32")),
+        expect(
+            dead_code,
+            reason = "типовое чтение и запись ждут первую команду (задачи 9 и 53); пока их держат браузерные тесты"
+        )
+    )]
     pub async fn get<T: Stored>(&self, id: RecordId) -> Result<Option<T>, StoreError> {
         let request = self
             .records
@@ -366,6 +376,13 @@ impl<M> Tx<M> {
     }
 
     /// Все записи вида `T`, включая помеченные удалёнными.
+    #[cfg_attr(
+        not(all(test, target_arch = "wasm32")),
+        expect(
+            dead_code,
+            reason = "типовое чтение и запись ждут первую команду (задачи 9 и 53); пока их держат браузерные тесты"
+        )
+    )]
     pub async fn all<T: Stored>(&self) -> Result<Vec<T>, StoreError> {
         let range = IdbKeyRange::bound(
             &Array::of1(&T::KIND.into()),
@@ -379,6 +396,76 @@ impl<M> Tx<M> {
         let values = wait(request).await?;
         let values: Array = values.dyn_into().map_err(|_| StoreError::Damaged)?;
         values.iter().map(|value| decode(&value)).collect()
+    }
+
+    /// Все записи базы как они лежат, любого вида, — для файла копии
+    /// (`backup`). Разбирает их ядро: хранилище не знает, какие виды бывают.
+    pub async fn dump(&self) -> Result<Vec<Dumped>, StoreError> {
+        let keys = self
+            .records
+            .get_all_keys()
+            .map_err(|error| failure("getAllKeys", Some(error)))?;
+        let values = self
+            .records
+            .get_all()
+            .map_err(|error| failure("getAll", Some(error)))?;
+        // Оба запроса ждём с самого начала: второй может ответить, пока ждут
+        // первый (`Settle`). Ключи и значения приходят в одном порядке —
+        // по ключу, — а между ними база не меняется: оба в одной транзакции.
+        let (keys, values) = (Settle::new(keys), Settle::new(values));
+        let keys = settled(keys, "getAllKeys").await?;
+        let values = settled(values, "getAll").await?;
+        let (Ok(keys), Ok(values)) = (keys.dyn_into::<Array>(), values.dyn_into::<Array>()) else {
+            return Err(StoreError::Damaged);
+        };
+        if keys.length() != values.length() {
+            return Err(StoreError::Damaged);
+        }
+        Ok(keys
+            .iter()
+            .zip(values.iter())
+            .map(|(key, value)| {
+                let part = |at| Reflect::get_u32(&key, at).ok().and_then(|v| v.as_string());
+                Dumped {
+                    kind: part(0).unwrap_or_default(),
+                    id: part(1).unwrap_or_default(),
+                    text: value.as_string(),
+                }
+            })
+            .collect())
+    }
+
+    /// Есть ли в базе хоть одна запись, включая удалённые.
+    pub async fn is_empty(&self) -> Result<bool, StoreError> {
+        let request = self
+            .records
+            .count()
+            .map_err(|error| failure("count", Some(error)))?;
+        Ok(wait(request)
+            .await?
+            .as_f64()
+            .is_none_or(|count| count < 1.0))
+    }
+}
+
+/// Запись базы как она лежит: вид и идентификатор из ключа, строка JSON
+/// из значения. Ключ не той формы — пустые вид и идентификатор, значение
+/// не строка — `None`: такую запись ядро назовёт нечитаемой.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Dumped {
+    kind: String,
+    id: String,
+    text: Option<String>,
+}
+
+impl Dumped {
+    /// Вид для ядра.
+    pub fn raw(&self) -> Raw<'_> {
+        Raw {
+            kind: &self.kind,
+            id: &self.id,
+            text: self.text.as_deref(),
+        }
     }
 }
 
@@ -472,15 +559,46 @@ impl Writes {
     /// Новая запись. Если запись с таким ключом уже есть, действие
     /// отменяется целиком, а не перезаписывает её: два одинаковых
     /// идентификатора — беда, и чужую запись из-за неё терять нельзя.
+    #[cfg_attr(
+        not(all(test, target_arch = "wasm32")),
+        expect(
+            dead_code,
+            reason = "типовое чтение и запись ждут первую команду (задачи 9 и 53); пока их держат браузерные тесты"
+        )
+    )]
     pub fn insert<T: Stored>(&mut self, record: &T) {
         self.push(true, record);
     }
 
     /// Правка записи, прочитанной в этой же транзакции.
+    #[cfg_attr(
+        not(all(test, target_arch = "wasm32")),
+        expect(
+            dead_code,
+            reason = "типовое чтение и запись ждут первую команду (задачи 9 и 53); пока их держат браузерные тесты"
+        )
+    )]
     pub fn update<T: Stored>(&mut self, record: &T) {
         self.push(false, record);
     }
 
+    /// Запись из файла копии — поверх той, что в базе, если она есть.
+    /// Какие записи класть, решает слияние ядра (`backup::merge`).
+    pub fn restore(&mut self, entry: &Entry) {
+        self.items.push(Item {
+            insert: false,
+            key: key(entry.kind(), entry.meta().id()),
+            value: JsValue::from_str(&entry.stored()),
+        });
+    }
+
+    #[cfg_attr(
+        not(all(test, target_arch = "wasm32")),
+        expect(
+            dead_code,
+            reason = "типовое чтение и запись ждут первую команду (задачи 9 и 53); пока их держат браузерные тесты"
+        )
+    )]
     fn push<T: Stored>(&mut self, insert: bool, record: &T) {
         self.items.push(Item {
             insert,
@@ -497,11 +615,15 @@ fn key(kind: &str, id: RecordId) -> JsValue {
 
 /// Значение запроса, когда он ответил.
 async fn wait(request: IdbRequest) -> Result<JsValue, StoreError> {
-    let settled = Settle::new(request);
-    let request = settled.target().clone();
-    if settled.await.is_err() {
+    settled(Settle::new(request), "request").await
+}
+
+/// Значение запроса, которого уже ждут.
+async fn settled(settle: Settle<IdbRequest>, context: &str) -> Result<JsValue, StoreError> {
+    let request = settle.target().clone();
+    if settle.await.is_err() {
         return Err(failure(
-            "request",
+            context,
             request.error().ok().flatten().map(JsValue::from),
         ));
     }
@@ -510,6 +632,13 @@ async fn wait(request: IdbRequest) -> Result<JsValue, StoreError> {
         .map_err(|error| failure("result", Some(error)))
 }
 
+#[cfg_attr(
+    not(all(test, target_arch = "wasm32")),
+    expect(
+        dead_code,
+        reason = "типовое чтение и запись ждут первую команду (задачи 9 и 53); пока их держат браузерные тесты"
+    )
+)]
 fn decode<T: Stored>(value: &JsValue) -> Result<T, StoreError> {
     let Some(text) = value.as_string() else {
         log("decode", &"значение не строка".into());

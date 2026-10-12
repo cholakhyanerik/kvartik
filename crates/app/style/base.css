@@ -74,3 +74,121 @@ button {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
+
+/* Абзацы раздела копии — с воздухом между ними: в разделе их много. */
+section > p + p,
+section > p + form,
+section > form + p,
+section > p + .button,
+section > .button + p {
+  margin-top: var(--space-2);
+}
+
+/* Восстановление — своя часть раздела, отдельно от копии. */
+.restore {
+  margin-top: var(--space-5);
+}
+
+/* Форма: поля друг под другом, подпись над полем. */
+form {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+label {
+  display: grid;
+  gap: var(--space-1);
+}
+
+/* Поле ввода: рамка --border-strong (3:1 на каждом фоне), высота — цель
+   для пальца, шрифт — как у текста страницы. */
+input[type="password"] {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--touch);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+}
+
+/* Подсказка к полю — мельче и тише основного текста. */
+.hint {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* Напоминание о копии: слова и жирный шрифт, а цвет только помогает
+   (Правило 4). */
+.reminder {
+  margin-top: var(--space-2);
+  color: var(--warning-text);
+  font-weight: var(--weight-strong);
+}
+
+/* Кнопки в ряд; на узком экране переносятся. */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.actions button {
+  margin-top: 0;
+}
+
+/* Ссылка и подпись, которые выглядят и работают как кнопка: файл копии
+   сохраняется настоящей ссылкой, а выбор файла открывает подпись поля. */
+.button {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: var(--touch);
+  margin-top: var(--space-3);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: var(--weight-strong);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* Второстепенная кнопка: рамка и текст акцента, без заливки — чтобы рядом
+   с главной было видно, какая главная. */
+button.secondary,
+.button.secondary {
+  border: 1px solid var(--border-strong);
+  background: none;
+  color: var(--accent-text);
+}
+
+/* Выключенная кнопка отличается от включённой не только курсором: фон
+   утоплен, текст приглушён (--text-muted на --surface-sunken — 5.6:1
+   и 8.1:1). */
+button:disabled {
+  border-color: var(--border);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  cursor: default;
+}
+
+/* Поле, которое не видно, но которым можно пользоваться: выбор файла
+   открывает подпись-кнопка, а с клавиатуры фокус встаёт на само поле. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Фокус на спрятанном поле рисуется на его подписи-кнопке. */
+.file:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}

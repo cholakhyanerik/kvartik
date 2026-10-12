@@ -5,28 +5,39 @@
 //! `style/`, а не атрибутом `style` (Правило 4). Цвет литералом и опечатку
 //! в `var(--…)` ловит тест `crates/app/tests/tokens.rs`.
 
+mod backup;
 mod storage;
+
+use std::rc::Rc;
 
 use kvartik_core::i18n::{Key, Lang, t};
 use leptos::prelude::*;
 
 use crate::store::{self, Store};
+use backup::{BackupSection, Backups};
 use storage::{Storage, StorageSection};
 
-/// Корень окна. Пока — экран каркаса: название и раздел о хранении данных
-/// сразу на трёх языках, по блоку на язык, чтобы армянский и кириллица
-/// проходили весь путь от таблицы строк до страницы. Выбора языка окна ещё
-/// нет (задача 53).
+/// Корень окна. Пока — экран каркаса: название, раздел о хранении данных
+/// и раздел о резервной копии сразу на трёх языках, по блоку на язык, чтобы
+/// армянский и кириллица проходили весь путь от таблицы строк до страницы.
+/// Выбора языка окна ещё нет (задача 53).
 #[component]
 pub fn App() -> impl IntoView {
     let storage = RwSignal::new(Storage::Opening);
-    // Открытая база живёт, пока живо окно: брошенное соединение браузер
-    // может закрыть, а с ним и обработчик `versionchange` (Правило 6).
-    let opened = StoredValue::new_local(None::<Store>);
+    // Открытая база живёт, пока живо окно (её держит `Backups`): брошенное
+    // соединение браузер может закрыть, а с ним и обработчик
+    // `versionchange` (Правило 6).
+    let backups = Backups::new();
     leptos::task::spawn_local(async move {
         match Store::open(move |event| storage.update(|state| state.apply(event))).await {
             Ok(store) => {
-                opened.set_value(Some(store));
+                // Не прочиталось — напоминания о копии не будет, а об ошибке
+                // хранилище скажет на первом же действии.
+                let has_data = match store.read() {
+                    Ok(tx) => tx.is_empty().await.is_ok_and(|empty| !empty),
+                    Err(_) => false,
+                };
+                backups.opened(Rc::new(store), has_data);
                 let persistence = store::persistence().await;
                 storage.update(|state| state.opened(persistence));
             }
@@ -44,6 +55,7 @@ pub fn App() -> impl IntoView {
                     <section lang=lang.code()>
                         <h1>{t(lang, Key::AppName)}</h1>
                         <StorageSection lang storage />
+                        <BackupSection lang backups storage />
                     </section>
                 })
                 .collect_view()}

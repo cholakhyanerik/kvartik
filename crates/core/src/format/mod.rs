@@ -3,7 +3,7 @@
 //! Байты на входе и на выходе: ни IndexedDB, ни файлов браузера здесь нет
 //! (таблица слоёв CLAUDE.md). Хранилище окна (`crates/app/src/store/`)
 //! кладёт в базу то, что дал [`encode`], и отдаёт [`decode`] то, что
-//! прочитало; файл копии (задача 7) соберётся из тех же записей.
+//! прочитало; файл копии ([`backup`]) собирается из тех же записей.
 //!
 //! # Версия — у каждой записи
 //!
@@ -29,8 +29,12 @@
 //! ломается громко, а не стирает поле у того, кто откроет данные старой
 //! версией.
 
+pub mod backup;
+mod base64;
+
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 
 use crate::model::record::RecordMeta;
 
@@ -46,7 +50,8 @@ pub trait Stored: Serialize + DeserializeOwned {
     /// Вид записи — имя её раздела в хранилище и в файле копии: `"client"`,
     /// `"invoice"`. Латиница в нижнем регистре и `_`. Часть формата:
     /// переименовать вид — значит перевести данные всех пользователей
-    /// миграцией.
+    /// миграцией. Новый вид — строкой в [`backup::KINDS`], иначе копия его
+    /// не возьмёт.
     const KIND: &'static str;
 
     /// Общие поля: идентификатор, момент изменения, метка удаления.
@@ -67,20 +72,14 @@ pub enum FormatError {
     Damaged(String),
 }
 
-/// Запись в том виде, в котором она лежит.
-#[derive(Serialize)]
-struct EnvelopeOut<'a, T> {
-    format_version: u32,
-    record: &'a T,
-}
-
-/// То же при чтении — после того, как версия проверена.
+/// Запись при чтении — после того, как версия проверена. Сама запись ещё не
+/// разобрана: её разбирает [`decode_record`] по версии.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct EnvelopeIn<T> {
-    #[serde(rename = "format_version")]
-    _format_version: u32,
-    record: T,
+struct Envelope<'a> {
+    format_version: u32,
+    #[serde(borrow)]
+    record: &'a RawValue,
 }
 
 /// Только версия: остальное разбор пропускает, не заглядывая в поля.
@@ -96,11 +95,15 @@ struct Header {
 /// а в записях нет ни того, ни другого. Новый тип записи держит это своим
 /// тестом «записано — прочитано».
 pub fn encode<T: Serialize>(record: &T) -> String {
-    serde_json::to_string(&EnvelopeOut {
-        format_version: FORMAT_VERSION,
-        record,
-    })
-    .expect("запись в JSON не падает: в типах записей нет ни словарей с ключами-структурами, ни своих ошибок")
+    wrap(&serde_json::to_string(record).expect(
+        "запись в JSON не падает: в типах записей нет ни словарей с ключами-структурами, ни своих ошибок",
+    ))
+}
+
+/// Запись, уже в JSON, — в конверт с версией формата. Поля в том же
+/// порядке, что всегда: сначала версия, потом запись.
+fn wrap(record: &str) -> String {
+    format!(r#"{{"format_version":{FORMAT_VERSION},"record":{record}}}"#)
 }
 
 /// Запись из JSON — с проверкой версии и каждого поля.
@@ -109,11 +112,31 @@ pub fn encode<T: Serialize>(record: &T) -> String {
 /// иначе выглядела бы испорченной, и человек услышал бы «данные испорчены»
 /// вместо «откройте новую версию».
 pub fn decode<T: DeserializeOwned>(text: &str) -> Result<T, FormatError> {
+    let (version, record) = split(text)?;
+    decode_record(version, record)
+}
+
+/// Версия и ещё не разобранная запись из конверта. Версия — раньше
+/// остального: конверт новой версии может быть и другим.
+fn split(text: &str) -> Result<(u32, &str), FormatError> {
     let header: Header = serde_json::from_str(text).map_err(damaged)?;
-    match header.format_version {
-        FORMAT_VERSION => serde_json::from_str::<EnvelopeIn<T>>(text)
-            .map(|envelope| envelope.record)
-            .map_err(damaged),
+    if header.format_version > FORMAT_VERSION {
+        return Err(FormatError::Newer {
+            found: header.format_version,
+        });
+    }
+    let envelope: Envelope<'_> = serde_json::from_str(text).map_err(damaged)?;
+    Ok((envelope.format_version, envelope.record.get()))
+}
+
+/// Запись версии формата `version` из JSON её полей.
+///
+/// Единственное место, где читаются записи прошлых версий: здесь встанут
+/// миграции `migrate_vN_to_vN1` (Правило 2), и через него читают и база,
+/// и файл копии.
+fn decode_record<T: DeserializeOwned>(version: u32, record: &str) -> Result<T, FormatError> {
+    match version {
+        FORMAT_VERSION => serde_json::from_str(record).map_err(damaged),
         found if found > FORMAT_VERSION => Err(FormatError::Newer { found }),
         // Версий до первой нет; прошлые версии появятся здесь вместе со своими
         // миграциями.
