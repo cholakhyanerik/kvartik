@@ -83,7 +83,9 @@ p {
 button {
   min-height: var(--touch);
   margin-top: var(--space-3);
-  padding: 0 var(--space-4);
+  /* Подпись в две строки (армянская, на телефоне) не прижимается к краям:
+     в одну строку высоту и так держит min-height. */
+  padding: var(--space-2) var(--space-4);
   border: 0;
   border-radius: var(--radius-md);
   background: var(--accent);
@@ -171,7 +173,13 @@ label {
 
 /* Поле ввода: рамка --border-strong (3:1 на каждом фоне), высота — цель
    для пальца, шрифт — как у текста страницы. */
-input[type="password"] {
+input[type="password"],
+input[type="text"],
+input[type="email"],
+input[type="tel"],
+input[type="date"],
+select,
+textarea {
   box-sizing: border-box;
   width: 100%;
   min-height: var(--touch);
@@ -183,6 +191,107 @@ input[type="password"] {
   font: inherit;
 }
 
+/* Многострочное поле — адрес: строки с воздухом, высота — по желанию
+   человека. */
+textarea {
+  padding: var(--space-2) var(--space-3);
+  resize: vertical;
+}
+
+/* Группа полей формы — профиль (задача 9): тонкая рамка-разделитель
+   и подпись группы. `min-width: 0` — иначе группа шириной не меньше своего
+   содержимого и на телефоне вылезает за край. */
+fieldset {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+/* Подпись группы — заголовком внутри рамки, а не на ней: длинная
+   армянская подпись на телефоне переносится, и вторая строка на рамке
+   выглядит сломанной. Плавающая подпись перестаёт быть «подписью на
+   рамке» и встаёт первой строкой сетки. */
+legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  font-weight: var(--weight-strong);
+}
+
+/* Группа внутри группы — выбор из вариантов, периоды: без второй рамки. */
+fieldset.group {
+  gap: var(--space-1);
+  padding: 0;
+  border: 0;
+}
+
+/* Вариант выбора: кружок и подпись в строку, высота — цель для пальца,
+   кружок — цвета акцента. */
+.choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--touch);
+}
+
+.choice input {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* Строка списка в форме — счёт, код, период: отделена от соседней. */
+.row {
+  display: grid;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Кнопки внутри групп — по своей ширине, а не во всю строку. */
+fieldset > button,
+.row > button {
+  justify-self: start;
+  margin-top: 0;
+}
+
+/* Логотип — не выше нескольких строк текста, как в шапке счёта. */
+img.logo {
+  display: block;
+  max-width: 100%;
+  max-height: 5rem;
+  margin-bottom: var(--space-2);
+}
+
+.logo-field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+/* Короткий итог профиля: подпись над значением — длинные армянские
+   подписи на телефоне в одну строку со значением не влезают. */
+dl.summary {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+dl.summary dt {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+dl.summary dd {
+  margin: 0 0 var(--space-2);
+  overflow-wrap: anywhere;
+}
+
 /* Подсказка к полю — мельче и тише основного текста. */
 .hint {
   color: var(--text-muted);
@@ -192,7 +301,14 @@ input[type="password"] {
 /* Напоминание о копии: слова и жирный шрифт, а цвет только помогает
    (Правило 4). */
 .reminder {
-  margin-top: var(--space-2);
+  color: var(--warning-text);
+  font-weight: var(--weight-strong);
+}
+
+/* Предупреждение — код деятельности закрывает налог с оборота (задача 9):
+   словами и жирным, цвет только помогает. После `[role="alert"]`:
+   предупреждение — не ошибка ввода, и цвет у него свой. */
+.warning {
   color: var(--warning-text);
   font-weight: var(--weight-strong);
 }
@@ -204,7 +320,8 @@ input[type="password"] {
   gap: var(--space-3);
 }
 
-.actions button {
+.actions button,
+.actions .button {
   margin-top: 0;
 }
 
@@ -216,7 +333,7 @@ input[type="password"] {
   box-sizing: border-box;
   min-height: var(--touch);
   margin-top: var(--space-3);
-  padding: 0 var(--space-4);
+  padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-md);
   background: var(--accent);
   color: var(--on-accent);

@@ -9,9 +9,10 @@
 //!
 //! Меняет их только путь команд ядра (CLAUDE.md, «Данные меняются одним
 //! путём»): создание — `RecordMeta::new`, правка — `touch`, удаление
-//! и восстановление — `delete` и `restore`. Пока команд нет, эти методы
-//! открыты всем; первая команда ядра сужает их до `pub(crate)`, чтобы окно
-//! не могло поставить метку в обход команды.
+//! и восстановление — `delete` и `restore`. Правка, удаление и запись под
+//! заданным идентификатором открыты только ядру (`pub(crate)`): окно меняет
+//! записи командами — `Profile::save`, `Logo::set` и т. д., — и поставить
+//! метку в обход команды не может.
 //!
 //! В данных поля записываются так: `{"id":"…","modified":1760000000000,
 //! "deleted":null}`. Читаются — с проверкой каждого поля (Правило 13):
@@ -168,8 +169,15 @@ impl<'de> Deserialize<'de> for RecordMeta {
 impl RecordMeta {
     /// Поля новой записи: свежий идентификатор, изменена в `now`, не удалена.
     pub fn new(now: Timestamp) -> Self {
+        Self::with_id(RecordId::random(), now)
+    }
+
+    /// Поля новой записи под заданным идентификатором. Только для записи,
+    /// которая продолжает другую под её же идентификатором, — логотип
+    /// профиля (`Logo`): вид — часть ключа, и записи не столкнутся.
+    pub(crate) const fn with_id(id: RecordId, now: Timestamp) -> Self {
         Self {
-            id: RecordId::random(),
+            id,
             modified: now,
             deleted: None,
         }
@@ -204,7 +212,7 @@ impl RecordMeta {
     /// JS (`Timestamp::MAX_MILLIS`, 275 760 год): там момент останавливается,
     /// и две правки получают один момент. Дальше края тип не заходит, иначе
     /// запись не прочиталась бы обратно.
-    pub fn touch(&mut self, now: Timestamp) {
+    pub(crate) fn touch(&mut self, now: Timestamp) {
         let after_previous = self.modified.0.saturating_add(1);
         self.modified = Timestamp::from_unix_millis(now.0.max(after_previous));
     }
@@ -214,7 +222,7 @@ impl RecordMeta {
     ///
     /// Удалённую запись не трогает: время удаления остаётся первым, а запись
     /// не становится «новее» без настоящей правки.
-    pub fn delete(&mut self, now: Timestamp) {
+    pub(crate) fn delete(&mut self, now: Timestamp) {
         if self.deleted.is_none() {
             self.touch(now);
             self.deleted = Some(self.modified);
@@ -222,7 +230,7 @@ impl RecordMeta {
     }
 
     /// Снять метку удаления. Живую запись не трогает.
-    pub fn restore(&mut self, now: Timestamp) {
+    pub(crate) fn restore(&mut self, now: Timestamp) {
         if self.deleted.is_some() {
             self.touch(now);
             self.deleted = None;

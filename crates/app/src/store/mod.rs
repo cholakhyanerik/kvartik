@@ -356,13 +356,6 @@ pub struct Tx<M> {
 
 impl<M> Tx<M> {
     /// Запись вида `T` с этим идентификатором; `None` — такой нет.
-    #[cfg_attr(
-        not(all(test, target_arch = "wasm32")),
-        expect(
-            dead_code,
-            reason = "типовое чтение и запись ждут первую команду (задачи 9 и 53); пока их держат браузерные тесты"
-        )
-    )]
     pub async fn get<T: Stored>(&self, id: RecordId) -> Result<Option<T>, StoreError> {
         let request = self
             .records
@@ -376,13 +369,6 @@ impl<M> Tx<M> {
     }
 
     /// Все записи вида `T`, включая помеченные удалёнными.
-    #[cfg_attr(
-        not(all(test, target_arch = "wasm32")),
-        expect(
-            dead_code,
-            reason = "типовое чтение и запись ждут первую команду (задачи 9 и 53); пока их держат браузерные тесты"
-        )
-    )]
     pub async fn all<T: Stored>(&self) -> Result<Vec<T>, StoreError> {
         let range = IdbKeyRange::bound(
             &Array::of1(&T::KIND.into()),
@@ -559,25 +545,11 @@ impl Writes {
     /// Новая запись. Если запись с таким ключом уже есть, действие
     /// отменяется целиком, а не перезаписывает её: два одинаковых
     /// идентификатора — беда, и чужую запись из-за неё терять нельзя.
-    #[cfg_attr(
-        not(all(test, target_arch = "wasm32")),
-        expect(
-            dead_code,
-            reason = "типовое чтение и запись ждут первую команду (задачи 9 и 53); пока их держат браузерные тесты"
-        )
-    )]
     pub fn insert<T: Stored>(&mut self, record: &T) {
         self.push(true, record);
     }
 
     /// Правка записи, прочитанной в этой же транзакции.
-    #[cfg_attr(
-        not(all(test, target_arch = "wasm32")),
-        expect(
-            dead_code,
-            reason = "типовое чтение и запись ждут первую команду (задачи 9 и 53); пока их держат браузерные тесты"
-        )
-    )]
     pub fn update<T: Stored>(&mut self, record: &T) {
         self.push(false, record);
     }
@@ -592,13 +564,6 @@ impl Writes {
         });
     }
 
-    #[cfg_attr(
-        not(all(test, target_arch = "wasm32")),
-        expect(
-            dead_code,
-            reason = "типовое чтение и запись ждут первую команду (задачи 9 и 53); пока их держат браузерные тесты"
-        )
-    )]
     fn push<T: Stored>(&mut self, insert: bool, record: &T) {
         self.items.push(Item {
             insert,
@@ -632,13 +597,6 @@ async fn settled(settle: Settle<IdbRequest>, context: &str) -> Result<JsValue, S
         .map_err(|error| failure("result", Some(error)))
 }
 
-#[cfg_attr(
-    not(all(test, target_arch = "wasm32")),
-    expect(
-        dead_code,
-        reason = "типовое чтение и запись ждут первую команду (задачи 9 и 53); пока их держат браузерные тесты"
-    )
-)]
 fn decode<T: Stored>(value: &JsValue) -> Result<T, StoreError> {
     let Some(text) = value.as_string() else {
         log("decode", &"значение не строка".into());

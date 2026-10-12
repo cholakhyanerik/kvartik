@@ -21,19 +21,18 @@ use leptos::prelude::*;
 use web_sys::HtmlInputElement;
 
 use super::storage::{Storage, error_key};
-use super::tr;
+use super::{Base, tr};
 use crate::platform::clock;
 use crate::platform::crypto::{self, CryptoError};
 use crate::platform::file::{self, Download, FileError};
-use crate::store::Store;
 use crate::store::backup::{self as stored, Failure, Restored};
 use crate::store::device::Device;
 
 /// Что окно знает о копиях.
 #[derive(Clone, Copy)]
 pub struct Backups {
-    /// Открытая база; `None` — ещё открывается или не открылась.
-    store: StoredValue<Option<Rc<Store>>, LocalStorage>,
+    /// Открытая база.
+    base: Base,
     /// День последней копии на этом устройстве — по его календарю.
     last: RwSignal<Option<Date>>,
     /// Задан ли на устройстве пароль копий.
@@ -47,10 +46,10 @@ pub struct Backups {
 impl Backups {
     /// Что известно до открытия базы: последняя копия и пароль — из
     /// хранилища устройства, сегодня — из часов.
-    pub fn new() -> Self {
+    pub fn new(base: Base) -> Self {
         let device = Device::new();
         Self {
-            store: StoredValue::new_local(None),
+            base,
             last: RwSignal::new(device.last_backup().and_then(clock::local_date)),
             key_set: RwSignal::new(device.backup_key().is_some()),
             has_data: RwSignal::new(false),
@@ -58,16 +57,46 @@ impl Backups {
         }
     }
 
-    /// База открылась: копии есть что брать.
-    pub fn opened(&self, store: Rc<Store>, has_data: bool) {
-        self.store.set_value(Some(store));
+    /// База открылась, и в ней есть данные — или нет.
+    pub fn opened(&self, has_data: bool) {
         self.has_data.set(has_data);
+    }
+
+    /// Действие сохранило данные: теперь есть что терять, и без копии
+    /// напоминание о ней появляется сразу, а не со следующим открытием.
+    pub fn data_saved(&self) {
+        self.has_data.set(true);
     }
 
     /// Пора ли напомнить о копии (Правило 2). Часы без даты — не повод.
     fn due(&self) -> bool {
         self.today
             .is_some_and(|today| backup::reminder_due(self.last.get(), today, self.has_data.get()))
+    }
+}
+
+/// `id` раздела копии: на него ведёт ссылка напоминания.
+const SECTION_ID: &str = "backup";
+
+/// Напоминание о копии — вверху окна, над разделами с данными: окно растёт,
+/// и раздел копии внизу при открытии уже не виден, а напоминать обязано
+/// каждое открытие (Правило 2). Ссылка ведёт к разделу копии.
+#[component]
+pub fn BackupReminder(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
+    move || {
+        backups.due().then(|| {
+            let key = if backups.last.get().is_some() {
+                Key::BackupDueOld
+            } else {
+                Key::BackupDueNone
+            };
+            view! {
+                <div class="notice" role="status">
+                    <p class="reminder">{tr(lang, key)}</p>
+                    <a class="button" href=format!("#{SECTION_ID}")>{tr(lang, Key::BackupGoTo)}</a>
+                </div>
+            }
+        })
     }
 }
 
@@ -194,7 +223,7 @@ pub fn BackupSection(
     let ready = move || matches!(storage.get(), Storage::Ready(_));
     view! {
         <Show when=ready>
-            <h2>{tr(lang, Key::BackupTitle)}</h2>
+            <h2 id=SECTION_ID>{tr(lang, Key::BackupTitle)}</h2>
             <p>{tr(lang, Key::BackupAbout)}</p>
             <p>
                 {move || {
@@ -205,14 +234,6 @@ pub fn BackupSection(
                     }
                 }}
             </p>
-            {move || backups.due().then(|| {
-                let key = if backups.last.get().is_some() {
-                    Key::BackupDueOld
-                } else {
-                    Key::BackupDueNone
-                };
-                view! { <p class="reminder" role="status">{tr(lang, key)}</p> }
-            })}
             <MakeBackup lang backups />
             <RestoreBackup lang backups />
         </Show>
@@ -372,10 +393,7 @@ async fn make(backups: Backups, typed: &str, repeat: Option<&str>) -> Result<Rea
     {
         return Err(Problem::Say(Key::PasswordWrong));
     }
-    let store = backups
-        .store
-        .get_value()
-        .ok_or(Problem::Say(Key::BackupFailed))?;
+    let store = backups.base.get().ok_or(Problem::Say(Key::BackupFailed))?;
     let now = clock::now();
     let today = clock::local_date(now).ok_or(Problem::Say(Key::BackupFailed))?;
     let header = Header::new(env!("CARGO_PKG_VERSION"), now);
@@ -533,10 +551,7 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
 async fn restore(backups: Backups, sealed: &Sealed, typed: &str) -> Result<Restored, Problem> {
     let password = crypto::normalize(typed);
     let (entries, key) = stored::unlock(KINDS, sealed, &password).await?;
-    let store = backups
-        .store
-        .get_value()
-        .ok_or(Problem::Say(Key::BackupFailed))?;
+    let store = backups.base.get().ok_or(Problem::Say(Key::BackupFailed))?;
     let restored = stored::restore(&store, KINDS, &entries).await?;
     let device = Device::new();
     // Своего пароля у устройства нет — берётся пароль этой копии: человек

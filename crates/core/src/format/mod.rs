@@ -30,7 +30,7 @@
 //! версией.
 
 pub mod backup;
-mod base64;
+pub(crate) mod base64;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -41,9 +41,16 @@ use crate::model::record::RecordMeta;
 /// Версия формата записей, которую пишет и понимает эта программа.
 ///
 /// Записи прошлых версий читаются переводом при чтении (миграция
-/// `migrate_vN_to_vN1`, Правило 2), более новых — не читаются. Пока версия
-/// одна, переводить нечего.
-pub const FORMAT_VERSION: u32 = 1;
+/// `migrate_vN_to_vN1`, Правило 2), более новых — не читаются. Что
+/// меняла каждая версия:
+///
+/// - 1 (0.0.7) — конверт записи; видов записей ещё нет.
+/// - 2 (0.0.12) — виды `profile` и `logo` (задача 9). Полей у прежних видов
+///   не прибавилось — их не было, — и запись версии 1 читается как есть.
+pub const FORMAT_VERSION: u32 = 2;
+
+/// Первая версия формата: старше не бывает.
+pub(crate) const FIRST_VERSION: u32 = 1;
 
 /// Запись, которая хранится: у неё есть вид и общие поля.
 pub trait Stored: Serialize + DeserializeOwned {
@@ -136,10 +143,11 @@ fn split(text: &str) -> Result<(u32, &str), FormatError> {
 /// и файл копии.
 fn decode_record<T: DeserializeOwned>(version: u32, record: &str) -> Result<T, FormatError> {
     match version {
-        FORMAT_VERSION => serde_json::from_str(record).map_err(damaged),
+        // Версия 2 прибавила виды записей, а не поля (шапка
+        // `FORMAT_VERSION`): запись версии 1 читается как есть.
+        FIRST_VERSION | FORMAT_VERSION => serde_json::from_str(record).map_err(damaged),
         found if found > FORMAT_VERSION => Err(FormatError::Newer { found }),
-        // Версий до первой нет; прошлые версии появятся здесь вместе со своими
-        // миграциями.
+        // Версий до первой нет.
         found => Err(FormatError::Damaged(format!(
             "версия формата {found}: такой не бывает"
         ))),
@@ -217,6 +225,18 @@ mod tests {
         r#"}}"#
     );
 
+    /// Та же запись в версии 2 — так её пишет эта программа. Тоже выписана
+    /// человеком: версия 2 прибавила виды записей, а не поля, и от версии 1
+    /// запись отличается только номером.
+    const SAMPLE_V2: &str = concat!(
+        r#"{"format_version":2,"record":{"#,
+        r#""meta":{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":1760000000000,"deleted":null},"#,
+        r#""day":"2026-10-12","#,
+        r#""sum":{"minor":150000,"currency":"USD"},"#,
+        r#""rate":{"currency":"USD","per_unit_e4":3619300,"date":"2026-10-09","source":"central_bank"}"#,
+        r#"}}"#
+    );
+
     /// Записанное читается обратно в ту же запись.
     #[test]
     fn what_is_encoded_decodes_back() {
@@ -229,12 +249,12 @@ mod tests {
         assert_eq!(decode::<Probe>(&encode(&without_rate)), Ok(without_rate));
     }
 
-    /// Образец версии 1 читается в ожидаемые значения, а запись его
+    /// Образец текущей версии читается в ожидаемые значения, а запись его
     /// значений — слово в слово образец. Поменялась запись — это новая
     /// версия формата с миграцией (Правило 5), а не правка образца.
     #[test]
-    fn sample_v1_is_pinned() {
-        let record: Probe = decode(SAMPLE_V1).expect("образец версии 1 читается");
+    fn sample_v2_is_pinned() {
+        let record: Probe = decode(SAMPLE_V2).expect("образец версии 2 читается");
         assert_eq!(
             record.meta.id().to_string(),
             "0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a"
@@ -247,25 +267,39 @@ mod tests {
         assert_eq!(record.day, day(2026, 10, 12));
         assert_eq!(record.sum, Money::new(150_000, Currency::Usd));
         assert_eq!(record.rate, probe().rate);
-        assert_eq!(encode(&record), SAMPLE_V1);
+        assert_eq!(encode(&record), SAMPLE_V2);
+    }
+
+    /// Запись версии 1 читается той же записью, а пишется уже версией 2:
+    /// данные прошлой версии не теряются (Правило 2).
+    #[test]
+    fn sample_v1_still_reads() {
+        let old: Probe = decode(SAMPLE_V1).expect("образец версии 1 читается");
+        let current: Probe = decode(SAMPLE_V2).expect("образец версии 2 читается");
+        assert_eq!(old, current);
+        assert_eq!(encode(&old), SAMPLE_V2);
     }
 
     /// Запись более новой версии — «новее», даже если её поля незнакомы
     /// или испорчены: версия проверяется раньше полей.
     #[test]
     fn newer_records_are_refused_by_version() {
+        let next = FORMAT_VERSION + 1;
         let cases = [
             (
-                r#"{"format_version":2,"record":{"meta":"что угодно","wings":2}}"#,
-                2,
+                format!(r#"{{"format_version":{next},"record":{{"meta":"что угодно","wings":2}}}}"#),
+                next,
             ),
-            (r#"{"record":null,"format_version":7}"#, 7),
-            (r#"{"format_version":4294967295,"record":{}}"#, u32::MAX),
+            (r#"{"record":null,"format_version":7}"#.to_owned(), 7),
+            (
+                r#"{"format_version":4294967295,"record":{}}"#.to_owned(),
+                u32::MAX,
+            ),
         ];
         let mut wrong = Vec::new();
-        for (text, found) in cases {
+        for (text, found) in &cases {
             let got = decode::<Probe>(text);
-            if got != Err(FormatError::Newer { found }) {
+            if got != Err(FormatError::Newer { found: *found }) {
                 wrong.push(format!("{text}: {got:?}"));
             }
         }

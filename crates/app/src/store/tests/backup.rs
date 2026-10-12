@@ -128,11 +128,10 @@ async fn backup_carries_the_whole_base() {
     let source = Probe::new();
     let store = source.open(DB_VERSION).await.expect("база открыта");
     let (first, second) = (note("первая ֏"), note("вторая"));
-    let mut deleted = Tag {
-        meta: RecordMeta::new(at(1_760_000_000_000)),
+    let deleted = Tag {
+        meta: meta(RecordId::random(), 1_760_000_000_500, Some(1_760_000_000_500)),
     };
-    deleted.meta.delete(at(1_760_000_000_500));
-    insert_all(&store, &[first.clone(), second.clone()], &[deleted.clone()]).await;
+    insert_all(&store, &[first.clone(), second.clone()], std::slice::from_ref(&deleted)).await;
     let salt = crypto::random(SALT_BYTES).expect("соль");
     let file = backup_of(&store, &salt).await;
     drop(store);
@@ -208,7 +207,7 @@ async fn restore_keeps_the_later_record() {
     let tx = store.write().expect("транзакция записи");
     let mut writes = Writes::default();
     changed_later.text = "правка после копии".to_owned();
-    changed_later.meta.touch(at(1_760_000_009_000));
+    changed_later.meta = meta(changed_later.meta.id(), 1_760_000_009_000, None);
     writes.update(&changed_later);
     writes.insert(&local_only);
     tx.commit(writes).await.expect("правка сохранена");
@@ -264,7 +263,7 @@ async fn restore_over_newer_records_writes_nothing() {
     let tx = store.write().expect("транзакция записи");
     let mut writes = Writes::default();
     let mut gone = fresh.clone();
-    gone.meta.delete(at(1_760_000_009_000));
+    gone.meta = meta(fresh.meta.id(), 1_760_000_009_000, Some(1_760_000_009_000));
     writes.update(&gone);
     tx.commit(writes).await.expect("удаление сохранено");
     // «Удалённая» запись — под ключом свежей; копия её бы вернула. Рядом —

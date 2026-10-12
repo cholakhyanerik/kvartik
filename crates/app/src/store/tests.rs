@@ -57,6 +57,17 @@ fn at(millis: i64) -> Timestamp {
     Timestamp::from_unix_millis(millis)
 }
 
+/// Общие поля в заданном состоянии. Метки ставят только команды ядра
+/// (`pub(crate)`), а пробам нужны записи в любом состоянии: поля собираются
+/// из данных — так, как их читает хранилище.
+fn meta(id: RecordId, modified: i64, deleted: Option<i64>) -> RecordMeta {
+    let deleted = deleted.map_or_else(|| "null".to_owned(), |at| at.to_string());
+    format::decode(&format!(
+        r#"{{"format_version":{FORMAT_VERSION},"record":{{"id":"{id}","modified":{modified},"deleted":{deleted}}}}}"#
+    ))
+    .expect("поля пробы читаются")
+}
+
 /// Новая запись: идентификатор — из WebCrypto (`RecordId::random`).
 fn note(text: &str) -> Note {
     Note {
@@ -226,7 +237,7 @@ async fn failed_action_leaves_previous_state() {
         .expect("чтение прошло")
         .expect("запись есть");
     changed.text = "стало".to_owned();
-    changed.meta.touch(at(1_760_000_001_000));
+    changed.meta = meta(first.meta.id(), 1_760_000_001_000, None);
     let second = note("лишняя");
     let mut writes = Writes::default();
     writes.update(&changed);

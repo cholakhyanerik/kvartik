@@ -61,8 +61,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
-use super::{FORMAT_VERSION, FormatError, Stored, base64, decode_record, split, wrap};
+use super::{
+    FIRST_VERSION, FORMAT_VERSION, FormatError, Stored, base64, decode_record, split, wrap,
+};
 use crate::model::date::Date;
+use crate::model::logo::Logo;
+use crate::model::profile::Profile;
 use crate::model::record::{RecordMeta, Timestamp};
 
 /// Метка файла копии: по ней свой файл отличается от чужого JSON. Часть
@@ -157,7 +161,7 @@ impl Kind {
 /// нечитаемыми и скажет об этом словами, а браузерный тест копии с ним
 /// упадёт. Новый вид — это ещё и новая версия формата (шапка
 /// `format/mod.rs`), и образец копии с его записью (Правило 2).
-pub const KINDS: &[Kind] = &[];
+pub const KINDS: &[Kind] = &[Kind::of::<Profile>(), Kind::of::<Logo>()];
 
 fn find(kinds: &[Kind], name: &str) -> Option<Kind> {
     kinds.iter().copied().find(|kind| kind.name == name)
@@ -532,10 +536,12 @@ pub fn open(text: &str) -> Result<Sealed, BackupError> {
         return Err(BackupError::NotBackup);
     }
     match mark.format_version {
-        FORMAT_VERSION => {}
+        // Шапка, замок и список записей у версий 1 и 2 одинаковы: версия 2
+        // прибавила виды записей, а их разбирает `decode_record` по версии
+        // файла.
+        FIRST_VERSION..=FORMAT_VERSION => {}
         found if found > FORMAT_VERSION => return Err(BackupError::Newer { found }),
-        // Версий до первой нет; прошлые версии появятся здесь вместе со
-        // своими разборами.
+        // Версий до первой нет.
         found => return Err(damaged(format!("версия формата {found}: такой не бывает"))),
     }
     let fields: SealedIn = serde_json::from_str(text).map_err(damaged)?;
