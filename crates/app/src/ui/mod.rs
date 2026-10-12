@@ -6,6 +6,7 @@
 //! в `var(--…)` ловит тест `crates/app/tests/tokens.rs`.
 
 mod backup;
+mod pwa;
 mod storage;
 
 use std::rc::Rc;
@@ -15,14 +16,18 @@ use leptos::prelude::*;
 
 use crate::store::{self, Store};
 use backup::{BackupSection, Backups};
+use pwa::{InstallSection, Program, UpdateNotice};
 use storage::{Storage, StorageSection};
 
-/// Корень окна. Пока — экран каркаса: название, раздел о хранении данных
-/// и раздел о резервной копии сразу на трёх языках, по блоку на язык, чтобы
-/// армянский и кириллица проходили весь путь от таблицы строк до страницы.
-/// Выбора языка окна ещё нет (задача 53).
+/// Корень окна. Пока — экран каркаса: название, новая версия, установка,
+/// раздел о хранении данных и раздел о резервной копии сразу на трёх
+/// языках, по блоку на язык, чтобы армянский и кириллица проходили весь
+/// путь от таблицы строк до страницы. Выбора языка окна ещё нет
+/// (задача 53).
 #[component]
 pub fn App() -> impl IntoView {
+    // Service worker — до базы: работа без сети от неё не зависит.
+    let program = Program::new();
     let storage = RwSignal::new(Storage::Opening);
     // Открытая база живёт, пока живо окно (её держит `Backups`): брошенное
     // соединение браузер может закрыть, а с ним и обработчик
@@ -54,6 +59,8 @@ pub fn App() -> impl IntoView {
                 .map(|lang| view! {
                     <section lang=lang.code()>
                         <h1>{t(lang, Key::AppName)}</h1>
+                        <UpdateNotice lang program />
+                        <InstallSection lang program />
                         <StorageSection lang storage />
                         <BackupSection lang backups storage />
                     </section>

@@ -25,8 +25,9 @@ leptos = { version = "0.8.22", features = ["csr"] }
 console_error_panic_hook = "0.1.7"
 # Привязки к браузеру для хранилища (`src/store/`) и платформы
 # (`src/platform/`): IndexedDB и `localStorage`, просьба о постоянном
-# хранении, шифр WebCrypto и файлы копии (задача 7), консоль для причин
-# ошибок. Все три крейта уже были в дереве через Leptos — новых авторов
+# хранении, шифр WebCrypto и файлы копии (задача 7), service worker
+# и установка (задача 8), консоль для причин ошибок. Все три крейта уже
+# были в дереве через Leptos — новых авторов
 # нет; версии — те же, что в замке. Фичи `web-sys` — ровно нужные
 # интерфейсы: каждая лишняя — привязки, которые никто не зовёт. Будущее
 # Rust из `Promise` и `spawn_local` даёт сам `js-sys` (с 0.3.106 там живёт
@@ -37,10 +38,14 @@ web-sys = { version = "0.3.106", features = [
     "AesGcmParams",
     "Blob",
     "BlobPropertyBag",
+    "CacheStorage",
     "console",
     "Crypto",
     "CryptoKey",
+    "Document",
     "DomException",
+    "Event",
+    "EventTarget",
     "File",
     "FileList",
     "HtmlInputElement",
@@ -54,12 +59,18 @@ web-sys = { version = "0.3.106", features = [
     "IdbTransactionMode",
     "IdbVersionChangeEvent",
     "Location",
+    "MediaQueryList",
     "Navigator",
     "Pbkdf2Params",
+    "ServiceWorker",
+    "ServiceWorkerContainer",
+    "ServiceWorkerRegistration",
+    "ServiceWorkerState",
     "Storage",
     "StorageManager",
     "SubtleCrypto",
     "Url",
+    "VisibilityState",
     "Window",
 ] }
 
@@ -71,6 +82,12 @@ web-sys = { version = "0.3.106", features = [
 # записи для проб. `Response` у `web-sys` — тест читает файл копии по его
 # адресу `blob:`; фичи dev-зависимостей в сборку сайта не попадают
 # (резолвер 3).
+# Машинные тесты окна (`tests/*.rs`): манифест программы — JSON, и тест
+# читает его разбором, а не поиском строк (`tests/pwa.rs`, `tests/tokens.rs`).
+# Крейт уже в дереве через ядро — новых авторов нет.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+serde_json = "1.0.154"
+
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3.79"
 serde = { version = "1.0.229", features = ["derive"] }

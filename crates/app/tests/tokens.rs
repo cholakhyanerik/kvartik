@@ -308,7 +308,8 @@ fn contrast_meets_wcag_and_comments_tell_the_truth() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
-/// Все файлы, где может оказаться цвет: стили, страница и код окна.
+/// Все файлы, где может оказаться цвет: стили, страница, код окна,
+/// service worker и манифест программы.
 fn sources() -> Vec<PathBuf> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         for entry in fs::read_dir(dir).expect("папка читается") {
@@ -317,7 +318,7 @@ fn sources() -> Vec<PathBuf> {
                 walk(&path, out);
             } else if matches!(
                 path.extension().and_then(|e| e.to_str()),
-                Some("css" | "rs" | "html")
+                Some("css" | "rs" | "html" | "js" | "webmanifest")
             ) {
                 out.push(path);
             }
@@ -326,11 +327,25 @@ fn sources() -> Vec<PathBuf> {
     let mut out = vec![app_dir().join("index.html")];
     walk(&app_dir().join("style"), &mut out);
     walk(&app_dir().join("src"), &mut out);
+    walk(&app_dir().join("public"), &mut out);
     out
 }
 
+/// Манифест программы: цвета в нём — литералом, потому что JSON не читает
+/// `var(--…)`. Каждый — копия переменной светлой темы: окно установленной
+/// программы и заставка при запуске (задача 8). Цвет заставки — фон
+/// страницы, чтобы между заставкой и первым кадром не мигало.
+fn manifest() -> PathBuf {
+    app_dir().join("public/manifest.webmanifest")
+}
+
+const MANIFEST_COLORS: [(&str, &str); 2] =
+    [("theme_color", "--accent"), ("background_color", "--surface")];
+
 /// Текст файла без комментариев: `/* … */` везде и `// …` в Rust. Цвет или
-/// `var(--…)` в комментарии — пример, а не использование.
+/// `var(--…)` в комментарии — пример, а не использование. `//` в Rust и JS
+/// режется до конца строки, даже внутри строкового литерала: адреса
+/// `https://` в коде окна и service worker не живут.
 fn code_only(path: &Path) -> String {
     let text = fs::read_to_string(path).expect("файл читается");
     let mut out = String::with_capacity(text.len());
@@ -340,7 +355,7 @@ fn code_only(path: &Path) -> String {
         rest = rest[open..].split_once("*/").map_or("", |(_, after)| after);
     }
     out.push_str(rest);
-    if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+    if matches!(path.extension().and_then(|e| e.to_str()), Some("rs" | "js")) {
         out = out
             .lines()
             .map(|line| line.split_once("//").map_or(line, |(code, _)| code))
@@ -380,16 +395,26 @@ fn color_literals(text: &str) -> Vec<String> {
 }
 
 /// Ни одного цвета литералом вне `tokens.css` — ни в стилях, ни в разметке,
-/// ни в `style=` из Rust (Правило 4).
+/// ни в `style=` из Rust, ни в service worker (Правило 4). Исключение —
+/// копии переменных в манифесте ([`MANIFEST_COLORS`]): их сверяет
+/// [`manifest_colors_copy_tokens`].
 #[test]
 fn no_color_literal_outside_tokens() {
     let tokens = app_dir().join("style/tokens.css");
+    let (light, _) = read_themes();
+    let copies: Vec<&str> = MANIFEST_COLORS
+        .iter()
+        .map(|(_, token)| light[*token].value.as_str())
+        .collect();
     let mut wrong = Vec::new();
     for path in sources() {
         if path == tokens {
             continue;
         }
         for literal in color_literals(&code_only(&path)) {
+            if path == manifest() && copies.contains(&literal.as_str()) {
+                continue;
+            }
             wrong.push(format!("{}: {literal}", path.display()));
         }
     }
@@ -397,6 +422,25 @@ fn no_color_literal_outside_tokens() {
         wrong.is_empty(),
         "цвет литералом вне tokens.css: {wrong:#?}"
     );
+}
+
+/// Цвета манифеста — те же, что у переменных: поменяли цвет в `tokens.css`
+/// и забыли манифест — окно установленной программы осталось бы прежнего
+/// цвета, и никто бы не заметил.
+#[test]
+fn manifest_colors_copy_tokens() {
+    let (light, _) = read_themes();
+    let text = fs::read_to_string(manifest()).expect("манифест читается");
+    let json: serde_json::Value = serde_json::from_str(&text).expect("манифест — JSON");
+    let mut wrong = Vec::new();
+    for (field, token) in MANIFEST_COLORS {
+        let expected = &light[token].value;
+        let got = json[field].as_str();
+        if got != Some(expected.as_str()) {
+            wrong.push(format!("{field}: {got:?}, а {token} — {expected}"));
+        }
+    }
+    assert!(wrong.is_empty(), "цвета манифеста разошлись с tokens.css: {wrong:#?}");
 }
 
 /// Опечатка в имени переменной не даёт ошибки: свойство с `var(--surfce)`

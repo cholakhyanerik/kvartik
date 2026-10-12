@@ -22,6 +22,19 @@
          текст появлялся на 0,17 с позже и шрифты были готовы на 0,17 с позже
          (2026-10-11, медиана пяти; цифры — в CLAUDE.md, Правило 1). Она делит
          узкий канал с wasm, а CSS со шрифтами браузер находит и так раньше. -->
+    <!-- Программа как приложение (задача 8): манифест и значки — под
+         постоянными именами, без хэша: на них ссылается манифест, а его Trunk
+         не переписывает. Адреса относительные: сайт может жить и не в корне
+         домена (задача 16; Trunk тогда собирает с `public_url`). Значок
+         вкладки объявлен, и браузер не просит
+         /favicon.ico, которого нет. `sw.js` пишет хук сборки (Trunk.toml),
+         а регистрирует окно (src/platform/pwa.rs). -->
+    <link data-trunk rel="copy-file" href="public/manifest.webmanifest" />
+    <link data-trunk rel="copy-dir" href="public/icons" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icons/icon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
     <!-- wasm окна. `s` — wasm-opt на размер, только в `trunk build --release`
          (Правило 1; замер — в CLAUDE.md). -->
     <link data-trunk rel="rust" data-wasm-opt="s" />

@@ -13,3 +13,15 @@ dist = "dist"
 # Сжатие HTML, CSS и клея JS — только в выпускной сборке: в отладке его
 # читают глазами.
 minify = "on_release"
+
+# Service worker (задача 8): `sw.js` пишет программа сборки `kvartik-sw`
+# (`crates/sw/`) по шаблону `public/sw.js`, когда все файлы сайта уже
+# собраны, — со списком файлов для кэша и хэшем сборки. Иначе браузер не
+# узнал бы о новой версии (шапка шаблона). `cargo`, а не скрипт оболочки:
+# одна команда и на Windows, и в CI. Папку сборки программа берёт из
+# `TRUNK_STAGING_DIR`, а запускается из папки этого файла (по исходникам
+# trunk 0.22.0-rc.2, `src/hooks.rs`).
+[[hooks]]
+stage = "post_build"
+command = "cargo"
+command_arguments = ["run", "--quiet", "--package", "kvartik-sw", "--", "public/sw.js"]

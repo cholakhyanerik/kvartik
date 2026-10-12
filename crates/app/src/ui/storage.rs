@@ -8,6 +8,7 @@
 use kvartik_core::i18n::{Key, Lang, t};
 use leptos::prelude::*;
 
+use crate::platform;
 use crate::store::{Event, Persistence, StoreError};
 
 /// Что окно знает о хранилище.
@@ -95,18 +96,10 @@ pub fn StorageSection(lang: Lang, storage: RwSignal<Storage>) -> impl IntoView {
                 <h2>{t(lang, Key::StorageTitle)}</h2>
                 <p role=role>{t(lang, key)}</p>
                 {failed.then(|| view! {
-                    <button type="button" on:click=|_| reload()>{t(lang, Key::Reload)}</button>
+                    <button type="button" on:click=|_| platform::reload()>{t(lang, Key::Reload)}</button>
                 })}
             }
         })
-    }
-}
-
-/// Перезагрузить страницу. Не вышло — делать нечего: кнопка браузера
-/// остаётся.
-fn reload() {
-    if let Some(window) = web_sys::window() {
-        let _ = window.location().reload();
     }
 }
 

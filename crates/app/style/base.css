@@ -84,6 +84,17 @@ section > .button + p {
   margin-top: var(--space-2);
 }
 
+/* Плашка «есть новая версия»: приподнятый фон и рамка выделяют её среди
+   разделов, а говорит она словами (Правило 4). --text на --surface-raised —
+   16.9:1 и 13.2:1. */
+.notice {
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
 /* Восстановление — своя часть раздела, отдельно от копии. */
 .restore {
   margin-top: var(--space-5);
