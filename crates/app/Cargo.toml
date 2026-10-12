@@ -21,12 +21,14 @@ kvartik-core = { path = "../core", features = ["js"] }
 # исходникам в реестре, а не по примерам из интернета (Правило 3).
 leptos = { version = "0.8.22", features = ["csr"] }
 # Без него паника в wasm видна в консоли только как `unreachable`,
-# и причину не найти (Правило 6).
+# и причину не найти (Правило 6). Зовёт его свой хук паники
+# (`src/ui/panic.rs`), а потом показывает плашку словами.
 console_error_panic_hook = "0.1.7"
 # Привязки к браузеру для хранилища (`src/store/`) и платформы
 # (`src/platform/`): IndexedDB и `localStorage`, просьба о постоянном
 # хранении, шифр WebCrypto и файлы копии (задача 7), service worker
-# и установка (задача 8), консоль для причин ошибок. Все три крейта уже
+# и установка (задача 8), консоль для причин ошибок, плашка сбоя прямо
+# в DOM (`src/ui/panic.rs`, задача 48). Все три крейта уже
 # были в дереве через Leptos — новых авторов
 # нет; версии — те же, что в замке. Фичи `web-sys` — ровно нужные
 # интерфейсы: каждая лишняя — привязки, которые никто не зовёт. Будущее
@@ -44,10 +46,13 @@ web-sys = { version = "0.3.106", features = [
     "CryptoKey",
     "Document",
     "DomException",
+    "Element",
     "Event",
     "EventTarget",
     "File",
     "FileList",
+    "HtmlCollection",
+    "HtmlElement",
     "HtmlInputElement",
     "IdbDatabase",
     "IdbFactory",
@@ -61,6 +66,7 @@ web-sys = { version = "0.3.106", features = [
     "Location",
     "MediaQueryList",
     "Navigator",
+    "Node",
     "Pbkdf2Params",
     "ServiceWorker",
     "ServiceWorkerContainer",
@@ -74,13 +80,15 @@ web-sys = { version = "0.3.106", features = [
     "Window",
 ] }
 
-# Браузерные тесты хранилища (`src/store/tests.rs`): только под wasm32,
+# Браузерные тесты хранилища (`src/store/tests.rs`) и плашки сбоя
+# (`src/ui/panic.rs`): только под wasm32,
 # в сайт не попадают — Trunk зовёт `cargo build`, а он dev-зависимостей не
 # собирает. Версия `wasm-bindgen-test` идёт в паре с `wasm-bindgen`
 # (0.3.79 ↔ 0.2.129: в его Cargo.toml — точные `=`), и программа
 # `wasm-bindgen-test-runner` нужна той же версии (Правило 3). `serde` —
 # записи для проб. `Response` у `web-sys` — тест читает файл копии по его
-# адресу `blob:`; фичи dev-зависимостей в сборку сайта не попадают
+# адресу `blob:`, `NodeList` — тест плашки считает её копии; фичи
+# dev-зависимостей в сборку сайта не попадают
 # (резолвер 3).
 # Машинные тесты окна (`tests/*.rs`): манифест программы — JSON, и тест
 # читает его разбором, а не поиском строк (`tests/pwa.rs`, `tests/tokens.rs`).
@@ -91,4 +99,4 @@ serde_json = "1.0.154"
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3.79"
 serde = { version = "1.0.229", features = ["derive"] }
-web-sys = { version = "0.3.106", features = ["Response"] }
+web-sys = { version = "0.3.106", features = ["NodeList", "Response"] }

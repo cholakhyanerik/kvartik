@@ -84,15 +84,47 @@ section > .button + p {
   margin-top: var(--space-2);
 }
 
-/* Плашка «есть новая версия»: приподнятый фон и рамка выделяют её среди
-   разделов, а говорит она словами (Правило 4). --text на --surface-raised —
-   16.9:1 и 13.2:1. */
+/* Плашка «есть новая версия» и плашка сбоя: приподнятый фон и рамка
+   выделяют её среди разделов, а говорит она словами (Правило 4). --text на
+   --surface-raised — 16.9:1 и 13.2:1, --danger-text у сбоя ([role="alert"]) —
+   6.2:1 и 7.1:1. */
 .notice {
   padding: var(--space-3) var(--space-4) var(--space-4);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   background: var(--surface-raised);
   color: var(--text);
+}
+
+/* Сбой программы (задача 48): плашка закрывает остановленное окно целиком.
+   Фон непрозрачный — прозрачности у цветов нет (tokens.css), — и окно под
+   ней не видно: его кнопки больше не отвечают. Плашка стоит там же, где
+   содержимое `main`. */
+.panic {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  overflow: auto;
+  padding: var(--space-4);
+  background: var(--surface);
+}
+
+.panic .notice {
+  box-sizing: border-box;
+  max-width: 40rem;
+}
+
+.panic p + p {
+  margin-top: var(--space-2);
+}
+
+/* «Перезагрузить» на трёх языках, когда язык окна неизвестен, на телефоне
+   в строку не влезает: подписи переносятся целиком, а промежуток между
+   ними — `gap` (пробел между элементами flex схлопывается). */
+.panic .button {
+  flex-wrap: wrap;
+  column-gap: var(--space-3);
+  padding-block: var(--space-2);
 }
 
 /* Восстановление — своя часть раздела, отдельно от копии. */

@@ -6,6 +6,7 @@
 //! в `var(--…)` ловит тест `crates/app/tests/tokens.rs`.
 
 mod backup;
+pub mod panic;
 mod pwa;
 mod storage;
 
@@ -66,6 +67,7 @@ pub fn App() -> impl IntoView {
                     </section>
                 })
                 .collect_view()}
+            {panic::debug_trigger()}
         </main>
     }
 }
