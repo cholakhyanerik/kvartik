@@ -117,6 +117,18 @@ pub fn ProfileSection(
     // Сегодня — один раз (Архитектура, «Время — параметр»): по нему
     // проверяется год рождения и берутся правила налога.
     let today = clock::today();
+    // Копию восстановили — профиль в базе мог стать другим или появиться.
+    Effect::watch(
+        move || base.replacements(),
+        move |_, _, _| {
+            if let Some(store) = base.get() {
+                editing.set(false);
+                saved.set(false);
+                leptos::task::spawn_local(async move { profiles.load(&store).await });
+            }
+        },
+        false,
+    );
     move || {
         let state = profiles.state.get();
         let body = match state {

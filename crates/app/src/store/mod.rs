@@ -675,5 +675,19 @@ async fn ask(call: fn(&StorageManager) -> Result<Promise, JsValue>) -> Persisten
     }
 }
 
+/// Удалить базу целиком — для браузерных тестов окна, которым нужна пустая
+/// база программы. Её соединения к этому времени закрыты: окна прошлых
+/// тестов сняты.
+#[cfg(all(test, target_arch = "wasm32"))]
+pub(crate) async fn delete_database(name: &str) {
+    let factory = web_sys::window()
+        .and_then(|window| window.indexed_db().ok().flatten())
+        .expect("IndexedDB есть");
+    let request = factory
+        .delete_database(name)
+        .expect("удаление базы поставлено");
+    let _ = Settle::new(IdbRequest::from(request)).await;
+}
+
 #[cfg(all(test, target_arch = "wasm32"))]
 mod tests;

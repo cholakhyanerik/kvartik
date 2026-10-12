@@ -79,8 +79,10 @@ fn button(host: &HtmlElement, labels: &[&str]) -> Option<HtmlElement> {
         })
 }
 
-/// Поле ввода внутри подписи, которая начинается с `label`, — `nth`-е
-/// такое, считая с нуля.
+/// Поле ввода внутри подписи `label` — `nth`-е такое, считая с нуля.
+/// Подпись сравнивается целиком, по первому узлу текста: «Банк» — начало
+/// и «Банк-корреспондент», а у подписи списка выбора в тексте ещё и все
+/// варианты.
 fn field(host: &HtmlElement, label: &str, nth: usize) -> Option<HtmlInputElement> {
     let labels = host.query_selector_all("label").ok()?;
     (0..labels.length())
@@ -88,8 +90,9 @@ fn field(host: &HtmlElement, label: &str, nth: usize) -> Option<HtmlInputElement
         .map(|node| node.unchecked_into::<Element>())
         .filter(|element| {
             element
-                .text_content()
-                .is_some_and(|text| text.trim_start().starts_with(label))
+                .first_child()
+                .and_then(|text| text.text_content())
+                .is_some_and(|text| text.trim() == label)
         })
         .nth(nth)?
         .query_selector("input")
@@ -229,6 +232,75 @@ async fn choosing_a_language_translates_the_whole_window() {
     assert!(wrong.is_empty(), "смена языка: {wrong:#?}\nшаги: {steps:#?}");
 }
 
+/// Положить файл в поле выбора файла, как будто его выбрал человек.
+fn choose_file(input: &HtmlInputElement, name: &str, text: &str) {
+    let file = web_sys::File::new_with_str_sequence(&js_sys::Array::of1(&text.into()), name)
+        .expect("файл собран");
+    let transfer = web_sys::DataTransfer::new().expect("DataTransfer есть");
+    transfer.items().add_with_file(&file).expect("файл положен");
+    input.set_files(transfer.files().as_ref());
+    let event = web_sys::Event::new("change").expect("событие создаётся");
+    input.dispatch_event(&event).expect("событие отправлено");
+}
+
+/// Восстановление из копии меняет базу в обход разделов окна, и раздел
+/// профиля обязан перечитать её: иначе на новом устройстве после
+/// восстановления окно просит «заполнить профиль», который уже в базе,
+/// и второй профиль появляется рядом с первым. Копия — образец версии 0.0.12
+/// с профилем и логотипом.
+#[wasm_bindgen_test]
+async fn restoring_a_backup_shows_its_profile() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let lang = Lang::Ru;
+    let device = Device::new();
+    device.set_ui_lang(lang);
+    let (host, mounted) = mount();
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::ProfileFill)).await {
+        wrong.push("пустая база — а профиль не предлагают заполнить".to_owned());
+    }
+    let input: Option<HtmlInputElement> = host
+        .query_selector(r#"input[type="file"][accept=".json,application/json"]"#)
+        .ok()
+        .flatten()
+        .map(JsCast::unchecked_into);
+    match &input {
+        Some(input) => choose_file(
+            input,
+            "kvartik-2026-10-12.json",
+            include_str!("../../../core/tests/backups/v2/kvartik-2026-10-12.json"),
+        ),
+        None => wrong.push("нет поля выбора копии".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::BackupFilePassword)).await {
+        wrong.push("копия не открылась".to_owned());
+    }
+    match field(&host, t(lang, Key::BackupFilePassword), 0) {
+        Some(password) => type_into(&password, "Պահուստ копия sample 0.0.12"),
+        None => wrong.push("нет поля пароля копии".to_owned()),
+    }
+    match button(&host, &[t(lang, Key::BackupRestore)]) {
+        Some(restore) => restore.click(),
+        None => wrong.push("нет кнопки «Восстановить»".to_owned()),
+    }
+    let done = t(lang, Key::BackupRestored).split("{}").next().unwrap_or_default();
+    if !wait_for(&host, done).await {
+        wrong.push("восстановление не завершилось".to_owned());
+    }
+    if !wait_for(&host, "ИП Арам Петросян").await {
+        wrong.push("после восстановления раздел профиля не показал профиль копии".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten())
+    {
+        for name in ["kvartik.lang", "kvartik.backup_key", "kvartik.last_backup"] {
+            let _ = storage.remove_item(name);
+        }
+    }
+    assert!(wrong.is_empty(), "восстановление: {wrong:#?}");
+}
+
 /// Профиль из базы программы — тот, что окно показывает.
 async fn stored_profile() -> Result<Option<Profile>, StoreError> {
     let store = Store::open(|_| {}).await?;
@@ -242,6 +314,9 @@ async fn stored_profile() -> Result<Option<Profile>, StoreError> {
 /// и видно в окне после нового открытия.
 #[wasm_bindgen_test]
 async fn profile_is_saved_and_read_back() {
+    // С пустой базы: профиль, оставленный другим тестом, принёс бы свои
+    // строки списков.
+    crate::store::delete_database(crate::store::DB_NAME).await;
     let lang = Lang::Ru;
     let device = Device::new();
     device.set_ui_lang(lang);

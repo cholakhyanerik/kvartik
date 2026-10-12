@@ -87,7 +87,8 @@ web-sys = { version = "0.3.106", features = [
 # (0.3.79 ↔ 0.2.129: в его Cargo.toml — точные `=`), и программа
 # `wasm-bindgen-test-runner` нужна той же версии (Правило 3). `serde` —
 # записи для проб. `Response` у `web-sys` — тест читает файл копии по его
-# адресу `blob:`, `NodeList` — тест плашки считает её копии; фичи
+# адресу `blob:`, `NodeList` — тест плашки считает её копии,
+# `DataTransfer` — тест окна кладёт файл копии в поле выбора файла; фичи
 # dev-зависимостей в сборку сайта не попадают
 # (резолвер 3).
 # Машинные тесты окна (`tests/*.rs`): манифест программы — JSON, и тест
@@ -99,4 +100,10 @@ serde_json = "1.0.154"
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3.79"
 serde = { version = "1.0.229", features = ["derive"] }
-web-sys = { version = "0.3.106", features = ["NodeList", "Response"] }
+web-sys = { version = "0.3.106", features = [
+    "DataTransfer",
+    "DataTransferItem",
+    "DataTransferItemList",
+    "NodeList",
+    "Response",
+] }

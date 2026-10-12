@@ -35,20 +35,40 @@ fn tr(lang: ReadSignal<Lang>, key: Key) -> impl Fn() -> &'static str + Copy + Se
 /// и пишут данные. Живёт, пока живо окно: брошенное соединение браузер
 /// может закрыть, а с ним и обработчик `versionchange` (Правило 6).
 #[derive(Clone, Copy)]
-pub struct Base(StoredValue<Option<Rc<Store>>, LocalStorage>);
+pub struct Base {
+    store: StoredValue<Option<Rc<Store>>, LocalStorage>,
+    /// Растёт, когда данные в базе заменило не действие раздела, а
+    /// восстановление из копии: разделы с данными перечитывают своё.
+    replaced: RwSignal<u32>,
+}
 
 impl Base {
     fn new() -> Self {
-        Self(StoredValue::new_local(None))
+        Self {
+            store: StoredValue::new_local(None),
+            replaced: RwSignal::new(0),
+        }
     }
 
     fn opened(&self, store: Rc<Store>) {
-        self.0.set_value(Some(store));
+        self.store.set_value(Some(store));
     }
 
     /// Открытая база; `None` — ещё открывается или не открылась.
     pub fn get(&self) -> Option<Rc<Store>> {
-        self.0.get_value()
+        self.store.get_value()
+    }
+
+    /// Восстановление из копии записало в базу: разделам с данными пора
+    /// перечитать своё, иначе окно покажет то, чего в базе уже нет.
+    pub fn replaced(&self) {
+        self.replaced.update(|count| *count = count.wrapping_add(1));
+    }
+
+    /// Сколько раз данные заменяли — отслеживаемое: по нему разделы узнают,
+    /// что пора перечитать.
+    pub fn replacements(&self) -> u32 {
+        self.replaced.get()
     }
 }
 

@@ -553,6 +553,9 @@ async fn restore(backups: Backups, sealed: &Sealed, typed: &str) -> Result<Resto
     let (entries, key) = stored::unlock(KINDS, sealed, &password).await?;
     let store = backups.base.get().ok_or(Problem::Say(Key::BackupFailed))?;
     let restored = stored::restore(&store, KINDS, &entries).await?;
+    if restored.added + restored.updated > 0 {
+        backups.base.replaced();
+    }
     let device = Device::new();
     // Своего пароля у устройства нет — берётся пароль этой копии: человек
     // только что показал, что знает его, и следующая копия будет под ним же.
