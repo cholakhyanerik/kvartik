@@ -20,14 +20,39 @@ body {
   margin: 0;
 }
 
-/* Блоки каркаса — по одному на язык (задача 53 оставит один). Ширина
-   строки — не больше ~70 знаков: длинную строку глаз теряет при переходе
-   на следующую. */
+/* Ширина строки — не больше ~70 знаков: длинную строку глаз теряет при
+   переходе на следующую. */
 main {
-  display: grid;
-  gap: var(--space-6);
   max-width: 40rem;
   padding: var(--space-4);
+}
+
+/* Шапка: название и выбор языка в строку, а на телефоне выбор уходит под
+   название. */
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.top h1 {
+  margin: 0;
+}
+
+/* Выбор языка окна (задача 53): выбранный язык — главная кнопка с заливкой,
+   остальные — второстепенные, с рамкой (button.secondary). */
+.langs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.langs button {
+  margin-top: 0;
+  padding: 0 var(--space-3);
 }
 
 h1 {

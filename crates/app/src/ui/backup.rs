@@ -1,8 +1,7 @@
 //! Раздел «Резервная копия» (задача 7): сделать копию под паролем,
 //! восстановить из неё, напомнить, если копии давно не было.
 //!
-//! Экрана настроек ещё нет, и раздел стоит на единственном экране каркаса,
-//! по разделу на язык; что знает окно о копиях ([`Backups`]), у них общее.
+//! Экрана настроек ещё нет, и раздел стоит на единственном экране каркаса.
 //!
 //! Копия делается в два шага: собрать и зашифровать — потом сохранить
 //! ссылкой, которую человек нажимает сам (`platform::file::Download`).
@@ -22,6 +21,7 @@ use leptos::prelude::*;
 use web_sys::HtmlInputElement;
 
 use super::storage::{Storage, error_key};
+use super::tr;
 use crate::platform::clock;
 use crate::platform::crypto::{self, CryptoError};
 use crate::platform::file::{self, Download, FileError};
@@ -29,7 +29,7 @@ use crate::store::Store;
 use crate::store::backup::{self as stored, Failure, Restored};
 use crate::store::device::Device;
 
-/// Что окно знает о копиях — одно на все разделы.
+/// Что окно знает о копиях.
 #[derive(Clone, Copy)]
 pub struct Backups {
     /// Открытая база; `None` — ещё открывается или не открылась.
@@ -147,6 +147,14 @@ impl From<Failure> for Problem {
     }
 }
 
+/// Шаблон с одним числом на языке окна — производное от сигнала языка.
+fn counted(lang: ReadSignal<Lang>, key: Key, n: i64) -> impl Fn() -> String + Send + 'static {
+    move || {
+        let lang = lang.get();
+        fill(t(lang, key), &[&i18n::integer(lang, n)])
+    }
+}
+
 /// Готовая копия: файл и что в нём.
 struct Ready {
     download: Download,
@@ -175,19 +183,26 @@ enum Restoring {
     Failed(Problem),
 }
 
-/// Раздел на языке `lang`. Показан, только пока хранилище открыто: без
-/// базы копии не из чего делать и некуда восстанавливать.
+/// Раздел на языке окна. Показан, только пока хранилище открыто: без базы
+/// копии не из чего делать и некуда восстанавливать.
 #[component]
-pub fn BackupSection(lang: Lang, backups: Backups, storage: RwSignal<Storage>) -> impl IntoView {
+pub fn BackupSection(
+    lang: ReadSignal<Lang>,
+    backups: Backups,
+    storage: RwSignal<Storage>,
+) -> impl IntoView {
     let ready = move || matches!(storage.get(), Storage::Ready(_));
     view! {
         <Show when=ready>
-            <h2>{t(lang, Key::BackupTitle)}</h2>
-            <p>{t(lang, Key::BackupAbout)}</p>
+            <h2>{tr(lang, Key::BackupTitle)}</h2>
+            <p>{tr(lang, Key::BackupAbout)}</p>
             <p>
-                {move || match backups.last.get() {
-                    Some(day) => fill(t(lang, Key::BackupLast), &[&i18n::date(lang, day)]),
-                    None => t(lang, Key::BackupNone).to_owned(),
+                {move || {
+                    let lang = lang.get();
+                    match backups.last.get() {
+                        Some(day) => fill(t(lang, Key::BackupLast), &[&i18n::date(lang, day)]),
+                        None => t(lang, Key::BackupNone).to_owned(),
+                    }
                 }}
             </p>
             {move || backups.due().then(|| {
@@ -196,7 +211,7 @@ pub fn BackupSection(lang: Lang, backups: Backups, storage: RwSignal<Storage>) -
                 } else {
                     Key::BackupDueNone
                 };
-                view! { <p class="reminder" role="status">{t(lang, key)}</p> }
+                view! { <p class="reminder" role="status">{tr(lang, key)}</p> }
             })}
             <MakeBackup lang backups />
             <RestoreBackup lang backups />
@@ -206,7 +221,7 @@ pub fn BackupSection(lang: Lang, backups: Backups, storage: RwSignal<Storage>) -
 
 /// Сделать копию: пароль, сборка и шифр, потом ссылка на файл.
 #[component]
-fn MakeBackup(lang: Lang, backups: Backups) -> impl IntoView {
+fn MakeBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
     let password = RwSignal::new(String::new());
     let repeat = RwSignal::new(String::new());
     // «Забыли пароль?» — новый пароль поверх заданного.
@@ -253,35 +268,32 @@ fn MakeBackup(lang: Lang, backups: Backups) -> impl IntoView {
             {move || if new_password() {
                 view! {
                     <label>
-                        {t(lang, Key::BackupNewPassword)}
+                        {tr(lang, Key::BackupNewPassword)}
                         <input type="password" autocomplete="new-password" bind:value=password />
                     </label>
                     <label>
-                        {t(lang, Key::BackupRepeatPassword)}
+                        {tr(lang, Key::BackupRepeatPassword)}
                         <input type="password" autocomplete="new-password" bind:value=repeat />
                     </label>
                     <p class="hint">
-                        {fill(
-                            t(lang, Key::BackupPasswordHint),
-                            &[&i18n::integer(lang, MIN_PASSWORD_CHARS as i64)],
-                        )}
+                        {counted(lang, Key::BackupPasswordHint, MIN_PASSWORD_CHARS as i64)}
                     </p>
                     {move || resetting.get().then(|| view! {
-                        <p class="hint">{t(lang, Key::BackupForgotNote)}</p>
+                        <p class="hint">{tr(lang, Key::BackupForgotNote)}</p>
                     })}
                 }
                 .into_any()
             } else {
                 view! {
                     <label>
-                        {t(lang, Key::BackupPassword)}
+                        {tr(lang, Key::BackupPassword)}
                         <input type="password" autocomplete="current-password" bind:value=password />
                     </label>
                 }
                 .into_any()
             }}
             <div class="actions">
-                <button type="submit" disabled=busy>{t(lang, Key::BackupMake)}</button>
+                <button type="submit" disabled=busy>{tr(lang, Key::BackupMake)}</button>
                 {move || (!new_password()).then(|| view! {
                     <button
                         type="button"
@@ -289,7 +301,7 @@ fn MakeBackup(lang: Lang, backups: Backups) -> impl IntoView {
                         disabled=busy
                         on:click=move |_| resetting.set(true)
                     >
-                        {t(lang, Key::BackupForgot)}
+                        {tr(lang, Key::BackupForgot)}
                     </button>
                 })}
             </div>
@@ -297,40 +309,34 @@ fn MakeBackup(lang: Lang, backups: Backups) -> impl IntoView {
         {move || match making.get() {
             Making::Idle => None,
             Making::Busy => Some(view! {
-                <p role="status">{t(lang, Key::BackupMaking)}</p>
+                <p role="status">{tr(lang, Key::BackupMaking)}</p>
             }.into_any()),
             Making::Failed(problem) => Some(view! {
-                <p role="alert">{problem.text(lang)}</p>
+                <p role="alert">{move || problem.text(lang.get())}</p>
             }.into_any()),
-            Making::Ready(ready) => Some(view! {
-                <p role="status">
-                    {fill(
-                        t(lang, Key::BackupReady),
-                        &[&i18n::integer(lang, ready.records as i64)],
-                    )}
-                </p>
-                {(ready.unreadable > 0).then(|| view! {
-                    <p role="alert">
-                        {fill(
-                            t(lang, Key::BackupUnreadable),
-                            &[&i18n::integer(lang, ready.unreadable as i64)],
-                        )}
+            Making::Ready(ready) => {
+                let (records, unreadable) = (ready.records as i64, ready.unreadable as i64);
+                let name = ready.name.clone();
+                Some(view! {
+                    <p role="status">{counted(lang, Key::BackupReady, records)}</p>
+                    {(unreadable > 0).then(|| view! {
+                        <p role="alert">{counted(lang, Key::BackupUnreadable, unreadable)}</p>
+                    })}
+                    <p>
+                        <a
+                            class="button"
+                            href=ready.download.url().to_owned()
+                            download=ready.name.clone()
+                            on:click=on_save
+                        >
+                            {move || fill(t(lang.get(), Key::BackupSaveFile), &[&name])}
+                        </a>
                     </p>
-                })}
-                <p>
-                    <a
-                        class="button"
-                        href=ready.download.url().to_owned()
-                        download=ready.name.clone()
-                        on:click=on_save
-                    >
-                        {fill(t(lang, Key::BackupSaveFile), &[&ready.name])}
-                    </a>
-                </p>
-                {move || saved.get().then(|| view! {
-                    <p role="status">{t(lang, Key::BackupSaved)}</p>
-                })}
-            }.into_any()),
+                    {move || saved.get().then(|| view! {
+                        <p role="status">{tr(lang, Key::BackupSaved)}</p>
+                    })}
+                }.into_any())
+            }
         }}
     }
 }
@@ -392,7 +398,7 @@ async fn make(backups: Backups, typed: &str, repeat: Option<&str>) -> Result<Rea
 
 /// Восстановить из копии: выбрать файл, ввести его пароль, слить.
 #[component]
-fn RestoreBackup(lang: Lang, backups: Backups) -> impl IntoView {
+fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
     let restoring = RwSignal::new_local(Restoring::Idle);
     let password = RwSignal::new(String::new());
 
@@ -443,24 +449,27 @@ fn RestoreBackup(lang: Lang, backups: Backups) -> impl IntoView {
     };
 
     view! {
-        <p class="restore">{t(lang, Key::BackupRestoreAbout)}</p>
+        <p class="restore">{tr(lang, Key::BackupRestoreAbout)}</p>
         {move || match restoring.get() {
             Restoring::Password(sealed, problem) => {
                 let header = sealed.header();
-                let info = clock::local_date(header.created()).map(|day| fill(
-                    t(lang, Key::BackupFileInfo),
-                    &[&i18n::date(lang, day), header.app_version()],
-                ));
+                let version = header.app_version().to_owned();
+                let info = clock::local_date(header.created()).map(|day| move || {
+                    let lang = lang.get();
+                    fill(t(lang, Key::BackupFileInfo), &[&i18n::date(lang, day), &version])
+                });
                 view! {
                     {info.map(|info| view! { <p>{info}</p> })}
                     <form class="backup" on:submit=submit>
                         <label>
-                            {t(lang, Key::BackupFilePassword)}
+                            {tr(lang, Key::BackupFilePassword)}
                             <input type="password" autocomplete="current-password" bind:value=password />
                         </label>
-                        {problem.map(|problem| view! { <p role="alert">{problem.text(lang)}</p> })}
+                        {problem.map(|problem| view! {
+                            <p role="alert">{move || problem.text(lang.get())}</p>
+                        })}
                         <div class="actions">
-                            <button type="submit">{t(lang, Key::BackupRestore)}</button>
+                            <button type="submit">{tr(lang, Key::BackupRestore)}</button>
                             <button
                                 type="button"
                                 class="secondary"
@@ -469,7 +478,7 @@ fn RestoreBackup(lang: Lang, backups: Backups) -> impl IntoView {
                                     restoring.set(Restoring::Idle);
                                 }
                             >
-                                {t(lang, Key::Cancel)}
+                                {tr(lang, Key::Cancel)}
                             </button>
                         </div>
                     </form>
@@ -477,7 +486,7 @@ fn RestoreBackup(lang: Lang, backups: Backups) -> impl IntoView {
                 .into_any()
             }
             Restoring::Busy => view! {
-                <p role="status">{t(lang, Key::BackupRestoring)}</p>
+                <p role="status">{tr(lang, Key::BackupRestoring)}</p>
             }
             .into_any(),
             state => view! {
@@ -485,7 +494,7 @@ fn RestoreBackup(lang: Lang, backups: Backups) -> impl IntoView {
                 // подпись открывает выбор без кода, и на iPhone тоже
                 // (разведка задачи 7, 2026-10-12).
                 <label class="button secondary file">
-                    {t(lang, Key::BackupChooseFile)}
+                    {tr(lang, Key::BackupChooseFile)}
                     <input
                         type="file"
                         class="visually-hidden"
@@ -496,18 +505,21 @@ fn RestoreBackup(lang: Lang, backups: Backups) -> impl IntoView {
                 {match state {
                     Restoring::Done(restored) => Some(view! {
                         <p role="status">
-                            {fill(
-                                t(lang, Key::BackupRestored),
-                                &[
-                                    &i18n::integer(lang, restored.added as i64),
-                                    &i18n::integer(lang, restored.updated as i64),
-                                    &i18n::integer(lang, restored.unchanged as i64),
-                                ],
-                            )}
+                            {move || {
+                                let lang = lang.get();
+                                fill(
+                                    t(lang, Key::BackupRestored),
+                                    &[
+                                        &i18n::integer(lang, restored.added as i64),
+                                        &i18n::integer(lang, restored.updated as i64),
+                                        &i18n::integer(lang, restored.unchanged as i64),
+                                    ],
+                                )
+                            }}
                         </p>
                     }.into_any()),
                     Restoring::Failed(problem) => Some(view! {
-                        <p role="alert">{problem.text(lang)}</p>
+                        <p role="alert">{move || problem.text(lang.get())}</p>
                     }.into_any()),
                     _ => None,
                 }}

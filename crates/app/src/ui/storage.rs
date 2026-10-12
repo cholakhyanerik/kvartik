@@ -5,9 +5,10 @@
 //! Слова для ошибок хранилища ([`error_key`]) — общие: ими же заговорят
 //! действия, когда сохранение не удалось.
 
-use kvartik_core::i18n::{Key, Lang, t};
+use kvartik_core::i18n::{Key, Lang};
 use leptos::prelude::*;
 
+use super::tr;
 use crate::platform;
 use crate::store::{Event, Persistence, StoreError};
 
@@ -78,9 +79,9 @@ const fn message(storage: Storage) -> Option<Key> {
     }
 }
 
-/// Раздел на языке `lang`.
+/// Раздел на языке окна.
 #[component]
-pub fn StorageSection(lang: Lang, storage: RwSignal<Storage>) -> impl IntoView {
+pub fn StorageSection(lang: ReadSignal<Lang>, storage: RwSignal<Storage>) -> impl IntoView {
     move || {
         let state = storage.get();
         let failed = matches!(state, Storage::Failed(_));
@@ -93,10 +94,10 @@ pub fn StorageSection(lang: Lang, storage: RwSignal<Storage>) -> impl IntoView {
         };
         message(state).map(|key| {
             view! {
-                <h2>{t(lang, Key::StorageTitle)}</h2>
-                <p role=role>{t(lang, key)}</p>
+                <h2>{tr(lang, Key::StorageTitle)}</h2>
+                <p role=role>{tr(lang, key)}</p>
                 {failed.then(|| view! {
-                    <button type="button" on:click=|_| platform::reload()>{t(lang, Key::Reload)}</button>
+                    <button type="button" on:click=|_| platform::reload()>{tr(lang, Key::Reload)}</button>
                 })}
             }
         })

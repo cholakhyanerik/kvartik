@@ -6,6 +6,7 @@
 //! в `var(--…)` ловит тест `crates/app/tests/tokens.rs`.
 
 mod backup;
+mod lang;
 pub mod panic;
 mod pwa;
 mod storage;
@@ -17,16 +18,24 @@ use leptos::prelude::*;
 
 use crate::store::{self, Store};
 use backup::{BackupSection, Backups};
+use lang::{LangSwitch, WindowLang};
 use pwa::{InstallSection, Program, UpdateNotice};
 use storage::{Storage, StorageSection};
 
-/// Корень окна. Пока — экран каркаса: название, новая версия, установка,
-/// раздел о хранении данных и раздел о резервной копии сразу на трёх
-/// языках, по блоку на язык, чтобы армянский и кириллица проходили весь
-/// путь от таблицы строк до страницы. Выбора языка окна ещё нет
-/// (задача 53).
+/// Строка окна на его языке — производное от сигнала языка, а не значение,
+/// вычисленное один раз: при смене языка она пересобирается сама
+/// (Правило 4).
+fn tr(lang: ReadSignal<Lang>, key: Key) -> impl Fn() -> &'static str + Copy + Send + 'static {
+    move || t(lang.get(), key)
+}
+
+/// Корень окна. Пока — экран каркаса: название и выбор языка, новая версия,
+/// установка, раздел о хранении данных и раздел о резервной копии.
 #[component]
 pub fn App() -> impl IntoView {
+    // Язык — первым: до первой отрисовки (задача 53).
+    let window_lang = WindowLang::start();
+    let lang = window_lang.signal();
     // Service worker — до базы: работа без сети от неё не зависит.
     let program = Program::new();
     let storage = RwSignal::new(Storage::Opening);
@@ -53,21 +62,20 @@ pub fn App() -> impl IntoView {
 
     view! {
         <main>
-            {Lang::ALL
-                .into_iter()
-                // `lang` у каждого блока: по нему браузер выбирает шрифт
-                // и правила переноса, а экранный диктор — произношение.
-                .map(|lang| view! {
-                    <section lang=lang.code()>
-                        <h1>{t(lang, Key::AppName)}</h1>
-                        <UpdateNotice lang program />
-                        <InstallSection lang program />
-                        <StorageSection lang storage />
-                        <BackupSection lang backups storage />
-                    </section>
-                })
-                .collect_view()}
+            <section>
+                <header class="top">
+                    <h1>{tr(lang, Key::AppName)}</h1>
+                    <LangSwitch lang=window_lang />
+                </header>
+                <UpdateNotice lang program />
+                <InstallSection lang program />
+                <StorageSection lang storage />
+                <BackupSection lang backups storage />
+            </section>
             {panic::debug_trigger()}
         </main>
     }
 }
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod tests;

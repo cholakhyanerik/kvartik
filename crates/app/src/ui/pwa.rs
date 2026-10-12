@@ -8,9 +8,10 @@
 //! а от неё зависит, увидит ли программа данные (Правило 6), поэтому
 //! раздел стоит выше разделов о данных.
 
-use kvartik_core::i18n::{Key, Lang, t};
+use kvartik_core::i18n::{Key, Lang};
 use leptos::prelude::*;
 
+use super::tr;
 use crate::platform;
 use crate::platform::pwa::{self as browser, Event, Pwa};
 
@@ -147,17 +148,17 @@ impl Program {
     }
 }
 
-/// «Есть новая версия» на языке `lang`. Пусто, пока новой версии нет.
+/// «Есть новая версия» на языке окна. Пусто, пока новой версии нет.
 #[component]
-pub fn UpdateNotice(lang: Lang, program: Program) -> impl IntoView {
+pub fn UpdateNotice(lang: ReadSignal<Lang>, program: Program) -> impl IntoView {
     move || match program.version.get() {
         NewVersion::Current => None,
         NewVersion::Ready => Some(
             view! {
                 <div class="notice" role="status">
-                    <p>{t(lang, Key::UpdateReady)}</p>
+                    <p>{tr(lang, Key::UpdateReady)}</p>
                     <button type="button" on:click=move |_| program.apply_update()>
-                        {t(lang, Key::UpdateApply)}
+                        {tr(lang, Key::UpdateApply)}
                     </button>
                 </div>
             }
@@ -166,7 +167,7 @@ pub fn UpdateNotice(lang: Lang, program: Program) -> impl IntoView {
         NewVersion::Applying => Some(
             view! {
                 <div class="notice" role="status">
-                    <p>{t(lang, Key::UpdateApplying)}</p>
+                    <p>{tr(lang, Key::UpdateApplying)}</p>
                 </div>
             }
             .into_any(),
@@ -174,9 +175,9 @@ pub fn UpdateNotice(lang: Lang, program: Program) -> impl IntoView {
         NewVersion::Elsewhere => Some(
             view! {
                 <div class="notice" role="status">
-                    <p>{t(lang, Key::UpdateElsewhere)}</p>
+                    <p>{tr(lang, Key::UpdateElsewhere)}</p>
                     <button type="button" on:click=|_| platform::reload()>
-                        {t(lang, Key::Reload)}
+                        {tr(lang, Key::Reload)}
                     </button>
                 </div>
             }
@@ -185,31 +186,31 @@ pub fn UpdateNotice(lang: Lang, program: Program) -> impl IntoView {
     }
 }
 
-/// Раздел «Установка» на языке `lang`. Пусто, когда предложить нечего.
+/// Раздел «Установка» на языке окна. Пусто, когда предложить нечего.
 #[component]
-pub fn InstallSection(lang: Lang, program: Program) -> impl IntoView {
+pub fn InstallSection(lang: ReadSignal<Lang>, program: Program) -> impl IntoView {
     move || match program.install.get() {
         Install::Installed | Install::Nothing => None,
         state @ (Install::Button | Install::Asking) => Some(
             view! {
-                <h2>{t(lang, Key::InstallTitle)}</h2>
-                <p>{t(lang, Key::InstallAbout)}</p>
+                <h2>{tr(lang, Key::InstallTitle)}</h2>
+                <p>{tr(lang, Key::InstallAbout)}</p>
                 <button
                     type="button"
                     disabled=state == Install::Asking
                     on:click=move |_| program.ask_install()
                 >
-                    {t(lang, Key::InstallButton)}
+                    {tr(lang, Key::InstallButton)}
                 </button>
             }
             .into_any(),
         ),
         Install::Manual => Some(
             view! {
-                <h2>{t(lang, Key::InstallTitle)}</h2>
-                <p>{t(lang, Key::InstallFirst)}</p>
-                <p>{t(lang, Key::InstallSteps)}</p>
-                <p class="hint">{t(lang, Key::InstallMoveData)}</p>
+                <h2>{tr(lang, Key::InstallTitle)}</h2>
+                <p>{tr(lang, Key::InstallFirst)}</p>
+                <p>{tr(lang, Key::InstallSteps)}</p>
+                <p class="hint">{tr(lang, Key::InstallMoveData)}</p>
             }
             .into_any(),
         ),

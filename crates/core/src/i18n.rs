@@ -56,6 +56,35 @@ impl Lang {
     pub fn from_code(code: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|lang| lang.code() == code)
     }
+
+    /// Имя языка на нём самом — для переключателя языка окна. Не перевод:
+    /// человек, открывший окно на чужом языке, ищет свой глазами (опыт
+    /// Arpa).
+    pub const fn native_name(self) -> &'static str {
+        match self {
+            Lang::Am => "Հայերեն",
+            Lang::Ru => "Русский",
+            Lang::En => "English",
+        }
+    }
+
+    /// Язык окна, пока человек не выбрал свой: первый из языков браузера
+    /// (`navigator.languages`, по убыванию предпочтения), который знает
+    /// программа, а не нашлось ни одного — армянский (решение человека
+    /// 2026-10-12, задача 53; так же берёт имя программы манифест).
+    ///
+    /// Сравнивается основной подтег без учёта регистра: `ru-RU` — русский,
+    /// `hy-AM` — армянский. `am` — амхарский, а не армянский.
+    pub fn preferred<'a>(tags: impl IntoIterator<Item = &'a str>) -> Self {
+        tags.into_iter()
+            .find_map(|tag| {
+                let primary = tag.split(['-', '_']).next().unwrap_or(tag);
+                Self::ALL
+                    .into_iter()
+                    .find(|lang| lang.code().eq_ignore_ascii_case(primary))
+            })
+            .unwrap_or(Lang::Am)
+    }
 }
 
 /// Объявляет ключ и три его перевода разом.
@@ -99,6 +128,9 @@ strings! {
     /// человек): армянское — из описания проекта, русское и английское — его
     /// дословный перевод.
     AppName = "Офис ИП", "IE Office", "ԱՁ գրասենյակ";
+    /// Переключатель языка окна (задача 53) — для экранного диктора: сами
+    /// кнопки — имена языков на них самих (`Lang::native_name`).
+    Language = "Язык", "Language", "Լեզու";
 
     /// Раздел о том, где и как хранятся данные (задача 6). Пока экрана
     /// настроек нет, раздел стоит на единственном экране каркаса.
@@ -633,6 +665,34 @@ mod tests {
         }
         assert!(lost.is_empty(), "код не читается обратно: {lost:?}");
         assert_eq!(Lang::from_code("am"), None);
+    }
+
+    /// Язык при первом заходе — первый знакомый из языков браузера, а не
+    /// первый язык списка и не язык с регионом целиком. Ожидаемое выписано
+    /// человеком по смыслу случаев.
+    #[test]
+    fn first_language_follows_the_browser() {
+        let cases: [(&[&str], Lang); 11] = [
+            (&["ru-RU", "ru", "en-US"], Lang::Ru),
+            (&["hy-AM"], Lang::Am),
+            (&["en-GB", "ru"], Lang::En),
+            (&["de-DE", "fr", "ru-RU"], Lang::Ru),
+            (&["de-DE", "fr"], Lang::Am),
+            (&[], Lang::Am),
+            (&["RU"], Lang::Ru),
+            (&["en_US"], Lang::En),
+            (&["hy-arevmda"], Lang::Am),
+            (&["am-ET", "en"], Lang::En),
+            (&["", "rus", "ru"], Lang::Ru),
+        ];
+        let mut wrong = Vec::new();
+        for (tags, expected) in cases {
+            let got = Lang::preferred(tags.iter().copied());
+            if got != expected {
+                wrong.push(format!("{tags:?}: {got:?}, а не {expected:?}"));
+            }
+        }
+        assert!(wrong.is_empty(), "не тот язык при первом заходе: {wrong:#?}");
     }
 
     #[test]
