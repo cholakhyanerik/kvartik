@@ -19,10 +19,12 @@
 //! Пока здесь только то, что нужно сейчас: проверка даты, квартал, день
 //! месяца после квартала, запись ISO (`2026-10-10`) — так дата лежит
 //! в данных и в файле копии (`format`) — и разность дней: напоминание
-//! о копии через 7 дней (задача 7). Сложение дней и день недели были
-//! в пробе и добавятся с задачами, которым они нужны: срок оплаты счёта,
-//! перенос срока на рабочий день. Дни считает алгоритм `days_from_civil`
-//! Говарда Хиннанта (`day_number` ниже) — на нём строить и их.
+//! о копии через 7 дней (задача 7). Сложение дней — срок оплаты счёта,
+//! сложение месяцев — повторяющийся счёт (задача 11). День недели был
+//! в пробе и добавится с задачей, которой он нужен: перенос срока на
+//! рабочий день. Дни считают алгоритмы `days_from_civil` и `civil_from_days`
+//! Говарда Хиннанта (`day_number` и `from_day_number` ниже) — на них строить
+//! и его.
 
 use std::fmt;
 
@@ -101,6 +103,87 @@ impl Date {
         let day_of_year = (153 * shifted_month + 2) / 5 + self.day as i32 - 1;
         let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
         era * 146_097 + day_of_era - 719_468
+    }
+
+    /// Дата по номеру дня от 1970-01-01 — обратный `day_number` (алгоритм
+    /// `civil_from_days` там же). `None` — день за пределами
+    /// `MIN_YEAR..=MAX_YEAR`.
+    const fn from_day_number(number: i32) -> Option<Self> {
+        // Сдвиг к 0000-03-01: для лет от первого число неотрицательно,
+        // и деление на эры округляет к нулю, как и надо.
+        let shifted = number as i64 + 719_468;
+        if shifted < 0 {
+            return None;
+        }
+        let era = shifted / 146_097;
+        let day_of_era = shifted - era * 146_097;
+        let year_of_era =
+            (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+        let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+        let shifted_month = (5 * day_of_year + 2) / 153;
+        let day = day_of_year - (153 * shifted_month + 2) / 5 + 1;
+        let month = if shifted_month < 10 {
+            shifted_month + 3
+        } else {
+            shifted_month - 9
+        };
+        let year = year_of_era + era * 400 + if month <= 2 { 1 } else { 0 };
+        if year < Self::MIN_YEAR as i64 || year > Self::MAX_YEAR as i64 {
+            return None;
+        }
+        // Месяц — от 1 до 12, день — от 1 до 31: в `u8` они помещаются,
+        // и такой день в календаре есть по построению.
+        Self::new(year as u16, month as u8, day as u8)
+    }
+
+    /// Дата через `days` дней — или раньше на столько, если число
+    /// отрицательное: срок оплаты — дата счёта плюс дни из договора.
+    /// `None` — календарь `Date` кончился.
+    pub const fn add_days(self, days: i32) -> Option<Self> {
+        match self.day_number().checked_add(days) {
+            Some(number) => Self::from_day_number(number),
+            None => None,
+        }
+    }
+
+    /// Дата через `months` месяцев — для повторяющегося счёта (задача 11).
+    ///
+    /// Последний день месяца переходит в последний день: счёт за подписку,
+    /// выписанный 30 сентября, через месяц выписывается 31 октября, а через
+    /// пять — 28 февраля. Остальные дни остаются тем же числом, а где его
+    /// нет — последним днём: 30 января через месяц — 28 февраля, через
+    /// два — 30 марта. Считать каждый месяц от исходной даты, а не от
+    /// прошлой: иначе 31-е, однажды ставшее 28-м, так бы им и осталось.
+    /// `None` — календарь `Date` кончился.
+    pub const fn add_months(self, months: u32) -> Option<Self> {
+        let index = self.year as u64 * 12 + (self.month - 1) as u64 + months as u64;
+        let year = index / 12;
+        if year > Self::MAX_YEAR as u64 {
+            return None;
+        }
+        // Год не больше 9999, месяц — от 1 до 12.
+        let (year, month) = (year as u16, (index % 12) as u8 + 1);
+        let last = days_in_month(year, month);
+        let day = if self.is_last_of_month() || self.day > last {
+            last
+        } else {
+            self.day
+        };
+        Some(Self { year, month, day })
+    }
+
+    /// Последний ли это день месяца.
+    pub const fn is_last_of_month(self) -> bool {
+        self.day == days_in_month(self.year, self.month)
+    }
+
+    /// Последний день того же месяца: у подписки на программу услуга
+    /// оказана в последний день месяца (задача 11).
+    pub const fn last_of_month(self) -> Self {
+        Self {
+            day: days_in_month(self.year, self.month),
+            ..self
+        }
     }
 
     /// Квартал, в который попадает дата: январь — март — первый, октябрь —
@@ -495,6 +578,109 @@ mod tests {
             .map(|pair| format!("{:?} → {:?}", pair[0], pair[1]))
             .collect();
         assert!(wrong.is_empty(), "соседние дни не через день: {wrong:#?}");
+    }
+
+    /// Сложение дней — числами, выписанными по календарю, а не той же
+    /// формулой: стыки месяцев и лет, 29 февраля, отрицательные дни и края
+    /// календаря.
+    #[test]
+    fn add_days_follows_the_calendar() {
+        let cases = [
+            (date(2026, 10, 13), 15, Some(date(2026, 10, 28))),
+            (date(2026, 10, 13), 0, Some(date(2026, 10, 13))),
+            (date(2026, 12, 25), 10, Some(date(2027, 1, 4))),
+            (date(2028, 2, 28), 1, Some(date(2028, 2, 29))),
+            (date(2026, 2, 28), 1, Some(date(2026, 3, 1))),
+            (date(2026, 1, 31), 30, Some(date(2026, 3, 2))),
+            (date(2026, 3, 1), -1, Some(date(2026, 2, 28))),
+            (date(2026, 10, 13), 365, Some(date(2027, 10, 13))),
+            (date(2027, 10, 13), 366, Some(date(2028, 10, 13))),
+            (date(1970, 1, 1), 10_957, Some(date(2000, 1, 1))),
+            (date(1, 1, 1), 3_652_058, Some(date(9999, 12, 31))),
+            (date(9999, 12, 31), 1, None),
+            (date(1, 1, 1), -1, None),
+            (date(2026, 10, 13), i32::MAX, None),
+            (date(2026, 10, 13), i32::MIN, None),
+        ];
+        let mut wrong = Vec::new();
+        for (from, days, expected) in cases {
+            let got = from.add_days(days);
+            if got != expected {
+                wrong.push(format!("{from:?} + {days}: {got:?}, а не {expected:?}"));
+            }
+        }
+        assert!(wrong.is_empty(), "не тот день: {wrong:#?}");
+    }
+
+    /// Номер дня читается обратно в тот же день — на каждом дне 2000–2100
+    /// годов и на краях календаря.
+    #[test]
+    fn day_numbers_round_trip() {
+        let mut days = vec![date(1, 1, 1), date(9999, 12, 31)];
+        for year in 2000..=2100 {
+            for month in 1..=12 {
+                days.extend((1..=31).filter_map(|day| Date::new(year, month, day)));
+            }
+        }
+        let lost: Vec<String> = days
+            .iter()
+            .filter(|day| Date::from_day_number(day.day_number()) != Some(**day))
+            .map(|day| format!("{day:?}"))
+            .collect();
+        assert!(lost.is_empty(), "номер дня не читается обратно: {lost:#?}");
+    }
+
+    /// Сложение месяцев: последний день месяца остаётся последним, другое
+    /// число — тем же числом, а где его нет — последним днём. Ожидаемое
+    /// выписано по календарю.
+    #[test]
+    fn add_months_keeps_the_end_of_month() {
+        let cases = [
+            (date(2026, 9, 30), 1, Some(date(2026, 10, 31))),
+            (date(2026, 9, 30), 5, Some(date(2027, 2, 28))),
+            (date(2026, 1, 31), 1, Some(date(2026, 2, 28))),
+            (date(2026, 1, 31), 2, Some(date(2026, 3, 31))),
+            (date(2026, 1, 30), 1, Some(date(2026, 2, 28))),
+            (date(2026, 1, 30), 2, Some(date(2026, 3, 30))),
+            (date(2028, 1, 29), 1, Some(date(2028, 2, 29))),
+            (date(2027, 2, 28), 12, Some(date(2028, 2, 29))),
+            (date(2028, 2, 29), 12, Some(date(2029, 2, 28))),
+            (date(2026, 10, 15), 3, Some(date(2027, 1, 15))),
+            (date(2026, 10, 15), 0, Some(date(2026, 10, 15))),
+            (date(2026, 12, 1), 1, Some(date(2027, 1, 1))),
+            (date(9999, 11, 15), 1, Some(date(9999, 12, 15))),
+            (date(9999, 12, 15), 1, None),
+            (date(2026, 10, 15), u32::MAX, None),
+        ];
+        let mut wrong = Vec::new();
+        for (from, months, expected) in cases {
+            let got = from.add_months(months);
+            if got != expected {
+                wrong.push(format!("{from:?} + {months} мес.: {got:?}, а не {expected:?}"));
+            }
+        }
+        assert!(wrong.is_empty(), "не тот месяц: {wrong:#?}");
+    }
+
+    /// Последний день месяца — и в високосном феврале.
+    #[test]
+    fn last_day_of_the_month() {
+        let cases = [
+            (date(2026, 2, 10), date(2026, 2, 28)),
+            (date(2028, 2, 10), date(2028, 2, 29)),
+            (date(2026, 12, 1), date(2026, 12, 31)),
+            (date(2026, 4, 30), date(2026, 4, 30)),
+        ];
+        let mut wrong = Vec::new();
+        for (day, last) in cases {
+            if day.last_of_month() != last || !last.is_last_of_month() {
+                wrong.push(format!("{day:?}: {:?}, а не {last:?}", day.last_of_month()));
+            }
+        }
+        if date(2026, 4, 29).is_last_of_month() {
+            wrong.push("29 апреля — последний день".to_owned());
+        }
+        assert!(wrong.is_empty(), "последний день месяца: {wrong:#?}");
     }
 
     /// Отладочная запись — ISO 8601 с ведущими нулями.

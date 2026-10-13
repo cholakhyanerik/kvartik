@@ -7,6 +7,7 @@
 
 mod backup;
 mod clients;
+mod documents;
 mod form;
 mod lang;
 pub mod panic;
@@ -19,9 +20,11 @@ use std::rc::Rc;
 use kvartik_core::i18n::{Key, Lang, t};
 use leptos::prelude::*;
 
+use crate::platform::clock;
 use crate::store::{self, Store};
 use backup::{BackupReminder, BackupSection, Backups};
 use clients::{Clients, ClientsSection};
+use documents::{Documents, DocumentsSection};
 use lang::{LangSwitch, WindowLang};
 use profile::{ProfileSection, Profiles};
 use pwa::{InstallSection, Program, UpdateNotice};
@@ -76,8 +79,8 @@ impl Base {
 }
 
 /// Корень окна. Пока — экран каркаса: название и выбор языка, новая версия,
-/// напоминание о копии, установка, профиль ИП, клиенты, раздел о хранении
-/// данных и раздел о резервной копии.
+/// напоминание о копии, установка, профиль ИП, клиенты, счета и акты, раздел
+/// о хранении данных и раздел о резервной копии.
 ///
 /// Установка — выше профиля: на iPhone программу ставят до того, как
 /// вводить данные (Правило 6). Напоминание о копии — над всем, что растёт:
@@ -98,6 +101,7 @@ pub fn App() -> impl IntoView {
     let backups = Backups::new(base);
     let profiles = Profiles::new();
     let clients = Clients::new();
+    let documents = Documents::new();
     leptos::task::spawn_local(async move {
         match Store::open(move |event| storage.update(|state| state.apply(event))).await {
             Ok(store) => {
@@ -112,11 +116,12 @@ pub fn App() -> impl IntoView {
                 backups.opened(has_data);
                 profiles.load(&store).await;
                 clients.load(&store).await;
+                documents.load(&store, clock::today()).await;
                 let persistence = store::persistence().await;
                 storage.update(|state| state.opened(persistence));
             }
-            // Профиль и клиенты остаются пустыми: почему, скажет раздел
-            // о хранении.
+            // Профиль, клиенты и документы остаются пустыми: почему, скажет
+            // раздел о хранении.
             Err(error) => storage.set(Storage::Failed(error)),
         }
     });
@@ -132,7 +137,8 @@ pub fn App() -> impl IntoView {
                 <BackupReminder lang backups />
                 <InstallSection lang program />
                 <ProfileSection lang profiles base backups />
-                <ClientsSection lang clients base backups />
+                <ClientsSection lang clients documents base backups />
+                <DocumentsSection lang documents clients base backups />
                 <StorageSection lang storage />
                 <BackupSection lang backups storage />
             </section>

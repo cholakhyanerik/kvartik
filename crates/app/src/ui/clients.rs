@@ -11,6 +11,10 @@
 //! После восстановления из копии раздел перечитывает базу по
 //! `Base::replacements` — иначе показал бы прежний список (дефект 0.0.12
 //! у профиля).
+//!
+//! Удалённый клиент документов не уносит (задача 11): у выпущенных — копия
+//! его реквизитов, у черновиков — ссылка на запись, которая остаётся.
+//! Сообщение об удалении называет, сколько у него документов.
 
 use std::sync::Arc;
 
@@ -26,6 +30,7 @@ use leptos::ev::SubmitEvent;
 use leptos::prelude::*;
 
 use super::backup::Backups;
+use super::documents::Documents;
 use super::form::{
     AreaField, CURRENCIES, FieldError, TextField, currency_code, currency_key, optional,
 };
@@ -93,11 +98,28 @@ impl Clients {
     }
 
     /// Клиент по идентификатору — без слежения: форма открывается один раз.
-    fn get(&self, id: RecordId) -> Option<Client> {
+    pub(super) fn get(&self, id: RecordId) -> Option<Client> {
         self.state.with_untracked(|state| match state {
             State::Ready { clients, .. } => clients.iter().find(|c| c.id() == id).cloned(),
             State::Loading | State::Failed(_) => None,
         })
+    }
+
+    /// Название клиента и удалён ли он — со слежением: у черновика документа
+    /// реквизиты клиента ещё не скопированы, и его название — из записи
+    /// (задача 11). `None` — клиента в базе нет.
+    pub(super) fn name(&self, id: RecordId) -> Option<(String, bool)> {
+        self.with(|list, _| {
+            list.iter()
+                .find(|client| client.id() == id)
+                .map(|client| (client.data().name.as_str().to_owned(), client.is_deleted()))
+        })
+    }
+
+    /// Живые клиенты по алфавиту — для выбора клиента документа: удалённому
+    /// новый документ не выписывают.
+    pub(super) fn alive(&self) -> Vec<Client> {
+        self.with(|list, _| Client::find(list, "").into_iter().cloned().collect())
     }
 
     /// Что-то из списка, посчитанное по прочитанным клиентам; пока их нет —
@@ -125,8 +147,9 @@ enum Mode {
 #[derive(Clone, PartialEq, Eq, Debug)]
 enum Notice {
     Saved,
-    /// Удалён — с кнопкой «Восстановить» рядом.
-    Deleted(RecordId, String),
+    /// Удалён — с кнопкой «Восстановить» рядом и числом его документов:
+    /// они остаются.
+    Deleted(RecordId, String, usize),
     Restored(String),
 }
 
@@ -145,6 +168,7 @@ enum Phase {
 pub fn ClientsSection(
     lang: ReadSignal<Lang>,
     clients: Clients,
+    documents: Documents,
     base: Base,
     backups: Backups,
 ) -> impl IntoView {
@@ -177,7 +201,7 @@ pub fn ClientsSection(
             }
             .into_any(),
             (Phase::Ready, Mode::List) => view! {
-                <ClientList lang clients base backups mode notice />
+                <ClientList lang clients documents base backups mode notice />
             }
             .into_any(),
             (Phase::Ready, Mode::New) => view! {
@@ -208,6 +232,7 @@ enum Action {
 fn ClientList(
     lang: ReadSignal<Lang>,
     clients: Clients,
+    documents: Documents,
     base: Base,
     backups: Backups,
     mode: RwSignal<Mode>,
@@ -246,7 +271,10 @@ fn ClientList(
                 Ok(Some(client)) => {
                     let name = client.data().name.as_str().to_owned();
                     notice.set(Some(match action {
-                        Action::Delete => Notice::Deleted(client.id(), name),
+                        Action::Delete => {
+                            let docs = documents.count_for_client(client.id());
+                            Notice::Deleted(client.id(), name, docs)
+                        }
                         Action::Restore => Notice::Restored(name),
                     }));
                     clients.put(client);
@@ -281,9 +309,19 @@ fn ClientList(
         </button>
         {move || notice.get().map(|shown| match shown {
             Notice::Saved => view! { <p role="status">{tr(lang, Key::ClientSaved)}</p> }.into_any(),
-            Notice::Deleted(id, name) => view! {
+            Notice::Deleted(id, name, docs) => view! {
                 <div class="notice-row">
-                    <p role="status">{move || fill(t(lang.get(), Key::ClientDeleted), &[&name])}</p>
+                    <p role="status">
+                        {move || {
+                            let lang = lang.get();
+                            if docs == 0 {
+                                fill(t(lang, Key::ClientDeleted), &[&name])
+                            } else {
+                                let count = i18n::integer(lang, docs as i64);
+                                fill(t(lang, Key::ClientDeletedDocs), &[&name, &count])
+                            }
+                        }}
+                    </p>
                     <button
                         type="button"
                         class="secondary"

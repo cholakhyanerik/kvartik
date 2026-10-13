@@ -52,7 +52,10 @@ use crate::model::record::RecordMeta;
 /// - 4 (0.0.15) — у клиента поле `tax_id` (налоговый номер иностранного
 ///   клиента, `#[serde(default)]`) и страна Косово, `XK`. Записи версий 1–3
 ///   читаются как есть: у клиента без поля номер пустой.
-pub const FORMAT_VERSION: u32 = 4;
+/// - 5 (0.0.17) — виды `document` (счёт и акт) и `recurring` (повторяющийся
+///   счёт), задача 11. Поля прежних видов те же, и записи версий 1–4
+///   читаются как есть.
+pub const FORMAT_VERSION: u32 = 5;
 
 /// Первая версия формата: старше не бывает.
 pub(crate) const FIRST_VERSION: u32 = 1;
@@ -148,7 +151,7 @@ fn split(text: &str) -> Result<(u32, &str), FormatError> {
 /// и файл копии.
 fn decode_record<T: DeserializeOwned>(version: u32, record: &str) -> Result<T, FormatError> {
     match version {
-        // Версии 2–4 прибавили виды записей и поле со значением по
+        // Версии 2–5 прибавили виды записей и поле со значением по
         // умолчанию, а не переименовали и не убрали прежние (шапка
         // `FORMAT_VERSION`): записи прошлых версий читаются как есть.
         FIRST_VERSION..=FORMAT_VERSION => serde_json::from_str(record).map_err(damaged),
@@ -255,11 +258,23 @@ mod tests {
         r#"}}"#
     );
 
-    /// Та же запись в версии 4 — так её пишет эта программа. Выписана
-    /// человеком: версия 4 прибавила поле клиенту, а у пробы его нет, и запись
+    /// Та же запись в версии 4 — так её писала 0.0.15. Выписана человеком:
+    /// версия 4 прибавила поле клиенту, а у пробы его нет, и запись
     /// отличается только номером.
     const SAMPLE_V4: &str = concat!(
         r#"{"format_version":4,"record":{"#,
+        r#""meta":{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":1760000000000,"deleted":null},"#,
+        r#""day":"2026-10-12","#,
+        r#""sum":{"minor":150000,"currency":"USD"},"#,
+        r#""rate":{"currency":"USD","per_unit_e4":3619300,"date":"2026-10-09","source":"central_bank"}"#,
+        r#"}}"#
+    );
+
+    /// Та же запись в версии 5 — так её пишет эта программа. Выписана
+    /// человеком: версия 5 прибавила виды записей, а не поля, и запись
+    /// отличается только номером.
+    const SAMPLE_V5: &str = concat!(
+        r#"{"format_version":5,"record":{"#,
         r#""meta":{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":1760000000000,"deleted":null},"#,
         r#""day":"2026-10-12","#,
         r#""sum":{"minor":150000,"currency":"USD"},"#,
@@ -283,8 +298,8 @@ mod tests {
     /// значений — слово в слово образец. Поменялась запись — это новая
     /// версия формата с миграцией (Правило 5), а не правка образца.
     #[test]
-    fn sample_v4_is_pinned() {
-        let record: Probe = decode(SAMPLE_V4).expect("образец версии 4 читается");
+    fn sample_v5_is_pinned() {
+        let record: Probe = decode(SAMPLE_V5).expect("образец версии 5 читается");
         assert_eq!(
             record.meta.id().to_string(),
             "0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a"
@@ -297,19 +312,19 @@ mod tests {
         assert_eq!(record.day, day(2026, 10, 12));
         assert_eq!(record.sum, Money::new(150_000, Currency::Usd));
         assert_eq!(record.rate, probe().rate);
-        assert_eq!(encode(&record), SAMPLE_V4);
+        assert_eq!(encode(&record), SAMPLE_V5);
     }
 
-    /// Записи версий 1–3 читаются той же записью, а пишутся уже версией 4:
+    /// Записи версий 1–4 читаются той же записью, а пишутся уже версией 5:
     /// данные прошлых версий не теряются (Правило 2).
     #[test]
     fn older_samples_still_read() {
-        let current: Probe = decode(SAMPLE_V4).expect("образец версии 4 читается");
-        for (version, sample) in [(1, SAMPLE_V1), (2, SAMPLE_V2), (3, SAMPLE_V3)] {
+        let current: Probe = decode(SAMPLE_V5).expect("образец версии 5 читается");
+        for (version, sample) in [(1, SAMPLE_V1), (2, SAMPLE_V2), (3, SAMPLE_V3), (4, SAMPLE_V4)] {
             let old: Probe = decode(sample)
                 .unwrap_or_else(|error| panic!("образец версии {version}: {error:?}"));
             assert_eq!(old, current, "версия {version}");
-            assert_eq!(encode(&old), SAMPLE_V4, "версия {version}");
+            assert_eq!(encode(&old), SAMPLE_V5, "версия {version}");
         }
     }
 

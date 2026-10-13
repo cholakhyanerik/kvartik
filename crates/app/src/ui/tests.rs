@@ -9,17 +9,20 @@
 use js_sys::Promise;
 use kvartik_core::format::Stored;
 use kvartik_core::i18n::{ALL_KEYS, Key, Lang, fill, t};
-use kvartik_core::model::client::Client;
+use kvartik_core::model::client::{Client, ClientData};
 use kvartik_core::model::country::Country;
 use kvartik_core::model::money::Currency;
 use kvartik_core::model::profile::Profile;
+use kvartik_core::model::text::{Line, Lines};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 use web_sys::{Document, Element, HtmlElement, HtmlInputElement, HtmlSelectElement};
 
 use super::App;
 use crate::store::device::Device;
-use crate::store::{Store, StoreError};
+use crate::store::{Store, StoreError, Writes};
+
+mod documents;
 
 wasm_bindgen_test_configure!(run_in_browser);
 
@@ -168,6 +171,7 @@ fn leftovers(text: &str, lang: Lang) -> Vec<String> {
 /// открывается языком, выбранным раньше. Форма профиля открыта, и в каждом
 /// её списке есть строка: их подписи тоже должны перевестись. Форма
 /// клиента открыта тоже: список стран — на языке окна и по его алфавиту.
+/// И форма нового счёта — со строкой услуги и подсказками.
 #[wasm_bindgen_test]
 async fn choosing_a_language_translates_the_whole_window() {
     let document = document();
@@ -175,6 +179,35 @@ async fn choosing_a_language_translates_the_whole_window() {
     let page_lang = html.get_attribute("lang");
     let device = Device::new();
     device.set_ui_lang(Lang::Am);
+    // Счёт выписывают живому клиенту: без него кнопка нового счёта
+    // выключена. Армянская фирма — чтобы форма показала и слова о чеке кассы.
+    let client = Client::create(
+        ClientData {
+            country: Some(Country::ARMENIA),
+            ..ClientData {
+                name: Line::new("Proba LLC").expect("годное название"),
+                country: None,
+                address: Lines::default(),
+                tin: None,
+                tax_id: Line::default(),
+                currency: None,
+                lang: None,
+                payment_days: None,
+            }
+        },
+        crate::platform::clock::now(),
+    )
+    .expect("годный клиент");
+    let mut writes = Writes::default();
+    writes.insert(&client);
+    Store::open(|_| {})
+        .await
+        .expect("база открыта")
+        .write()
+        .expect("транзакция записи")
+        .commit(writes)
+        .await
+        .expect("клиент записан");
     let (host, mounted) = mount();
 
     let mut wrong = Vec::new();
@@ -190,11 +223,16 @@ async fn choosing_a_language_translates_the_whole_window() {
         None => wrong.push("нет кнопки профиля".to_owned()),
     }
     sleep(50).await;
-    for add in [Key::AccountAdd, Key::ActivityAdd, Key::StopAdd, Key::ClientAdd] {
+    for add in [Key::AccountAdd, Key::ActivityAdd, Key::StopAdd, Key::ClientAdd, Key::DocNewInvoice] {
         match button(&host, &[t(Lang::Am, add)]) {
             Some(add) => add.click(),
             None => wrong.push(format!("нет кнопки {add:?}")),
         }
+    }
+    sleep(50).await;
+    match select(&host, t(Lang::Am, Key::DocClient), 0) {
+        Some(clients) => pick(&clients, &client.id().to_string()),
+        None => wrong.push("нет выбора клиента в форме счёта".to_owned()),
     }
     sleep(50).await;
 
@@ -223,7 +261,15 @@ async fn choosing_a_language_translates_the_whole_window() {
         sleep(50).await;
         let text = host.text_content().unwrap_or_default();
         steps.push(format!("{lang:?}: {} знаков", text.chars().count()));
-        for key in [Key::BackupTitle, Key::ProfileAccounts, Key::StopFrom, Key::ClientCountry] {
+        for key in [
+            Key::BackupTitle,
+            Key::ProfileAccounts,
+            Key::StopFrom,
+            Key::ClientCountry,
+            Key::DocServiceDate,
+            Key::DocItemsHint,
+            Key::DocCashReceipt,
+        ] {
             if !text.contains(t(lang, key)) {
                 wrong.push(format!("{lang:?}: нет {key:?} на этом языке"));
             }

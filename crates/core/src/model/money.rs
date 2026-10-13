@@ -285,12 +285,13 @@ pub enum RateError {
 }
 
 /// Деление с округлением половины от нуля: 18 096,5 → 18 097,
-/// −18 096,5 → −18 097, 3 619,3 → 3 619.
+/// −18 096,5 → −18 097, 3 619,3 → 3 619. Им же округляется сумма строки
+/// счёта — цена, умноженная на дробное количество (`model::document`).
 ///
 /// TODO(задача 17): правило округления по закону. До сверки — обычное
 /// арифметическое, и тест `rounding_is_half_away_from_zero_until_task_17`
 /// держит его: смена правила должна быть решением, а не случайностью.
-fn div_round_half_away_from_zero(numerator: i128, denominator: i128) -> i128 {
+pub(crate) fn div_round_half_away_from_zero(numerator: i128, denominator: i128) -> i128 {
     debug_assert!(denominator > 0, "знаменатель курса всегда положителен");
     let quotient = numerator / denominator;
     let remainder = numerator % denominator;

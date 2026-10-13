@@ -341,6 +341,106 @@ ul.clients.deleted .client-name {
   column-gap: var(--space-3);
 }
 
+/* Счета и акты (задача 11): список документов и строки документа — как
+   список клиентов, строками с линией. */
+ul.documents,
+ul.items {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+ul.documents li,
+ul.items li {
+  display: grid;
+  gap: var(--space-1);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+ul.documents .actions {
+  margin-top: var(--space-1);
+}
+
+/* Название документа и статус — в строку; на телефоне статус переносится
+   под название. */
+.doc-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: var(--weight-strong);
+}
+
+/* Удалённые черновики — тише живых, как удалённые клиенты. */
+ul.documents.deleted .doc-title {
+  color: var(--text-muted);
+}
+
+/* Статус документа — словом в рамке: слово говорит, рамка и цвет только
+   помогают (Правило 4). Цвета — те же пары статусов на фонах, что
+   проверяет tokens.css. */
+.status {
+  padding: 0 var(--space-2);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-round);
+  font-size: var(--font-size-sm);
+  font-weight: var(--weight-regular);
+}
+
+.status.done {
+  color: var(--success-text);
+}
+
+.status.waiting {
+  color: var(--warning-text);
+}
+
+.status.late {
+  color: var(--danger-text);
+}
+
+.status.muted {
+  color: var(--text-muted);
+}
+
+/* Итог документа и сколько осталось оплатить. */
+.total {
+  font-weight: var(--weight-strong);
+}
+
+/* Оплата счёта: своя группа под реквизитами. Поступление и «Убрать» —
+   в строку. */
+.payments {
+  margin-top: var(--space-3);
+}
+
+ul.items li.payment {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-3);
+}
+
+ul.items li.payment button {
+  margin-top: 0;
+}
+
+/* Повтор счёта: что будет и кнопка. */
+.repeat {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.repeat button {
+  margin-top: 0;
+}
+
 /* Сообщение об удалении и «Восстановить» рядом с ним. */
 .notice-row {
   display: flex;

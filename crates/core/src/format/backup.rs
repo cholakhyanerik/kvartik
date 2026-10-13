@@ -66,9 +66,11 @@ use super::{
 };
 use crate::model::client::Client;
 use crate::model::date::Date;
+use crate::model::document::Document;
 use crate::model::logo::Logo;
 use crate::model::profile::Profile;
 use crate::model::record::{RecordMeta, Timestamp};
+use crate::model::recurring::Recurring;
 
 /// Метка файла копии: по ней свой файл отличается от чужого JSON. Часть
 /// формата — не меняется и при смене имени программы (задача 16).
@@ -166,6 +168,8 @@ pub const KINDS: &[Kind] = &[
     Kind::of::<Profile>(),
     Kind::of::<Logo>(),
     Kind::of::<Client>(),
+    Kind::of::<Document>(),
+    Kind::of::<Recurring>(),
 ];
 
 fn find(kinds: &[Kind], name: &str) -> Option<Kind> {
@@ -541,9 +545,9 @@ pub fn open(text: &str) -> Result<Sealed, BackupError> {
         return Err(BackupError::NotBackup);
     }
     match mark.format_version {
-        // Шапка, замок и список записей у версий 1 и 2 одинаковы: версия 2
-        // прибавила виды записей, а их разбирает `decode_record` по версии
-        // файла.
+        // Шапка, замок и список записей у версий 1–5 одинаковы: версии 2–5
+        // прибавили виды записей и поле, а их разбирает `decode_record` по
+        // версии файла.
         FIRST_VERSION..=FORMAT_VERSION => {}
         found if found > FORMAT_VERSION => return Err(BackupError::Newer { found }),
         // Версий до первой нет.

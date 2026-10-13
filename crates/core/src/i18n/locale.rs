@@ -127,6 +127,21 @@ pub fn rate(lang: Lang, per_unit_e4: i64) -> String {
     out
 }
 
+/// Десятичное число без нулей в конце дробной части: количество в строке
+/// счёта — `37,5`, `1`, `0,125`. `scaled` — значение, умноженное на
+/// `10^digits`. Что записала она, то `parse_decimal` с теми же `digits`
+/// и прочтёт.
+pub fn decimal(lang: Lang, scaled: i64, digits: u32) -> String {
+    let (mut scaled, mut digits) = (scaled, digits);
+    while digits > 0 && scaled % 10 == 0 {
+        scaled /= 10;
+        digits -= 1;
+    }
+    let mut out = String::new();
+    push_signed(&mut out, lang, scaled, digits);
+    out
+}
+
 /// Дата: `11.10.2026` в армянском и русском, `Oct 11, 2026` в английском.
 ///
 /// Русская запись — короткая из CLDR (`dd.MM.y`). Армянская — тоже, но год
@@ -219,6 +234,12 @@ pub fn parse_money(lang: Lang, input: &str, currency: Currency) -> Result<Money,
 /// курс, решает `ExchangeRate::new`.
 pub fn parse_rate(lang: Lang, input: &str) -> Result<i64, ParseError> {
     parse_scaled(lang, input, RATE_DIGITS)
+}
+
+/// Десятичное число, введённое человеком, — количество в строке счёта:
+/// `37,5` при трёх знаках → 37 500. Правила — те же, что у `parse_money`.
+pub fn parse_decimal(lang: Lang, input: &str, digits: u32) -> Result<i64, ParseError> {
+    parse_scaled(lang, input, digits)
 }
 
 /// Разбирает число с `digits` знаками после запятой в целое, умноженное на
@@ -502,6 +523,31 @@ mod tests {
         assert!(wrong.is_empty(), "курсы записаны не так: {wrong:#?}");
     }
 
+    /// Количество — без нулей в конце дробной части, разряды — по языку.
+    #[test]
+    fn decimals_drop_trailing_zeros() {
+        let cases = [
+            (Lang::Ru, 37_500, "37,5"),
+            (Lang::Ru, 1_000, "1"),
+            (Lang::Ru, 125, "0,125"),
+            (Lang::Ru, 0, "0"),
+            (Lang::Ru, -1_500, "-1,5"),
+            (Lang::Ru, 1_234_000, "1 234"),
+            (Lang::Am, 1_234_000, "1234"),
+            (Lang::Am, 12_345_250, "12 345,25"),
+            (Lang::En, 1_234_500, "1,234.5"),
+            (Lang::En, 1_234, "1.234"),
+        ];
+        let mut wrong = Vec::new();
+        for (lang, scaled, expected) in cases {
+            let got = decimal(lang, scaled, 3);
+            if got != nb(expected) {
+                wrong.push(format!("{lang:?} {scaled}: «{got}», а не «{expected}»"));
+            }
+        }
+        assert!(wrong.is_empty(), "количество записано не так: {wrong:#?}");
+    }
+
     /// Дата — цифрами в армянском и русском, месяцем словом в английском.
     /// Все двенадцать английских месяцев выписаны по `Intl.DateTimeFormat`
     /// (CLDR 48, 2026-10-11).
@@ -711,6 +757,12 @@ mod tests {
                 let text = rate(lang, per_unit_e4);
                 if parse_rate(lang, &text) != Ok(per_unit_e4) {
                     lost.push(format!("{lang:?} курс {per_unit_e4} → «{text}»"));
+                }
+            }
+            for scaled in values.into_iter().chain(rates) {
+                let text = decimal(lang, scaled, 3);
+                if parse_decimal(lang, &text, 3) != Ok(scaled) {
+                    lost.push(format!("{lang:?} количество {scaled} → «{text}»"));
                 }
             }
         }
