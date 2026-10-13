@@ -13,6 +13,7 @@ mod lang;
 pub mod panic;
 mod profile;
 mod pwa;
+mod split;
 mod storage;
 
 use std::rc::Rc;
@@ -124,6 +125,20 @@ pub fn App() -> impl IntoView {
             // раздел о хранении.
             Err(error) => storage.set(Storage::Failed(error)),
         }
+    });
+
+    // Части wasm — в память, когда рабочий экран готов и страницей правит
+    // service worker: тогда они приходят из его кэша, а не делят канал
+    // с первым заходом (`ui/split.rs`). Один раз.
+    Effect::new(move |done: Option<bool>| {
+        if done == Some(true) {
+            return true;
+        }
+        let ready = matches!(storage.get(), Storage::Ready(_)) && program.serving();
+        if ready {
+            leptos::task::spawn_local(split::preload());
+        }
+        ready
     });
 
     view! {

@@ -1,10 +1,17 @@
-//! Сборка сайта: `sw.js` со списком файлов для кэша и хэшем сборки
-//! (задача 8).
+//! Сборка сайта после Trunk: wasm окна с частями (задача 58, `wasm.rs`)
+//! и `sw.js` со списком файлов для кэша и хэшем сборки (задача 8).
 //!
 //! Зовёт её Trunk хуком `post_build` (`crates/app/Trunk.toml`): к этому
-//! времени все файлы сайта уже лежат в папке сборки, а `index.html` дописан
-//! (по исходникам trunk 0.22.0-rc.2, `src/pipelines/html.rs`). Папку она
-//! берёт из переменной `TRUNK_STAGING_DIR`, а шаблон — путём из аргумента.
+//! времени остальные файлы сайта уже лежат в папке сборки, а `index.html`
+//! дописан (по исходникам trunk 0.22.0-rc.2, `src/pipelines/html.rs`).
+//! Папку она берёт из переменной `TRUNK_STAGING_DIR`, а шаблон — путём из
+//! аргумента: `kvartik-sw [--wasm <пакет>] <шаблон sw.js>`. С `--wasm`
+//! она сначала собирает wasm пакета и вписывает его запуск в страницу,
+//! а потом пишет `sw.js` по всем файлам, wasm в том числе. Одна программа,
+//! а не два хука: хуки одной стадии Trunk идут одновременно (по исходникам
+//! trunk 0.22.0-rc.2, `src/hooks.rs`), а `sw.js` должен видеть готовый wasm.
+//! Без `--wasm` — только `sw.js`: так переписывают `sw.js` у копии `dist/`
+//! для прогона новой версии (CLAUDE.md, Правило 2).
 //!
 //! Зачем: браузер узнаёт о новой версии сайта, только сравнивая `sw.js`
 //! с прошлым байт в байт (по спецификации Service Worker, «Update»). Имена
@@ -17,6 +24,8 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+
+mod wasm;
 
 /// Строка шаблона, вместо которой встаёт хэш сборки.
 const BUILD_LINE: &str = r#"const BUILD = "dev";"#;
@@ -48,19 +57,32 @@ fn run() -> Result<String, String> {
     let staging = env::var_os("TRUNK_STAGING_DIR")
         .map(PathBuf::from)
         .ok_or("нет TRUNK_STAGING_DIR: программу зовёт хук Trunk (crates/app/Trunk.toml)")?;
-    let template_path = env::args_os()
-        .nth(1)
-        .map(PathBuf::from)
-        .ok_or("ожидался путь к шаблону sw.js")?;
+    let mut args = env::args().skip(1);
+    let mut first = args.next();
+    let package = if first.as_deref() == Some("--wasm") {
+        let package = args.next().ok_or("после --wasm ожидалось имя пакета")?;
+        first = args.next();
+        Some(package)
+    } else {
+        None
+    };
+    let template_path = PathBuf::from(first.ok_or("ожидался путь к шаблону sw.js")?);
     let template = fs::read_to_string(&template_path)
         .map_err(|error| format!("{}: {error}", template_path.display()))?;
+    let wasm = match &package {
+        Some(package) => {
+            let built = wasm::build(package, &staging)?;
+            format!(", wasm {} с частями: {}", built.hash, built.parts)
+        }
+        None => String::new(),
+    };
     let files = collect(&staging)?;
     let build = build_id(&template, &files);
     let sw = render(&template, &build, &files)?;
     let output = staging.join(OUTPUT);
     fs::write(&output, sw).map_err(|error| format!("{}: {error}", output.display()))?;
     Ok(format!(
-        "kvartik-sw: сборка {build}, файлов в кэше {}",
+        "kvartik-sw: сборка {build}, файлов в кэше {}{wasm}",
         precached(&files).count() + 1
     ))
 }
@@ -118,14 +140,21 @@ fn collect(root: &Path) -> Result<Vec<File>, String> {
 /// хэш только отличает одну сборку от другой. Длина перед содержимым — чтобы
 /// граница между путём и байтами не могла сдвинуться.
 fn build_id(template: &str, files: &[File]) -> String {
+    digest(
+        std::iter::once((OUTPUT, template.as_bytes()))
+            .chain(files.iter().map(|file| (file.path.as_str(), file.bytes.as_slice()))),
+    )
+}
+
+/// Хэш путей и содержимого: FNV-1a, 64 бита, 16 знаков. Почему свой —
+/// у [`build_id`]; им же `wasm.rs` называет файлы wasm.
+fn digest<'a>(entries: impl IntoIterator<Item = (&'a str, &'a [u8])>) -> String {
     fn feed(hash: u64, bytes: &[u8]) -> u64 {
         bytes.iter().fold(hash, |hash, byte| {
             (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
         })
     }
-    let entries = std::iter::once((OUTPUT, template.as_bytes()))
-        .chain(files.iter().map(|file| (file.path.as_str(), file.bytes.as_slice())));
-    let hash = entries.fold(0xcbf2_9ce4_8422_2325, |hash, (path, bytes)| {
+    let hash = entries.into_iter().fold(0xcbf2_9ce4_8422_2325, |hash, (path, bytes)| {
         let hash = feed(hash, path.as_bytes());
         let hash = feed(hash, &[0]);
         let hash = feed(hash, &(bytes.len() as u64).to_le_bytes());

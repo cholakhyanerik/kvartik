@@ -78,9 +78,19 @@ cargo install trunk --locked --version 0.22.0-rc.2
 ```
 
 Trunk нужен именно 0.22: без `--version` cargo ставит 0.21.14, и сборка
-с ней откажется работать. При первой сборке Trunk сам скачивает с GitHub
-`wasm-bindgen` и `wasm-opt` нужных версий; если ему мешает ошибка DNS,
-обход описан в [CLAUDE.md](CLAUDE.md) (Правило 3).
+с ней откажется работать.
+
+Ещё нужны две программы в PATH: `wasm-bindgen` **0.2.129** (та же версия,
+что крейт `wasm-bindgen` в `Cargo.lock`) и `wasm-opt` из binaryen
+**version_131**. Их берут готовыми из выпусков на GitHub —
+`wasm-bindgen-0.2.129-<система>.tar.gz` в
+[wasm-bindgen](https://github.com/wasm-bindgen/wasm-bindgen/releases/tag/0.2.129)
+и `binaryen-version_131-<система>.tar.gz` в
+[binaryen](https://github.com/WebAssembly/binaryen/releases/tag/version_131),
+сверив сумму sha256 с файлом суммы рядом с архивом, — и кладут, например,
+в `~/.cargo/bin`. Окно режется на части, которые грузятся по нажатию, и эти
+программы зовёт сборка сама; не той версии — она остановится и скажет об
+этом.
 
 Посмотреть программу в браузере — `trunk serve` из `crates/app`, потом
 открыть <http://127.0.0.1:8080>:
@@ -104,7 +114,8 @@ Rust 2024, четыре крейта: `kvartik-core` (`crates/core/`) — всё
 `kvartik-app` (`crates/app/`) — окно на Leptos (CSR) в WebAssembly;
 `kvartik-keygen` (`crates/keygen/`) — выпуск ключей лицензии на машине
 автора, в сайт не попадает; `kvartik-sw` (`crates/sw/`) — шаг сборки,
-который пишет `sw.js` для работы без сети. Слои, их границы и правила работы над кодом
+который режет wasm окна на части и пишет `sw.js` для работы без сети. Слои,
+их границы и правила работы над кодом
 описаны в [CLAUDE.md](CLAUDE.md); проверки оттуда же CI гоняет на каждый
 push.
 

@@ -36,9 +36,13 @@
     <link rel="icon" href="icons/icon-32.png" sizes="32x32" type="image/png" />
     <link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png" />
     <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
-    <!-- wasm окна. `s` — wasm-opt на размер, только в `trunk build --release`
-         (Правило 1; замер — в CLAUDE.md). -->
-    <link data-trunk rel="rust" data-wasm-opt="s" />
+    <!-- wasm окна и его запуск вписывает в конец head программа сборки
+         (хук в Trunk.toml, crates/sw/src/wasm.rs), а не Trunk: окно режется
+         на части, которые грузятся по нажатию (задача 58). `data-trunk-skip`
+         — Trunk его не собирает: без этой строки он нашёл бы Cargo.toml
+         рядом и собрал бы wasm сам, со своим запуском (по исходникам trunk
+         0.22.0-rc.2, `src/pipelines/html.rs`, `rust/mod.rs`). -->
+    <link data-trunk rel="rust" data-trunk-skip />
   </head>
   <body></body>
 </html>

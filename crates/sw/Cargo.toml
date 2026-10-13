@@ -1,6 +1,6 @@
 [package]
 name = "kvartik-sw"
-description = "Сборка сайта Kvartik: sw.js со списком файлов и хэшем сборки"
+description = "Сборка сайта Kvartik: wasm окна с частями и sw.js со списком файлов и хэшем сборки"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,31 @@ repository.workspace = true
 publish.workspace = true
 
 # Программа сборки: её зовёт Trunk хуком `post_build` (`crates/app/Trunk.toml`)
-# на машине разработчика и в CI. В сайт попадает только написанный ею
-# `sw.js`, а её код — никогда. Зависимостей нет и не нужно: обход папки,
-# хэш и подстановка двух строк — стандартная библиотека.
+# на машине разработчика и в CI. В сайт попадают только написанные ею файлы
+# — wasm окна, его JS и `sw.js`, — а её код никогда. Поэтому её
+# зависимости пользователь не скачивает, но они исполняются на машине
+# и в CI: проверяет их `cargo deny check`, как и остальные (Правило 13).
 [dependencies]
+# Разрез wasm на части (задача 58): тот же код, что у программы
+# `wasm-split-cli`, но библиотекой — с именем загрузчика частей, которое
+# CLI задать не даёт. Владельцы — WorldSEnder и gbj (автор Leptos), MIT OR
+# Apache-2.0, `build.rs` нет (разбор задачи 57, 2026-10-13). В 0.2.x и держится
+# за внутренности wasm-bindgen: после каждого обновления wasm-bindgen —
+# проверка разреза (CLAUDE.md, Правило 3).
+wasm_split_cli_support = "0.2.3"
+# Импорты и экспорты частей и главного модуля для проверки, что они
+# сходятся (`src/wasm.rs`). Уже в дереве через `wasm_split_cli_support` —
+# той же версии.
+wasmparser = "0.258.0"
+# Путь к собранному wasm — из сообщений `cargo build --message-format=json`.
+# Уже в дереве через ядро.
+serde_json = "1.0.154"
+# `integrity` у ссылок на wasm и JS (SRI: SHA-384 в base64), как ставил
+# Trunk. Оба уже в дереве.
+sha2 = "0.10.9"
+base64 = "0.22.1"
+
+[dev-dependencies]
+# Модуль wasm для теста чтения импортов и экспортов. Уже в дереве через
+# `wasm_split_cli_support` — той же версии.
+wasm-encoder = "0.258.0"

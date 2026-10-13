@@ -245,15 +245,19 @@ fn page_links_the_manifest_and_icons() {
     );
 }
 
-/// Шаблон service worker лежит там, откуда его берёт хук сборки
-/// (`Trunk.toml`), и сам в сайт не копируется: в сайте должен оказаться
-/// только `sw.js`, написанный `kvartik-sw`, — шаблон с `"dev"` выключил бы
-/// обновления у всех.
+/// Wasm окна и `sw.js` собирает хук сборки (`Trunk.toml`), а не Trunk.
+/// Шаблон service worker лежит там, откуда его берёт хук, и сам в сайт не
+/// копируется: в сайте должен оказаться только `sw.js`, написанный
+/// `kvartik-sw`, — шаблон с `"dev"` выключил бы обновления у всех. А wasm
+/// Trunk не собирает (`data-trunk-skip`): без этого он собрал бы свой,
+/// неразрезанный, со своим запуском (задача 58).
 #[test]
-fn service_worker_template_goes_through_the_hook() {
+fn wasm_and_service_worker_go_through_the_hook() {
     let trunk = fs::read_to_string(app_dir().join("Trunk.toml")).expect("Trunk.toml читается");
     assert!(
-        trunk.contains(r#"command_arguments = ["run", "--quiet", "--package", "kvartik-sw", "--", "public/sw.js"]"#),
+        trunk.contains(
+            r#"command_arguments = ["run", "--quiet", "--package", "kvartik-sw", "--", "--wasm", "kvartik-app", "public/sw.js"]"#
+        ),
         "хук kvartik-sw в Trunk.toml не найден"
     );
     assert!(app_dir().join("public/sw.js").is_file());
@@ -261,5 +265,13 @@ fn service_worker_template_goes_through_the_hook() {
     assert!(
         !page.contains("public/sw.js") && !page.contains(r#"href="public""#),
         "шаблон sw.js копируется в сайт как есть"
+    );
+    let rust: Vec<_> = page
+        .split('<')
+        .filter(|tag| tag.starts_with("link ") && tag.contains(r#"rel="rust""#))
+        .collect();
+    assert!(
+        rust.len() == 1 && rust[0].contains("data-trunk-skip"),
+        "wasm окна собирает Trunk, а не хук: {rust:?}"
     );
 }

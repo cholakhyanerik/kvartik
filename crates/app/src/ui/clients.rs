@@ -34,6 +34,7 @@ use super::documents::Documents;
 use super::form::{
     AreaField, CURRENCIES, FieldError, TextField, currency_code, currency_key, optional,
 };
+use super::split::{part, split};
 use super::storage::error_key;
 use super::{Base, tr};
 use crate::platform::clock;
@@ -204,14 +205,16 @@ pub fn ClientsSection(
                 <ClientList lang clients documents base backups mode notice />
             }
             .into_any(),
-            (Phase::Ready, Mode::New) => view! {
-                <ClientForm lang existing=None clients base backups mode notice />
-            }
-            .into_any(),
-            (Phase::Ready, Mode::Edit(id)) => view! {
-                <ClientForm lang existing=clients.get(id) clients base backups mode notice />
-            }
-            .into_any(),
+            (Phase::Ready, Mode::New) => part(
+                lang,
+                client_form(lang, None, clients, base, backups, mode, notice),
+                move || mode.set(Mode::List),
+            ),
+            (Phase::Ready, Mode::Edit(id)) => part(
+                lang,
+                client_form(lang, clients.get(id), clients, base, backups, mode, notice),
+                move || mode.set(Mode::List),
+            ),
         };
         Some(view! {
             <h2>{tr(lang, Key::ClientsTitle)}</h2>
@@ -590,6 +593,23 @@ impl Form {
         };
         data.check().ok()?;
         Some(data)
+    }
+}
+
+split! {
+    /// Форма клиента — своей частью wasm (`ui/split.rs`): она нужна только
+    /// по «Добавить клиента» и «Изменить».
+    pub(super) fn client_form(
+        lang: ReadSignal<Lang>,
+        existing: Option<Client>,
+        clients: Clients,
+        base: Base,
+        backups: Backups,
+        mode: RwSignal<Mode>,
+        notice: RwSignal<Option<Notice>>,
+    ) -> AnyView, preload preload_form
+    {
+        view! { <ClientForm lang existing clients base backups mode notice /> }.into_any()
     }
 }
 

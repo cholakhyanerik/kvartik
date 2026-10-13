@@ -38,6 +38,7 @@ use leptos::prelude::*;
 use super::backup::Backups;
 use super::clients::Clients;
 use super::form::{CURRENCIES, TextField, currency_code, currency_key};
+use super::split::{part, split};
 use super::storage::error_key;
 use super::{Base, tr};
 use crate::platform::clock;
@@ -366,6 +367,8 @@ pub fn DocumentsSection(
         },
         false,
     );
+    // Часть формы или просмотра не загрузилась — назад к списку.
+    let back = move || ctx.mode.set(Mode::List);
     move || {
         let body = match (phase.get(), ctx.mode.get()) {
             (Phase::Loading, _) => return None,
@@ -375,7 +378,7 @@ pub fn DocumentsSection(
             .into_any(),
             (Phase::Ready, Mode::List) => view! { <DocList ctx /> }.into_any(),
             (Phase::Ready, Mode::New(kind)) => {
-                view! { <DocForm ctx existing=None start=Start::Blank(kind, ctx.today) /> }.into_any()
+                part(lang, document_form(ctx, None, Start::Blank(kind, ctx.today)), back)
             }
             (Phase::Ready, Mode::ActFor(id)) => {
                 let start = ctx
@@ -383,20 +386,18 @@ pub fn DocumentsSection(
                     .get(id)
                     .and_then(|invoice| invoice.act_data(ctx.today_or(invoice.data().date)).ok());
                 match start {
-                    Some(data) => {
-                        view! { <DocForm ctx existing=None start=Start::Data(data) /> }.into_any()
-                    }
+                    Some(data) => part(lang, document_form(ctx, None, Start::Data(data)), back),
                     None => view! { <DocList ctx /> }.into_any(),
                 }
             }
             (Phase::Ready, Mode::Edit(id)) => match ctx.documents.get(id) {
                 Some(draft) => {
                     let start = Start::Data(draft.data().clone());
-                    view! { <DocForm ctx existing=Some(draft) start /> }.into_any()
+                    part(lang, document_form(ctx, Some(draft), start), back)
                 }
                 None => view! { <DocList ctx /> }.into_any(),
             },
-            (Phase::Ready, Mode::View(id)) => view! { <DocView ctx id /> }.into_any(),
+            (Phase::Ready, Mode::View(id)) => part(lang, opened_document(ctx, id), back),
         };
         Some(view! {
             <h2>{tr(lang, Key::DocsTitle)}</h2>
@@ -1018,6 +1019,24 @@ fn shown_problem(
             .then(&problem)
             .flatten()
             .map(|text| view! { <p class="field-error" role="alert">{text}</p> })
+    }
+}
+
+split! {
+    /// Форма документа — своей частью wasm (`ui/split.rs`): она нужна только
+    /// по «Новый счёт», «Новый акт», «Акт по счёту» и правке черновика.
+    pub(super) fn document_form(ctx: Ctx, existing: Option<Document>, start: Start) -> AnyView,
+        preload preload_form
+    {
+        view! { <DocForm ctx existing start /> }.into_any()
+    }
+}
+
+split! {
+    /// Выпущенный документ — своей частью wasm (`ui/split.rs`): просмотр
+    /// с оплатами и действиями нужен только по «Открыть».
+    pub(super) fn opened_document(ctx: Ctx, id: RecordId) -> AnyView, preload preload_opened {
+        view! { <DocView ctx id /> }.into_any()
     }
 }
 

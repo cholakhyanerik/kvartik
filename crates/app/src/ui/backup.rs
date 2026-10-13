@@ -20,6 +20,7 @@ use leptos::ev::{Event, MouseEvent, SubmitEvent};
 use leptos::prelude::*;
 use web_sys::HtmlInputElement;
 
+use super::split::{Task, split};
 use super::storage::{Storage, error_key};
 use super::{Base, tr};
 use crate::platform::clock;
@@ -262,7 +263,10 @@ fn MakeBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
         making.set(Making::Busy);
         saved.set(false);
         leptos::task::spawn_local(async move {
-            let outcome = make(backups, &typed, fresh.then_some(again.as_str())).await;
+            let outcome = match making_task(backups, typed, fresh.then_some(again)).await {
+                Ok(task) => task.await,
+                Err(_) => Err(Problem::Say(Key::PartFailed)),
+            };
             if outcome.is_ok() {
                 password.set(String::new());
                 repeat.set(String::new());
@@ -362,6 +366,39 @@ fn MakeBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
     }
 }
 
+split! {
+    /// Сборка и шифр копии — своей частью wasm (`ui/split.rs`): нужны только
+    /// по «Сделать копию».
+    pub(super) fn making_task(
+        backups: Backups,
+        typed: String,
+        repeat: Option<String>,
+    ) -> Task<Result<Ready, Problem>>, preload preload_make
+    {
+        Box::pin(async move { make(backups, &typed, repeat.as_deref()).await })
+    }
+}
+
+split! {
+    /// Разбор выбранного файла копии — своей частью wasm (`ui/split.rs`).
+    pub(super) fn opening(text: String) -> Result<Sealed, Problem>, preload preload_open {
+        backup::open(&text).map_err(Problem::from)
+    }
+}
+
+split! {
+    /// Расшифровка и слияние — своей частью wasm (`ui/split.rs`): нужны
+    /// только по «Восстановить».
+    pub(super) fn restoring_task(
+        backups: Backups,
+        sealed: Rc<Sealed>,
+        typed: String,
+    ) -> Task<Result<Restored, Problem>>, preload preload_restore
+    {
+        Box::pin(async move { restore(backups, &sealed, &typed).await })
+    }
+}
+
 /// Собрать и зашифровать копию. `repeat` — повтор нового пароля; `None` —
 /// пароль на устройстве уже задан, и введённый сверяется с ним.
 async fn make(backups: Backups, typed: &str, repeat: Option<&str>) -> Result<Ready, Problem> {
@@ -428,10 +465,12 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
         };
         restoring.set(Restoring::Busy);
         leptos::task::spawn_local(async move {
-            let opened = file::read(&chosen, MAX_FILE_BYTES)
-                .await
-                .map_err(Problem::from)
-                .and_then(|text| backup::open(&text).map_err(Problem::from));
+            let opened = match file::read(&chosen, MAX_FILE_BYTES).await {
+                Ok(text) => opening(text)
+                    .await
+                    .unwrap_or(Err(Problem::Say(Key::PartFailed))),
+                Err(error) => Err(Problem::from(error)),
+            };
             // Тот же файл можно будет выбрать снова: без сброса браузер
             // не сообщит о повторном выборе.
             input.set_value("");
@@ -450,7 +489,10 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
         let typed = password.get_untracked();
         restoring.set(Restoring::Busy);
         leptos::task::spawn_local(async move {
-            let outcome = restore(backups, &sealed, &typed).await;
+            let outcome = match restoring_task(backups, Rc::clone(&sealed), typed).await {
+                Ok(task) => task.await,
+                Err(_) => Err(Problem::Say(Key::PartFailed)),
+            };
             if outcome.is_ok() {
                 password.set(String::new());
             }

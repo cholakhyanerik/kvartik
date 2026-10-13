@@ -33,6 +33,7 @@ use super::backup::Backups;
 use super::form::{
     AreaField, CURRENCIES, FieldError, TextField, currency_code, currency_key, optional,
 };
+use super::split::{part, split};
 use super::storage::error_key;
 use super::{Base, tr};
 use crate::platform::clock;
@@ -140,19 +141,14 @@ pub fn ProfileSection(
                 <p role="alert">{tr(lang, error_key(error))}</p>
             }
             .into_any(),
-            State::Ready(profile) if editing.get() => view! {
-                <ProfileForm
-                    lang
-                    data=profile.map(|profile| profile.data().clone())
-                    profiles
-                    base
-                    backups
-                    editing
-                    saved
-                    today
-                />
+            State::Ready(profile) if editing.get() => {
+                let data = profile.map(|profile| profile.data().clone());
+                part(
+                    lang,
+                    profile_form(lang, data, profiles, base, backups, editing, saved, today),
+                    move || editing.set(false),
+                )
             }
-            .into_any(),
             State::Ready(Some(profile)) => view! {
                 <Summary lang data=profile.data().clone() picture=profiles.picture today />
                 {move || saved.get().then(|| view! {
@@ -559,6 +555,25 @@ const fn code_key(error: CodeError) -> Key {
         CodeError::Malformed | CodeError::NoSuchDivision | CodeError::WrongSection => {
             Key::ActivityCodeInvalid
         }
+    }
+}
+
+split! {
+    /// Форма профиля — своей частью wasm (`ui/split.rs`): она нужна только
+    /// по «Заполнить» и «Изменить», а весит больше всех форм.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn profile_form(
+        lang: ReadSignal<Lang>,
+        data: Option<ProfileData>,
+        profiles: Profiles,
+        base: Base,
+        backups: Backups,
+        editing: RwSignal<bool>,
+        saved: RwSignal<bool>,
+        today: Option<Date>,
+    ) -> AnyView, preload preload_form
+    {
+        view! { <ProfileForm lang data profiles base backups editing saved today /> }.into_any()
     }
 }
 

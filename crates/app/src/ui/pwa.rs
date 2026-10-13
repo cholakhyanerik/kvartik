@@ -44,7 +44,7 @@ impl NewVersion {
                     *self = Self::Elsewhere;
                 }
             }
-            Event::CanInstall | Event::Installed => {}
+            Event::CanInstall | Event::Installed | Event::Serving => {}
         }
     }
 }
@@ -88,7 +88,7 @@ impl Install {
                 }
             }
             Event::Installed => *self = Self::Installed,
-            Event::UpdateReady | Event::UpdatedElsewhere => {}
+            Event::UpdateReady | Event::UpdatedElsewhere | Event::Serving => {}
         }
     }
 
@@ -107,6 +107,9 @@ impl Install {
 pub struct Program {
     version: RwSignal<NewVersion>,
     install: RwSignal<Install>,
+    /// Страницей правит service worker, и весь сайт — в его кэше
+    /// ([`Event::Serving`]).
+    serving: RwSignal<bool>,
     pwa: StoredValue<Pwa, LocalStorage>,
 }
 
@@ -118,15 +121,26 @@ impl Program {
             browser::installed(),
             browser::install_by_hand(),
         ));
+        let serving = RwSignal::new(false);
         let pwa = Pwa::start(move |event| {
             version.update(|state| state.apply(event));
             install.update(|state| state.apply(event));
+            if event == Event::Serving {
+                serving.set(true);
+            }
         });
         Self {
             version,
             install,
+            serving,
             pwa: StoredValue::new_local(pwa),
         }
+    }
+
+    /// Правит ли страницей service worker — отслеживаемое: части wasm
+    /// окно загружает заранее, только когда они придут из его кэша.
+    pub fn serving(&self) -> bool {
+        self.serving.get()
     }
 
     fn apply_update(&self) {

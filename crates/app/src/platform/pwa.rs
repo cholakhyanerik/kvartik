@@ -70,6 +70,10 @@ pub enum Event {
     CanInstall,
     /// Программу установили.
     Installed,
+    /// Страницей правит service worker, и весь сайт лежит в его кэше: сразу
+    /// при открытии или после первой установки (`clients.claim()`). Части
+    /// wasm теперь приходят из кэша, а не из сети (`ui/split.rs`).
+    Serving,
 }
 
 /// Программа как приложение. Одна на окно.
@@ -203,6 +207,8 @@ impl Shared {
         // без service worker, и новой версии нет.
         if self.controlled.replace(true) {
             self.emit(Event::UpdatedElsewhere);
+        } else {
+            self.emit(Event::Serving);
         }
     }
 
@@ -234,6 +240,9 @@ async fn register(shared: Rc<Shared>) {
         return;
     };
     shared.controlled.set(container.controller().is_some());
+    if shared.controlled.get() {
+        shared.emit(Event::Serving);
+    }
     let changed = Rc::clone(&shared);
     listen(
         |handler| container.set_oncontrollerchange(handler),
