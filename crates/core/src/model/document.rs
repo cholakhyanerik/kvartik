@@ -42,7 +42,7 @@ use super::date::Date;
 use super::money::{Currency, Money, MoneyError, div_round_half_away_from_zero};
 use super::profile::{Email, Localized, ProfileData};
 use super::record::{RecordId, RecordMeta, Timestamp};
-use super::text::{Line, Lines};
+use super::text::{Line, Lines, fold};
 use super::tin::Tin;
 use crate::format::Stored;
 use crate::i18n::Lang;
@@ -837,6 +837,35 @@ impl Document {
             ))
         });
         listed
+    }
+
+    /// Живые документы по дате — для списка, разбитого по месяцам: свежие
+    /// сверху; в один день черновик — выше выпущенных (его ещё выпускать),
+    /// выпущенные — по номеру, больший выше.
+    pub fn by_date(documents: &[Document]) -> Vec<&Document> {
+        let mut listed: Vec<&Document> = documents.iter().filter(|d| !d.is_deleted()).collect();
+        listed.sort_by(|a, b| {
+            (b.data.date, a.issued.is_some(), b.number(), b.id()).cmp(&(
+                a.data.date,
+                b.issued.is_some(),
+                a.number(),
+                a.id(),
+            ))
+        });
+        listed
+    }
+
+    /// Подходит ли документ к поиску `query`: часть номера (`2026-014`) или
+    /// названия клиента `client`, без учёта регистра, «ё» и «և» (`fold`);
+    /// пустой запрос — подходит любой. Название клиента — от окна: у
+    /// черновика оно ещё в записи клиента, а не в документе.
+    pub fn matches(&self, query: &str, client: &str) -> bool {
+        let query = fold(query);
+        if query.is_empty() {
+            return true;
+        }
+        let number = self.number().map(|number| number.to_string()).unwrap_or_default();
+        fold(client).contains(&query) || number.contains(&query)
     }
 
     /// Счета, которые на день `today` ждут оплаты, — для главного экрана:

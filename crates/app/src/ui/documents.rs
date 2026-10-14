@@ -36,10 +36,11 @@ use kvartik_core::model::text::Line;
 use leptos::ev::SubmitEvent;
 use leptos::prelude::*;
 
-use super::backup::Backups;
+use super::backup::{BackupChip, Backups};
 use super::clients::Clients;
 use super::form::{CURRENCIES, TextField, currency_code, currency_key};
-use super::route::Screen;
+use super::icon::{Icon, icon};
+use super::route::{Router, Screen};
 use super::split::{part, split};
 use super::storage::error_key;
 use super::{Base, tr};
@@ -58,8 +59,8 @@ pub struct Documents {
     /// Сколько черновиков повторяющихся счетов создало последнее открытие.
     created: RwSignal<usize>,
     /// Что показывает раздел и сообщение о сделанном — здесь, а не в самом
-    /// разделе: «Новый счёт» в меню и строка «ждут оплаты» на главном
-    /// экране открывают форму и документ (`new_invoice`, `open`).
+    /// разделе: «Новый счёт» в меню и на главном экране открывает форму
+    /// (`new_invoice`).
     mode: RwSignal<Mode>,
     notice: RwSignal<Option<Notice>>,
 }
@@ -101,15 +102,6 @@ impl Documents {
         self.mode.set(Mode::New(DocKind::Invoice));
     }
 
-    /// Открыть документ: выпущенный — просмотром, черновик — формой.
-    fn open(&self, document: &Document) {
-        self.notice.set(None);
-        self.mode.set(if document.issued().is_some() {
-            Mode::View(document.id())
-        } else {
-            Mode::Edit(document.id())
-        });
-    }
 
     /// Прочитать документы и повторы: когда база открылась и когда её
     /// заменило восстановление из копии. Повторам, которым к дню `today`
@@ -248,7 +240,9 @@ async fn create_due(
     Ok((drafts, moved))
 }
 
-/// Что показывает раздел.
+/// Что показывает раздел: список или форму. Выпущенный документ — не
+/// режим, а адрес экрана (`Screen::Document`): «Назад» на телефоне ведёт
+/// от него к списку.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Mode {
     List,
@@ -258,8 +252,6 @@ enum Mode {
     ActFor(RecordId),
     /// Черновик в форме.
     Edit(RecordId),
-    /// Выпущенный документ.
-    View(RecordId),
 }
 
 /// Сообщение о сделанном — над списком или над документом.
@@ -347,6 +339,8 @@ struct Ctx {
     backups: Backups,
     mode: RwSignal<Mode>,
     notice: RwSignal<Option<Notice>>,
+    /// Открытый экран: выпущенный документ — по адресу.
+    router: Router,
     /// Сегодня — один раз (Архитектура, «Время — параметр»).
     today: Option<Date>,
 }
@@ -358,15 +352,18 @@ impl Ctx {
     }
 }
 
-/// Раздел на языке окна — под заголовком экрана. Пока база открывается —
-/// пусто: «открываем…» только мигнуло бы.
+/// Экран «Счета и акты» на языке окна (дизайн «Kvartik Design»): список
+/// или форма, а выпущенный документ — карточкой: на телефоне вместо списка,
+/// на компьютере рядом с ним. Пока база открывается — только заголовок:
+/// «открываем…» лишь мигнуло бы.
 #[component]
-pub fn DocumentsSection(
+pub fn DocumentsScreen(
     lang: ReadSignal<Lang>,
     documents: Documents,
     clients: Clients,
     base: Base,
     backups: Backups,
+    router: Router,
 ) -> impl IntoView {
     let ctx = Ctx {
         lang,
@@ -376,6 +373,7 @@ pub fn DocumentsSection(
         backups,
         mode: documents.mode,
         notice: documents.notice,
+        router,
         today: clock::today(),
     };
     let phase = Memo::new(move |_| {
@@ -397,9 +395,16 @@ pub fn DocumentsSection(
         },
         false,
     );
-    // Часть формы или просмотра не загрузилась — назад к списку.
+    // Часть формы не загрузилась — назад к списку; часть карточки — тоже.
     let back = move || ctx.mode.set(Mode::List);
-    move || {
+    let close = move || router.go(Screen::Documents);
+    // Открытый документ — из адреса; открытая форма его прячет.
+    let opened = Memo::new(move |_| match router.screen() {
+        Screen::Document(id) => Some(id),
+        _ => None,
+    });
+    let listing = Memo::new(move |_| ctx.mode.get() == Mode::List && phase.get() == Phase::Ready);
+    let body = move || {
         let body = match (phase.get(), ctx.mode.get()) {
             (Phase::Loading, _) => return None,
             (Phase::Failed(error), _) => view! {
@@ -427,9 +432,24 @@ pub fn DocumentsSection(
                 }
                 None => view! { <DocList ctx /> }.into_any(),
             },
-            (Phase::Ready, Mode::View(id)) => part(lang, opened_document(ctx, id), back),
         };
         Some(body)
+    };
+    let detail = move || {
+        let id = opened.get()?;
+        listing.get().then(|| view! {
+            <div class="docs-detail">{part(lang, opened_document(ctx, id), close)}</div>
+        })
+    };
+    view! {
+        <div class="docs" class:opened=move || opened.get().is_some() && listing.get()>
+            <div class="docs-main">
+                <h1 tabindex="-1">{tr(lang, Key::DocsTitle)}</h1>
+                <BackupChip lang backups nudge=true />
+                {body}
+            </div>
+            {detail}
+        </div>
     }
 }
 
@@ -509,8 +529,17 @@ fn money_text(lang: Lang, sum: Option<Money>) -> String {
     sum.map(|sum| i18n::money(lang, sum)).unwrap_or_default()
 }
 
-/// Список: новые документы, сообщения, документы по страницам, удалённые
-/// черновики — по кнопке.
+/// Какие документы показать: все, только счета или только акты.
+const FILTERS: [(Option<DocKind>, Key); 3] = [
+    (None, Key::FilterAll),
+    (Some(DocKind::Invoice), Key::NavDocuments),
+    (Some(DocKind::Act), Key::FilterActs),
+];
+
+/// Список (дизайн «Kvartik Design»): поиск по клиенту и номеру, «все,
+/// счета, акты», документы по месяцам — свежие сверху — и по страницам,
+/// удалённые черновики — по кнопке. Новый счёт на телефоне — круглой
+/// кнопкой «+» внизу, на компьютере — в меню; новый акт — под списком.
 #[component]
 fn DocList(ctx: Ctx) -> impl IntoView {
     let Ctx {
@@ -521,30 +550,68 @@ fn DocList(ctx: Ctx) -> impl IntoView {
         notice,
         ..
     } = ctx;
+    let query = RwSignal::new(String::new());
+    let kind = RwSignal::new(None::<DocKind>);
     let limit = RwSignal::new(PAGE);
     let show_deleted = RwSignal::new(false);
     let failure = RwSignal::new(None::<Problem>);
     let busy = RwSignal::new(false);
-    // Производные от списка — пересчитываются, только когда меняется
-    // список (Правило 1).
-    let listed = Memo::new(move |_| {
-        documents.with(|list, _, _| Document::listed(list).into_iter().cloned().collect::<Vec<_>>())
+    // Производные от списка, поиска и фильтра — пересчитываются, только
+    // когда меняется одно из них (Правило 1).
+    let any = Memo::new(move |_| documents.with(|list, _, _| list.iter().any(|d| !d.is_deleted())));
+    let shown = Memo::new(move |_| {
+        let (query, kind) = (query.get(), kind.get());
+        documents.with(|list, _, _| {
+            Document::by_date(list)
+                .into_iter()
+                .filter(|document| kind.is_none_or(|kind| document.data().kind == kind))
+                .filter(|document| {
+                    let lang = lang.get_untracked();
+                    document.matches(&query, &client_label(lang, document, clients))
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        })
     });
-    let page = Memo::new(move |_| {
-        listed.with(|all| all.iter().take(limit.get()).cloned().collect::<Vec<_>>())
+    // Месяцы страницы — по порядку, у каждого его документы.
+    let months = Memo::new(move |_| {
+        let limit = limit.get();
+        shown.with(|shown| {
+            let mut months: Vec<((u16, u8), Vec<Document>)> = Vec::new();
+            for document in shown.iter().take(limit) {
+                let date = document.data().date;
+                let month = (date.year(), date.month());
+                match months.last_mut() {
+                    Some((last, list)) if *last == month => list.push(document.clone()),
+                    _ => months.push((month, vec![document.clone()])),
+                }
+            }
+            months
+        })
     });
     let deleted = Memo::new(move |_| {
         documents.with(|list, _, _| Document::deleted(list).into_iter().cloned().collect::<Vec<_>>())
     });
     let unreadable = Memo::new(move |_| documents.with(|_, _, unreadable| unreadable));
     let has_clients = Memo::new(move |_| !clients.alive().is_empty());
+    // Год «этого» месяца — без года в заголовке: сегодня, а часы без даты —
+    // год самого свежего документа.
+    let this_year = move || {
+        ctx.today.map(Date::year).unwrap_or_else(|| {
+            shown.with(|shown| shown.first().map_or(Date::MIN_YEAR, |d| d.data().date.year()))
+        })
+    };
 
     let restore = move |id: RecordId| {
         act(ctx, busy, failure, id, Change::Restore, move |_| {
             notice.set(Some(Notice::Restored));
         });
     };
-    let open = move |document: &Document| documents.open(document);
+    let start = move |doc_kind: DocKind| {
+        notice.set(None);
+        documents.created.set(0);
+        mode.set(Mode::New(doc_kind));
+    };
 
     view! {
         {move || (unreadable.get() > 0).then(|| view! {
@@ -564,45 +631,91 @@ fn DocList(ctx: Ctx) -> impl IntoView {
                 }}
             </p>
         })}
-        {move || listed.with(Vec::is_empty).then(|| view! { <p>{tr(lang, Key::DocsAbout)}</p> })}
+        {move || (!any.get()).then(|| view! { <p>{tr(lang, Key::DocsAbout)}</p> })}
         {move || (!has_clients.get()).then(|| view! { <p class="hint">{tr(lang, Key::DocsNeedClient)}</p> })}
-        <div class="actions">
-            <button
-                type="button"
-                disabled=move || !has_clients.get()
-                on:click=move |_| {
-                    notice.set(None);
-                    documents.created.set(0);
-                    mode.set(Mode::New(DocKind::Invoice));
-                }
-            >
-                {tr(lang, Key::DocNewInvoice)}
-            </button>
-            <button
-                type="button"
-                class="secondary"
-                disabled=move || !has_clients.get()
-                on:click=move |_| {
-                    notice.set(None);
-                    documents.created.set(0);
-                    mode.set(Mode::New(DocKind::Act));
-                }
-            >
-                {tr(lang, Key::DocNewAct)}
-            </button>
-        </div>
-        <NoticeLine ctx busy failure />
+        // Сообщение о сделанном — в карточке, когда она открыта, иначе здесь:
+        // дважды на экране оно было бы лишним.
+        <Show when=move || !matches!(ctx.router.screen(), Screen::Document(_))>
+            <NoticeLine ctx busy failure />
+        </Show>
         {move || failure.get().map(|problem| view! { <p role="alert">{tr(lang, problem.key())}</p> })}
-        <ul class="documents">
-            <For each=move || page.get() key=|document| (document.id(), document.meta().modified()) let(document)>
-                <DocRow ctx document open />
-            </For>
-        </ul>
-        {move || (listed.with(Vec::len) > limit.get()).then(|| view! {
+        <Show when=move || any.get()>
+            <div class="docs-tools">
+                <label class="search-field">
+                    <span class="visually-hidden">{tr(lang, Key::DocsSearch)}</span>
+                    {icon(Icon::Search)}
+                    <input
+                        type="search"
+                        bind:value=query
+                        placeholder=move || t(lang.get(), Key::DocsSearch)
+                        autocomplete="off"
+                        maxlength=Line::MAX_CHARS.to_string()
+                        on:input=move |_| limit.set(PAGE)
+                    />
+                </label>
+                <div class="seg" role="group" aria-label=move || t(lang.get(), Key::DocsFilter)>
+                    {FILTERS
+                        .into_iter()
+                        .map(|(value, key)| view! {
+                            <button
+                                type="button"
+                                aria-pressed=move || (kind.get() == value).to_string()
+                                on:click=move |_| {
+                                    kind.set(value);
+                                    limit.set(PAGE);
+                                }
+                            >
+                                {tr(lang, key)}
+                            </button>
+                        })
+                        .collect_view()}
+                </div>
+            </div>
+            {move || shown.with(Vec::is_empty).then(|| view! {
+                <p class="hint">{tr(lang, Key::DocsNotFound)}</p>
+            })}
+        </Show>
+        <For each=move || months.with(|months| months.iter().map(|(month, _)| *month).collect::<Vec<_>>()) key=|month| *month let(month)>
+            <h2 class="month">{move || i18n::month_heading(lang.get(), month.0, month.1, this_year())}</h2>
+            <ul class="list documents">
+                <For
+                    each=move || months.with(|months| {
+                        months.iter().find(|(known, _)| *known == month).map(|(_, list)| list.clone()).unwrap_or_default()
+                    })
+                    key=|document| (document.id(), document.meta().modified())
+                    let(document)
+                >
+                    <DocEntry ctx document />
+                </For>
+            </ul>
+        </For>
+        {move || (shown.with(Vec::len) > limit.get()).then(|| view! {
             <button type="button" class="secondary" on:click=move |_| limit.update(|limit| *limit += PAGE)>
                 {tr(lang, Key::DocsMore)}
             </button>
         })}
+        <div class="actions docs-more">
+            <button
+                type="button"
+                class="secondary"
+                disabled=move || !has_clients.get()
+                on:click=move |_| start(DocKind::Act)
+            >
+                {icon(Icon::Plus)}
+                <span>{tr(lang, Key::DocNewAct)}</span>
+            </button>
+        </div>
+        // Новый счёт — главное действие экрана: на телефоне круглой кнопкой
+        // над вкладками, на компьютере он в меню (`ui/nav.rs`).
+        <button
+            type="button"
+            class="fab"
+            aria-label=move || t(lang.get(), Key::DocNewInvoice)
+            disabled=move || !has_clients.get()
+            on:click=move |_| start(DocKind::Invoice)
+        >
+            {icon(Icon::Plus)}
+        </button>
         <Show when=move || { !deleted.with(Vec::is_empty) }>
             <button
                 type="button"
@@ -649,43 +762,58 @@ fn DocList(ctx: Ctx) -> impl IntoView {
     }
 }
 
-/// Документ в списке: название и статус, клиент, дата и итог, «Открыть».
+/// Документ в списке (дизайн «Kvartik Design»): клиент, вид с номером
+/// и дата слева, итог и статус словом справа. Вся строка — ссылка:
+/// выпущенный открывается карточкой по своему адресу, черновик — формой.
+/// Открытый на компьютере — отмечен (`aria-current`) и подсвечен.
 #[component]
-fn DocRow<O>(ctx: Ctx, document: Document, open: O) -> impl IntoView
-where
-    O: Fn(&Document) + Copy + Send + Sync + 'static,
-{
-    let Ctx { lang, clients, .. } = ctx;
+fn DocEntry(ctx: Ctx, document: Document) -> impl IntoView {
+    let Ctx { lang, clients, router, .. } = ctx;
     let status = document.status(ctx.today_or(document.data().date));
     let (status_key, status_class) = status_look(status);
     let total = document.total().ok();
     let date = document.data().date;
-    let shown = document.clone();
+    let id = document.id();
+    let issued = document.issued().is_some();
+    let href = if issued {
+        Screen::Document(id).href()
+    } else {
+        Screen::Documents.href()
+    };
     let label = document.clone();
     view! {
         <li>
-            <p class="doc-title">
-                <span>{move || row_title(lang.get(), &shown)}</span>
-                <span class=status_class>{tr(lang, status_key)}</span>
-            </p>
-            <p class="hint facts">
-                <span>{move || client_label(lang.get(), &label, clients)}</span>
-                <span>{move || i18n::date(lang.get(), date)}</span>
-                <span>{move || money_text(lang.get(), total)}</span>
-            </p>
-            <div class="actions">
-                <button type="button" class="secondary" on:click=move |_| open(&document)>
-                    {tr(lang, Key::DocOpen)}
-                </button>
-            </div>
+            <a
+                class="entry"
+                href=href
+                aria-current=move || (router.screen() == Screen::Document(id)).then_some("page")
+                on:click=move |_| {
+                    if !issued {
+                        ctx.notice.set(None);
+                        ctx.mode.set(Mode::Edit(id));
+                    }
+                }
+            >
+                <span class="entry-main">
+                    <span class="entry-title">{move || client_label(lang.get(), &label, clients)}</span>
+                    <span class="entry-meta">
+                        <span>{move || row_title(lang.get(), &document)}</span>
+                        <span>{move || i18n::date(lang.get(), date)}</span>
+                    </span>
+                </span>
+                <span class="entry-side">
+                    <span class="entry-amount">{move || money_text(lang.get(), total)}</span>
+                    <span class=status_class>{tr(lang, status_key)}</span>
+                </span>
+            </a>
         </li>
     }
 }
 
 /// Счета, которые ждут оплаты, — на главном экране (дизайн «Kvartik
 /// Design»): кому, номер и срок, сколько осталось и статус словом.
-/// Строка — ссылка на раздел документов, и нажатие открывает счёт там. Пока
-/// база открывается — пусто, а не «неоплаченных нет»: это было бы неправдой.
+/// Строка — ссылка на карточку счёта. Пока база открывается — пусто, а не
+/// «неоплаченных нет»: это было бы неправдой.
 #[component]
 pub fn Awaiting(lang: ReadSignal<Lang>, documents: Documents, clients: Clients) -> impl IntoView {
     // Сегодня — один раз (Архитектура, «Время — параметр»); часы без даты —
@@ -712,7 +840,7 @@ pub fn Awaiting(lang: ReadSignal<Lang>, documents: Documents, clients: Clients) 
             >
                 <ul class="list">
                     <For each=move || awaiting.get() key=|document| (document.id(), document.meta().modified()) let(document)>
-                        <AwaitingRow lang document documents clients today />
+                        <AwaitingRow lang document clients today />
                     </For>
                 </ul>
             </Show>
@@ -725,7 +853,6 @@ pub fn Awaiting(lang: ReadSignal<Lang>, documents: Documents, clients: Clients) 
 fn AwaitingRow(
     lang: ReadSignal<Lang>,
     document: Document,
-    documents: Documents,
     clients: Clients,
     today: Option<Date>,
 ) -> impl IntoView {
@@ -734,12 +861,12 @@ fn AwaitingRow(
     let left = document.left().ok();
     let number = document.number().map(|number| number.to_string()).unwrap_or_default();
     let due = document.data().due;
-    let label = document.clone();
+    let href = Screen::Document(document.id()).href();
     view! {
         <li>
-            <a class="entry" href=Screen::Documents.href() on:click=move |_| documents.open(&document)>
+            <a class="entry" href=href>
                 <span class="entry-main">
-                    <span class="entry-title">{move || client_label(lang.get(), &label, clients)}</span>
+                    <span class="entry-title">{move || client_label(lang.get(), &document, clients)}</span>
                     <span class="entry-meta">
                         <span>{number}</span>
                         {due.map(|due| view! {
@@ -1202,7 +1329,8 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                     ctx.backups.data_saved();
                     if issued {
                         notice.set(Some(Notice::Issued(named)));
-                        mode.set(Mode::View(shown));
+                        mode.set(Mode::List);
+                        ctx.router.go(Screen::Document(shown));
                     } else {
                         notice.set(Some(Notice::Saved));
                         mode.set(Mode::List);
@@ -1555,58 +1683,71 @@ async fn save(
     Ok(document)
 }
 
-/// Выпущенный документ: реквизиты, строки, итог, оплата, действия.
-/// Документ читается из списка со слежением: оплата и аннулирование
-/// показываются сразу.
+/// Выпущенный документ карточкой (дизайн «Kvartik Design»): статус, итог,
+/// клиент и даты, главное действие, строки, оплаты, история и редкие
+/// действия внизу. Документ читается из списка со слежением: оплата
+/// и аннулирование показываются сразу.
 #[component]
 fn DocView(ctx: Ctx, id: RecordId) -> impl IntoView {
-    let Ctx {
-        lang,
-        documents,
-        mode,
-        ..
-    } = ctx;
+    let Ctx { lang, documents, .. } = ctx;
     let document = Memo::new(move |_| {
         documents.with(|list, _, _| list.iter().find(|d| d.id() == id).cloned())
     });
     let failure = RwSignal::new(None::<Problem>);
     let busy = RwSignal::new(false);
     move || {
-        let Some(shown) = document.get() else {
-            return view! { <DocList ctx /> }.into_any();
+        let back = view! {
+            <a class="back" href=Screen::Documents.href()>
+                {icon(Icon::Back)}
+                <span>{tr(lang, Key::NavDocuments)}</span>
+            </a>
         };
+        let Some(shown) = document.get() else {
+            return view! {
+                {back}
+                <p class="hint">{tr(lang, Key::DocsNotFound)}</p>
+            }
+            .into_any();
+        };
+        let invoice = shown.data().kind == DocKind::Invoice;
         view! {
-            <DocDetails ctx document=shown.clone() />
+            {back}
+            <DocCard ctx document=shown.clone() busy failure />
             <NoticeLine ctx busy failure />
             {move || failure.get().map(|problem| view! { <p role="alert">{tr(lang, problem.key())}</p> })}
-            {(shown.data().kind == DocKind::Invoice).then(|| view! { <Payments ctx document=shown.clone() busy failure /> })}
+            <DocItems ctx document=shown.clone() />
+            {invoice.then(|| view! { <Payments ctx document=shown.clone() busy failure /> })}
+            <History ctx document=shown.clone() />
             <DocActions ctx document=shown busy failure />
-            <div class="actions">
-                <button type="button" class="secondary" on:click=move |_| {
-                    ctx.notice.set(None);
-                    mode.set(Mode::List);
-                }>
-                    {tr(lang, Key::DocClose)}
-                </button>
-            </div>
         }
         .into_any()
     }
 }
 
-/// Реквизиты и строки выпущенного документа — на языке окна; суммы —
-/// записью `i18n::money`.
+/// Карточка документа: номер заголовком, статус словом, итог крупно,
+/// клиент, даты и язык. У счёта, который ждёт оплаты, — главное действие
+/// «Отметить, что оплачен»: поступление на весь остаток сегодняшним днём;
+/// оплату частями и другим днём отмечают ниже, в оплатах. У действующего
+/// счёта — «Акт по счёту».
 #[component]
-fn DocDetails(ctx: Ctx, document: Document) -> impl IntoView {
+fn DocCard(
+    ctx: Ctx,
+    document: Document,
+    busy: RwSignal<bool>,
+    failure: RwSignal<Option<Problem>>,
+) -> impl IntoView {
     let Ctx {
         lang,
         documents,
         clients,
+        mode,
+        notice,
         ..
     } = ctx;
     let data = document.data().clone();
     let status = document.status(ctx.today_or(data.date));
     let (status_key, status_class) = status_look(status);
+    let id = document.id();
     let named = document.clone();
     let client = document.clone();
     let basis = data.basis.and_then(|basis| {
@@ -1615,32 +1756,107 @@ fn DocDetails(ctx: Ctx, document: Document) -> impl IntoView {
             .and_then(|invoice| invoice.number())
             .map(|number| number.to_string())
     });
+    let total = document.total().ok();
+    let left = document.left().ok().filter(|left| left.minor() > 0);
+    let awaiting = matches!(status, Status::Unpaid | Status::PartlyPaid | Status::Overdue);
+    let invoice = data.kind == DocKind::Invoice;
+    let open = document.annulled().is_none();
+    // Сколько дней до срока — у счёта, который ждёт оплаты и ещё не
+    // просрочен: о просроченном говорит статус.
+    let days_left = match (ctx.today, data.due) {
+        (Some(today), Some(due)) if awaiting && due >= today => Some(due.days_since(today)),
+        _ => None,
+    };
+    let mark_paid = move |_| {
+        let (Some(today), Some(left)) = (ctx.today, left) else {
+            return;
+        };
+        let payment = Payment {
+            date: today,
+            amount: left.minor(),
+        };
+        act(ctx, busy, failure, id, Change::AddPayment(payment), move |_| {
+            notice.set(Some(Notice::Paid));
+        });
+    };
+    view! {
+        <div class="doc-card">
+            <h2 class="doc-heading" tabindex="-1">{move || title(lang.get(), &named)}</h2>
+            <span class=format!("{status_class} dot")>{tr(lang, status_key)}</span>
+            <p class="amount">{move || money_text(lang.get(), total)}</p>
+            <p class="doc-client">{move || client_label(lang.get(), &client, clients)}</p>
+            <dl class="pairs">
+                <div>
+                    <dt>{tr(lang, Key::DocDate)}</dt>
+                    <dd>{move || i18n::date(lang.get(), data.date)}</dd>
+                </div>
+                <div>
+                    <dt>{tr(lang, Key::DocServiceDate)}</dt>
+                    <dd>{move || i18n::date(lang.get(), data.service_date)}</dd>
+                </div>
+                {data.due.map(|due| view! {
+                    <div>
+                        <dt>{tr(lang, Key::DocDue)}</dt>
+                        <dd class="dotted">
+                            <span>{move || i18n::date(lang.get(), due)}</span>
+                            {days_left.map(|days| view! {
+                                <span>{move || days_text(lang.get(), days)}</span>
+                            })}
+                        </dd>
+                    </div>
+                })}
+                <div>
+                    <dt>{tr(lang, Key::DocLanguage)}</dt>
+                    <dd lang=data.lang.code()>{data.lang.native_name()}</dd>
+                </div>
+            </dl>
+            {basis.map(|number| view! {
+                <p class="hint">{move || fill(t(lang.get(), Key::DocBasis), &[&number])}</p>
+            })}
+        </div>
+        {(awaiting && left.is_some() && ctx.today.is_some()).then(|| view! {
+            <button type="button" class="wide" disabled=move || busy.get() on:click=mark_paid>
+                {icon(Icon::Check)}
+                <span>{tr(lang, Key::DocMarkPaid)}</span>
+            </button>
+        })}
+        {(invoice && open).then(|| view! {
+            <div class="actions doc-next">
+                <button
+                    type="button"
+                    class="secondary"
+                    on:click=move |_| {
+                        notice.set(None);
+                        mode.set(Mode::ActFor(id));
+                    }
+                >
+                    {tr(lang, Key::DocActFromInvoice)}
+                </button>
+            </div>
+        })}
+    }
+}
+
+/// Сколько дней до срока словами: «сегодня», «5 дней».
+fn days_text(lang: Lang, days: i32) -> String {
+    if days == 0 {
+        return t(lang, Key::DueToday).to_owned();
+    }
+    fill(
+        i18n::plural(lang, u64::from(days.unsigned_abs()), Key::DaysOne, Key::DaysFew, Key::DaysMany),
+        &[&i18n::integer(lang, i64::from(days))],
+    )
+}
+
+/// Строки документа и итог — на языке окна; суммы — записью `i18n::money`.
+#[component]
+fn DocItems(ctx: Ctx, document: Document) -> impl IntoView {
+    let lang = ctx.lang;
+    let data = document.data().clone();
     let currency = data.currency;
     let total = document.total().ok();
     view! {
-        <p class="doc-title">
-            <span>{move || title(lang.get(), &named)}</span>
-            <span class=status_class>{tr(lang, status_key)}</span>
-        </p>
-        <dl class="summary">
-            <dt>{tr(lang, Key::DocClient)}</dt>
-            <dd>{move || client_label(lang.get(), &client, clients)}</dd>
-            <dt>{tr(lang, Key::DocLanguage)}</dt>
-            <dd>{data.lang.native_name()}</dd>
-            <dt>{tr(lang, Key::DocCurrency)}</dt>
-            <dd>{currency_code(currency)}</dd>
-            <dt>{tr(lang, Key::DocDate)}</dt>
-            <dd>{move || i18n::date(lang.get(), data.date)}</dd>
-            <dt>{tr(lang, Key::DocServiceDate)}</dt>
-            <dd>{move || i18n::date(lang.get(), data.service_date)}</dd>
-            {data.due.map(|due| view! {
-                <dt>{tr(lang, Key::DocDue)}</dt>
-                <dd>{move || i18n::date(lang.get(), due)}</dd>
-            })}
-        </dl>
-        {basis.map(|number| view! {
-            <p class="hint">{move || fill(t(lang.get(), Key::DocBasis), &[&number])}</p>
-        })}
+        <h2>{tr(lang, Key::DocItems)}</h2>
         <ul class="items">
             {data.items.iter().map(|item| {
                 let text = item.text.as_str().to_owned();
@@ -1667,6 +1883,56 @@ fn DocDetails(ctx: Ctx, document: Document) -> impl IntoView {
             let lang = lang.get();
             fill(t(lang, Key::DocTotal), &[&money_text(lang, total)])
         }}</p>
+    }
+}
+
+/// Событие в истории документа.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Event {
+    Issued,
+    Paid(i64),
+    Annulled,
+}
+
+/// Что было с документом — свежее сверху (дизайн «Kvartik Design»): выпуск,
+/// поступления оплаты, аннулирование. Дата выпуска — дата документа: момент
+/// выпуска программа не хранит, а в документе написана она.
+#[component]
+fn History(ctx: Ctx, document: Document) -> impl IntoView {
+    let lang = ctx.lang;
+    let number = document.number().map(|number| number.to_string()).unwrap_or_default();
+    let currency = document.data().currency;
+    // В один день: аннулирование — позже оплат, оплаты — позже выпуска.
+    let mut events = vec![(document.data().date, 0, Event::Issued)];
+    events.extend(document.payments().iter().map(|payment| (payment.date, 1, Event::Paid(payment.amount))));
+    if let Some(day) = document.annulled() {
+        events.push((day, 2, Event::Annulled));
+    }
+    events.sort_by_key(|&(day, order, _)| std::cmp::Reverse((day, order)));
+    view! {
+        <h2>{tr(lang, Key::HistoryTitle)}</h2>
+        <ol class="history">
+            {events.into_iter().map(|(day, _, event)| {
+                let number = number.clone();
+                let text = move || {
+                    let lang = lang.get();
+                    match event {
+                        Event::Issued => fill(t(lang, Key::HistoryIssued), &[&number]),
+                        Event::Paid(amount) => fill(
+                            t(lang, Key::HistoryPaid),
+                            &[&i18n::money(lang, Money::new(amount, currency))],
+                        ),
+                        Event::Annulled => t(lang, Key::StatusAnnulled).to_owned(),
+                    }
+                };
+                view! {
+                    <li class:muted=event == Event::Annulled>
+                        <span>{text}</span>
+                        <span class="hint">{move || i18n::date(lang.get(), day)}</span>
+                    </li>
+                }
+            }).collect_view()}
+        </ol>
     }
 }
 
@@ -1789,7 +2055,9 @@ fn Payments(
     }
 }
 
-/// Действия с выпущенным документом: акт по счёту, повтор, аннулирование.
+/// Редкие действия с выпущенным документом — внизу карточки, под «Ещё»:
+/// повтор счёта и аннулирование. Акт по счёту — в карточке, рядом с главным
+/// действием.
 #[component]
 fn DocActions(
     ctx: Ctx,
@@ -1800,7 +2068,6 @@ fn DocActions(
     let Ctx {
         lang,
         documents,
-        mode,
         notice,
         ..
     } = ctx;
@@ -1866,6 +2133,7 @@ fn DocActions(
         });
     };
     Some(view! {
+        <h2>{tr(lang, Key::DocMoreActions)}</h2>
         {invoice.then(|| view! {
             <div class="repeat">
                 {move || match recurring.get() {
@@ -1895,17 +2163,6 @@ fn DocActions(
             </div>
         })}
         <div class="actions">
-            {invoice.then(|| view! {
-                <button
-                    type="button"
-                    on:click=move |_| {
-                        notice.set(None);
-                        mode.set(Mode::ActFor(id));
-                    }
-                >
-                    {tr(lang, Key::DocActFromInvoice)}
-                </button>
-            })}
             <button type="button" class="secondary" disabled=move || busy.get() on:click=annul>
                 {tr(lang, Key::DocAnnul)}
             </button>

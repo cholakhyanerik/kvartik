@@ -25,8 +25,8 @@
 mod locale;
 
 pub use locale::{
-    ParseError, amount, date, day_long, decimal, integer, money, parse_decimal, parse_money,
-    parse_rate, rate,
+    ParseError, amount, date, day_long, decimal, integer, money, month_heading, parse_decimal,
+    parse_money, parse_rate, rate,
 };
 
 use serde::de::{self, Deserializer};
@@ -803,6 +803,14 @@ strings! {
         "An invoice asks for payment; an act confirms that the service was delivered and accepted. A document gets its number when you issue it; until then it's a draft.",
         "Հաշիվը վճարման պահանջ է, ակտը՝ հաստատում, որ ծառայությունը մատուցվել և ընդունվել է։ Փաստաթուղթը համար է ստանում թողարկվելիս, իսկ մինչ այդ այն սևագիր է։";
     /// Клиентов нет: документ выписывается клиенту.
+    /// Поиск в списке документов — подпись поля и подсказка в нём.
+    DocsSearch = "Клиент или номер", "Client or number", "Հաճախորդ կամ համար";
+    /// Какие документы показать — для экранного диктора; варианты — «Все»,
+    /// «Счета» (`NavDocuments`) и «Акты».
+    DocsFilter = "Какие документы показать", "Which documents to show", "Որ փաստաթղթերը ցույց տալ";
+    FilterAll = "Все", "All", "Բոլորը";
+    FilterActs = "Акты", "Acts", "Ակտեր";
+    DocsNotFound = "Ничего не нашлось.", "Nothing found.", "Ոչինչ չգտնվեց։";
     DocsNeedClient =
         "Документ выписывается клиенту: сначала добавьте клиента в разделе «Клиенты».",
         "A document is made out to a client: first add a client under Clients.",
@@ -857,6 +865,17 @@ strings! {
     /// Кнопка: дата оказания услуги — последний день её месяца.
     DocLastDay = "Последний день месяца", "Last day of the month", "Ամսվա վերջին օրը";
     DocDue = "Оплатить до", "Due date", "Վճարել մինչև";
+    /// Срок оплаты — сегодня: вместо «0 дней».
+    DueToday = "сегодня", "today", "այսօր";
+    /// Главное действие у счёта, который ждёт оплаты: поступление на весь
+    /// остаток сегодняшним днём.
+    DocMarkPaid = "Отметить, что оплачен", "Mark as paid", "Նշել, որ վճարվել է";
+    /// Редкие действия внизу карточки документа: повтор и аннулирование.
+    DocMoreActions = "Ещё", "More", "Ավելին";
+    /// История документа — свежее сверху.
+    HistoryTitle = "История", "History", "Պատմություն";
+    HistoryIssued = "Выпущен под номером {}", "Issued as No. {}", "Թողարկվել է {} համարով";
+    HistoryPaid = "Оплата {}", "Payment of {}", "Վճարում՝ {}";
     /// Срок оплаты в строке списка: «до 19.10.2026». Пробел неразрывный:
     /// перенос не отрывает «до» от даты.
     DueBy = "до\u{A0}{}", "due\u{A0}{}", "մինչև\u{A0}{}";
@@ -896,8 +915,6 @@ strings! {
         "Когда население платит вам наличными или картой, чек выдаёт контрольно-кассовая машина (ՀԴՄ), и счёт программы его не заменяет (Налоговый кодекс, ст.\u{A0}380, 381).",
         "When individuals pay you in cash or by card, the receipt comes from a cash register (ՀԴՄ), and the app's invoice doesn't replace it (Tax Code, Art.\u{A0}380, 381).",
         "Երբ բնակչությունը ձեզ վճարում է կանխիկ կամ քարտով, կտրոնը տալիս է հսկիչ դրամարկղային մեքենան (ՀԴՄ), և ծրագրի հաշիվն այն չի փոխարինում (Հարկային օրենսգիրք, հոդված\u{A0}380, 381)։";
-    DocOpen = "Открыть", "Open", "Բացել";
-    DocClose = "Закрыть", "Close", "Փակել";
     DocDeleteDraft = "Удалить черновик", "Delete draft", "Ջնջել սևագիրը";
     DocAnnul = "Аннулировать", "Cancel this document", "Չեղարկել փաստաթուղթը";
     /// Кнопка в сообщении об аннулировании: вернуть документ.

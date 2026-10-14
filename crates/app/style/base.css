@@ -218,8 +218,48 @@ h1[tabindex="-1"]:focus {
   }
 
   main {
-    max-width: 48rem;
+    max-width: 76rem;
     padding: var(--space-7) var(--space-8);
+  }
+
+  /* Ширина строки — не больше ~70 знаков (выше, `main`); экран документов
+     шире: список и карточка документа встают рядом. */
+  .screen,
+  main > .notice {
+    max-width: 48rem;
+  }
+
+  #documents {
+    max-width: none;
+  }
+
+  /* Новый счёт на компьютере — в меню, круглая кнопка не нужна. */
+  .fab {
+    display: none;
+  }
+
+  /* Открытый документ — справа от списка, карточкой во всю высоту окна.
+     Сама карточка внутри — без своей заливки. */
+  .docs.opened {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 23rem;
+    align-items: start;
+    gap: var(--space-6);
+  }
+
+  .docs-detail {
+    position: sticky;
+    top: var(--space-5);
+    box-sizing: border-box;
+    max-height: calc(100vh - 2 * var(--space-5));
+    overflow: auto;
+    padding: var(--space-5);
+    border-radius: var(--radius-xl);
+    background: var(--surface-raised);
+  }
+
+  .docs-detail .doc-card {
+    padding: 0;
   }
 
   h1 {
@@ -309,7 +349,8 @@ ul.list > li + li {
   font-size: var(--font-size-sm);
 }
 
-.entry-meta > span + span::before {
+.entry-meta > span + span::before,
+.dotted > span + span::before {
   content: "\a0· ";
 }
 
@@ -342,9 +383,11 @@ p {
   font-size: var(--font-size-sm);
 }
 
-/* Выбор языка окна (задача 53): дорожка с тремя языками, выбранный —
-   приподнятой пилюлей и жирным: отличается он не только цветом (Правило 4). */
-.langs {
+/* Переключатель-дорожка (дизайн «Kvartik Design»): выбор языка окна
+   (задача 53) и какие документы показать. Выбранный вариант — приподнятой
+   пилюлей и жирным: отличается он не только цветом (Правило 4). */
+.langs,
+.seg {
   display: inline-flex;
   flex-wrap: wrap;
   gap: var(--space-1);
@@ -354,7 +397,8 @@ p {
 }
 
 .langs button,
-.langs button.secondary {
+.langs button.secondary,
+.seg button {
   margin-top: 0;
   border: 0;
   background: none;
@@ -362,7 +406,8 @@ p {
   font-weight: var(--weight-regular);
 }
 
-.langs button[aria-pressed="true"] {
+.langs button[aria-pressed="true"],
+.seg button[aria-pressed="true"] {
   background: var(--surface-raised);
   font-weight: var(--weight-strong);
 }
@@ -415,7 +460,8 @@ li .button,
 .notice-row button,
 fieldset > button,
 .repeat button,
-.langs button {
+.langs button,
+.seg button {
   min-height: var(--touch);
   padding-inline: var(--space-4);
   font-size: var(--font-size-md);
@@ -429,7 +475,8 @@ fieldset > button,
     background: var(--surface-raised);
   }
 
-  .langs button:hover:not([aria-pressed="true"]) {
+  .langs button:hover:not([aria-pressed="true"]),
+  .seg button:hover:not([aria-pressed="true"]) {
     background: var(--surface);
   }
 }
@@ -731,7 +778,7 @@ dl.summary dd {
    как в дизайне. Линия, а не карточка на строку: на телефоне так помещается
    больше строк. */
 ul.clients,
-ul.documents,
+ul.documents.deleted,
 ul.items {
   display: grid;
   margin: var(--space-4) 0 0;
@@ -742,7 +789,7 @@ ul.items {
 }
 
 ul.clients li,
-ul.documents li,
+ul.documents.deleted li,
 ul.items li {
   display: grid;
   gap: var(--space-1);
@@ -752,13 +799,13 @@ ul.items li {
 }
 
 ul.clients li:last-child,
-ul.documents li:last-child,
+ul.documents.deleted li:last-child,
 ul.items li:last-child {
   border-bottom: 0;
 }
 
 ul.clients .actions,
-ul.documents .actions {
+ul.documents.deleted .actions {
   margin-top: var(--space-1);
 }
 
@@ -925,4 +972,197 @@ ul.items li.payment button {
 .file:focus-within {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
+}
+
+
+/* Экран документов (дизайн «Kvartik Design»): поиск и выбор, что
+   показать, — над списком; на телефоне открытый документ занимает экран
+   вместо списка (`.docs.opened`), на компьютере встаёт рядом (`@media`
+   выше). */
+@media not all and (min-width: 56.25rem) {
+  .docs.opened .docs-main {
+    display: none;
+  }
+}
+
+.docs-tools {
+  display: grid;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.docs-tools .seg {
+  justify-self: start;
+}
+
+/* Поле поиска — пилюля с лупой внутри; подпись видна диктору, а глазу —
+   подсказка в поле. */
+.search-field {
+  position: relative;
+  display: block;
+}
+
+.search-field .icon {
+  position: absolute;
+  top: 50%;
+  left: var(--space-5);
+  color: var(--text-muted);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.search-field input {
+  padding-left: calc(var(--space-5) + 1.5rem + var(--space-3));
+}
+
+/* Месяц над его документами — мелко и тише, как в дизайне. С заглавной
+   буквы: запись месяца (`i18n::month_heading`) — по CLDR, со строчной. */
+h2.month {
+  margin: var(--space-5) 0 var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+h2.month::first-letter {
+  text-transform: uppercase;
+}
+
+/* Открытый на компьютере документ в списке — подсвечен, а `aria-current`
+   говорит о нём и диктору: не одним цветом (Правило 4). */
+.entry[aria-current="page"] {
+  margin-inline: calc(-1 * var(--space-3));
+  padding-inline: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--fill-selected);
+  color: var(--on-fill-selected);
+}
+
+.docs-more {
+  margin-top: var(--space-4);
+}
+
+/* Новый счёт на телефоне — круглая кнопка в правом нижнем углу, над
+   вкладками меню; место под неё — в конце экрана. */
+.fab {
+  position: fixed;
+  right: var(--space-5);
+  bottom: calc(var(--touch) + var(--space-8));
+  z-index: 1;
+  width: 3.75rem;
+  min-height: 3.75rem;
+  margin: 0;
+  padding: 0;
+}
+
+.fab .icon {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
+#documents {
+  padding-bottom: var(--space-8);
+}
+
+/* Карточка документа: номер, статус, итог крупным шрифтом, клиент, даты. */
+.doc-card {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
+}
+
+.doc-card > * {
+  margin: 0;
+}
+
+.doc-heading {
+  color: var(--text-muted);
+  font-size: var(--font-size-md);
+}
+
+.doc-heading:focus {
+  outline: none;
+}
+
+/* Статус с точкой — в карточке документа; точка — цвета слова. */
+.status.dot::before {
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: var(--space-2);
+  border-radius: var(--radius-round);
+  background: currentColor;
+  content: "";
+}
+
+.amount {
+  font-family: var(--font-display);
+  font-size: var(--font-size-hero);
+  line-height: var(--leading-tight);
+}
+
+.doc-client {
+  font-size: var(--font-size-lg);
+  font-weight: var(--weight-strong);
+}
+
+/* Пары «подпись — значение» в строку: подпись слева тише, значение
+   справа. Узко — значение уходит под подпись. */
+dl.pairs {
+  display: grid;
+  justify-self: stretch;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+}
+
+dl.pairs > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  column-gap: var(--space-4);
+}
+
+dl.pairs dt {
+  color: var(--text-muted);
+}
+
+dl.pairs dd {
+  margin: 0;
+  text-align: end;
+}
+
+.doc-next {
+  margin-top: var(--space-3);
+}
+
+/* История документа — свежее сверху, точкой слева: оливковой у сделанного,
+   серой у аннулирования; что случилось, говорят слова. */
+ol.history {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+ol.history li {
+  position: relative;
+  display: grid;
+  padding-left: var(--space-6);
+}
+
+ol.history li::before {
+  position: absolute;
+  top: 0.45em;
+  left: var(--space-1);
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: var(--radius-round);
+  background: var(--decor-hero);
+  content: "";
+}
+
+ol.history li.muted::before {
+  background: var(--border-strong);
 }

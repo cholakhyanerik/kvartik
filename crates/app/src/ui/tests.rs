@@ -45,8 +45,15 @@ async fn sleep(ms: i32) {
 }
 
 /// Окно в своём `<div>`: снять его — бросить ручку (`UnmountHandle`)
-/// и убрать `<div>`.
+/// и убрать `<div>`. Адрес — с начала: экран, открытый прошлым тестом, не
+/// переходит в следующий.
 fn mount() -> (HtmlElement, impl Sized) {
+    mount_at("")
+}
+
+/// Окно, открытое по адресу `hash`.
+fn mount_at(hash: &str) -> (HtmlElement, impl Sized) {
+    crate::platform::set_hash(hash);
     let document = document();
     let host: HtmlElement = document
         .create_element("div")
@@ -362,8 +369,7 @@ async fn screens_follow_the_address() {
 
     let lang = Lang::Ru;
     Device::new().set_ui_lang(lang);
-    set_hash("#/clients");
-    let (host, mounted) = mount();
+    let (host, mounted) = mount_at("#/clients");
     let mut wrong = Vec::new();
     sleep(50).await;
     let look = |step: &str, screen: &str, tab: &str, wrong: &mut Vec<String>| {

@@ -25,6 +25,10 @@ pub enum Icon {
     Back,
     /// Дальше — угол вправо.
     Forward,
+    /// Поиск — лупа.
+    Search,
+    /// Сделано — галочка.
+    Check,
 }
 
 /// Значок для разметки. Он только украшает: что делает кнопка или ссылка,
@@ -55,6 +59,12 @@ pub fn icon(icon: Icon) -> impl IntoView {
         Icon::Shield => view! { <path d="M12 3 5 6v6c0 4.5 3 7.8 7 9 4-1.2 7-4.5 7-9V6z" /> }.into_any(),
         Icon::Back => view! { <path d="m15 18-6-6 6-6" /> }.into_any(),
         Icon::Forward => view! { <path d="m9 18 6-6-6-6" /> }.into_any(),
+        Icon::Search => view! {
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-4-4" />
+        }
+        .into_any(),
+        Icon::Check => view! { <path d="M20 6 9 17l-5-5" /> }.into_any(),
     };
     view! {
         <svg

@@ -29,7 +29,7 @@ use crate::platform::clock;
 use crate::store::{self, Store};
 use backup::{BackupChip, BackupLink, BackupSection, Backups};
 use clients::{Clients, ClientsSection};
-use documents::{Documents, DocumentsSection};
+use documents::{Documents, DocumentsScreen};
 use home::Home;
 use icon::{Icon, icon};
 use lang::{LangSwitch, WindowLang};
@@ -156,7 +156,7 @@ pub fn App() -> impl IntoView {
     // Экран сменился — страница с его начала, фокус на его заголовке.
     Effect::watch(move || router.screen(), |screen, _, _| route::shown(*screen), false);
 
-    let hidden = move |screen: Screen| move || !router.is(screen);
+    let hidden = move |screen: Screen| move || !router.shows(screen);
     view! {
         <div class="app">
             <Nav lang router documents clients backups />
@@ -167,9 +167,7 @@ pub fn App() -> impl IntoView {
                     <Home lang router program backups profiles documents clients />
                 </section>
                 <section id=Screen::Documents.id() class="screen" hidden=hidden(Screen::Documents)>
-                    <h1 tabindex="-1">{tr(lang, Key::DocsTitle)}</h1>
-                    <BackupChip lang backups nudge=true />
-                    <DocumentsSection lang documents clients base backups />
+                    <DocumentsScreen lang documents clients base backups router />
                 </section>
                 <section id=Screen::Clients.id() class="screen" hidden=hidden(Screen::Clients)>
                     <h1 tabindex="-1">{tr(lang, Key::ClientsTitle)}</h1>

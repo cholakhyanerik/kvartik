@@ -268,6 +268,16 @@ fn needed() -> BTreeSet<char> {
         for month in 1..=12 {
             let day = Date::new(2026, month, 1).expect("первое число есть всегда");
             text += &i18n::date(lang, day);
+            text += &i18n::month_heading(lang, 2025, month, 2026);
+            text += &i18n::month_heading(lang, 2026, month, 2026);
+        }
+        // Дни с месяцем словом — все месяцы и все дни недели.
+        for day in 1..=7 {
+            let date = Date::new(2026, 10, 11 + day).expect("день есть");
+            text += &i18n::day_long(lang, date);
+        }
+        for month in 1..=12 {
+            text += &i18n::day_long(lang, Date::new(2026, month, 5).expect("день есть"));
         }
         text += &i18n::rate(lang, 3_619_349);
         for country in Country::by_name(lang) {

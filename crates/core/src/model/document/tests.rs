@@ -460,6 +460,46 @@ fn lists_and_counts() {
     assert_eq!(Document::count_for_client(&documents, other.id()), 1);
 }
 
+/// По дате: свежие сверху, в один день черновик выше выпущенных,
+/// выпущенные — больший номер выше; удалённых нет. Поиск — по части
+/// номера и названия клиента, без учёта регистра и «ё»; пустой — всё.
+#[test]
+fn by_date_and_search() {
+    let client = client();
+    let first = issued(DocKind::Invoice, &client, day(2026, 10, 9), &[]);
+    let second = issued(DocKind::Invoice, &client, day(2026, 10, 9), std::slice::from_ref(&first));
+    let september = issued(DocKind::Act, &client, day(2026, 9, 30), &[]);
+    let draft = Document::create(data(DocKind::Invoice, &client, day(2026, 10, 9)), at(2_000)).expect("черновик");
+    let newest = Document::create(data(DocKind::Act, &client, day(2026, 10, 12)), at(2_000)).expect("черновик");
+    let gone = Document::create(data(DocKind::Act, &client, day(2026, 10, 20)), at(2_000))
+        .expect("черновик")
+        .delete(at(3_000))
+        .expect("черновик")
+        .expect("удалён");
+    let documents = vec![september.clone(), first.clone(), gone, draft.clone(), second.clone(), newest.clone()];
+    let order: Vec<RecordId> = Document::by_date(&documents).iter().map(|d| d.id()).collect();
+    assert_eq!(order, [newest.id(), draft.id(), second.id(), first.id(), september.id()]);
+
+    let number = format!("{}", second.number().expect("выпущен"));
+    let mut wrong = Vec::new();
+    for (query, name, document, expected) in [
+        ("", "Семён", &draft, true),
+        ("семен", "ООО Семён", &draft, true),
+        ("СЕМЁН", "ООО Семён", &draft, true),
+        ("acme", "ООО Семён", &draft, false),
+        (number.as_str(), "", &second, true),
+        ("-002", "", &second, true),
+        ("-002", "", &first, false),
+        ("2026", "", &draft, false),
+        ("  ararat ", "«Ararat» LLC", &first, true),
+    ] {
+        if document.matches(query, name) != expected {
+            wrong.push(format!("«{query}» в «{name}» {:?}: не {expected}", document.number()));
+        }
+    }
+    assert!(wrong.is_empty(), "поиск: {wrong:#?}");
+}
+
 /// Ждут оплаты только выпущенные действующие счета, оплаченные не целиком:
 /// просроченный — первым, потом по сроку, без срока — последним. Черновик,
 /// акт, аннулированный, оплаченный и удалённый — не ждут. Сколько осталось

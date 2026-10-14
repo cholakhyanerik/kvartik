@@ -53,6 +53,14 @@ impl RecordId {
     pub fn random() -> Self {
         Self(Uuid::new_v4())
     }
+
+    /// Идентификатор из записи `Display` — например, из адреса экрана
+    /// документа (`#/documents/…`). Только запись с дефисами в нижнем
+    /// регистре, как её пишет `Display`: адрес, набранный иначе, — чужой.
+    pub fn parse(text: &str) -> Option<Self> {
+        let id = Uuid::try_parse(text).ok()?;
+        (id.hyphenated().to_string() == text).then_some(Self(id))
+    }
 }
 
 /// Строка UUID в нижнем регистре, как в данных: `0f8c…-…`. Это не текст для
@@ -245,6 +253,31 @@ mod tests {
 
     fn at(millis: i64) -> Timestamp {
         Timestamp::from_unix_millis(millis)
+    }
+
+    /// Идентификатор читается из своей записи обратно, а другая запись того
+    /// же UUID — заглавными, без дефисов, в фигурных скобках — и не UUID
+    /// вовсе — нет: адрес экрана документа должен быть один.
+    #[test]
+    fn id_reads_back_only_from_its_own_writing() {
+        let id = RecordId::random();
+        assert_eq!(RecordId::parse(&id.to_string()), Some(id));
+        let written = id.to_string();
+        let mut wrong = Vec::new();
+        for other in [
+            written.to_uppercase(),
+            written.replace('-', ""),
+            format!("{{{written}}}"),
+            format!("urn:uuid:{written}"),
+            format!("{written} "),
+            String::new(),
+            "documents".to_owned(),
+        ] {
+            if RecordId::parse(&other).is_some() {
+                wrong.push(other);
+            }
+        }
+        assert!(wrong.is_empty(), "прочитано чужое: {wrong:?}");
     }
 
     /// Новая запись жива, и момент изменения — момент создания.

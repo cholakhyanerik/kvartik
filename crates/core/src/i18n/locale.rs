@@ -183,6 +183,51 @@ pub fn day_long(lang: Lang, day: Date) -> String {
     }
 }
 
+/// Месяц — заголовком группы в списке документов: в этом году — одним
+/// словом, иначе — с годом. Шаблоны CLDR `LLLL` и `yMMMM` (по браузеру:
+/// CLDR 48 через ICU 78.3 в Node 24.21, сверено 2026-10-14): `октябрь`,
+/// `октябрь 2025 г.`, `2025 թ․ հոկտեմբեր`, `October 2025`; месяц —
+/// в именительном падеже (`stand-alone`). В армянском после «թ» — U+2024,
+/// как в CLDR. С заглавной буквы его пишет окно, когда строка стоит первой.
+pub fn month_heading(lang: Lang, year: u16, month: u8, this_year: u16) -> String {
+    let index = usize::from(month.clamp(1, 12) - 1);
+    let name = match lang {
+        Lang::Am => HY_MONTHS_ALONE[index],
+        Lang::Ru => RU_MONTHS_ALONE[index],
+        Lang::En => EN_MONTHS_LONG[index],
+    };
+    if year == this_year {
+        return name.to_owned();
+    }
+    match lang {
+        Lang::Am => format!("{year} թ\u{2024} {name}"),
+        Lang::Ru => format!("{name} {year} г."),
+        Lang::En => format!("{name} {year}"),
+    }
+}
+
+/// Месяцы CLDR `hy`, `stand-alone` `wide` — в именительном падеже.
+const HY_MONTHS_ALONE: [&str; 12] = [
+    "հունվար",
+    "փետրվար",
+    "մարտ",
+    "ապրիլ",
+    "մայիս",
+    "հունիս",
+    "հուլիս",
+    "օգոստոս",
+    "սեպտեմբեր",
+    "հոկտեմբեր",
+    "նոյեմբեր",
+    "դեկտեմբեր",
+];
+
+/// Месяцы CLDR `ru`, `stand-alone` `wide` — в именительном падеже.
+const RU_MONTHS_ALONE: [&str; 12] = [
+    "январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь",
+    "октябрь", "ноябрь", "декабрь",
+];
+
 /// Месяцы CLDR `hy`, `format` `wide` — в родительном падеже: «հոկտեմբերի
 /// 14».
 const HY_MONTHS: [&str; 12] = [
@@ -764,6 +809,101 @@ mod tests {
             }
         }
         assert!(wrong.is_empty(), "день записан не так: {wrong:#?}");
+    }
+
+    /// Месяц заголовком группы: в этом году — одним словом, в другом —
+    /// с годом. Ожидаемое выписано по `Intl.DateTimeFormat` с `month:
+    /// "long"` и с `year: "numeric", month: "long"` (CLDR 48, Node 24.21,
+    /// 2026-10-14), а не посчитано этим кодом.
+    #[test]
+    fn month_headings_follow_each_language() {
+        let alone: [(Lang, [&str; 12]); 3] = [
+            (
+                Lang::Am,
+                [
+                    "հունվար", "փետրվար", "մարտ", "ապրիլ", "մայիս", "հունիս", "հուլիս",
+                    "օգոստոս", "սեպտեմբեր", "հոկտեմբեր", "նոյեմբեր", "դեկտեմբեր",
+                ],
+            ),
+            (
+                Lang::Ru,
+                [
+                    "январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август",
+                    "сентябрь", "октябрь", "ноябрь", "декабрь",
+                ],
+            ),
+            (
+                Lang::En,
+                [
+                    "January", "February", "March", "April", "May", "June", "July", "August",
+                    "September", "October", "November", "December",
+                ],
+            ),
+        ];
+        let with_year: [(Lang, [&str; 12]); 3] = [
+            (
+                Lang::Am,
+                [
+                    "2025 թ\u{2024} հունվար",
+                    "2025 թ\u{2024} փետրվար",
+                    "2025 թ\u{2024} մարտ",
+                    "2025 թ\u{2024} ապրիլ",
+                    "2025 թ\u{2024} մայիս",
+                    "2025 թ\u{2024} հունիս",
+                    "2025 թ\u{2024} հուլիս",
+                    "2025 թ\u{2024} օգոստոս",
+                    "2025 թ\u{2024} սեպտեմբեր",
+                    "2025 թ\u{2024} հոկտեմբեր",
+                    "2025 թ\u{2024} նոյեմբեր",
+                    "2025 թ\u{2024} դեկտեմբեր",
+                ],
+            ),
+            (
+                Lang::Ru,
+                [
+                    "январь 2025 г.",
+                    "февраль 2025 г.",
+                    "март 2025 г.",
+                    "апрель 2025 г.",
+                    "май 2025 г.",
+                    "июнь 2025 г.",
+                    "июль 2025 г.",
+                    "август 2025 г.",
+                    "сентябрь 2025 г.",
+                    "октябрь 2025 г.",
+                    "ноябрь 2025 г.",
+                    "декабрь 2025 г.",
+                ],
+            ),
+            (
+                Lang::En,
+                [
+                    "January 2025",
+                    "February 2025",
+                    "March 2025",
+                    "April 2025",
+                    "May 2025",
+                    "June 2025",
+                    "July 2025",
+                    "August 2025",
+                    "September 2025",
+                    "October 2025",
+                    "November 2025",
+                    "December 2025",
+                ],
+            ),
+        ];
+        let mut wrong = Vec::new();
+        for ((lang, names), (_, dated)) in alone.into_iter().zip(with_year) {
+            for (month, (name, full)) in (1..=12).zip(names.into_iter().zip(dated)) {
+                let this = month_heading(lang, 2026, month, 2026);
+                let other = month_heading(lang, 2025, month, 2026);
+                if this != name || other != full {
+                    wrong.push(format!("{lang:?} {month}: «{this}», «{other}»"));
+                }
+            }
+        }
+        assert!(wrong.is_empty(), "месяц записан не так: {wrong:#?}");
     }
 
     /// Одна и та же запись `1,234` читается по языку окна (Правило 6):

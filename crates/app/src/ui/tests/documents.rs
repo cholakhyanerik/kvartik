@@ -15,7 +15,9 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_test::wasm_bindgen_test;
 use web_sys::HtmlElement;
 
-use super::{button, choose_file, field, mount, pick, select, sleep, type_into, wait_for};
+use super::{
+    button, choose_file, field, mount, mount_at, pick, select, sleep, type_into, wait_for,
+};
 use crate::platform::clock;
 use crate::store::device::Device;
 use crate::store::{Store, Writes};
@@ -143,11 +145,20 @@ async fn invoice_flow(host: &HtmlElement, client: &Client, lang: Lang, today: Da
         Some(clients) => pick(&clients, &client.id().to_string()),
         None => wrong.push("нет выбора клиента".to_owned()),
     };
+    // Строка списка — ссылка: выпущенный открывается карточкой, черновик —
+    // формой.
     let open_row = |title: &str, wrong: &mut Vec<String>| {
         let row = row_with(host, "ul.documents:not(.deleted)", title);
-        match row.and_then(|row| button(&row, &[t(lang, Key::DocOpen)])) {
-            Some(open) => open.click(),
+        match row.and_then(|row| row.query_selector("a.entry").ok().flatten()) {
+            Some(open) => open.unchecked_into::<HtmlElement>().click(),
             None => wrong.push(format!("в списке нет «{title}»")),
+        }
+    };
+    // Карточка документа закрывается ссылкой «назад» к списку.
+    let close = |wrong: &mut Vec<String>| {
+        match host.query_selector(".docs-detail a.back").ok().flatten() {
+            Some(back) => back.unchecked_into::<HtmlElement>().click(),
+            None => wrong.push("у карточки документа нет «назад»".to_owned()),
         }
     };
     let numbered = |kind: Key, seq: u32| {
@@ -230,7 +241,7 @@ async fn invoice_flow(host: &HtmlElement, client: &Client, lang: Lang, today: Da
     if !host.text_content().unwrap_or_default().contains(&basis) {
         wrong.push("у акта не названо основание".to_owned());
     }
-    press(t(lang, Key::DocClose), &mut wrong);
+    close(&mut wrong);
     sleep(100).await;
 
     // Аннулировать счёт и вернуть его.
@@ -248,7 +259,7 @@ async fn invoice_flow(host: &HtmlElement, client: &Client, lang: Lang, today: Da
     if !wait_for(host, &fill(t(lang, Key::DocUnannulledNotice), &[&first])).await {
         wrong.push("аннулирование не вернулось".to_owned());
     }
-    press(t(lang, Key::DocClose), &mut wrong);
+    close(&mut wrong);
     sleep(100).await;
 
     // Черновик: сохранить, удалить, восстановить, выпустить — номер 002:
@@ -283,7 +294,7 @@ async fn invoice_flow(host: &HtmlElement, client: &Client, lang: Lang, today: Da
         wrong.push(format!("второй счёт не выпущен: нет «{second}»"));
         return wrong;
     }
-    press(t(lang, Key::DocClose), &mut wrong);
+    close(&mut wrong);
     sleep(100).await;
     // И ещё один черновик — у удалённого клиента он останется с пометкой.
     press(t(lang, Key::DocNewInvoice), &mut wrong);
@@ -562,4 +573,160 @@ async fn numbers_follow_the_window_language() {
     host.remove();
     forget_device();
     assert!(wrong.is_empty(), "числа и язык окна: {wrong:#?}");
+}
+
+/// Видимые строки списка документов — их текст.
+fn listed_rows(host: &HtmlElement) -> Vec<String> {
+    let Ok(rows) = host.query_selector_all("ul.documents:not(.deleted) a.entry") else {
+        return Vec::new();
+    };
+    (0..rows.length())
+        .filter_map(|at| rows.item(at))
+        .filter_map(|row| row.text_content())
+        .collect()
+}
+
+/// Экран документов по дизайну: поиск по клиенту и номеру и «все, счета,
+/// акты» сужают список; документы — под заголовком своего месяца; строка
+/// выпущенного открывает его карточку по своему адресу; «Отметить, что
+/// оплачен» вносит остаток сегодняшним днём — статус «оплачен», в истории —
+/// поступление; «назад» возвращает к списку.
+#[wasm_bindgen_test]
+async fn documents_are_found_opened_and_marked_paid() {
+    let client = fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let today = clock::today().expect("часы с датой");
+    let now = clock::now();
+    let data = |kind: DocKind, price: i64| DocumentData {
+        kind,
+        client: client.id(),
+        lang: Lang::En,
+        currency: Currency::Usd,
+        date: today,
+        service_date: today,
+        due: None,
+        items: vec![Item {
+            text: line("Software development"),
+            quantity_e3: 1_000,
+            price,
+        }],
+        basis: None,
+        recurring: None,
+    };
+    let issue = |kind: DocKind, price: i64, before: &[Document]| {
+        Document::create(data(kind, price), now)
+            .expect("черновик")
+            .issue(before, 0, Some(&profile()), &client, now)
+            .expect("выпущен")
+    };
+    let first = issue(DocKind::Invoice, 240_000, &[]);
+    let second = issue(DocKind::Invoice, 100_000, std::slice::from_ref(&first));
+    let act = issue(DocKind::Act, 240_000, &[]);
+    let mut writes = Writes::default();
+    for document in [&first, &second, &act] {
+        writes.insert(document);
+    }
+    commit(writes).await;
+
+    let (host, mounted) = mount_at("#/documents");
+    let mut wrong = Vec::new();
+    let named = |document: &Document| {
+        let kind = match document.data().kind {
+            DocKind::Invoice => Key::KindInvoice,
+            DocKind::Act => Key::KindAct,
+        };
+        let number = document.number().map(|number| number.to_string()).unwrap_or_default();
+        fill(t(lang, Key::DocNumbered), &[t(lang, kind), &number])
+    };
+    if !wait_for(&host, &named(&first)).await {
+        wrong.push("документов в списке нет".to_owned());
+    }
+    let month = i18n::month_heading(lang, today.year(), today.month(), today.year());
+    let headings = host.query_selector_all("h2.month").map(|list| list.length()).unwrap_or(0);
+    if headings != 1 || !host.text_content().unwrap_or_default().contains(&month) {
+        wrong.push(format!("заголовков месяца {headings}, а не один «{month}»"));
+    }
+
+    let search = host
+        .query_selector(".docs-tools input[type=search]")
+        .ok()
+        .flatten()
+        .map(JsCast::unchecked_into::<web_sys::HtmlInputElement>);
+    let number = second.number().map(|number| number.to_string()).unwrap_or_default();
+    for (query, expected) in [(number.as_str(), 1), ("acme", 3), ("zzz", 0), ("", 3)] {
+        match &search {
+            Some(input) => type_into(input, query),
+            None => wrong.push("нет поиска".to_owned()),
+        }
+        sleep(50).await;
+        let rows = listed_rows(&host);
+        if rows.len() != expected {
+            wrong.push(format!("поиск «{query}»: {rows:?}"));
+        }
+        let none = host.text_content().unwrap_or_default().contains(t(lang, Key::DocsNotFound));
+        if none != (expected == 0) {
+            wrong.push(format!("поиск «{query}»: «ничего не нашлось» — {none}"));
+        }
+    }
+    for (filter, expected) in [(Key::FilterActs, 1), (Key::NavDocuments, 2), (Key::FilterAll, 3)] {
+        match button(&host, &[t(lang, filter)]) {
+            Some(choice) => choice.click(),
+            None => wrong.push(format!("нет выбора {filter:?}")),
+        }
+        sleep(50).await;
+        if listed_rows(&host).len() != expected {
+            wrong.push(format!("{filter:?}: {:?}", listed_rows(&host)));
+        }
+    }
+
+    match row_with(&host, "ul.documents:not(.deleted)", &named(&first))
+        .and_then(|row| row.query_selector("a.entry").ok().flatten())
+    {
+        Some(open) => open.unchecked_into::<HtmlElement>().click(),
+        None => wrong.push("нет строки первого счёта".to_owned()),
+    }
+    sleep(200).await;
+    let address = crate::platform::hash();
+    if address != format!("#/documents/{}", first.id()) {
+        wrong.push(format!("адрес карточки — {address}"));
+    }
+    if host.query_selector(".docs.opened .docs-detail").ok().flatten().is_none() {
+        wrong.push("карточка не открылась".to_owned());
+    }
+    match button(&host, &[t(lang, Key::DocMarkPaid)]) {
+        Some(paid) => paid.click(),
+        None => wrong.push("нет «Отметить, что оплачен»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::PaymentSaved)).await {
+        wrong.push("оплата не подтвердилась".to_owned());
+    }
+    let detail = host
+        .query_selector(".docs-detail")
+        .ok()
+        .flatten()
+        .and_then(|detail| detail.text_content())
+        .unwrap_or_default();
+    let payment = fill(t(lang, Key::HistoryPaid), &[&i18n::money(lang, Money::new(240_000, Currency::Usd))]);
+    if !detail.contains(t(lang, Key::StatusPaid)) || !detail.contains(&payment) {
+        wrong.push(format!("в карточке нет «{}» и «{payment}»", t(lang, Key::StatusPaid)));
+    }
+    let (documents, _) = stored().await;
+    match documents.iter().find(|d| d.id() == first.id()).map(Document::payments) {
+        Some([paid]) if paid.date == today && paid.amount == 240_000 => {}
+        other => wrong.push(format!("оплаты в базе: {other:?}")),
+    }
+
+    match host.query_selector(".docs-detail a.back").ok().flatten() {
+        Some(back) => back.unchecked_into::<HtmlElement>().click(),
+        None => wrong.push("у карточки нет «назад»".to_owned()),
+    }
+    sleep(200).await;
+    if crate::platform::hash() != "#/documents" || host.query_selector(".docs.opened").ok().flatten().is_some() {
+        wrong.push(format!("«назад» не вернул к списку: {}", crate::platform::hash()));
+    }
+    drop(mounted);
+    host.remove();
+    forget_device();
+    assert!(wrong.is_empty(), "экран документов: {wrong:#?}");
 }
