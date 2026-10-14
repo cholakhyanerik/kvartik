@@ -1,8 +1,9 @@
 //! Раздел «Счета и акты» (задача 11): список, черновик в форме, выпуск
 //! с номером, оплата, аннулирование, акт из счёта и повторяющийся счёт.
 //!
-//! Экрана документов ещё нет, и раздел стоит на единственном экране
-//! каркаса, под клиентами. Каждое действие — команда ядра
+//! Раздел — содержимое экрана «Счета и акты» (`ui/route.rs`); счета,
+//! которые ждут оплаты, показывает и главный экран. Каждое действие —
+//! команда ядра
 //! (`Document::create`, `edit`, `issue`, `annul`…, `Recurring::start`,
 //! `stop`, `generate`) и одна транзакция хранилища (CLAUDE.md, «Данные
 //! меняются одним путём»).
@@ -38,6 +39,7 @@ use leptos::prelude::*;
 use super::backup::Backups;
 use super::clients::Clients;
 use super::form::{CURRENCIES, TextField, currency_code, currency_key};
+use super::route::Screen;
 use super::split::{part, split};
 use super::storage::error_key;
 use super::{Base, tr};
@@ -55,6 +57,11 @@ pub struct Documents {
     state: RwSignal<State>,
     /// Сколько черновиков повторяющихся счетов создало последнее открытие.
     created: RwSignal<usize>,
+    /// Что показывает раздел и сообщение о сделанном — здесь, а не в самом
+    /// разделе: «Новый счёт» в меню и строка «ждут оплаты» на главном
+    /// экране открывают форму и документ (`new_invoice`, `open`).
+    mode: RwSignal<Mode>,
+    notice: RwSignal<Option<Notice>>,
 }
 
 /// Где документы.
@@ -78,7 +85,30 @@ impl Documents {
         Self {
             state: RwSignal::new(State::Loading),
             created: RwSignal::new(0),
+            mode: RwSignal::new(Mode::List),
+            notice: RwSignal::new(None),
         }
+    }
+
+    /// Открыть форму нового счёта — из меню и с главного экрана. Без живого
+    /// клиента формы нет: раздел скажет, что сначала нужен клиент.
+    pub fn new_invoice(&self, clients: Clients) {
+        if clients.alive().is_empty() {
+            return;
+        }
+        self.notice.set(None);
+        self.created.set(0);
+        self.mode.set(Mode::New(DocKind::Invoice));
+    }
+
+    /// Открыть документ: выпущенный — просмотром, черновик — формой.
+    fn open(&self, document: &Document) {
+        self.notice.set(None);
+        self.mode.set(if document.issued().is_some() {
+            Mode::View(document.id())
+        } else {
+            Mode::Edit(document.id())
+        });
     }
 
     /// Прочитать документы и повторы: когда база открылась и когда её
@@ -328,8 +358,8 @@ impl Ctx {
     }
 }
 
-/// Раздел на языке окна. Пока база открывается — пусто: «открываем…»
-/// только мигнуло бы.
+/// Раздел на языке окна — под заголовком экрана. Пока база открывается —
+/// пусто: «открываем…» только мигнуло бы.
 #[component]
 pub fn DocumentsSection(
     lang: ReadSignal<Lang>,
@@ -344,8 +374,8 @@ pub fn DocumentsSection(
         clients,
         base,
         backups,
-        mode: RwSignal::new(Mode::List),
-        notice: RwSignal::new(None),
+        mode: documents.mode,
+        notice: documents.notice,
         today: clock::today(),
     };
     let phase = Memo::new(move |_| {
@@ -399,10 +429,7 @@ pub fn DocumentsSection(
             },
             (Phase::Ready, Mode::View(id)) => part(lang, opened_document(ctx, id), back),
         };
-        Some(view! {
-            <h2>{tr(lang, Key::DocsTitle)}</h2>
-            {body}
-        })
+        Some(body)
     }
 }
 
@@ -517,14 +544,7 @@ fn DocList(ctx: Ctx) -> impl IntoView {
             notice.set(Some(Notice::Restored));
         });
     };
-    let open = move |document: &Document| {
-        notice.set(None);
-        mode.set(if document.issued().is_some() {
-            Mode::View(document.id())
-        } else {
-            Mode::Edit(document.id())
-        });
-    };
+    let open = move |document: &Document| documents.open(document);
 
     view! {
         {move || (unreadable.get() > 0).then(|| view! {
@@ -658,6 +678,83 @@ where
                     {tr(lang, Key::DocOpen)}
                 </button>
             </div>
+        </li>
+    }
+}
+
+/// Счета, которые ждут оплаты, — на главном экране (дизайн «Kvartik
+/// Design»): кому, номер и срок, сколько осталось и статус словом.
+/// Строка — ссылка на раздел документов, и нажатие открывает счёт там. Пока
+/// база открывается — пусто, а не «неоплаченных нет»: это было бы неправдой.
+#[component]
+pub fn Awaiting(lang: ReadSignal<Lang>, documents: Documents, clients: Clients) -> impl IntoView {
+    // Сегодня — один раз (Архитектура, «Время — параметр»); часы без даты —
+    // списка нет: без сегодня не сказать, что просрочено.
+    let today = clock::today();
+    let ready = Memo::new(move |_| {
+        documents.state.with(|state| matches!(state, State::Ready { .. }))
+    });
+    // Пересчитывается, только когда меняются документы (Правило 1).
+    let awaiting = Memo::new(move |_| {
+        let Some(today) = today else {
+            return Vec::new();
+        };
+        documents.with(|list, _, _| {
+            Document::awaiting(list, today).into_iter().cloned().collect::<Vec<_>>()
+        })
+    });
+    view! {
+        <Show when=move || ready.get() && today.is_some()>
+            <h2>{tr(lang, Key::HomeAwaiting)}</h2>
+            <Show
+                when=move || !awaiting.with(Vec::is_empty)
+                fallback=move || view! { <p class="hint">{tr(lang, Key::HomeNoneAwaiting)}</p> }
+            >
+                <ul class="list">
+                    <For each=move || awaiting.get() key=|document| (document.id(), document.meta().modified()) let(document)>
+                        <AwaitingRow lang document documents clients today />
+                    </For>
+                </ul>
+            </Show>
+        </Show>
+    }
+}
+
+/// Счёт в списке «ждут оплаты».
+#[component]
+fn AwaitingRow(
+    lang: ReadSignal<Lang>,
+    document: Document,
+    documents: Documents,
+    clients: Clients,
+    today: Option<Date>,
+) -> impl IntoView {
+    let today = today.unwrap_or(document.data().date);
+    let (status_key, status_class) = status_look(document.status(today));
+    let left = document.left().ok();
+    let number = document.number().map(|number| number.to_string()).unwrap_or_default();
+    let due = document.data().due;
+    let label = document.clone();
+    view! {
+        <li>
+            <a class="entry" href=Screen::Documents.href() on:click=move |_| documents.open(&document)>
+                <span class="entry-main">
+                    <span class="entry-title">{move || client_label(lang.get(), &label, clients)}</span>
+                    <span class="entry-meta">
+                        <span>{number}</span>
+                        {due.map(|due| view! {
+                            <span>{move || {
+                                let lang = lang.get();
+                                fill(t(lang, Key::DueBy), &[&i18n::date(lang, due)])
+                            }}</span>
+                        })}
+                    </span>
+                </span>
+                <span class="entry-side">
+                    <span class="entry-amount">{move || money_text(lang.get(), left)}</span>
+                    <span class=status_class>{tr(lang, status_key)}</span>
+                </span>
+            </a>
         </li>
     }
 }
@@ -1585,10 +1682,7 @@ fn Payments(
     let id = document.id();
     let currency = document.data().currency;
     let open = document.annulled().is_none();
-    let left = match (document.total(), document.paid()) {
-        (Ok(total), Ok(paid)) => Some(Money::new(total.minor() - paid.minor(), currency)),
-        _ => None,
-    };
+    let left = document.left().ok();
     let date = RwSignal::new(ctx.today.map(Date::iso).unwrap_or_default());
     let amount = RwSignal::new(
         left.filter(|left| left.minor() > 0)

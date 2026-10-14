@@ -482,10 +482,13 @@ async fn a_repeating_invoice_appears_when_the_app_opens() {
         wrong.push(format!("счётчик повтора не сдвинут: {recurrings:?}"));
     }
 
-    // Второе открытие черновиков не прибавляет.
+    // Второе открытие черновиков не прибавляет. Ждать — счёт в списке:
+    // заголовок экрана виден и до того, как база прочитана.
     let (host, mounted) = mount();
-    if !wait_for(&host, t(lang, Key::DocsTitle)).await {
-        wrong.push("раздела документов нет".to_owned());
+    let number = source.number().map(|number| number.to_string()).unwrap_or_default();
+    let named = fill(t(lang, Key::DocNumbered), &[t(lang, Key::KindInvoice), &number]);
+    if !wait_for(&host, &named).await {
+        wrong.push(format!("в списке нет «{named}»"));
     }
     sleep(300).await;
     drop(mounted);

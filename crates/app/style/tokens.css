@@ -76,6 +76,10 @@
   --fill-notice: #ffe1d0;
   --on-fill-notice: #402310; /* 11.5 на fill-notice */
 
+  /* Открытый раздел в меню на компьютере. */
+  --fill-selected: #ffe1d0;
+  --on-fill-selected: #402310; /* 11.5 на fill-selected */
+
   /* Главная карточка экрана — оливковая, с кругом-украшением. */
   --fill-hero: #56633f;
   --on-fill-hero: #f0fae1; /* 5.9 на fill-hero */
@@ -164,6 +168,9 @@
 
     --fill-notice: #4d2b15;
     --on-fill-notice: #ffe1d0; /* 10.1 на fill-notice */
+
+    --fill-selected: #4d2b15;
+    --on-fill-selected: #ffe1d0; /* 10.1 на fill-selected */
 
     --fill-hero: #3d472b;
     --on-fill-hero: #f0fae1; /* 9.1 на fill-hero */

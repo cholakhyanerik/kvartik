@@ -167,6 +167,90 @@ const EN_MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
+/// День с месяцем словом и днём недели, без года — заголовок дня на главном
+/// экране: `հոկտեմբերի 14, չորեքշաբթի`, `среда, 14 октября`, `Wednesday,
+/// October 14`. Шаблон — CLDR `MMMMEEEEd` (по браузеру: CLDR 48 через ICU 78.3
+/// в Node 24.21, сверено 2026-10-14); месяц в армянском и русском — в
+/// родительном падеже, как его ставит CLDR (`format`, а не `stand-alone`).
+/// С заглавной буквы его пишет окно, когда строка стоит первой.
+pub fn day_long(lang: Lang, day: Date) -> String {
+    let month = usize::from(day.month() - 1);
+    let weekday = usize::from(day.weekday() - 1);
+    match lang {
+        Lang::Am => format!("{} {}, {}", HY_MONTHS[month], day.day(), HY_WEEKDAYS[weekday]),
+        Lang::Ru => format!("{}, {} {}", RU_WEEKDAYS[weekday], day.day(), RU_MONTHS[month]),
+        Lang::En => format!("{}, {} {}", EN_WEEKDAYS[weekday], EN_MONTHS_LONG[month], day.day()),
+    }
+}
+
+/// Месяцы CLDR `hy`, `format` `wide` — в родительном падеже: «հոկտեմբերի
+/// 14».
+const HY_MONTHS: [&str; 12] = [
+    "հունվարի",
+    "փետրվարի",
+    "մարտի",
+    "ապրիլի",
+    "մայիսի",
+    "հունիսի",
+    "հուլիսի",
+    "օգոստոսի",
+    "սեպտեմբերի",
+    "հոկտեմբերի",
+    "նոյեմբերի",
+    "դեկտեմբերի",
+];
+
+/// Месяцы CLDR `ru`, `format` `wide` — в родительном падеже: «14 октября».
+const RU_MONTHS: [&str; 12] = [
+    "января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября",
+    "октября", "ноября", "декабря",
+];
+
+/// Месяцы CLDR `en`, `wide`.
+const EN_MONTHS_LONG: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
+/// Дни недели CLDR, `wide`, с понедельника — как `Date::weekday` (ISO 8601).
+const HY_WEEKDAYS: [&str; 7] = [
+    "երկուշաբթի",
+    "երեքշաբթի",
+    "չորեքշաբթի",
+    "հինգշաբթի",
+    "ուրբաթ",
+    "շաբաթ",
+    "կիրակի",
+];
+const RU_WEEKDAYS: [&str; 7] = [
+    "понедельник",
+    "вторник",
+    "среда",
+    "четверг",
+    "пятница",
+    "суббота",
+    "воскресенье",
+];
+const EN_WEEKDAYS: [&str; 7] = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+];
+
 /// Число со знаком: `scaled` — значение, умноженное на `10^digits`.
 fn push_signed(out: &mut String, lang: Lang, scaled: i64, digits: u32) {
     if scaled < 0 {
@@ -585,6 +669,101 @@ mod tests {
             }
         }
         assert!(wrong.is_empty(), "даты записаны не так: {wrong:#?}");
+    }
+
+    /// День с месяцем словом и днём недели — все двенадцать месяцев
+    /// и семь дней недели на трёх языках. Ожидаемое выписано по
+    /// `Intl.DateTimeFormat` с `weekday: "long", month: "long", day:
+    /// "numeric"` (CLDR 48, Node 24.21, 2026-10-14), а не посчитано этим кодом.
+    #[test]
+    fn long_days_follow_each_language() {
+        let expected: [(Lang, [&str; 19]); 3] = [
+            (
+                Lang::Am,
+                [
+                    "հունվարի 5, երկուշաբթի",
+                    "փետրվարի 5, հինգշաբթի",
+                    "մարտի 5, հինգշաբթի",
+                    "ապրիլի 5, կիրակի",
+                    "մայիսի 5, երեքշաբթի",
+                    "հունիսի 5, ուրբաթ",
+                    "հուլիսի 5, կիրակի",
+                    "օգոստոսի 5, չորեքշաբթի",
+                    "սեպտեմբերի 5, շաբաթ",
+                    "հոկտեմբերի 5, երկուշաբթի",
+                    "նոյեմբերի 5, հինգշաբթի",
+                    "դեկտեմբերի 5, շաբաթ",
+                    "հոկտեմբերի 12, երկուշաբթի",
+                    "հոկտեմբերի 13, երեքշաբթի",
+                    "հոկտեմբերի 14, չորեքշաբթի",
+                    "հոկտեմբերի 15, հինգշաբթի",
+                    "հոկտեմբերի 16, ուրբաթ",
+                    "հոկտեմբերի 17, շաբաթ",
+                    "հոկտեմբերի 18, կիրակի",
+                ],
+            ),
+            (
+                Lang::Ru,
+                [
+                    "понедельник, 5 января",
+                    "четверг, 5 февраля",
+                    "четверг, 5 марта",
+                    "воскресенье, 5 апреля",
+                    "вторник, 5 мая",
+                    "пятница, 5 июня",
+                    "воскресенье, 5 июля",
+                    "среда, 5 августа",
+                    "суббота, 5 сентября",
+                    "понедельник, 5 октября",
+                    "четверг, 5 ноября",
+                    "суббота, 5 декабря",
+                    "понедельник, 12 октября",
+                    "вторник, 13 октября",
+                    "среда, 14 октября",
+                    "четверг, 15 октября",
+                    "пятница, 16 октября",
+                    "суббота, 17 октября",
+                    "воскресенье, 18 октября",
+                ],
+            ),
+            (
+                Lang::En,
+                [
+                    "Monday, January 5",
+                    "Thursday, February 5",
+                    "Thursday, March 5",
+                    "Sunday, April 5",
+                    "Tuesday, May 5",
+                    "Friday, June 5",
+                    "Sunday, July 5",
+                    "Wednesday, August 5",
+                    "Saturday, September 5",
+                    "Monday, October 5",
+                    "Thursday, November 5",
+                    "Saturday, December 5",
+                    "Monday, October 12",
+                    "Tuesday, October 13",
+                    "Wednesday, October 14",
+                    "Thursday, October 15",
+                    "Friday, October 16",
+                    "Saturday, October 17",
+                    "Sunday, October 18",
+                ],
+            ),
+        ];
+        let days = (1..=12)
+            .map(|month| day(2026, month, 5))
+            .chain((12..=18).map(|d| day(2026, 10, d)));
+        let mut wrong = Vec::new();
+        for (lang, rows) in expected {
+            for (d, want) in days.clone().zip(rows) {
+                let got = day_long(lang, d);
+                if got != want {
+                    wrong.push(format!("{lang:?} {d:?}: «{got}», а не «{want}»"));
+                }
+            }
+        }
+        assert!(wrong.is_empty(), "день записан не так: {wrong:#?}");
     }
 
     /// Одна и та же запись `1,234` читается по языку окна (Правило 6):

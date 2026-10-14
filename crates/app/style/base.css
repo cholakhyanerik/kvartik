@@ -23,43 +23,309 @@ body {
 }
 
 /* Ширина строки — не больше ~70 знаков: длинную строку глаз теряет при
-   переходе на следующую. */
+   переходе на следующую. Снизу — место под вкладки меню: содержимое под
+   ними не прячется. */
 main {
   max-width: 40rem;
-  padding: var(--space-5);
+  padding: var(--space-5) var(--space-5) calc(var(--control) + var(--space-8));
 }
 
-/* Шапка: название и выбор языка в строку, а на телефоне выбор уходит под
-   название. */
-.top {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-4);
+/* Спрятанный экран не виден, что бы ни говорили его классы: `display`
+   у класса перебил бы атрибут `hidden`. */
+[hidden] {
+  display: none !important;
 }
 
-.top h1 {
-  margin: 0;
-}
-
-/* Заголовки — засечками (Noto Serif), как в дизайне; текст — Noto Sans. */
-h1,
-h2 {
+/* Заголовок экрана — засечками (Noto Serif), как в дизайне; заголовок
+   части экрана — жирным текстом. */
+h1 {
+  margin: 0 0 var(--space-4);
   font-family: var(--font-serif);
+  font-size: var(--font-size-2xl);
   font-weight: var(--weight-heading);
   line-height: var(--leading-tight);
 }
 
-h1 {
-  margin: 0 0 var(--space-4);
-  font-size: var(--font-size-2xl);
+h2 {
+  margin: var(--space-6) 0 var(--space-3);
+  font-size: var(--font-size-lg);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
 }
 
-h2 {
-  margin: var(--space-7) 0 var(--space-3);
-  font-size: var(--font-size-xl);
+/* Фокус на заголовок экрана ставит окно при переходе (`ui/route.rs`):
+   это не элемент управления, и кольцо на нём только сбивало бы с толку. */
+h1[tabindex="-1"]:focus {
+  outline: none;
+}
+
+/* Значок — размером со строку текста, цвета текста рядом. */
+.icon {
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+/* Меню разделов (`ui/nav.rs`). На телефоне — вкладки внизу экрана,
+   поверх содержимого; на компьютере — колонка слева (ниже, `@media`). */
+.nav {
+  position: fixed;
+  inset: auto 0 0;
+  z-index: 1;
+  padding: var(--space-1) var(--space-2) var(--space-2);
+  border-top: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+
+/* На телефоне в меню — только вкладки: «Новый счёт» и напоминание о копии
+   есть на главном экране. */
+.nav .brand,
+.nav .new,
+.nav .chip {
+  display: none;
+}
+
+.tabs {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Вкладка: значок над подписью. Подпись — в строку и мелко, как в дизайне:
+   «Հաճախորդներ» иначе ломается посреди слова, а длинная подпись забирает
+   себе места больше коротких (`flex: auto`). Открытая — цветом акцента
+   и жирнее: не одним цветом (Правило 4). */
+.tabs li {
+  flex: auto;
+}
+
+.tabs a {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.125rem;
+  min-height: var(--touch);
+  padding: var(--space-2) var(--space-1) 0;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  line-height: var(--leading-tight);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.tabs a[aria-current="page"] {
+  color: var(--accent-text);
+  font-weight: var(--weight-strong);
+}
+
+/* Метка копии: когда была последняя — словами, а пора ли сделать новую,
+   говорит и заливка. В меню — на компьютере; на телефоне, когда пора, —
+   под заголовком экрана (`nudge`). */
+.chip.nudge {
+  display: inline-flex;
+  margin-bottom: var(--space-4);
+}
+
+.chip {
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--fill-muted);
+  color: var(--on-fill-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--weight-strong);
+  text-decoration: none;
+}
+
+.chip.due {
+  background: var(--fill-notice);
+  color: var(--on-fill-notice);
+}
+
+.chip .icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+/* Компьютер: меню — колонкой слева во всю высоту окна, с крупным знаком
+   программы, «Новым счётом» и меткой копии внизу. В rem: у человека
+   с крупным шрифтом колонка уступает место телефонной раскладке раньше. */
+@media (min-width: 56.25rem) {
+  .app {
+    display: grid;
+    grid-template-columns: 16rem minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .nav {
+    position: sticky;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    box-sizing: border-box;
+    height: 100vh;
+    padding: var(--space-7) var(--space-4) var(--space-5);
+    border-top: 0;
+  }
+
+  .nav .brand {
+    display: block;
+    padding: 0 var(--space-3) var(--space-4);
+    color: var(--text);
+    font-family: var(--font-display);
+    font-size: var(--font-size-2xl);
+    line-height: var(--leading-tight);
+    text-decoration: none;
+  }
+
+  .nav .new {
+    display: inline-flex;
+    margin: 0 0 var(--space-4);
+  }
+
+  .nav .chip {
+    display: flex;
+    margin-top: auto;
+  }
+
+  .chip.nudge {
+    display: none;
+  }
+
+  .tabs {
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .tabs a {
+    flex-direction: row;
+    gap: var(--space-3);
+    min-height: 3rem;
+    padding: 0 var(--space-4);
+    border-radius: var(--radius-round);
+    color: var(--text);
+    font-size: var(--font-size-md);
+    text-align: start;
+  }
+
+  .tabs a[aria-current="page"] {
+    background: var(--fill-selected);
+    color: var(--on-fill-selected);
+  }
+
+  main {
+    max-width: 48rem;
+    padding: var(--space-7) var(--space-8);
+  }
+
+  h1 {
+    font-size: var(--font-size-3xl);
+  }
+}
+
+/* Главный экран: день недели над приветствием. С заглавной буквы — строка
+   стоит первой, а запись дня (`i18n::day_long`) — по CLDR, со строчной. */
+.greeting {
+  margin-bottom: var(--space-4);
+}
+
+.greeting h1 {
+  margin: 0;
+}
+
+.today {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.today::first-letter {
+  text-transform: uppercase;
+}
+
+/* Главное действие экрана — во всю ширину. */
+button.wide {
+  width: 100%;
+  margin-top: var(--space-6);
+}
+
+/* «Назад» на экране внутри раздела — к разделу. */
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--touch);
+  margin-bottom: var(--space-2);
+  color: var(--accent-text);
+  font-weight: var(--weight-strong);
+  text-decoration: none;
+}
+
+/* Список-карточка из строк-ссылок (дизайн «Kvartik Design»): что за
+   строка и подробности слева, сумма и статус справа. Вся строка нажимается
+   и высотой не меньше главной кнопки. */
+ul.list {
+  display: grid;
+  margin: var(--space-3) 0 0;
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
+  list-style: none;
+}
+
+ul.list > li + li {
+  border-top: 1px solid var(--border);
+}
+
+.entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--control);
+  padding: var(--space-3) 0;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.entry-main {
+  display: grid;
+  flex: 1;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.entry-title {
+  font-weight: var(--weight-strong);
+  overflow-wrap: anywhere;
+}
+
+/* Подробности строки — через точку. Точка держится за предыдущее
+   (неразрывный пробел перед ней), и перенос — после неё, а не перед. */
+.entry-meta {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.entry-meta > span + span::before {
+  content: "\a0· ";
+}
+
+.entry-side {
+  display: grid;
+  justify-items: end;
+  gap: var(--space-1);
+}
+
+.entry-amount {
+  font-weight: var(--weight-strong);
+  white-space: nowrap;
+}
+
+.entry > .icon {
+  color: var(--text-muted);
 }
 
 p {
@@ -215,11 +481,40 @@ section > .button + p {
 }
 
 /* Карточка, которая просит действия, — напоминание о копии: тёплая
-   заливка, как в дизайне. Слова и жирный шрифт говорят сами, цвет только
-   помогает (Правило 4). */
+   заливка и щит в круге слева, как в дизайне. Слова и жирный шрифт говорят
+   сами, цвет только помогает (Правило 4). */
 .notice.due {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
   background: var(--fill-notice);
   color: var(--on-fill-notice);
+}
+
+.notice.due > :not(.icon) {
+  grid-column: 2;
+}
+
+/* Действие в напоминании — подчёркнутой ссылкой, как в дизайне: кнопка
+   в узкой колонке рядом со щитом ломалась бы на три строки. */
+.notice.due .button {
+  min-height: var(--touch);
+  padding: 0;
+  background: none;
+  color: inherit;
+  text-align: start;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.notice.due > .icon {
+  grid-row: span 2;
+  box-sizing: border-box;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: var(--space-2);
+  border-radius: var(--radius-round);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 /* Сбой программы (задача 48): плашка закрывает остановленное окно целиком.
@@ -229,7 +524,8 @@ section > .button + p {
 .panic {
   position: fixed;
   inset: 0;
-  z-index: 1;
+  /* Выше меню разделов: его кнопки тоже больше не отвечают. */
+  z-index: 2;
   overflow: auto;
   padding: var(--space-5);
   background: var(--surface);

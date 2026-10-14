@@ -1,7 +1,8 @@
 //! Раздел «Резервная копия» (задача 7): сделать копию под паролем,
 //! восстановить из неё, напомнить, если копии давно не было.
 //!
-//! Экрана настроек ещё нет, и раздел стоит на единственном экране каркаса.
+//! Раздел — содержимое своего экрана внутри профиля (`ui/route.rs`), а
+//! напоминание о копии — вверху остальных экранов.
 //!
 //! Копия делается в два шага: собрать и зашифровать — потом сохранить
 //! ссылкой, которую человек нажимает сам (`platform::file::Download`).
@@ -20,6 +21,8 @@ use leptos::ev::{Event, MouseEvent, SubmitEvent};
 use leptos::prelude::*;
 use web_sys::HtmlInputElement;
 
+use super::icon::{Icon, icon};
+use super::route::Screen;
 use super::split::{Task, split};
 use super::storage::{Storage, error_key};
 use super::{Base, tr};
@@ -76,12 +79,11 @@ impl Backups {
     }
 }
 
-/// `id` раздела копии: на него ведёт ссылка напоминания.
-const SECTION_ID: &str = "backup";
-
-/// Напоминание о копии — вверху окна, над разделами с данными: окно растёт,
-/// и раздел копии внизу при открытии уже не виден, а напоминать обязано
-/// каждое открытие (Правило 2). Ссылка ведёт к разделу копии.
+/// Напоминание о копии — карточкой на главном экране, под приветствием, со
+/// словами, зачем копия; на остальных экранах телефона о том же говорит
+/// короткая метка ([`BackupChip`] с `nudge`), а на компьютере метка всегда
+/// видна в меню: напоминать обязано каждое открытие, на каком бы экране оно
+/// ни было (Правило 2). Ссылка ведёт на экран копии.
 #[component]
 pub fn BackupReminder(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
     move || {
@@ -93,11 +95,81 @@ pub fn BackupReminder(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView
             };
             view! {
                 <div class="notice due" role="status">
+                    {icon(Icon::Shield)}
                     <p class="reminder">{tr(lang, key)}</p>
-                    <a class="button" href=format!("#{SECTION_ID}")>{tr(lang, Key::BackupGoTo)}</a>
+                    <a class="button" href=Screen::Backup.href()>{tr(lang, Key::BackupGoTo)}</a>
                 </div>
             }
         })
+    }
+}
+
+/// Когда была последняя копия — словами: «сегодня», «3 дня назад», «копии
+/// ещё нет». Часы без даты — `None`.
+fn ago(lang: Lang, last: Option<Date>, today: Option<Date>) -> Option<String> {
+    let Some(last) = last else {
+        return Some(t(lang, Key::BackupChipNone).to_owned());
+    };
+    let days = today?.days_since(last).max(0);
+    Some(if days == 0 {
+        t(lang, Key::BackupChipToday).to_owned()
+    } else {
+        let n = days.unsigned_abs().into();
+        let count = fill(
+            i18n::plural(lang, n, Key::DaysOne, Key::DaysFew, Key::DaysMany),
+            &[&i18n::integer(lang, i64::from(days))],
+        );
+        fill(t(lang, Key::BackupChipAgo), &[&count])
+    })
+}
+
+/// Метка копии (дизайн «Kvartik Design»): когда была последняя — словами,
+/// а пора ли сделать новую, говорит и заливка, и слова. В меню на
+/// компьютере она видна всегда; `nudge` — она же под заголовком экрана на
+/// телефоне, и только когда пора. Ссылка ведёт на экран копии.
+#[component]
+pub fn BackupChip(
+    lang: ReadSignal<Lang>,
+    backups: Backups,
+    #[prop(optional)] nudge: bool,
+) -> impl IntoView {
+    move || {
+        if nudge && !backups.due() {
+            return None;
+        }
+        let text = ago(lang.get(), backups.last.get(), backups.today)?;
+        Some(view! {
+            <a
+                class="chip"
+                class:due=move || backups.due()
+                class:nudge=nudge
+                href=Screen::Backup.href()
+            >
+                {icon(Icon::Shield)}
+                <span>{text}</span>
+            </a>
+        })
+    }
+}
+
+/// Строка «Резервная копия» на экране профиля — ссылка на экран копии
+/// с днём последней.
+#[component]
+pub fn BackupLink(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
+    view! {
+        <ul class="list">
+            <li>
+                <a class="entry" href=Screen::Backup.href()>
+                    <span class="entry-main">
+                        <span class="entry-title">{tr(lang, Key::BackupTitle)}</span>
+                        <span class="entry-meta">
+                            {move || ago(lang.get(), backups.last.get(), backups.today)}
+                        </span>
+                    </span>
+                    {icon(Icon::Forward)}
+                </a>
+            </li>
+        </ul>
     }
 }
 
@@ -213,8 +285,9 @@ enum Restoring {
     Failed(Problem),
 }
 
-/// Раздел на языке окна. Показан, только пока хранилище открыто: без базы
-/// копии не из чего делать и некуда восстанавливать.
+/// Раздел на языке окна — под заголовком экрана копии. Показан, только пока
+/// хранилище открыто: без базы копии не из чего делать и некуда
+/// восстанавливать.
 #[component]
 pub fn BackupSection(
     lang: ReadSignal<Lang>,
@@ -224,7 +297,6 @@ pub fn BackupSection(
     let ready = move || matches!(storage.get(), Storage::Ready(_));
     view! {
         <Show when=ready>
-            <h2 id=SECTION_ID>{tr(lang, Key::BackupTitle)}</h2>
             <p>{tr(lang, Key::BackupAbout)}</p>
             <p>
                 {move || {

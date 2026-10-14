@@ -9,10 +9,14 @@ mod backup;
 mod clients;
 mod documents;
 mod form;
+mod home;
+mod icon;
 mod lang;
+mod nav;
 pub mod panic;
 mod profile;
 mod pwa;
+mod route;
 mod split;
 mod storage;
 
@@ -23,13 +27,17 @@ use leptos::prelude::*;
 
 use crate::platform::clock;
 use crate::store::{self, Store};
-use backup::{BackupReminder, BackupSection, Backups};
+use backup::{BackupChip, BackupLink, BackupSection, Backups};
 use clients::{Clients, ClientsSection};
 use documents::{Documents, DocumentsSection};
+use home::Home;
+use icon::{Icon, icon};
 use lang::{LangSwitch, WindowLang};
+use nav::Nav;
 use profile::{ProfileSection, Profiles};
-use pwa::{InstallSection, Program, UpdateNotice};
-use storage::{Storage, StorageSection};
+use pwa::{Program, UpdateNotice};
+use route::{Router, Screen};
+use storage::{Storage, StorageAlert, StorageSection};
 
 /// Строка окна на его языке — производное от сигнала языка, а не значение,
 /// вычисленное один раз: при смене языка она пересобирается сама
@@ -79,19 +87,23 @@ impl Base {
     }
 }
 
-/// Корень окна. Пока — экран каркаса: название и выбор языка, новая версия,
-/// напоминание о копии, установка, профиль ИП, клиенты, счета и акты, раздел
-/// о хранении данных и раздел о резервной копии.
+/// Корень окна (дизайн «Kvartik Design»): меню разделов и экраны —
+/// главный, счета и акты, клиенты, профиль и копия внутри него
+/// (`ui/route.rs`). Все экраны — в странице, открытый виден, остальные
+/// спрятаны: начатое в форме не пропадает при переходе.
 ///
-/// Установка — выше профиля: на iPhone программу ставят до того, как
-/// вводить данные (Правило 6). Напоминание о копии — над всем, что растёт:
-/// с профилем раздел копии при открытии уже не виден, а напоминать обязано
+/// Над экранами — то, о чём окно обязано сказать, где бы человек ни был:
+/// новая версия и беда с хранилищем. Напоминание о копии — карточкой на
+/// главном экране и меткой под заголовком остальных: напоминать обязано
 /// каждое открытие (Правило 2).
+/// Установка — на главном экране, выше всего о данных: на iPhone программу
+/// ставят до того, как вводить данные (Правило 6).
 #[component]
 pub fn App() -> impl IntoView {
     // Язык — первым: до первой отрисовки (задача 53).
     let window_lang = WindowLang::start();
     let lang = window_lang.signal();
+    let router = Router::start();
     // Service worker — до базы: работа без сети от неё не зависит.
     let program = Program::new();
     let storage = RwSignal::new(Storage::Opening);
@@ -141,24 +153,49 @@ pub fn App() -> impl IntoView {
         ready
     });
 
+    // Экран сменился — страница с его начала, фокус на его заголовке.
+    Effect::watch(move || router.screen(), |screen, _, _| route::shown(*screen), false);
+
+    let hidden = move |screen: Screen| move || !router.is(screen);
     view! {
-        <main>
-            <section>
-                <header class="top">
-                    <h1>{tr(lang, Key::AppName)}</h1>
-                    <LangSwitch lang=window_lang />
-                </header>
+        <div class="app">
+            <Nav lang router documents clients backups />
+            <main>
                 <UpdateNotice lang program />
-                <BackupReminder lang backups />
-                <InstallSection lang program />
-                <ProfileSection lang profiles base backups />
-                <ClientsSection lang clients documents base backups />
-                <DocumentsSection lang documents clients base backups />
-                <StorageSection lang storage />
-                <BackupSection lang backups storage />
-            </section>
+                <StorageAlert lang storage />
+                <section id=Screen::Home.id() class="screen" hidden=hidden(Screen::Home)>
+                    <Home lang router program backups profiles documents clients />
+                </section>
+                <section id=Screen::Documents.id() class="screen" hidden=hidden(Screen::Documents)>
+                    <h1 tabindex="-1">{tr(lang, Key::DocsTitle)}</h1>
+                    <BackupChip lang backups nudge=true />
+                    <DocumentsSection lang documents clients base backups />
+                </section>
+                <section id=Screen::Clients.id() class="screen" hidden=hidden(Screen::Clients)>
+                    <h1 tabindex="-1">{tr(lang, Key::ClientsTitle)}</h1>
+                    <BackupChip lang backups nudge=true />
+                    <ClientsSection lang clients documents base backups />
+                </section>
+                <section id=Screen::Profile.id() class="screen" hidden=hidden(Screen::Profile)>
+                    <h1 tabindex="-1">{tr(lang, Key::ProfileTitle)}</h1>
+                    <BackupChip lang backups nudge=true />
+                    <ProfileSection lang profiles base backups />
+                    <h2>{tr(lang, Key::Language)}</h2>
+                    <LangSwitch lang=window_lang />
+                    <BackupLink lang backups />
+                </section>
+                <section id=Screen::Backup.id() class="screen" hidden=hidden(Screen::Backup)>
+                    <a class="back" href=Screen::Profile.href()>
+                        {icon(Icon::Back)}
+                        <span>{tr(lang, Key::NavProfile)}</span>
+                    </a>
+                    <h1 tabindex="-1">{tr(lang, Key::BackupTitle)}</h1>
+                    <BackupSection lang backups storage />
+                    <StorageSection lang storage />
+                </section>
+            </main>
             {panic::debug_trigger()}
-        </main>
+        </div>
     }
 }
 

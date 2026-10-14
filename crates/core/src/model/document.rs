@@ -785,6 +785,16 @@ impl Document {
         )
     }
 
+    /// Сколько осталось оплатить: итог минус поступления, а у оплаченного
+    /// целиком — ноль.
+    pub fn left(&self) -> Result<Money, MoneyError> {
+        let (total, paid) = (self.total()?, self.paid()?);
+        Ok(Money::new(
+            (total.minor() - paid.minor()).max(0),
+            self.data.currency,
+        ))
+    }
+
     /// Где документ на день `today`: просрочен счёт со сроком раньше
     /// сегодняшнего, оплаченный не целиком.
     pub fn status(&self, today: Date) -> Status {
@@ -827,6 +837,33 @@ impl Document {
             ))
         });
         listed
+    }
+
+    /// Счета, которые на день `today` ждут оплаты, — для главного экрана:
+    /// выпущенные, действующие и оплаченные не целиком. По сроку: чей срок
+    /// раньше, тот выше — просроченные поэтому первыми; без срока — в конце,
+    /// по дате счёта.
+    pub fn awaiting(documents: &[Document], today: Date) -> Vec<&Document> {
+        let mut awaiting: Vec<&Document> = documents
+            .iter()
+            .filter(|document| !document.is_deleted())
+            .filter(|document| {
+                matches!(
+                    document.status(today),
+                    Status::Unpaid | Status::PartlyPaid | Status::Overdue
+                )
+            })
+            .collect();
+        awaiting.sort_by_key(|document| {
+            (
+                document.data.due.is_none(),
+                document.data.due,
+                document.data.date,
+                document.number(),
+                document.id(),
+            )
+        });
+        awaiting
     }
 
     /// Удалённые черновики — последний удалённый первым.

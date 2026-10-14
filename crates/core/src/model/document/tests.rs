@@ -460,6 +460,55 @@ fn lists_and_counts() {
     assert_eq!(Document::count_for_client(&documents, other.id()), 1);
 }
 
+/// Ждут оплаты только выпущенные действующие счета, оплаченные не целиком:
+/// просроченный — первым, потом по сроку, без срока — последним. Черновик,
+/// акт, аннулированный, оплаченный и удалённый — не ждут. Сколько осталось
+/// оплатить — итог минус поступления. Сегодня — 20 октября.
+#[test]
+fn invoices_awaiting_payment() {
+    let client = client();
+    let today = day(2026, 10, 20);
+    let with_due = |date: Date, due: Option<Date>, documents: &[Document]| {
+        let mut data = data(DocKind::Invoice, &client, date);
+        data.due = due;
+        Document::create(data, at(2_000))
+            .expect("черновик")
+            .issue(documents, 0, Some(&profile()), &client, at(3_000))
+            .expect("выпущен")
+    };
+    let late = with_due(day(2026, 9, 1), Some(day(2026, 10, 1)), &[]);
+    let soon = with_due(day(2026, 10, 10), Some(day(2026, 10, 25)), std::slice::from_ref(&late));
+    let later = with_due(day(2026, 10, 5), Some(day(2026, 11, 5)), &[late.clone(), soon.clone()]);
+    let open = with_due(day(2026, 10, 2), None, &[late.clone(), soon.clone(), later.clone()]);
+    let part = Payment { date: day(2026, 10, 12), amount: 30_000 };
+    let partly = soon.add_payment(part, at(4_000)).expect("отмечена");
+    let full = Payment { date: day(2026, 10, 12), amount: 100_000 };
+    let paid = with_due(day(2026, 10, 3), None, &[late.clone(), soon.clone(), later.clone(), open.clone()])
+        .add_payment(full, at(4_000))
+        .expect("отмечена");
+    let annulled = with_due(day(2026, 10, 4), None, &[late.clone(), soon.clone(), later.clone(), open.clone(), paid.clone()])
+        .annul(today, at(4_000))
+        .expect("выпущен")
+        .expect("аннулирован");
+    let act = issued(DocKind::Act, &client, day(2026, 10, 6), &[]);
+    let draft = Document::create(data(DocKind::Invoice, &client, today), at(2_000)).expect("черновик");
+    let documents = vec![
+        open.clone(),
+        draft,
+        later.clone(),
+        act,
+        paid.clone(),
+        partly.clone(),
+        annulled,
+        late.clone(),
+    ];
+    let order: Vec<RecordId> = Document::awaiting(&documents, today).iter().map(|d| d.id()).collect();
+    assert_eq!(order, [late.id(), partly.id(), later.id(), open.id()]);
+    assert_eq!(partly.left(), Ok(Money::new(70_000, Currency::Amd)));
+    assert_eq!(late.left(), Ok(Money::new(100_000, Currency::Amd)));
+    assert_eq!(paid.left(), Ok(Money::new(0, Currency::Amd)));
+}
+
 /// Профиль, сохранённый командой, годится для выпуска так же, как данные
 /// профиля: окно передаёт `Profile::data`.
 #[test]

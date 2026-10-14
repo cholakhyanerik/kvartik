@@ -16,6 +16,21 @@ pub fn reload() {
     }
 }
 
+/// Часть адреса после `#` вместе с `#` (`#/clients`); пусто — её нет.
+pub fn hash() -> String {
+    web_sys::window()
+        .and_then(|window| window.location().hash().ok())
+        .unwrap_or_default()
+}
+
+/// Сменить часть адреса после `#`. Браузер запоминает шаг в истории —
+/// кнопка «Назад» вернёт прежний адрес — и шлёт `hashchange`.
+pub fn set_hash(hash: &str) {
+    if let Some(window) = web_sys::window() {
+        let _ = window.location().set_hash(hash);
+    }
+}
+
 /// Языки браузера по убыванию предпочтения (`navigator.languages`, а нет
 /// его — `navigator.language`); пусто — браузер не сказал.
 pub fn languages() -> Vec<String> {

@@ -87,6 +87,12 @@ impl Date {
         self.day_number() - earlier.day_number()
     }
 
+    /// День недели по ISO 8601: понедельник — 1, воскресенье — 7.
+    /// 1970-01-01, нулевой день `day_number`, — четверг.
+    pub const fn weekday(self) -> u8 {
+        (self.day_number() + 3).rem_euclid(7) as u8 + 1
+    }
+
     /// Номер дня: сколько дней от 1970-01-01 (алгоритм `days_from_civil`
     /// Говарда Хиннанта, «chrono-Compatible Low-Level Date Algorithms»).
     /// Год считается с марта, чтобы 29 февраля было последним днём года,
@@ -394,6 +400,39 @@ mod tests {
             }
         }
         assert!(wrong.is_empty(), "не тот квартал: {wrong:#?}");
+    }
+
+    /// День недели — по календарю, а не той же формулой: 1970-01-01 —
+    /// четверг, 2000-02-29 — вторник, 2026-10-14 — среда, 2026-10-18 —
+    /// воскресенье, 2027-01-01 — пятница, 9999-12-31 — пятница. И каждый
+    /// следующий день — следующий день недели, через воскресенье на
+    /// понедельник.
+    #[test]
+    fn weekday_follows_the_calendar() {
+        let cases = [
+            (date(1970, 1, 1), 4),
+            (date(2000, 2, 29), 2),
+            (date(2026, 10, 12), 1),
+            (date(2026, 10, 14), 3),
+            (date(2026, 10, 18), 7),
+            (date(2027, 1, 1), 5),
+            (date(1, 1, 1), 1),
+            (date(9999, 12, 31), 5),
+        ];
+        let mut wrong = Vec::new();
+        for (day, expected) in cases {
+            if day.weekday() != expected {
+                wrong.push(format!("{day:?}: {}, а не {expected}", day.weekday()));
+            }
+        }
+        let mut day = date(2026, 1, 1);
+        while let Some(next) = day.add_days(1).filter(|next| next.year() == 2026) {
+            if next.weekday() != day.weekday() % 7 + 1 {
+                wrong.push(format!("{next:?} после {day:?}: {}", next.weekday()));
+            }
+            day = next;
+        }
+        assert!(wrong.is_empty(), "не тот день недели: {wrong:#?}");
     }
 
     /// Первый и последний день каждого квартала — выписаны человеком по

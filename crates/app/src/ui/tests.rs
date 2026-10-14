@@ -211,8 +211,9 @@ async fn choosing_a_language_translates_the_whole_window() {
     let (host, mounted) = mount();
 
     let mut wrong = Vec::new();
-    // Разделы о данных появляются, когда открылась база.
-    if !wait_for(&host, t(Lang::Am, Key::BackupTitle)).await {
+    // Разделы о данных появляются, когда открылась база; заголовок экрана
+    // копии виден и раньше.
+    if !wait_for(&host, t(Lang::Am, Key::BackupChooseFile)).await {
         wrong.push("раздел копии не появился".to_owned());
     }
     match button(
@@ -327,6 +328,86 @@ async fn choosing_a_language_translates_the_whole_window() {
     assert!(wrong.is_empty(), "смена языка: {wrong:#?}\nшаги: {steps:#?}");
 }
 
+/// `id` видимых экранов окна.
+fn shown_screens(host: &HtmlElement) -> Vec<String> {
+    let Ok(sections) = host.query_selector_all("section.screen") else {
+        return Vec::new();
+    };
+    (0..sections.length())
+        .filter_map(|at| sections.item(at))
+        .map(|node| node.unchecked_into::<Element>())
+        .filter(|section| !section.has_attribute("hidden"))
+        .map(|section| section.id())
+        .collect()
+}
+
+/// Адреса вкладок меню, отмеченных открытыми (`aria-current`).
+fn current_tabs(host: &HtmlElement) -> Vec<String> {
+    let Ok(tabs) = host.query_selector_all(r#".tabs a[aria-current="page"]"#) else {
+        return Vec::new();
+    };
+    (0..tabs.length())
+        .filter_map(|at| tabs.item(at))
+        .filter_map(|tab| tab.unchecked_into::<Element>().get_attribute("href"))
+        .collect()
+}
+
+/// Экран — по адресу: окно, открытое с `#/clients`, показывает клиентов,
+/// а остальные экраны прячет; вкладка меню открывает свой экран и отмечена
+/// открытой; «Назад» браузера возвращает прежний экран, а не уводит из
+/// программы; копия — экран внутри профиля; чужой адрес — главный экран.
+#[wasm_bindgen_test]
+async fn screens_follow_the_address() {
+    use crate::platform::{hash, set_hash};
+
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    set_hash("#/clients");
+    let (host, mounted) = mount();
+    let mut wrong = Vec::new();
+    sleep(50).await;
+    let look = |step: &str, screen: &str, tab: &str, wrong: &mut Vec<String>| {
+        let (shown, current) = (shown_screens(&host), current_tabs(&host));
+        if shown != [screen] || current != [tab] {
+            wrong.push(format!("{step}: видны {shown:?}, открыта вкладка {current:?}"));
+        }
+    };
+    look("с #/clients", "clients", "#/clients", &mut wrong);
+
+    match host.query_selector(r##".tabs a[href="#/documents"]"##).ok().flatten() {
+        Some(tab) => tab.unchecked_into::<HtmlElement>().click(),
+        None => wrong.push("нет вкладки счетов".to_owned()),
+    }
+    sleep(100).await;
+    look("вкладка счетов", "documents", "#/documents", &mut wrong);
+    if hash() != "#/documents" {
+        wrong.push(format!("адрес после вкладки — {}", hash()));
+    }
+
+    if let Some(window) = web_sys::window() {
+        let _ = window.history().map(|history| history.back());
+    }
+    sleep(200).await;
+    look("«Назад»", "clients", "#/clients", &mut wrong);
+
+    set_hash("#/backup");
+    sleep(100).await;
+    look("копия", "backup", "#/profile", &mut wrong);
+
+    set_hash("#/nothing");
+    sleep(100).await;
+    look("чужой адрес", "home", "#/", &mut wrong);
+
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten())
+    {
+        let _ = storage.remove_item("kvartik.lang");
+    }
+    assert!(wrong.is_empty(), "экраны: {wrong:#?}");
+}
+
 /// Положить файл в поле выбора файла, как будто его выбрал человек.
 fn choose_file(input: &HtmlInputElement, name: &str, text: &str) {
     let file = web_sys::File::new_with_str_sequence(&js_sys::Array::of1(&text.into()), name)
@@ -422,8 +503,9 @@ async fn profile_is_saved_and_read_back() {
     device.set_ui_lang(lang);
     let (host, mounted) = mount();
     let mut wrong = Vec::new();
-    if !wait_for(&host, t(lang, Key::ProfileTitle)).await {
-        wrong.push("раздела профиля нет".to_owned());
+    // Заголовок экрана профиля виден сразу, а кнопка — когда база прочитана.
+    if !wait_for(&host, t(lang, Key::ProfileFill)).await {
+        wrong.push("пустая база — а профиль не предлагают заполнить".to_owned());
     }
     match button(&host, &[t(lang, Key::ProfileFill), t(lang, Key::ProfileEdit)]) {
         Some(open) => open.click(),

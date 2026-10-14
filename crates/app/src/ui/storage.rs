@@ -1,8 +1,8 @@
 //! Раздел «Хранение данных»: сотрёт ли браузер данные сам и что мешает
 //! хранилищу — словами (задача 6, Правило 6).
 //!
-//! Экрана настроек ещё нет, и раздел стоит на единственном экране каркаса.
-//! Слова для ошибок хранилища ([`error_key`]) — общие: ими же заговорят
+//! Раздел стоит на экране резервной копии (`ui/route.rs`): он о том же —
+//! сохранности данных. Слова для ошибок хранилища ([`error_key`]) — общие: ими же заговорят
 //! действия, когда сохранение не удалось.
 
 use kvartik_core::i18n::{Key, Lang};
@@ -79,26 +79,46 @@ const fn message(storage: Storage) -> Option<Key> {
     }
 }
 
-/// Раздел на языке окна.
+/// Беда с хранилищем — старая вкладка мешает или хранилищем пользоваться
+/// нельзя — карточкой вверху окна, на каком бы экране человек ни был:
+/// данные не сохраняются, и узнать об этом надо сразу (Правило 2).
 #[component]
-pub fn StorageSection(lang: ReadSignal<Lang>, storage: RwSignal<Storage>) -> impl IntoView {
+pub fn StorageAlert(lang: ReadSignal<Lang>, storage: RwSignal<Storage>) -> impl IntoView {
     move || {
         let state = storage.get();
-        let failed = matches!(state, Storage::Failed(_));
         // Ошибка — сразу диктору (`alert`), ожидание — когда тот договорит
-        // (`status`); спокойное состояние не объявляется.
-        let role = match state {
-            Storage::Failed(_) => Some("alert"),
-            Storage::Blocked => Some("status"),
-            Storage::Opening | Storage::Ready(_) => None,
+        // (`status`).
+        let (role, failed) = match state {
+            Storage::Failed(_) => ("alert", true),
+            Storage::Blocked => ("status", false),
+            Storage::Opening | Storage::Ready(_) => return None,
         };
-        message(state).map(|key| {
-            view! {
-                <h2>{tr(lang, Key::StorageTitle)}</h2>
+        let key = message(state)?;
+        Some(view! {
+            <div class="notice">
                 <p role=role>{tr(lang, key)}</p>
                 {failed.then(|| view! {
                     <button type="button" on:click=|_| platform::reload()>{tr(lang, Key::Reload)}</button>
                 })}
+            </div>
+        })
+    }
+}
+
+/// Раздел о хранении на экране копии: сотрёт ли браузер данные сам. Беду
+/// с хранилищем говорит [`StorageAlert`], а пока база открывается, сказать
+/// нечего.
+#[component]
+pub fn StorageSection(lang: ReadSignal<Lang>, storage: RwSignal<Storage>) -> impl IntoView {
+    move || {
+        let state = storage.get();
+        let Storage::Ready(_) = state else {
+            return None;
+        };
+        message(state).map(|key| {
+            view! {
+                <h2>{tr(lang, Key::StorageTitle)}</h2>
+                <p>{tr(lang, key)}</p>
             }
         })
     }
