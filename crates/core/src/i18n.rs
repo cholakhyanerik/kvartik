@@ -163,6 +163,15 @@ strings! {
     /// кнопки — имена языков на них самих (`Lang::native_name`).
     Language = "Язык", "Language", "Լեզու";
 
+    /// Первый запуск (дизайн «Kvartik Design», экран 01).
+    WelcomeHeadline = "Счёт, акт и налог\u{A0}— в одном месте", "Invoices, acts and tax in one place", "Հաշիվ, ակտ և հարկ՝ մեկ տեղում";
+    WelcomeAbout =
+        "Для ИП на налоге с оборота. Ваши данные остаются только на этом устройстве.",
+        "For individual entrepreneurs (IE) on turnover tax. Your data stays only on this device.",
+        "Շրջանառության հարկ վճարող ԱՁ-ների համար։ Ձեր տվյալները մնում են միայն այս սարքում։";
+    WelcomeLang = "Выберите язык", "Choose a language", "Ընտրեք լեզուն";
+    WelcomeContinue = "Продолжить", "Continue", "Շարունակել";
+    WelcomeHaveBackup = "У меня есть копия", "I have a backup", "Ունեմ պահուստային պատճեն";
     /// Формы по шагам (дизайн «Kvartik Design»): «назад» кружком — для
     /// экранного диктора, номер шага — «1 / 2» глазу и словами диктору.
     Back = "Назад", "Back", "Հետ";

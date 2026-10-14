@@ -14,6 +14,7 @@ mod home;
 mod icon;
 mod lang;
 mod nav;
+mod onboarding;
 pub mod panic;
 mod profile;
 mod pwa;
@@ -35,6 +36,7 @@ use home::Home;
 use icon::{Icon, icon};
 use lang::{LangSwitch, WindowLang};
 use nav::Nav;
+use onboarding::Welcome;
 use profile::{ProfileSection, Profiles};
 use pwa::{Program, UpdateNotice};
 use route::{Router, Screen};
@@ -105,6 +107,9 @@ pub fn App() -> impl IntoView {
     let window_lang = WindowLang::start();
     let lang = window_lang.signal();
     let router = Router::start();
+    // Первый запуск — пока язык окна не выбран (`ui::onboarding`). Окно под
+    // ним открывает базу и готовит экраны, спрятанным.
+    let welcome = RwSignal::new(onboarding::needed());
     // Service worker — до базы: работа без сети от неё не зависит.
     let program = Program::new();
     let storage = RwSignal::new(Storage::Opening);
@@ -159,7 +164,8 @@ pub fn App() -> impl IntoView {
 
     let hidden = move |screen: Screen| move || !router.shows(screen);
     view! {
-        <div class="app">
+        {move || welcome.get().then(|| view! { <Welcome window_lang open=welcome router /> })}
+        <div class="app" hidden=move || welcome.get()>
             <Nav lang router documents clients backups />
             <main>
                 <UpdateNotice lang program />

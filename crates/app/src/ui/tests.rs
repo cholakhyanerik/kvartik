@@ -395,6 +395,111 @@ async fn choosing_a_language_translates_the_whole_window() {
     assert!(wrong.is_empty(), "смена языка: {wrong:#?}\nшаги: {steps:#?}");
 }
 
+/// Забыть выбранный язык окна: окно откроется первым запуском.
+fn forget_lang() {
+    if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten())
+    {
+        let _ = storage.remove_item("kvartik.lang");
+    }
+}
+
+/// Отмеченный язык на экране первого запуска — код из `lang` его пилюли.
+fn welcome_choice(host: &HtmlElement) -> Option<String> {
+    host.query_selector(".welcome input:checked")
+        .ok()
+        .flatten()?
+        .parent_element()?
+        .get_attribute("lang")
+}
+
+/// Первый запуск: пока язык окна не выбран, окно открывается экраном
+/// первого запуска на языке браузера, а само спрятано под ним; выбор языка
+/// сразу переводит экран и запоминается; «Продолжить» убирает экран,
+/// и при новом открытии его нет. «У меня есть копия» запоминает язык
+/// и ведёт к копии, где в пустой базе восстановление стоит первым.
+#[wasm_bindgen_test]
+async fn first_launch_asks_for_the_language() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    forget_lang();
+    let mut wrong = Vec::new();
+    let preferred = Lang::preferred(crate::platform::languages().iter().map(String::as_str));
+    let (host, mounted) = mount();
+    let app_hidden = |host: &HtmlElement| {
+        host.query_selector(".app")
+            .ok()
+            .flatten()
+            .is_some_and(|app| app.has_attribute("hidden"))
+    };
+    let welcome = |host: &HtmlElement| host.query_selector(".welcome").ok().flatten().is_some();
+    if !welcome(&host) || !app_hidden(&host) {
+        wrong.push(format!(
+            "первый запуск: экран — {}, окно спрятано — {}",
+            welcome(&host),
+            app_hidden(&host)
+        ));
+    }
+    if welcome_choice(&host).as_deref() != Some(preferred.code()) {
+        wrong.push(format!("предложен не язык браузера {preferred:?}: {:?}", welcome_choice(&host)));
+    }
+    match host.query_selector(".welcome label[lang=\"ru\"]").ok().flatten() {
+        Some(russian) => russian.unchecked_into::<HtmlElement>().click(),
+        None => wrong.push("нет русского среди языков".to_owned()),
+    }
+    sleep(50).await;
+    let text = host.text_content().unwrap_or_default();
+    if !text.contains(t(Lang::Ru, Key::WelcomeHeadline)) || welcome_choice(&host).as_deref() != Some("ru") {
+        wrong.push(format!("выбор русского не перевёл экран: {:?}", welcome_choice(&host)));
+    }
+    if Device::new().ui_lang() != Some(Lang::Ru) {
+        wrong.push(format!("выбор не запомнен: {:?}", Device::new().ui_lang()));
+    }
+    match button(&host, &[t(Lang::Ru, Key::WelcomeContinue)]) {
+        Some(next) => next.click(),
+        None => wrong.push("нет «Продолжить»".to_owned()),
+    }
+    sleep(50).await;
+    if welcome(&host) || app_hidden(&host) {
+        wrong.push("«Продолжить» не открыло окно".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    let (host, mounted) = mount();
+    if welcome(&host) || app_hidden(&host) {
+        wrong.push("язык выбран, а первый запуск снова".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+
+    // «У меня есть копия» — к восстановлению, и язык браузера запомнен.
+    forget_lang();
+    let (host, mounted) = mount();
+    match button(&host, &[t(preferred, Key::WelcomeHaveBackup)]) {
+        Some(backup) => backup.click(),
+        None => wrong.push("нет «У меня есть копия»".to_owned()),
+    }
+    sleep(50).await;
+    if welcome(&host) || crate::platform::hash() != "#/backup" {
+        wrong.push(format!("«У меня есть копия» не повело к копии: {}", crate::platform::hash()));
+    }
+    if Device::new().ui_lang() != Some(preferred) {
+        wrong.push(format!("язык браузера не запомнен: {:?}", Device::new().ui_lang()));
+    }
+    if !wait_for(&host, t(preferred, Key::BackupChooseFile)).await {
+        wrong.push("на экране копии нет восстановления".to_owned());
+    }
+    let restore = host.query_selector("#backup p.restore").ok().flatten();
+    let make = host.query_selector("#backup form.backup").ok().flatten();
+    match (restore, make) {
+        (Some(restore), Some(make))
+            if restore.compare_document_position(&make) & web_sys::Node::DOCUMENT_POSITION_FOLLOWING != 0 => {}
+        _ => wrong.push("в пустой базе восстановление не первым".to_owned()),
+    }
+    drop(mounted);
+    host.remove();
+    forget_lang();
+    assert!(wrong.is_empty(), "первый запуск: {wrong:#?}");
+}
+
 /// `id` видимых экранов окна.
 fn shown_screens(host: &HtmlElement) -> Vec<String> {
     let Ok(sections) = host.query_selector_all("section.screen") else {

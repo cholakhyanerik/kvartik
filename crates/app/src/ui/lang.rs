@@ -21,12 +21,18 @@ impl WindowLang {
     /// отрисовки, — окно не мигает чужим языком, — и сразу ставится
     /// у страницы: паника в первой же отрисовке скажет на нём (`ui::panic`).
     pub fn start() -> Self {
-        let lang = Device::new().ui_lang().unwrap_or_else(|| {
+        let lang = Self::remembered().unwrap_or_else(|| {
             let browser = platform::languages();
             Lang::preferred(browser.iter().map(String::as_str))
         });
         mark_page(lang);
         Self(RwSignal::new(lang))
+    }
+
+    /// Язык, выбранный на этом устройстве раньше; `None` — не выбирали:
+    /// тогда окно открывается экраном первого запуска (`ui::onboarding`).
+    pub fn remembered() -> Option<Lang> {
+        Device::new().ui_lang()
     }
 
     /// Язык окна для разметки: каждая строка — производное от него
@@ -38,13 +44,19 @@ impl WindowLang {
     /// Человек выбрал язык: всё окно переводится сразу, без перезагрузки.
     /// Не запомнилось (`localStorage` отказал) — окно всё равно на новом
     /// языке, а в следующий раз откроется по языкам браузера.
-    fn choose(self, lang: Lang) {
+    pub fn choose(self, lang: Lang) {
         if self.0.get_untracked() == lang {
             return;
         }
         Device::new().set_ui_lang(lang);
         mark_page(lang);
         self.0.set(lang);
+    }
+
+    /// Запомнить язык окна как выбранный — и тот, что предложил браузер:
+    /// «Продолжить» на экране первого запуска — тоже выбор.
+    pub fn keep(self) {
+        Device::new().set_ui_lang(self.0.get_untracked());
     }
 }
 

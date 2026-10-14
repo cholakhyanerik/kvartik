@@ -98,6 +98,10 @@
   --on-fill-hero: #f0fae1; /* 5.9 на fill-hero */
   --decor-hero: #728157;
 
+  /* Круги первого запуска — только украшают и под текст не заходят. */
+  --decor-olive: #ccdbb2;
+  --decor-clay: #ffc6a5;
+
   /* Шрифты (fonts.css): текст — Noto Sans, заголовки — Noto Serif, крупные
      суммы и «Kvartik» — Caprasimo. Системные — пока файл не пришёл и для
      знаков, которых в нём нет. Начертаний у текста два, у заголовков одно:
@@ -199,5 +203,8 @@
     --fill-hero: #3d472b;
     --on-fill-hero: #f0fae1; /* 9.1 на fill-hero */
     --decor-hero: #4a5636;
+
+    --decor-olive: #34402a;
+    --decor-clay: #4d2b15;
   }
 }

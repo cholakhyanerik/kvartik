@@ -294,7 +294,11 @@ pub fn BackupSection(
     let ready = move || matches!(storage.get(), Storage::Ready(_));
     // Дизайн «Kvartik Design»: щит в круге, зачем копия, когда была
     // последняя — меткой (пора сделать новую — тёплой), пароль и большая
-    // кнопка; восстановление — ссылкой ниже.
+    // кнопка; восстановление — ссылкой ниже. В пустой базе копию делать не
+    // из чего, а пришли, скорее всего, восстановить её (первый запуск,
+    // «У меня есть копия»): восстановление — первым. Порядок решается, когда
+    // база открылась, и после восстановления раздел не перестраивается —
+    // иначе пропало бы сообщение о восстановленном.
     view! {
         <Show when=ready>
             <span class="hero-icon">{icon(Icon::Shield)}</span>
@@ -309,8 +313,19 @@ pub fn BackupSection(
                     }
                 }}
             </p>
-            <MakeBackup lang backups />
-            <RestoreBackup lang backups />
+            {if backups.has_data.get_untracked() {
+                view! {
+                    <MakeBackup lang backups />
+                    <RestoreBackup lang backups />
+                }
+                .into_any()
+            } else {
+                view! {
+                    <RestoreBackup lang backups />
+                    <MakeBackup lang backups />
+                }
+                .into_any()
+            }}
         </Show>
     }
 }
