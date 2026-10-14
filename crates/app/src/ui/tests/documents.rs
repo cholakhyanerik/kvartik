@@ -16,7 +16,8 @@ use wasm_bindgen_test::wasm_bindgen_test;
 use web_sys::HtmlElement;
 
 use super::{
-    button, choose_file, field, mount, mount_at, pick, select, sleep, type_into, wait_for,
+    button, choose_file, field, mount, mount_at, pick_client, select, shown_step, sleep, type_into,
+    wait_for,
 };
 use crate::platform::clock;
 use crate::store::device::Device;
@@ -103,8 +104,10 @@ fn forget_device() {
     }
 }
 
-/// Счёт от черновика до оплаты и акта: форма не выпускает без клиента
-/// и говорит об этом у поля; клиент приносит язык, валюту и срок оплаты;
+/// Счёт от черновика до оплаты и акта: новый — по шагам, и шаг строк не
+/// пускает дальше с пустой строкой и говорит об этом у поля; клиент
+/// выбирается строкой и приносит язык, валюту и срок оплаты, а «Изменить»
+/// возвращает к выбору;
 /// сумма строки — по правилам языка окна; выпуск даёт номер серии года,
 /// а следующий выпущенный — следующий номер; оплата меняет статус; акт по
 /// счёту — одним нажатием и со своей серией; аннулирование возвращается;
@@ -141,10 +144,12 @@ async fn invoice_flow(host: &HtmlElement, client: &Client, lang: Lang, today: Da
             }
         }
     };
-    let choose_client = |wrong: &mut Vec<String>| match select(host, t(lang, Key::DocClient), 0) {
-        Some(clients) => pick(&clients, &client.id().to_string()),
-        None => wrong.push("нет выбора клиента".to_owned()),
+    let choose_client = |wrong: &mut Vec<String>| {
+        if !pick_client(host, client.data().name.as_str()) {
+            wrong.push("клиента нет в выборе".to_owned());
+        }
     };
+    let step = || shown_step(host, "form.document");
     // Строка списка — ссылка: выпущенный открывается карточкой, черновик —
     // формой.
     let open_row = |title: &str, wrong: &mut Vec<String>| {
@@ -171,17 +176,29 @@ async fn invoice_flow(host: &HtmlElement, client: &Client, lang: Lang, today: Da
 
     press(t(lang, Key::DocNewInvoice), &mut wrong);
     sleep(100).await;
-    press(t(lang, Key::DocIssue), &mut wrong);
-    sleep(100).await;
-    let text = host.text_content().unwrap_or_default();
-    for key in [Key::DocClientMissing, Key::DocLanguageMissing, Key::DocCurrencyMissing, Key::ItemTextMissing] {
-        if !text.contains(t(lang, key)) {
-            wrong.push(format!("пустая форма выпущена без {key:?}"));
-        }
+    if step() != Some(1) || button(host, &[t(lang, Key::DocIssue)]).is_some() {
+        wrong.push(format!("новый счёт — не с выбора клиента: шаг {:?}", step()));
     }
-
     choose_client(&mut wrong);
     sleep(100).await;
+    if step() != Some(2) {
+        wrong.push(format!("выбор клиента не повёл дальше: шаг {:?}", step()));
+    }
+    // «Изменить» у клиента — снова к выбору.
+    press(t(lang, Key::Change), &mut wrong);
+    sleep(50).await;
+    if step() != Some(1) {
+        wrong.push(format!("«Изменить» не вернуло к выбору клиента: шаг {:?}", step()));
+    }
+    choose_client(&mut wrong);
+    sleep(100).await;
+    // Пустая строка дальше не пускает и говорит об этом у поля.
+    press(t(lang, Key::DocNextReview), &mut wrong);
+    sleep(100).await;
+    let text = host.text_content().unwrap_or_default();
+    if step() != Some(2) || !text.contains(t(lang, Key::ItemTextMissing)) || !text.contains(t(lang, Key::StepFix)) {
+        wrong.push(format!("пустая строка прошла к проверке: шаг {:?}", step()));
+    }
     let chosen = |label: Key| select(host, t(lang, label), 0).map(|select| select.value());
     if (chosen(Key::DocLanguage), chosen(Key::DocCurrency)) != (Some("en".to_owned()), Some("USD".to_owned())) {
         wrong.push(format!(
@@ -194,6 +211,9 @@ async fn invoice_flow(host: &HtmlElement, client: &Client, lang: Lang, today: Da
     if field(host, t(lang, Key::DocDue), 0).map(|input| input.value()) != due {
         wrong.push("срок оплаты клиента не подставился".to_owned());
     }
+    if field(host, t(lang, Key::ItemQuantity), 0).map(|input| input.value()).as_deref() != Some("1") {
+        wrong.push("количество новой строки — не 1".to_owned());
+    }
     fill_in(
         &[(Key::ItemText, "Разработка программ"), (Key::ItemQuantity, "1,5"), (Key::ItemPrice, "1 000,50")],
         &mut wrong,
@@ -203,6 +223,11 @@ async fn invoice_flow(host: &HtmlElement, client: &Client, lang: Lang, today: Da
     let line_total = i18n::money(lang, Money::new(150_075, Currency::Usd));
     if !host.text_content().unwrap_or_default().contains(&line_total) {
         wrong.push(format!("сумма строки не {line_total}"));
+    }
+    press(t(lang, Key::DocNextReview), &mut wrong);
+    sleep(100).await;
+    if step() != Some(3) {
+        wrong.push(format!("верная строка не пустила к проверке: шаг {:?}", step()));
     }
     press(t(lang, Key::DocIssue), &mut wrong);
     let first = numbered(Key::KindInvoice, 1);
@@ -268,7 +293,9 @@ async fn invoice_flow(host: &HtmlElement, client: &Client, lang: Lang, today: Da
     sleep(100).await;
     choose_client(&mut wrong);
     sleep(50).await;
-    fill_in(&[(Key::ItemText, "Поддержка"), (Key::ItemQuantity, "1"), (Key::ItemPrice, "100")], &mut wrong);
+    fill_in(&[(Key::ItemText, "Поддержка"), (Key::ItemPrice, "100")], &mut wrong);
+    press(t(lang, Key::DocNextReview), &mut wrong);
+    sleep(50).await;
     press(t(lang, Key::DocSaveDraft), &mut wrong);
     if !wait_for(host, t(lang, Key::DocSaved)).await {
         wrong.push("черновик не сохранён".to_owned());
@@ -302,6 +329,8 @@ async fn invoice_flow(host: &HtmlElement, client: &Client, lang: Lang, today: Da
     choose_client(&mut wrong);
     sleep(50).await;
     fill_in(&[(Key::ItemText, "Поддержка"), (Key::ItemQuantity, "1"), (Key::ItemPrice, "100")], &mut wrong);
+    press(t(lang, Key::DocNextReview), &mut wrong);
+    sleep(50).await;
     press(t(lang, Key::DocSaveDraft), &mut wrong);
     if !wait_for(host, t(lang, Key::DocSaved)).await {
         wrong.push("второй черновик не сохранён".to_owned());
@@ -536,8 +565,8 @@ async fn numbers_follow_the_window_language() {
         None => wrong.push("нет кнопки нового счёта".to_owned()),
     }
     sleep(100).await;
-    if let Some(clients) = select(&host, t(Lang::En, Key::DocClient), 0) {
-        pick(&clients, &client.id().to_string());
+    if !pick_client(&host, client.data().name.as_str()) {
+        wrong.push("клиента нет в выборе".to_owned());
     }
     sleep(50).await;
     for (label, value) in [(Key::ItemQuantity, "1,000.5"), (Key::ItemPrice, "1,234.50")] {

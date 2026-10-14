@@ -33,7 +33,8 @@ use super::avatar::{Avatar, tone};
 use super::backup::Backups;
 use super::documents::Documents;
 use super::form::{
-    AreaField, CURRENCIES, FieldError, TextField, currency_code, currency_key, optional,
+    AreaField, CURRENCIES, FieldError, TextField, WizardHead, currency_code, currency_key,
+    optional,
 };
 use super::icon::{Icon, icon};
 use super::split::{part, split};
@@ -547,6 +548,9 @@ struct Form {
     currency: RwSignal<Option<Currency>>,
     doc_lang: RwSignal<Option<Lang>>,
     days: RwSignal<String>,
+    /// Где зарегистрирован — ответ на первый шаг мастера: `Some(false)` —
+    /// в Армении, `Some(true)` — в другой стране, `None` — не ответили.
+    abroad: RwSignal<Option<bool>>,
     /// Была ли попытка сохранить: после неё ошибки полей видны.
     tried: RwSignal<bool>,
     /// Идёт сохранение.
@@ -573,9 +577,38 @@ impl Form {
                     .map(|days| days.to_string())
                     .unwrap_or_default(),
             ),
+            abroad: RwSignal::new(data.and_then(|d| d.country).map(|c| c != Country::ARMENIA)),
             tried: RwSignal::new(false),
             busy: RwSignal::new(false),
         }
+    }
+
+    /// Фирма из Армении: страна — Армения, спрашивается ՀՎՀՀ.
+    fn choose_armenia(&self) {
+        self.abroad.set(Some(false));
+        self.country.set(Some(Country::ARMENIA));
+    }
+
+    /// Фирма другой страны: страну выбирают из списка, спрашивается её
+    /// налоговый номер.
+    fn choose_abroad(&self) {
+        self.abroad.set(Some(true));
+        if self.country.get_untracked() == Some(Country::ARMENIA) {
+            self.country.set(None);
+        }
+    }
+
+    /// Первый шаг мастера годится: название есть, ՀՎՀՀ и налоговый номер
+    /// читаются, адрес не длиннее предела. Остальное проверит сохранение.
+    fn first_step(&self) -> bool {
+        let name = self.name.get_untracked();
+        let tin = self.country.get_untracked() != Some(Country::ARMENIA)
+            || optional(&self.tin.get_untracked(), Tin::parse).is_some();
+        !name.trim().is_empty()
+            && Line::new(&name).is_ok()
+            && tin
+            && Line::new(&self.tax_id.get_untracked()).is_ok()
+            && Lines::new(&self.address.get_untracked()).is_ok()
     }
 
     /// ՀՎՀՀ спрашивается только у армянской фирмы.
@@ -628,8 +661,9 @@ split! {
     }
 }
 
-/// Форма клиента: новый — `existing` пуст, правка — с его данными
-/// и «Удалить» внизу.
+/// Форма клиента. Новый — по шагам (дизайн «Kvartik Design»): где
+/// зарегистрирован, название и номера, потом — как выписывать ему
+/// документы. Правка — одной формой со всеми полями и «Удалить» внизу.
 #[component]
 fn ClientForm(ctx: Ctx, existing: Option<Client>) -> impl IntoView {
     let Ctx {
@@ -643,12 +677,36 @@ fn ClientForm(ctx: Ctx, existing: Option<Client>) -> impl IntoView {
     } = ctx;
     let form = Form::new(existing.as_ref().map(Client::data));
     let id = existing.as_ref().map(Client::id);
+    // Новый клиент — по шагам; у правки шаг всегда последний, и видны все
+    // поля.
+    let wizard = existing.is_none();
+    let step = RwSignal::new(if wizard { 1_u8 } else { 2 });
+    let shows = move |n: u8| !wizard || step.get() == n;
     let failure = RwSignal::new(None::<StoreError>);
     let invalid = RwSignal::new(false);
     let tried = form.tried;
+    // Армению выбрали и в списке стран — значит, фирма из Армении.
+    Effect::watch(
+        move || form.country.get(),
+        move |country, _, _| {
+            if *country == Some(Country::ARMENIA) {
+                form.abroad.set(Some(false));
+            }
+        },
+        false,
+    );
 
-    let submit = move |event: SubmitEvent| {
-        event.prevent_default();
+    let next = move || {
+        if form.first_step() {
+            invalid.set(false);
+            form.tried.set(false);
+            step.set(2);
+        } else {
+            form.tried.set(true);
+            invalid.set(true);
+        }
+    };
+    let submit = move || {
         if form.busy.get_untracked() {
             return;
         }
@@ -678,19 +736,57 @@ fn ClientForm(ctx: Ctx, existing: Option<Client>) -> impl IntoView {
             }
         });
     };
+    let leave = move || mode.set(Mode::List);
+    // Шаг сменился — прежняя жалоба к нему не относится.
+    Effect::watch(move || step.get(), move |_, _, _| invalid.set(false), false);
 
     view! {
-        <form class="client" on:submit=submit novalidate>
-            <fieldset>
-                <legend>{tr(lang, Key::ProfileRequisites)}</legend>
+        // «Ввод» в поле первого шага — «Дальше», последнего — «Сохранить».
+        <form class="client" on:submit=move |event: SubmitEvent| {
+            event.prevent_default();
+            if step.get_untracked() == 1 {
+                next();
+            } else {
+                submit();
+            }
+        } novalidate>
+            {wizard.then(|| view! {
+                <WizardHead lang title=Key::ClientNew step steps=2 leave />
+            })}
+            <fieldset hidden=move || !shows(1)>
+                {if wizard {
+                    view! {
+                        <legend class="question">{tr(lang, Key::ClientWhere)}</legend>
+                        <div class="choices" role="radiogroup" aria-label=move || t(lang.get(), Key::ClientWhere)>
+                            <WhereChoice
+                                lang
+                                label=Key::ClientInArmenia
+                                hint=Key::ClientInArmeniaHint
+                                chosen=move || form.abroad.get() == Some(false)
+                                choose=move || form.choose_armenia()
+                            />
+                            <WhereChoice
+                                lang
+                                label=Key::ClientAbroad
+                                hint=Key::ClientAbroadHint
+                                chosen=move || form.abroad.get() == Some(true)
+                                choose=move || form.choose_abroad()
+                            />
+                        </div>
+                    }
+                    .into_any()
+                } else {
+                    view! { <legend>{tr(lang, Key::ProfileRequisites)}</legend> }.into_any()
+                }}
+                <Show when=move || !wizard || form.abroad.get() == Some(true)>
+                    <CountryField lang chosen=form.country />
+                </Show>
                 <TextField lang label=Key::ClientName value=form.name tried hint=Key::ClientNameHint autocomplete="off" />
                 <FieldError
                     lang
                     tried
                     error=move || form.name.with(|name| name.trim().is_empty()).then_some(Key::ClientNameMissing)
                 />
-                <CountryField lang chosen=form.country />
-                <AreaField lang label=Key::ClientAddress value=form.address tried />
                 <Show when=move || form.asks_tin()>
                     <TextField
                         lang
@@ -714,9 +810,10 @@ fn ClientForm(ctx: Ctx, existing: Option<Client>) -> impl IntoView {
                         hint=Key::ClientTaxIdHint
                     />
                 </Show>
+                <AreaField lang label=Key::ClientAddress value=form.address tried />
             </fieldset>
-            <fieldset>
-                <legend>{tr(lang, Key::ClientDefaults)}</legend>
+            <fieldset hidden=move || !shows(2)>
+                <legend class:question=wizard>{tr(lang, Key::ClientDefaults)}</legend>
                 <label>
                     {tr(lang, Key::ClientCurrency)}
                     <select on:change=move |event| {
@@ -780,24 +877,39 @@ fn ClientForm(ctx: Ctx, existing: Option<Client>) -> impl IntoView {
                 })}
             </fieldset>
             {move || invalid.get().then(|| view! {
-                <p role="alert">{tr(lang, Key::ProfileFix)}</p>
+                <p role="alert">{move || {
+                    let fix = if step.get() == 1 { Key::StepFix } else { Key::ProfileFix };
+                    t(lang.get(), fix)
+                }}</p>
             })}
             {move || failure.get().map(|error| view! {
                 <p role="alert">{tr(lang, error_key(error))}</p>
             })}
-            <div class="actions">
-                <button type="submit" disabled=move || form.busy.get()>
-                    {tr(lang, Key::ProfileSave)}
-                </button>
-                <button
-                    type="button"
-                    class="secondary"
-                    disabled=move || form.busy.get()
-                    on:click=move |_| mode.set(Mode::List)
-                >
-                    {tr(lang, Key::Cancel)}
-                </button>
-            </div>
+            {move || if step.get() == 1 {
+                view! {
+                    <button type="submit" class="wide">
+                        {tr(lang, Key::ClientNextDefaults)}
+                    </button>
+                }
+                .into_any()
+            } else {
+                view! {
+                    <div class="actions">
+                        <button type="submit" disabled=move || form.busy.get()>
+                            {tr(lang, Key::ProfileSave)}
+                        </button>
+                        <button
+                            type="button"
+                            class="secondary"
+                            disabled=move || form.busy.get()
+                            on:click=move |_| leave()
+                        >
+                            {tr(lang, Key::Cancel)}
+                        </button>
+                    </div>
+                }
+                .into_any()
+            }}
             // Удалить — внизу, отдельно от сохранения: в строке списка
             // кнопки больше нет (дизайн «Kvartik Design»). Удалённый
             // восстанавливается из сообщения над списком.
@@ -814,6 +926,37 @@ fn ClientForm(ctx: Ctx, existing: Option<Client>) -> impl IntoView {
                 </div>
             })}
         </form>
+    }
+}
+
+/// Карточка выбора в мастере (дизайн «Kvartik Design»): крупная подпись,
+/// под ней — что из этого следует. Внутри — настоящий переключатель:
+/// стрелки и диктор работают с ним, как с любым выбором. Выбранная —
+/// с рамкой, заливкой и галочкой: не одним цветом (Правило 4).
+#[component]
+fn WhereChoice<C, H>(
+    lang: ReadSignal<Lang>,
+    label: Key,
+    hint: Key,
+    chosen: C,
+    choose: H,
+) -> impl IntoView
+where
+    C: Fn() -> bool + Copy + Send + Sync + 'static,
+    H: Fn() + Copy + Send + Sync + 'static,
+{
+    view! {
+        <label class="choice-card">
+            <input
+                type="radio"
+                name="client-where"
+                class="visually-hidden"
+                prop:checked=chosen
+                on:change=move |_| choose()
+            />
+            <span class="choice-title">{tr(lang, label)} {icon(Icon::Check)}</span>
+            <span class="choice-hint">{tr(lang, hint)}</span>
+        </label>
     }
 }
 

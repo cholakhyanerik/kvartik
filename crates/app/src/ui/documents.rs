@@ -36,9 +36,10 @@ use kvartik_core::model::text::Line;
 use leptos::ev::SubmitEvent;
 use leptos::prelude::*;
 
+use super::avatar::{Avatar, tone};
 use super::backup::{BackupChip, Backups};
 use super::clients::Clients;
-use super::form::{CURRENCIES, TextField, currency_code, currency_key};
+use super::form::{CURRENCIES, TextField, WizardHead, currency_code, currency_key};
 use super::icon::{Icon, icon};
 use super::route::{Router, Screen};
 use super::split::{part, split};
@@ -1104,10 +1105,19 @@ impl Form {
                     row
                 })
                 .collect(),
-            None => vec![form.row()],
+            None => vec![form.fresh_row(window)],
         };
         form.items.set(rows);
         form
+    }
+
+    /// Новая строка: количество — 1, по записи языка окна. У услуги без
+    /// часов остаётся вписать только цену (дизайн «Kvartik Design»: «что
+    /// сделано» и «сумма»).
+    fn fresh_row(&self, window: Lang) -> ItemRow {
+        let row = self.row();
+        row.quantity.set(i18n::decimal(window, 1_000, QUANTITY_DIGITS));
+        row
     }
 
     fn row(&self) -> ItemRow {
@@ -1264,7 +1274,9 @@ split! {
     }
 }
 
-/// Форма черновика: новый — `existing` пуст, правка — черновик.
+/// Форма документа. Новый — по шагам (дизайн «Kvartik Design»): кому, что
+/// сделано, проверить и выпустить. Правка черновика и акт по счёту — одной
+/// формой со всеми полями: там всё уже заполнено.
 #[component]
 fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView {
     let Ctx {
@@ -1277,10 +1289,20 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
     } = ctx;
     let form = Form::new(&start, lang.get_untracked());
     let id = existing.as_ref().map(Document::id);
+    // Новый — по шагам; у правки и акта по счёту шаг всегда последний,
+    // и видны все поля.
+    let wizard = matches!(start, Start::Blank(..));
+    let step = RwSignal::new(if wizard { 1_u8 } else { 3 });
+    let shows = move |n: u8| !wizard || step.get() == n;
     let failure = RwSignal::new(None::<Problem>);
     let invalid = RwSignal::new(false);
     let tried = form.tried;
     let alive = Memo::new(move |_| clients.alive());
+    // Выбранный клиент — из живых.
+    let chosen = move || {
+        let chosen = form.client.get()?;
+        alive.with(|list| list.iter().find(|client| client.id() == chosen).cloned())
+    };
     // Клиент из Армении: счёт программы не заменяет чек кассы, и окно
     // говорит это местным ИП, а не молчит (задача 11).
     let local = move || {
@@ -1301,6 +1323,29 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
         }
     };
 
+    // Шаг готов — можно дальше: клиент выбран; валюта выбрана, и каждая
+    // строка читается. Остальное проверят выпуск и сохранение.
+    let ready = move |step: u8| match step {
+        1 => form.client.get_untracked().is_some(),
+        _ => {
+            let window = lang.get_untracked();
+            form.currency.get_untracked().is_some_and(|currency| {
+                form.items
+                    .with_untracked(|rows| rows.iter().all(|row| row.item(window, currency).is_some()))
+            })
+        }
+    };
+    let next = move || {
+        let now = step.get_untracked();
+        if ready(now) {
+            invalid.set(false);
+            form.tried.set(false);
+            step.set(now + 1);
+        } else {
+            form.tried.set(true);
+            invalid.set(true);
+        }
+    };
     let submit = move |issue: bool| {
         if form.busy.get_untracked() {
             return;
@@ -1348,6 +1393,9 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
             });
         }
     };
+    let leave = move || mode.set(Mode::List);
+    // Шаг сменился — прежняя жалоба к нему не относится.
+    Effect::watch(move || step.get(), move |_, _, _| invalid.set(false), false);
     let last_day = move |_| {
         let text = form.service_date.get_untracked();
         let base = Date::from_iso(&text).or_else(|| Date::from_iso(&form.date.get_untracked()));
@@ -1368,6 +1416,29 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
             .map(|sum| fill(t(lang, Key::DocTotal), &[&i18n::money(lang, sum)]))
     };
     let full = move || form.items.with(|rows| rows.len() >= DocumentData::MAX_ITEMS);
+    // Выбранный клиент карточкой — на втором и третьем шаге: что о нём
+    // знает документ и «Изменить», которое возвращает к выбору.
+    let picked = move || {
+        chosen().map(|client| {
+            let id = client.id();
+            let data = client.data().clone();
+            let name = data.name.as_str().to_owned();
+            view! {
+                <div class="picked">
+                    <Avatar name=name.clone() tone=tone(id) />
+                    <span class="entry-main">
+                        <span class="entry-title">{name}</span>
+                        <span class="entry-meta">
+                            {move || client_facts(lang.get(), data.country, form.currency.get(), form.lang.get())}
+                        </span>
+                    </span>
+                    <button type="button" class="link" on:click=move |_| step.set(1)>
+                        {tr(lang, Key::Change)}
+                    </button>
+                </div>
+            }
+        })
+    };
     // Сменили язык окна — цены и количества записываются по-новому, а их
     // смысл не меняется (`retype`).
     Effect::watch(
@@ -1394,71 +1465,120 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
         },
         false,
     );
+    let (heading, who) = match form.kind {
+        DocKind::Invoice => (Key::DocNewInvoice, Key::DocWhoInvoice),
+        DocKind::Act => (Key::DocNewAct, Key::DocWhoAct),
+    };
 
     view! {
+        // «Ввод» в поле до последнего шага — «Дальше», на последнем —
+        // «Сохранить черновик», как и было.
         <form class="document" on:submit=move |event: SubmitEvent| {
             event.prevent_default();
-            submit(false);
+            if step.get_untracked() < 3 {
+                next();
+            } else {
+                submit(false);
+            }
         } novalidate>
-            <p class="doc-title">{move || {
-                let kind = t(lang.get(), kind_key(form.kind));
-                fill(t(lang.get(), Key::DocDraftTitle), &[kind])
-            }}</p>
-            <fieldset>
-                <label>
-                    {tr(lang, Key::DocClient)}
-                    <select on:change=move |event| {
-                        let chosen = event_target_value(&event);
-                        let client = alive.with_untracked(|list| {
-                            list.iter().find(|c| c.id().to_string() == chosen).cloned()
-                        });
-                        form.choose_client(client);
-                    }>
-                        <option value="" prop:selected=move || form.client.get().is_none()>
-                            {tr(lang, Key::NotChosen)}
-                        </option>
-                        {move || alive.get().into_iter().map(|client| {
-                            let id = client.id();
-                            view! {
-                                <option value=id.to_string() prop:selected=move || form.client.get() == Some(id)>
-                                    {client.data().name.as_str().to_owned()}
+            {if wizard {
+                view! { <WizardHead lang title=heading step steps=3 leave /> }.into_any()
+            } else {
+                view! {
+                    <p class="doc-title">{move || {
+                        let kind = t(lang.get(), kind_key(form.kind));
+                        fill(t(lang.get(), Key::DocDraftTitle), &[kind])
+                    }}</p>
+                }
+                .into_any()
+            }}
+            <fieldset hidden=move || !shows(1)>
+                {if wizard {
+                    // Клиент выбирается нажатием на строку, и оно же ведёт
+                    // дальше: отдельная «Дальше» была бы лишним шагом.
+                    view! {
+                        <legend class="question">{tr(lang, who)}</legend>
+                        <ul class="list pick">
+                            {move || alive.get().into_iter().map(|client| {
+                                let id = client.id();
+                                let data = client.data().clone();
+                                let name = data.name.as_str().to_owned();
+                                let current = move || form.client.get() == Some(id);
+                                view! {
+                                    <li>
+                                        <button
+                                            type="button"
+                                            class="entry"
+                                            aria-current=move || current().then_some("true")
+                                            on:click=move |_| {
+                                                form.choose_client(Some(client.clone()));
+                                                step.set(2);
+                                            }
+                                        >
+                                            <Avatar name=name.clone() tone=tone(id) />
+                                            <span class="entry-main">
+                                                <span class="entry-title">{name}</span>
+                                                <span class="entry-meta">
+                                                    {move || client_facts(lang.get(), data.country, data.currency, data.lang)}
+                                                </span>
+                                            </span>
+                                            {move || icon(if current() { Icon::Check } else { Icon::Forward })}
+                                        </button>
+                                    </li>
+                                }
+                            }).collect_view()}
+                        </ul>
+                    }
+                    .into_any()
+                } else {
+                    view! {
+                        <label>
+                            {tr(lang, Key::DocClient)}
+                            <select on:change=move |event| {
+                                let chosen = event_target_value(&event);
+                                let client = alive.with_untracked(|list| {
+                                    list.iter().find(|c| c.id().to_string() == chosen).cloned()
+                                });
+                                form.choose_client(client);
+                            }>
+                                <option value="" prop:selected=move || form.client.get().is_none()>
+                                    {tr(lang, Key::NotChosen)}
                                 </option>
-                            }
-                        }).collect_view()}
-                    </select>
-                </label>
-                {move || gone().map(|name| view! {
-                    <p class="field-error" role="alert">{move || fill(t(lang.get(), Key::DocClientGone), &[&name])}</p>
-                })}
-                {shown_problem(tried, move || {
-                    form.client.get().is_none().then(|| t(lang.get(), Key::DocClientMissing).to_owned())
-                })}
-                {move || (local() == Some(true)).then(|| view! {
-                    <p class="hint">{tr(lang, Key::DocCashReceipt)}</p>
-                })}
-                <label>
-                    {tr(lang, Key::DocLanguage)}
-                    <select on:change=move |event| form.lang.set(Lang::from_code(&event_target_value(&event)))>
-                        <option value="" prop:selected=move || form.lang.get().is_none()>
-                            {tr(lang, Key::NotChosen)}
-                        </option>
-                        {Lang::ALL
-                            .into_iter()
-                            .map(|doc_lang| view! {
-                                <option
-                                    value=doc_lang.code()
-                                    lang=doc_lang.code()
-                                    prop:selected=move || form.lang.get() == Some(doc_lang)
-                                >
-                                    {doc_lang.native_name()}
-                                </option>
-                            })
-                            .collect_view()}
-                    </select>
-                </label>
-                {shown_problem(tried, move || {
-                    form.lang.get().is_none().then(|| t(lang.get(), Key::DocLanguageMissing).to_owned())
-                })}
+                                {move || alive.get().into_iter().map(|client| {
+                                    let id = client.id();
+                                    view! {
+                                        <option value=id.to_string() prop:selected=move || form.client.get() == Some(id)>
+                                            {client.data().name.as_str().to_owned()}
+                                        </option>
+                                    }
+                                }).collect_view()}
+                            </select>
+                        </label>
+                        {move || gone().map(|name| view! {
+                            <p class="field-error" role="alert">{move || fill(t(lang.get(), Key::DocClientGone), &[&name])}</p>
+                        })}
+                        {shown_problem(tried, move || {
+                            form.client.get().is_none().then(|| t(lang.get(), Key::DocClientMissing).to_owned())
+                        })}
+                    }
+                    .into_any()
+                }}
+            </fieldset>
+            <fieldset hidden=move || !shows(2)>
+                {if wizard {
+                    view! {
+                        <legend class="question">{tr(lang, Key::DocWhat)}</legend>
+                        <p class="hint lead">{tr(lang, Key::DocWhatHint)}</p>
+                        {picked}
+                    }
+                    .into_any()
+                } else {
+                    view! {
+                        <legend>{tr(lang, Key::DocItems)}</legend>
+                        <p class="hint">{tr(lang, Key::DocItemsHint)}</p>
+                    }
+                    .into_any()
+                }}
                 <label>
                     {tr(lang, Key::DocCurrency)}
                     <select on:change=move |event| {
@@ -1484,27 +1604,6 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                 {shown_problem(tried, move || {
                     form.currency.get().is_none().then(|| t(lang.get(), Key::DocCurrencyMissing).to_owned())
                 })}
-                <DateField lang label=Key::DocDate value=form.date tried />
-                <DateField lang label=Key::DocServiceDate value=form.service_date tried />
-                <p class="hint">{tr(lang, Key::DocServiceDateHint)}</p>
-                <button type="button" class="secondary" on:click=last_day>
-                    {tr(lang, Key::DocLastDay)}
-                </button>
-                {(form.kind == DocKind::Invoice).then(|| view! {
-                    <label>
-                        {tr(lang, Key::DocDue)}
-                        <input type="date" bind:value=form.due />
-                    </label>
-                    {shown_problem(tried, move || {
-                        let due = Date::from_iso(&form.due.get())?;
-                        let date = Date::from_iso(&form.date.get())?;
-                        (due < date).then(|| t(lang.get(), Key::DocDueEarly).to_owned())
-                    })}
-                })}
-            </fieldset>
-            <fieldset>
-                <legend>{tr(lang, Key::DocItems)}</legend>
-                <p class="hint">{tr(lang, Key::DocItemsHint)}</p>
                 <For each=move || form.items.get() key=|row| row.key let(row)>
                     <div class="row">
                         <TextField lang label=Key::ItemText value=row.text tried autocomplete="off" />
@@ -1564,47 +1663,133 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                 </For>
                 <button
                     type="button"
-                    class="secondary"
+                    class="link"
                     disabled=full
                     on:click=move |_| {
-                        let row = form.row();
+                        let row = form.fresh_row(lang.get_untracked());
                         form.items.update(|rows| rows.push(row));
                     }
                 >
-                    {tr(lang, Key::ItemAdd)}
+                    {icon(Icon::Plus)}
+                    <span>{tr(lang, Key::ItemAdd)}</span>
                 </button>
                 <p class="total">{total}</p>
             </fieldset>
+            <fieldset hidden=move || !shows(3)>
+                {wizard.then(|| view! {
+                    <legend class="question">{tr(lang, Key::DocReview)}</legend>
+                    {picked}
+                    <p class="total">{total}</p>
+                })}
+                <label>
+                    {tr(lang, Key::DocLanguage)}
+                    <select on:change=move |event| form.lang.set(Lang::from_code(&event_target_value(&event)))>
+                        <option value="" prop:selected=move || form.lang.get().is_none()>
+                            {tr(lang, Key::NotChosen)}
+                        </option>
+                        {Lang::ALL
+                            .into_iter()
+                            .map(|doc_lang| view! {
+                                <option
+                                    value=doc_lang.code()
+                                    lang=doc_lang.code()
+                                    prop:selected=move || form.lang.get() == Some(doc_lang)
+                                >
+                                    {doc_lang.native_name()}
+                                </option>
+                            })
+                            .collect_view()}
+                    </select>
+                </label>
+                {shown_problem(tried, move || {
+                    form.lang.get().is_none().then(|| t(lang.get(), Key::DocLanguageMissing).to_owned())
+                })}
+                <DateField lang label=Key::DocDate value=form.date tried />
+                <DateField lang label=Key::DocServiceDate value=form.service_date tried />
+                <p class="hint">{tr(lang, Key::DocServiceDateHint)}</p>
+                <button type="button" class="secondary" on:click=last_day>
+                    {tr(lang, Key::DocLastDay)}
+                </button>
+                {(form.kind == DocKind::Invoice).then(|| view! {
+                    <label>
+                        {tr(lang, Key::DocDue)}
+                        <input type="date" bind:value=form.due />
+                    </label>
+                    {shown_problem(tried, move || {
+                        let due = Date::from_iso(&form.due.get())?;
+                        let date = Date::from_iso(&form.date.get())?;
+                        (due < date).then(|| t(lang.get(), Key::DocDueEarly).to_owned())
+                    })}
+                })}
+                {move || (local() == Some(true)).then(|| view! {
+                    <p class="hint">{tr(lang, Key::DocCashReceipt)}</p>
+                })}
+            </fieldset>
             {move || invalid.get().then(|| view! {
-                <p role="alert">{tr(lang, Key::ProfileFix)}</p>
+                <p role="alert">{move || {
+                    let fix = if step.get() < 3 { Key::StepFix } else { Key::ProfileFix };
+                    t(lang.get(), fix)
+                }}</p>
             })}
             {move || failure.get().map(|problem| view! {
                 <p role="alert">{tr(lang, problem.key())}</p>
             })}
-            <p class="hint">{tr(lang, Key::DocIssueHint)}</p>
-            <div class="actions">
-                <button type="button" disabled=move || form.busy.get() on:click=move |_| submit(true)>
-                    {tr(lang, Key::DocIssue)}
-                </button>
-                <button type="submit" class="secondary" disabled=move || form.busy.get()>
-                    {tr(lang, Key::DocSaveDraft)}
-                </button>
-                {id.map(|_| view! {
-                    <button type="button" class="secondary" disabled=move || form.busy.get() on:click=delete>
-                        {tr(lang, Key::DocDeleteDraft)}
-                    </button>
-                })}
-                <button
-                    type="button"
-                    class="secondary"
-                    disabled=move || form.busy.get()
-                    on:click=move |_| mode.set(Mode::List)
-                >
-                    {tr(lang, Key::Cancel)}
-                </button>
-            </div>
+            {move || match step.get() {
+                1 => None,
+                2 => Some(view! {
+                    <button type="submit" class="wide">{tr(lang, Key::DocNextReview)}</button>
+                }
+                .into_any()),
+                _ => Some(view! {
+                    <p class="hint">{tr(lang, Key::DocIssueHint)}</p>
+                    <div class="actions">
+                        <button
+                            type="button"
+                            class:wide=wizard
+                            disabled=move || form.busy.get()
+                            on:click=move |_| submit(true)
+                        >
+                            {tr(lang, Key::DocIssue)}
+                        </button>
+                        <button type="submit" class="secondary" disabled=move || form.busy.get()>
+                            {tr(lang, Key::DocSaveDraft)}
+                        </button>
+                        {id.map(|_| view! {
+                            <button type="button" class="secondary" disabled=move || form.busy.get() on:click=delete>
+                                {tr(lang, Key::DocDeleteDraft)}
+                            </button>
+                        })}
+                        <button
+                            type="button"
+                            class="secondary"
+                            disabled=move || form.busy.get()
+                            on:click=move |_| leave()
+                        >
+                            {tr(lang, Key::Cancel)}
+                        </button>
+                    </div>
+                }
+                .into_any()),
+            }}
         </form>
     }
+}
+
+/// Сведения о клиенте документа — страна, валюта и язык, что известно.
+fn client_facts(
+    lang: Lang,
+    country: Option<Country>,
+    currency: Option<Currency>,
+    doc_lang: Option<Lang>,
+) -> impl IntoView {
+    let country = country.map(|country| country.name(lang).to_owned());
+    let currency = currency.map(|currency| currency_code(currency).to_owned());
+    let doc_lang = doc_lang.map(|doc_lang| doc_lang.native_name().to_owned());
+    [country, currency, doc_lang]
+        .into_iter()
+        .flatten()
+        .map(|fact| view! { <span>{fact}</span> })
+        .collect_view()
 }
 
 /// Сумма строки из полей; `None` — поле не прочиталось.

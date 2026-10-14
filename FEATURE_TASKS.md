@@ -582,7 +582,7 @@ PDF — то, что видит клиент и банк. Из PDF: «шабло
   одна услуга, и доход — один раз: связь — `DocumentData::basis`.
 - Поле суммы, набранной по правилам языка окна, при смене языка
   переписывается записью нового — как цены документа (`retype`,
-  `crates/app/src/ui/documents.rs:489`; CLAUDE.md, Правило 6).
+  `crates/app/src/ui/documents.rs:490`; CLAUDE.md, Правило 6).
 
 ---
 
@@ -712,7 +712,7 @@ PDF — то, что видит клиент и банк. Из PDF: «шабло
 - **Строка плана:** 0.1
 - **README:** да
 - **Слои и файлы:** вне кода; потом — README, `<title>`
-  в `crates/app/index.html:12`, ключ `AppName` в `crates/core/src/i18n.rs:130`
+  в `crates/app/index.html:12`, ключ `AppName` в `crates/core/src/i18n.rs:155`
   (сейчас там рабочие «ԱՁ գրասենյակ», «Офис ИП», «IE Office»; английское
   ещё и читается как Internet Explorer) и имена в манифесте
   `crates/app/public/manifest.webmanifest` (`name`, `short_name` и их

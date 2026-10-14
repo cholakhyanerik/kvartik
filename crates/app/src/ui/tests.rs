@@ -148,6 +148,61 @@ fn pick(select: &HtmlSelectElement, value: &str) {
     select.dispatch_event(&event).expect("событие отправлено");
 }
 
+/// Карточка выбора формы по шагам — `nth`-я, считая с нуля: «В Армении»,
+/// «В другой стране». Нажатие на неё выбирает её переключатель.
+fn choice_card(host: &HtmlElement, nth: u32) -> Option<HtmlElement> {
+    host.query_selector_all("label.choice-card")
+        .ok()?
+        .item(nth)
+        .map(JsCast::unchecked_into)
+}
+
+/// Текст карточки выбора, чей переключатель отмечен.
+fn checked_card(host: &HtmlElement) -> Option<String> {
+    host.query_selector("label.choice-card input:checked")
+        .ok()
+        .flatten()?
+        .parent_element()?
+        .text_content()
+}
+
+/// Какой шаг формы `form` (CSS) виден — номер с единицы; `None` — видно не
+/// по одному шагу.
+fn shown_step(host: &HtmlElement, form: &str) -> Option<u32> {
+    let steps = host.query_selector_all(&format!("{form} > fieldset")).ok()?;
+    let shown: Vec<u32> = (0..steps.length())
+        .filter(|at| {
+            steps
+                .item(*at)
+                .is_some_and(|step| !step.unchecked_ref::<Element>().has_attribute("hidden"))
+        })
+        .map(|at| at + 1)
+        .collect();
+    match shown.as_slice() {
+        [one] => Some(*one),
+        _ => None,
+    }
+}
+
+/// Выбрать клиента `name` в первом шаге нового документа — строкой.
+fn pick_client(host: &HtmlElement, name: &str) -> bool {
+    let Ok(rows) = host.query_selector_all("ul.pick button.entry") else {
+        return false;
+    };
+    let row = (0..rows.length())
+        .filter_map(|at| rows.item(at))
+        .map(|node| node.unchecked_into::<HtmlElement>())
+        .find(|row| {
+            row.query_selector(".entry-title")
+                .ok()
+                .flatten()
+                .and_then(|title| title.text_content())
+                .as_deref()
+                == Some(name)
+        });
+    row.map(|row| row.click()).is_some()
+}
+
 /// Строки других языков, оставшиеся в тексте окна на языке `lang`: строка,
 /// собранная один раз, при смене языка остаётся прежней (Правило 4).
 /// Шаблон сверяется кусками между `{}`, и только длинными: короткий кусок
@@ -177,8 +232,9 @@ fn leftovers(text: &str, lang: Lang) -> Vec<String> {
 /// и выбор запомнен на устройстве, а введённое в поле остаётся в нём. Окно
 /// открывается языком, выбранным раньше. Форма профиля открыта, и в каждом
 /// её списке есть строка: их подписи тоже должны перевестись. Форма
-/// клиента открыта тоже: список стран — на языке окна и по его алфавиту.
-/// И форма нового счёта — со строкой услуги и подсказками.
+/// клиента открыта тоже, с фирмой другой страны: список стран — на языке
+/// окна и по его алфавиту. И форма нового счёта — с выбранным клиентом,
+/// строкой услуги и подсказками.
 #[wasm_bindgen_test]
 async fn choosing_a_language_translates_the_whole_window() {
     let document = document();
@@ -238,9 +294,12 @@ async fn choosing_a_language_translates_the_whole_window() {
         }
     }
     sleep(50).await;
-    match select(&host, t(Lang::Am, Key::DocClient), 0) {
-        Some(clients) => pick(&clients, &client.id().to_string()),
-        None => wrong.push("нет выбора клиента в форме счёта".to_owned()),
+    match choice_card(&host, 1) {
+        Some(abroad) => abroad.click(),
+        None => wrong.push("в форме клиента нет «В другой стране»".to_owned()),
+    }
+    if !pick_client(&host, client.data().name.as_str()) {
+        wrong.push("нет клиента в выборе формы счёта".to_owned());
     }
     sleep(50).await;
 
@@ -275,8 +334,9 @@ async fn choosing_a_language_translates_the_whole_window() {
             Key::StopFrom,
             Key::ClientCountry,
             Key::DocServiceDate,
-            Key::DocItemsHint,
+            Key::DocWhatHint,
             Key::DocCashReceipt,
+            Key::ClientInArmeniaHint,
         ] {
             if !text.contains(t(lang, key)) {
                 wrong.push(format!("{lang:?}: нет {key:?} на этом языке"));
@@ -678,9 +738,11 @@ fn client_entry(host: &HtmlElement, name: &str) -> Option<HtmlElement> {
         .map(JsCast::unchecked_into)
 }
 
-/// Клиенты: форма не сохраняет без названия, с неверным ՀՎՀՀ и сроком
-/// больше года и говорит об этом у поля; ՀՎՀՀ спрашивается только
-/// у армянской фирмы; сохранённое видно в списке и лежит в базе; поиск
+/// Клиенты: новый — по шагам; первый шаг не пускает дальше без названия
+/// и с неверным ՀՎՀՀ, второй не сохраняет срок больше года, и форма
+/// говорит об этом у поля; «назад» возвращает к первому шагу с введённым;
+/// ՀՎՀՀ спрашивается только у армянской фирмы, а страна — только у фирмы
+/// другой страны; сохранённое видно в списке и лежит в базе; поиск
 /// находит по части названия без учёта «ё»; удалённый уходит из списка
 /// и возвращается — из сообщения об удалении и из списка удалённых; после
 /// нового открытия клиенты на месте.
@@ -700,14 +762,24 @@ async fn clients_are_added_found_deleted_and_restored() {
     }
     press(t(lang, Key::ClientAdd), &mut wrong);
     sleep(50).await;
-    press(t(lang, Key::ProfileSave), &mut wrong);
+    if shown_step(&host, "form.client") != Some(1) {
+        wrong.push(format!("новый клиент — не с первого шага: {:?}", shown_step(&host, "form.client")));
+    }
+    press(t(lang, Key::ClientNextDefaults), &mut wrong);
     sleep(50).await;
     let text = host.text_content().unwrap_or_default();
-    if !text.contains(t(lang, Key::ClientNameMissing)) || !text.contains(t(lang, Key::ProfileFix)) {
-        wrong.push("клиент без названия сохранился без слова".to_owned());
+    // Шаг ничего не сохраняет — и «не сохранено» не говорит.
+    if !text.contains(t(lang, Key::ClientNameMissing))
+        || !text.contains(t(lang, Key::StepFix))
+        || text.contains(t(lang, Key::ProfileFix))
+    {
+        wrong.push("клиент без названия прошёл дальше без слова".to_owned());
     }
-    if field(&host, t(lang, Key::ProfileTin), 0).is_some() {
-        wrong.push("ՀՎՀՀ спрошен, когда страна не выбрана".to_owned());
+    if shown_step(&host, "form.client") != Some(1) {
+        wrong.push("клиент без названия прошёл ко второму шагу".to_owned());
+    }
+    if field(&host, t(lang, Key::ProfileTin), 0).is_some() || select(&host, t(lang, Key::ClientCountry), 0).is_some() {
+        wrong.push("ՀՎՀՀ или страна спрошены, когда не выбрано, где фирма".to_owned());
     }
 
     let name = "ООО Семён и партнёры";
@@ -715,16 +787,54 @@ async fn clients_are_added_found_deleted_and_restored() {
         Some(input) => type_into(&input, name),
         None => wrong.push("нет поля названия".to_owned()),
     }
-    match select(&host, t(lang, Key::ClientCountry), 0) {
-        Some(countries) => pick(&countries, "AM"),
-        None => wrong.push("нет списка стран".to_owned()),
+    match choice_card(&host, 0) {
+        Some(armenia) => armenia.click(),
+        None => wrong.push("нет карточки «В Армении»".to_owned()),
     }
     sleep(50).await;
+    // Выбор — настоящим переключателем: отмечен тот, что в нажатой карточке.
+    if !checked_card(&host).is_some_and(|text| text.contains(t(lang, Key::ClientInArmenia))) {
+        wrong.push(format!("отмечена не «В Армении»: {:?}", checked_card(&host)));
+    }
+    if select(&host, t(lang, Key::ClientCountry), 0).is_some() {
+        wrong.push("у армянской фирмы спрошена страна".to_owned());
+    }
     let tin = field(&host, t(lang, Key::ProfileTin), 0);
     match &tin {
         Some(input) => type_into(input, "0005432"),
         None => wrong.push("у армянской фирмы не спрошен ՀՎՀՀ".to_owned()),
     }
+    press(t(lang, Key::ClientNextDefaults), &mut wrong);
+    sleep(50).await;
+    if !host.text_content().unwrap_or_default().contains(t(lang, Key::TinInvalid))
+        || shown_step(&host, "form.client") != Some(1)
+    {
+        wrong.push("семь цифр ՀՎՀՀ прошли ко второму шагу без слова".to_owned());
+    }
+    if let Some(input) = &tin {
+        type_into(input, "00054321");
+    }
+    press(t(lang, Key::ClientNextDefaults), &mut wrong);
+    sleep(50).await;
+    if shown_step(&host, "form.client") != Some(2) {
+        wrong.push("верный первый шаг не пустил ко второму".to_owned());
+    }
+    // «Назад» — к первому шагу, и введённое на месте.
+    match host.query_selector("form.client .wizard-head button.round").ok().flatten() {
+        Some(back) => back.unchecked_into::<HtmlElement>().click(),
+        None => wrong.push("у формы клиента нет «назад»".to_owned()),
+    }
+    sleep(50).await;
+    match field(&host, t(lang, Key::ClientName), 0) {
+        Some(input) if shown_step(&host, "form.client") == Some(1) && input.value() == name => {}
+        other => wrong.push(format!(
+            "«назад» не вернул первый шаг с названием: шаг {:?}, {:?}",
+            shown_step(&host, "form.client"),
+            other.map(|input| input.value())
+        )),
+    }
+    press(t(lang, Key::ClientNextDefaults), &mut wrong);
+    sleep(50).await;
     match select(&host, t(lang, Key::ClientCurrency), 0) {
         Some(currencies) => pick(&currencies, "USD"),
         None => wrong.push("нет списка валют".to_owned()),
@@ -742,11 +852,8 @@ async fn clients_are_added_found_deleted_and_restored() {
     sleep(50).await;
     let text = host.text_content().unwrap_or_default();
     let days_problem = t(lang, Key::PaymentDaysInvalid).split("{}").next().unwrap_or_default();
-    if !text.contains(t(lang, Key::TinInvalid)) || !text.contains(days_problem) {
-        wrong.push("семь цифр ՀՎՀՀ и срок 400 дней сохранились без слова".to_owned());
-    }
-    if let Some(input) = &tin {
-        type_into(input, "00054321");
+    if !text.contains(days_problem) {
+        wrong.push("срок 400 дней сохранился без слова".to_owned());
     }
     if let Some(input) = &days {
         type_into(input, "15");
@@ -774,8 +881,26 @@ async fn clients_are_added_found_deleted_and_restored() {
     if let Some(input) = field(&host, t(lang, Key::ClientName), 0) {
         type_into(&input, "Acme Inc.");
     }
+    match choice_card(&host, 1) {
+        Some(abroad) => abroad.click(),
+        None => wrong.push("нет карточки «В другой стране»".to_owned()),
+    }
+    sleep(50).await;
+    // Армения из списка стран — армянская фирма: отмечается «В Армении».
     if let Some(countries) = select(&host, t(lang, Key::ClientCountry), 0) {
-        pick(&countries, "US");
+        pick(&countries, "AM");
+    }
+    sleep(50).await;
+    if !checked_card(&host).is_some_and(|text| text.contains(t(lang, Key::ClientInArmenia))) {
+        wrong.push(format!("Армения из списка не отметила «В Армении»: {:?}", checked_card(&host)));
+    }
+    if let Some(abroad) = choice_card(&host, 1) {
+        abroad.click();
+    }
+    sleep(50).await;
+    match select(&host, t(lang, Key::ClientCountry), 0) {
+        Some(countries) => pick(&countries, "US"),
+        None => wrong.push("у фирмы другой страны не спрошена страна".to_owned()),
     }
     sleep(50).await;
     if field(&host, t(lang, Key::ProfileTin), 0).is_some() {
@@ -785,6 +910,8 @@ async fn clients_are_added_found_deleted_and_restored() {
         Some(input) => type_into(&input, "EIN 12-3456789"),
         None => wrong.push("у американской фирмы не спрошен налоговый номер".to_owned()),
     }
+    press(t(lang, Key::ClientNextDefaults), &mut wrong);
+    sleep(50).await;
     press(t(lang, Key::ProfileSave), &mut wrong);
     if !wait_for(&host, "Acme Inc.").await {
         wrong.push("второй клиент не появился".to_owned());
