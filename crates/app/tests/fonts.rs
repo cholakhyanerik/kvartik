@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
 
-use kvartik_core::i18n::{self, ALL_KEYS, Lang, t};
+use kvartik_core::i18n::{self, ALL_KEYS, Key, Lang, t};
 use kvartik_core::model::country::Country;
 use kvartik_core::model::date::Date;
 use kvartik_core::model::money::{Currency, Money};
@@ -24,8 +24,27 @@ fn app_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// Правило `@font-face`: вес, файл и диапазоны знаков.
+/// Что семейство обязано рисовать само.
+#[derive(Clone, Copy)]
+enum Coverage {
+    /// Всё, что окно может показать ([`needed`]): текст и заголовки.
+    All,
+    /// Только крупные суммы и «Kvartik» ([`display_needed`]): остальное
+    /// берёт следующее семейство стека `--font-display` (tokens.css).
+    Display,
+}
+
+/// Семейства окна (`tools/fonts.py`): имя в `fonts.css`, переменные весов
+/// его начертаний в `tokens.css` и что оно обязано рисовать.
+const FAMILIES: [(&str, &[&str], Coverage); 3] = [
+    ("Kvartik Sans", &["--weight-regular", "--weight-strong"], Coverage::All),
+    ("Kvartik Serif", &["--weight-heading"], Coverage::All),
+    ("Kvartik Display", &["--weight-regular"], Coverage::Display),
+];
+
+/// Правило `@font-face`: семейство, вес, файл и диапазоны знаков.
 struct Face {
+    family: String,
     weight: u16,
     file: String,
     ranges: Vec<(u32, u32)>,
@@ -77,7 +96,9 @@ fn read_faces() -> Vec<Face> {
                 (parse(lo), parse(hi))
             })
             .collect();
+        let family = property("font-family").trim_matches('"').to_owned();
         faces.push(Face {
+            family,
             weight: property("font-weight").parse().expect("вес — число"),
             file,
             ranges,
@@ -86,19 +107,30 @@ fn read_faces() -> Vec<Face> {
     faces
 }
 
-/// Начертания, которые объявляет `tokens.css`: `--weight-…: 400;`.
-fn token_weights() -> BTreeSet<u16> {
+/// Начертания, которые объявляет `tokens.css`: `--weight-…: 400;` — по
+/// имени переменной.
+fn token_weights() -> BTreeMap<String, u16> {
     let text = fs::read_to_string(app_dir().join("style/tokens.css")).expect("tokens.css читается");
     text.lines()
         .filter_map(|line| line.trim().strip_prefix("--weight-"))
         .map(|rest| {
-            let (_, value) = rest.split_once(':').expect("--weight-…: число;");
-            value
+            let (name, value) = rest.split_once(':').expect("--weight-…: число;");
+            let weight = value
                 .trim()
                 .trim_end_matches(';')
                 .parse()
-                .expect("вес — число")
+                .expect("вес — число");
+            (format!("--weight-{name}"), weight)
         })
+        .collect()
+}
+
+/// Веса начертаний семейства — по его переменным в `tokens.css`.
+fn family_weights(names: &[&str]) -> BTreeSet<u16> {
+    let weights = token_weights();
+    names
+        .iter()
+        .map(|name| *weights.get(*name).unwrap_or_else(|| panic!("{name} нет в tokens.css")))
         .collect()
 }
 
@@ -132,10 +164,15 @@ impl Font {
             .map(|record| self.u32_at(record + 8))
     }
 
-    /// Знаки, у которых есть глиф: подтаблица `cmap` формата 4 (BMP) или 12.
+    /// Знаки, у которых есть глиф.
     fn chars(&self) -> BTreeSet<u32> {
+        self.glyphs().into_keys().collect()
+    }
+
+    /// Знак — номер его глифа: подтаблица `cmap` формата 4 (BMP) или 12.
+    fn glyphs(&self) -> BTreeMap<u32, usize> {
         let cmap = self.table(b"cmap").expect("в шрифте есть cmap");
-        let mut out = BTreeSet::new();
+        let mut out = BTreeMap::new();
         for i in 0..self.u16_at(cmap + 2) {
             let record = cmap + 4 + 8 * i;
             let (platform, encoding) = (self.u16_at(record), self.u16_at(record + 2));
@@ -153,7 +190,7 @@ impl Font {
         out
     }
 
-    fn format_4(&self, sub: usize, out: &mut BTreeSet<u32>) {
+    fn format_4(&self, sub: usize, out: &mut BTreeMap<u32, usize>) {
         let segments = self.u16_at(sub + 6) / 2;
         let ends = sub + 14;
         let starts = ends + 2 * segments + 2;
@@ -174,18 +211,28 @@ impl Font {
                     }
                 };
                 if glyph != 0 {
-                    out.insert(code as u32);
+                    out.insert(code as u32, glyph);
                 }
             }
         }
     }
 
-    fn format_12(&self, sub: usize, out: &mut BTreeSet<u32>) {
+    fn format_12(&self, sub: usize, out: &mut BTreeMap<u32, usize>) {
         for g in 0..self.u32_at(sub + 12) {
             let group = sub + 16 + 12 * g;
             let (start, end) = (self.u32_at(group), self.u32_at(group + 4));
-            out.extend((start..=end).map(|c| c as u32));
+            let first = self.u32_at(group + 8);
+            out.extend((start..=end).map(|c| (c as u32, first + (c - start))));
         }
+    }
+
+    /// Ширина глифа (`hmtx`): у глифов после последней записи — ширина
+    /// последней (`hhea.numberOfHMetrics`).
+    fn advance(&self, glyph: usize) -> usize {
+        let hhea = self.table(b"hhea").expect("в шрифте есть hhea");
+        let hmtx = self.table(b"hmtx").expect("в шрифте есть hmtx");
+        let metrics = self.u16_at(hhea + 34);
+        self.u16_at(hmtx + 4 * glyph.min(metrics - 1))
     }
 
     /// Теги возможностей из `GSUB`: `tnum`, `liga`…
@@ -238,8 +285,22 @@ fn needed() -> BTreeSet<char> {
     text.chars().filter(|c| !c.is_control()).collect()
 }
 
-/// Каждый нужный знак есть в каждом начертании: диапазон ведёт в файл,
-/// и файл знак содержит.
+/// Знаки, которые окно пишет крупным шрифтом «Kvartik Display»: суммы на
+/// трёх языках во всех валютах и «Kvartik». ֏ в Caprasimo нет вовсе — его
+/// рисует следующее семейство стека, как и в дизайне.
+fn display_needed() -> BTreeSet<char> {
+    let mut text = String::new();
+    for lang in Lang::ALL {
+        text += t(lang, Key::Brand);
+        for currency in [Currency::Amd, Currency::Usd, Currency::Eur] {
+            text += &i18n::money(lang, Money::new(-1_234_567_890, currency));
+        }
+    }
+    text.chars().filter(|c| *c != '֏').collect()
+}
+
+/// Каждый нужный знак есть в каждом начертании каждого семейства: диапазон
+/// ведёт в файл, и файл знак содержит.
 #[test]
 fn every_needed_char_is_in_the_fonts() {
     let faces = read_faces();
@@ -248,23 +309,32 @@ fn every_needed_char_is_in_the_fonts() {
         .map(|face| (face.file.as_str(), Font::open(&face.file).chars()))
         .collect();
     let mut wrong = Vec::new();
-    for weight in token_weights() {
-        let faces: Vec<&Face> = faces.iter().filter(|f| f.weight == weight).collect();
-        for c in needed() {
-            let covering: Vec<&&Face> = faces.iter().filter(|f| f.covers(c)).collect();
-            if covering.is_empty() {
-                wrong.push(format!(
-                    "{weight}: «{c}» U+{:04X} — ни в одном диапазоне, браузер возьмёт системный шрифт",
-                    u32::from(c)
-                ));
-            }
-            for face in covering {
-                if !fonts[face.file.as_str()].contains(&u32::from(c)) {
+    for (family, weights, coverage) in FAMILIES {
+        let chars = match coverage {
+            Coverage::All => needed(),
+            Coverage::Display => display_needed(),
+        };
+        for weight in family_weights(weights) {
+            let faces: Vec<&Face> = faces
+                .iter()
+                .filter(|f| f.family == family && f.weight == weight)
+                .collect();
+            for &c in &chars {
+                let covering: Vec<&&Face> = faces.iter().filter(|f| f.covers(c)).collect();
+                if covering.is_empty() {
                     wrong.push(format!(
-                        "{weight}: «{c}» U+{:04X} — диапазон ведёт в {}, а знака там нет",
-                        u32::from(c),
-                        face.file
+                        "{family} {weight}: «{c}» U+{:04X} — ни в одном диапазоне, браузер возьмёт другой шрифт",
+                        u32::from(c)
                     ));
+                }
+                for face in covering {
+                    if !fonts[face.file.as_str()].contains(&u32::from(c)) {
+                        wrong.push(format!(
+                            "{family} {weight}: «{c}» U+{:04X} — диапазон ведёт в {}, а знака там нет",
+                            u32::from(c),
+                            face.file
+                        ));
+                    }
                 }
             }
         }
@@ -272,12 +342,29 @@ fn every_needed_char_is_in_the_fonts() {
     assert!(wrong.is_empty(), "знаков нет в шрифтах: {wrong:#?}");
 }
 
-/// Каждому весу из `tokens.css` — свои файлы, и других начертаний нет:
-/// вес без файла браузер нарисовал бы утолщением сам.
+/// У семейства — ровно начертания его весов из `tokens.css`, и семейств
+/// других нет: вес без файла браузер нарисовал бы утолщением сам, а файл
+/// без веса никто бы не скачал.
 #[test]
 fn faces_match_the_weights_of_tokens() {
-    let weights: BTreeSet<u16> = read_faces().iter().map(|face| face.weight).collect();
-    assert_eq!(weights, token_weights());
+    let faces = read_faces();
+    let mut wrong = Vec::new();
+    for (family, weights, _) in FAMILIES {
+        let declared: BTreeSet<u16> = faces
+            .iter()
+            .filter(|face| face.family == family)
+            .map(|face| face.weight)
+            .collect();
+        if declared != family_weights(weights) {
+            wrong.push(format!("{family}: начертания {declared:?}, а в tokens.css {weights:?}"));
+        }
+    }
+    for face in &faces {
+        if !FAMILIES.iter().any(|(family, _, _)| *family == face.family) {
+            wrong.push(format!("{}: семейства «{}» нет в списке", face.file, face.family));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
 /// Каждый файл в `public/fonts` подключён в `fonts.css`, и каждый
@@ -308,15 +395,23 @@ fn font_files_and_rules_match() {
 
 /// Табличные цифры: `font-variant-numeric: tabular-nums` работает, только
 /// если в шрифте есть `tnum` (Правило 4). Проверяется у файлов, где есть
-/// цифры.
+/// цифры. У Caprasimo `tnum` нет, но цифры одной ширины и так: тогда
+/// столбец не «пляшет» и без него.
 #[test]
 fn digits_can_be_tabular() {
     let mut wrong = Vec::new();
     for face in read_faces() {
         let font = Font::open(&face.file);
-        if font.chars().contains(&u32::from('0')) && !font.substitutions().contains("tnum") {
+        let glyphs = font.glyphs();
+        let Some(widths) = ('0'..='9')
+            .map(|digit| glyphs.get(&u32::from(digit)).map(|&glyph| font.advance(glyph)))
+            .collect::<Option<BTreeSet<usize>>>()
+        else {
+            continue;
+        };
+        if widths.len() > 1 && !font.substitutions().contains("tnum") {
             wrong.push(face.file);
         }
     }
-    assert!(wrong.is_empty(), "цифры есть, а tnum нет: {wrong:?}");
+    assert!(wrong.is_empty(), "цифры разной ширины, а tnum нет: {wrong:?}");
 }

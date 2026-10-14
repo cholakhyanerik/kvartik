@@ -165,6 +165,9 @@ fn contrast(a: [u8; 3], b: [u8; 3]) -> f64 {
 enum Need {
     /// Фон: с ним сравнивают остальных.
     Surface,
+    /// Заливка плашки или карточки: с ней сравнивают только её текст
+    /// `--on-…`, а сама она слов не несёт.
+    Fill,
     /// Только украшает, порога нет.
     Decorative,
     /// Порог на каждом фоне `--surface…`.
@@ -182,7 +185,9 @@ fn need(name: &str) -> Option<Need> {
         Some(Need::OnSurfaces(4.5))
     } else if matches!(name, "--border-strong" | "--focus" | "--accent") {
         Some(Need::OnSurfaces(3.0))
-    } else if name == "--border" {
+    } else if name.starts_with("--fill-") {
+        Some(Need::Fill)
+    } else if name == "--border" || name.starts_with("--decor-") {
         Some(Need::Decorative)
     } else {
         None
@@ -225,7 +230,8 @@ fn colors_are_hex_and_named_by_role() {
                 Some(Err(error)) => wrong.push(format!("{theme} {name}: {error}")),
                 Some(Ok(_)) if need(name).is_none() => wrong.push(format!(
                     "{theme} {name}: роль по имени не ясна — --surface…, --text…, …-text, \
-                     --on-…, --border, --border-strong, --focus или --accent"
+                     --fill-…, --on-…, --border, --border-strong, --focus, --accent \
+                     или --decor-…"
                 )),
                 Some(Ok(_)) => {}
             }
@@ -273,7 +279,7 @@ fn contrast_meets_wcag_and_comments_tell_the_truth() {
                     surfaces.iter().map(|s| ((*s).clone(), min)).collect()
                 }
                 Some(Need::On(fill, min)) => vec![(fill, min)],
-                Some(Need::Surface | Need::Decorative) | None => Vec::new(),
+                Some(Need::Surface | Need::Fill | Need::Decorative) | None => Vec::new(),
             };
             let mut claims = claimed(&token.comment);
             for (background, min) in pairs {

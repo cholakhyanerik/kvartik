@@ -92,7 +92,7 @@ pub fn BackupReminder(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView
                 Key::BackupDueNone
             };
             view! {
-                <div class="notice" role="status">
+                <div class="notice due" role="status">
                     <p class="reminder">{tr(lang, key)}</p>
                     <a class="button" href=format!("#{SECTION_ID}")>{tr(lang, Key::BackupGoTo)}</a>
                 </div>

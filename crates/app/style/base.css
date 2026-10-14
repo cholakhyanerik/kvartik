@@ -1,5 +1,7 @@
-/* Основа страницы: фон, текст и шрифт. Только переменные из tokens.css
-   (Правило 4). */
+/* Основа страницы и общие части окна: кнопки, поля, списки, плашки. Только
+   переменные из tokens.css (Правило 4). Вид — по дизайну «Kvartik Design»
+   (2026-10-14): кремовый фон, карточки со скруглением, кнопки и поля
+   пилюлей, крупные главные кнопки. */
 
 html {
   font-family: var(--font-sans);
@@ -24,7 +26,7 @@ body {
    переходе на следующую. */
 main {
   max-width: 40rem;
-  padding: var(--space-4);
+  padding: var(--space-5);
 }
 
 /* Шапка: название и выбор языка в строку, а на телефоне выбор уходит под
@@ -35,38 +37,29 @@ main {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 .top h1 {
   margin: 0;
 }
 
-/* Выбор языка окна (задача 53): выбранный язык — главная кнопка с заливкой,
-   остальные — второстепенные, с рамкой (button.secondary). */
-.langs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-.langs button {
-  margin-top: 0;
-  padding: 0 var(--space-3);
+/* Заголовки — засечками (Noto Serif), как в дизайне; текст — Noto Sans. */
+h1,
+h2 {
+  font-family: var(--font-serif);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-tight);
 }
 
 h1 {
-  margin: 0 0 var(--space-3);
-  font-size: var(--font-size-xl);
-  font-weight: var(--weight-strong);
-  line-height: var(--leading-tight);
+  margin: 0 0 var(--space-4);
+  font-size: var(--font-size-2xl);
 }
 
 h2 {
-  margin: var(--space-4) 0 var(--space-2);
-  font-size: var(--font-size-md);
-  font-weight: var(--weight-strong);
-  line-height: var(--leading-tight);
+  margin: var(--space-7) 0 var(--space-3);
+  font-size: var(--font-size-xl);
 }
 
 p {
@@ -78,21 +71,111 @@ p {
   color: var(--danger-text);
 }
 
-/* Главная кнопка: заливка --accent, текст --on-accent, высота — цель для
-   пальца. Шрифт браузер кнопке сам не передаёт. */
-button {
-  min-height: var(--touch);
-  margin-top: var(--space-3);
-  /* Подпись в две строки (армянская, на телефоне) не прижимается к краям:
-     в одну строку высоту и так держит min-height. */
-  padding: var(--space-2) var(--space-4);
+/* Ошибка поля — под полем, мельче подписи. */
+.field-error {
+  font-size: var(--font-size-sm);
+}
+
+/* Выбор языка окна (задача 53): дорожка с тремя языками, выбранный —
+   приподнятой пилюлей и жирным: отличается он не только цветом (Правило 4). */
+.langs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border-radius: var(--radius-lg);
+  background: var(--surface-sunken);
+}
+
+.langs button,
+.langs button.secondary {
+  margin-top: 0;
   border: 0;
-  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text);
+  font-weight: var(--weight-regular);
+}
+
+.langs button[aria-pressed="true"] {
+  background: var(--surface-raised);
+  font-weight: var(--weight-strong);
+}
+
+/* Главная кнопка: заливка --accent, текст --on-accent, пилюля высотой
+   56 px — «крупные кнопки» дизайна. Подпись в две строки (армянская, на
+   телефоне) не прижимается к краям: в одну строку высоту и так держит
+   min-height. Шрифт браузер кнопке сам не передаёт. Ссылка и подпись,
+   которые работают как кнопка (`.button`): файл копии сохраняется настоящей
+   ссылкой, а выбор файла открывает подпись поля. */
+button,
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  min-height: var(--control);
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-6);
+  border: 0;
+  border-radius: var(--radius-round);
   background: var(--accent);
   color: var(--on-accent);
   font: inherit;
+  font-size: var(--font-size-lg);
   font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
+  text-align: center;
+  text-decoration: none;
   cursor: pointer;
+}
+
+/* Второстепенная кнопка: рамка без заливки, текст — цвета текста, чтобы
+   рядом с главной было видно, какая главная. Рамка --border-strong — 3:1 на
+   каждом фоне (WCAG 1.4.11). */
+button.secondary,
+.button.secondary {
+  border: 2px solid var(--border-strong);
+  background: none;
+  color: var(--text);
+}
+
+/* Кнопка внутри строки списка, строки формы или сообщения — меньше
+   главной: 56 px у каждой «Изменить» в списке съели бы экран телефона. Цель
+   для пальца — всё равно 44 px. */
+li button,
+li .button,
+.row button,
+.notice-row button,
+fieldset > button,
+.repeat button,
+.langs button {
+  min-height: var(--touch);
+  padding-inline: var(--space-4);
+  font-size: var(--font-size-md);
+}
+
+/* Отклик на наведение мышью — только там, где мышь есть: на телефоне
+   «наведение» залипает после касания. */
+@media (hover: hover) {
+  button.secondary:hover:not(:disabled),
+  .button.secondary:hover {
+    background: var(--surface-raised);
+  }
+
+  .langs button:hover:not([aria-pressed="true"]) {
+    background: var(--surface);
+  }
+}
+
+/* Выключенная кнопка отличается от включённой не только курсором: фон
+   утоплен, текст приглушён (--text-muted на --surface-sunken — 4.9:1
+   и 9.3:1). */
+button:disabled {
+  border-color: var(--border);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  cursor: default;
 }
 
 /* Фокус с клавиатуры виден всегда: кольцо цвета --focus, 3:1 на каждом
@@ -111,16 +194,32 @@ section > .button + p {
   margin-top: var(--space-2);
 }
 
-/* Плашка «есть новая версия» и плашка сбоя: приподнятый фон и рамка
-   выделяют её среди разделов, а говорит она словами (Правило 4). --text на
-   --surface-raised — 16.9:1 и 13.2:1, --danger-text у сбоя ([role="alert"]) —
-   6.2:1 и 7.1:1. */
+/* Карточка-сообщение: «есть новая версия», плашка сбоя. Приподнятый фон
+   и скругление выделяют её среди разделов, а говорит она словами
+   (Правило 4). --text на --surface-raised — 15.1:1 и 12.4:1, --danger-text
+   у сбоя ([role="alert"]) — 6.3:1 и 7.2:1. */
 .notice {
-  padding: var(--space-3) var(--space-4) var(--space-4);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding: var(--space-5);
+  border-radius: var(--radius-xl);
   background: var(--surface-raised);
   color: var(--text);
+}
+
+.notice button,
+.notice .button {
+  margin-top: 0;
+}
+
+/* Карточка, которая просит действия, — напоминание о копии: тёплая
+   заливка, как в дизайне. Слова и жирный шрифт говорят сами, цвет только
+   помогает (Правило 4). */
+.notice.due {
+  background: var(--fill-notice);
+  color: var(--on-fill-notice);
 }
 
 /* Сбой программы (задача 48): плашка закрывает остановленное окно целиком.
@@ -132,7 +231,7 @@ section > .button + p {
   inset: 0;
   z-index: 1;
   overflow: auto;
-  padding: var(--space-4);
+  padding: var(--space-5);
   background: var(--surface);
 }
 
@@ -141,38 +240,36 @@ section > .button + p {
   max-width: 40rem;
 }
 
-.panic p + p {
-  margin-top: var(--space-2);
-}
-
 /* «Перезагрузить» на трёх языках, когда язык окна неизвестен, на телефоне
    в строку не влезает: подписи переносятся целиком, а промежуток между
    ними — `gap` (пробел между элементами flex схлопывается). */
 .panic .button {
   flex-wrap: wrap;
   column-gap: var(--space-3);
-  padding-block: var(--space-2);
 }
 
 /* Восстановление — своя часть раздела, отдельно от копии. */
 .restore {
-  margin-top: var(--space-5);
+  margin-top: var(--space-6);
 }
 
 /* Форма: поля друг под другом, подпись над полем. */
 form {
   display: grid;
-  gap: var(--space-3);
-  margin-top: var(--space-3);
+  gap: var(--space-4);
+  margin-top: var(--space-4);
 }
 
+/* Подпись поля — над ним, мельче и жирнее текста поля, как в дизайне. */
 label {
   display: grid;
-  gap: var(--space-1);
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  font-weight: var(--weight-strong);
 }
 
-/* Поле ввода: рамка --border-strong (3:1 на каждом фоне), высота — цель
-   для пальца, шрифт — как у текста страницы. */
+/* Поле ввода: пилюля высотой 56 px, рамка --border-strong (3:1 на каждом
+   фоне), шрифт — как у текста страницы, а не у подписи над ним. */
 input[type="password"],
 input[type="search"],
 input[type="text"],
@@ -183,66 +280,95 @@ select,
 textarea {
   box-sizing: border-box;
   width: 100%;
-  min-height: var(--touch);
-  padding: 0 var(--space-3);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  background: var(--surface-raised);
+  min-height: var(--control);
+  margin: 0;
+  padding: 0 var(--space-5);
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius-round);
+  background-color: var(--surface-raised);
   color: var(--text);
   font: inherit;
+  font-size: var(--font-size-lg);
+  font-weight: var(--weight-regular);
 }
 
-/* Многострочное поле — адрес: строки с воздухом, высота — по желанию
-   человека. */
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  border-color: var(--focus);
+}
+
+/* Список выбора — своей стрелкой: у системной свой вид в каждом браузере,
+   а на пилюле она прилипает к краю. Стрелка — два треугольника цвета
+   текста (`currentColor`), без картинки. */
+select {
+  padding-right: var(--space-8);
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    right var(--space-6) center,
+    right calc(var(--space-6) - 0.375rem) center;
+  background-size: 0.375rem 0.375rem;
+  background-repeat: no-repeat;
+}
+
+/* Многострочное поле — адрес: скругление карточки вместо пилюли, строки
+   с воздухом, высота — по желанию человека. */
 textarea {
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-lg);
   resize: vertical;
 }
 
-/* Группа полей формы — профиль (задача 9): тонкая рамка-разделитель
-   и подпись группы. `min-width: 0` — иначе группа шириной не меньше своего
-   содержимого и на телефоне вылезает за край. */
+/* Группа полей формы — профиль (задача 9): заголовок группы и поля под ним,
+   без рамки, как в дизайне. `min-width: 0` — иначе группа шириной не меньше
+   своего содержимого и на телефоне вылезает за край. */
 fieldset {
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-4);
   min-width: 0;
   margin: 0;
-  padding: var(--space-3) var(--space-4) var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-}
-
-/* Подпись группы — заголовком внутри рамки, а не на ней: длинная
-   армянская подпись на телефоне переносится, и вторая строка на рамке
-   выглядит сломанной. Плавающая подпись перестаёт быть «подписью на
-   рамке» и встаёт первой строкой сетки. */
-legend {
-  float: left;
-  width: 100%;
-  padding: 0;
-  font-weight: var(--weight-strong);
-}
-
-/* Группа внутри группы — выбор из вариантов, периоды: без второй рамки. */
-fieldset.group {
-  gap: var(--space-1);
   padding: 0;
   border: 0;
 }
 
+form > fieldset + fieldset {
+  margin-top: var(--space-4);
+}
+
+/* Подпись группы — заголовком над полями: длинная армянская подпись на
+   телефоне переносится, и плавающая подпись встаёт первой строкой сетки,
+   а не ложится на рамку. */
+legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--weight-strong);
+}
+
+/* Группа внутри группы — выбор из вариантов, периоды: плотнее. */
+fieldset.group {
+  gap: var(--space-1);
+}
+
 /* Вариант выбора: кружок и подпись в строку, высота — цель для пальца,
-   кружок — цвета акцента. */
+   кружок — цвета акцента. Подпись — как текст, а не как подпись поля. */
 .choice {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
   min-height: var(--touch);
+  font-size: var(--font-size-md);
+  font-weight: var(--weight-regular);
 }
 
 .choice input {
   flex: none;
-  width: 1.25rem;
-  height: 1.25rem;
+  width: 1.375rem;
+  height: 1.375rem;
   margin: 0;
   accent-color: var(--accent);
 }
@@ -250,8 +376,8 @@ fieldset.group {
 /* Строка списка в форме — счёт, код, период: отделена от соседней. */
 .row {
   display: grid;
-  gap: var(--space-3);
-  padding-bottom: var(--space-3);
+  gap: var(--space-4);
+  padding-bottom: var(--space-4);
   border-bottom: 1px solid var(--border);
 }
 
@@ -275,6 +401,12 @@ img.logo {
   gap: var(--space-2);
 }
 
+/* «Логотип» — подпись поля, как у остальных полей формы. */
+.logo-field > p:first-child {
+  font-size: var(--font-size-sm);
+  font-weight: var(--weight-strong);
+}
+
 /* Короткий итог профиля: подпись над значением — длинные армянские
    подписи на телефоне в одну строку со значением не влезают. */
 dl.summary {
@@ -293,30 +425,44 @@ dl.summary dd {
   overflow-wrap: anywhere;
 }
 
-/* Клиенты (задача 10): поиск над списком, строки списка разделены
-   линией, как строки форм, а не карточками — на телефоне так помещается
-   больше клиентов. */
+/* Поиск над списком. */
 .search {
-  margin-top: var(--space-3);
+  margin-top: var(--space-4);
 }
 
-ul.clients {
+/* Списки — клиенты (задача 10), документы, строки и оплаты документа
+   (задача 11): карточка со скруглением, строки внутри разделены линией,
+   как в дизайне. Линия, а не карточка на строку: на телефоне так помещается
+   больше строк. */
+ul.clients,
+ul.documents,
+ul.items {
   display: grid;
-  gap: var(--space-3);
-  margin: var(--space-3) 0 0;
-  padding: 0;
+  margin: var(--space-4) 0 0;
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
   list-style: none;
 }
 
-ul.clients li {
+ul.clients li,
+ul.documents li,
+ul.items li {
   display: grid;
   gap: var(--space-1);
-  padding-bottom: var(--space-3);
+  padding: var(--space-4) 0;
   border-bottom: 1px solid var(--border);
   overflow-wrap: anywhere;
 }
 
-ul.clients .actions {
+ul.clients li:last-child,
+ul.documents li:last-child,
+ul.items li:last-child {
+  border-bottom: 0;
+}
+
+ul.clients .actions,
+ul.documents .actions {
   margin-top: var(--space-1);
 }
 
@@ -326,7 +472,7 @@ ul.clients .actions {
 
 /* Удалённые — тише живых: под кнопкой «Скрыть удалённых» их легко принять
    за живых. Слово «удалённые» — на кнопке, цвет только помогает
-   (Правило 4); пара --text-muted на --surface та же, что у подсказок. */
+   (Правило 4). */
 ul.clients.deleted .client-name {
   color: var(--text-muted);
 }
@@ -339,30 +485,6 @@ ul.clients.deleted .client-name {
   display: flex;
   flex-wrap: wrap;
   column-gap: var(--space-3);
-}
-
-/* Счета и акты (задача 11): список документов и строки документа — как
-   список клиентов, строками с линией. */
-ul.documents,
-ul.items {
-  display: grid;
-  gap: var(--space-3);
-  margin: var(--space-3) 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-ul.documents li,
-ul.items li {
-  display: grid;
-  gap: var(--space-1);
-  padding-bottom: var(--space-3);
-  border-bottom: 1px solid var(--border);
-  overflow-wrap: anywhere;
-}
-
-ul.documents .actions {
-  margin-top: var(--space-1);
 }
 
 /* Название документа и статус — в строку; на телефоне статус переносится
@@ -380,42 +502,48 @@ ul.documents.deleted .doc-title {
   color: var(--text-muted);
 }
 
-/* Статус документа — словом в рамке: слово говорит, рамка и цвет только
-   помогают (Правило 4). Цвета — те же пары статусов на фонах, что
-   проверяет tokens.css. */
+/* Статус документа — словом на плашке-пилюле: слово говорит, заливка
+   только помогает (Правило 4). Пары заливки и текста проверяет tokens.css. */
 .status {
-  padding: 0 var(--space-2);
-  border: 1px solid currentColor;
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-round);
-  font-size: var(--font-size-sm);
-  font-weight: var(--weight-regular);
+  font-size: var(--font-size-xs);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
 }
 
 .status.done {
-  color: var(--success-text);
+  background: var(--fill-done);
+  color: var(--on-fill-done);
 }
 
 .status.waiting {
-  color: var(--warning-text);
+  background: var(--fill-waiting);
+  color: var(--on-fill-waiting);
 }
 
 .status.late {
-  color: var(--danger-text);
+  background: var(--fill-late);
+  color: var(--on-fill-late);
 }
 
 .status.muted {
-  color: var(--text-muted);
+  background: var(--fill-muted);
+  color: var(--on-fill-muted);
 }
 
 /* Итог документа и сколько осталось оплатить. */
 .total {
+  font-size: var(--font-size-lg);
   font-weight: var(--weight-strong);
 }
 
 /* Оплата счёта: своя группа под реквизитами. Поступление и «Убрать» —
    в строку. */
 .payments {
-  margin-top: var(--space-3);
+  margin-top: var(--space-4);
 }
 
 ul.items li.payment {
@@ -434,7 +562,7 @@ ul.items li.payment button {
   display: grid;
   justify-items: start;
   gap: var(--space-2);
-  margin-top: var(--space-3);
+  margin-top: var(--space-4);
 }
 
 .repeat button {
@@ -460,10 +588,9 @@ ul.items li.payment button {
   font-size: var(--font-size-sm);
 }
 
-/* Напоминание о копии: слова и жирный шрифт, а цвет только помогает
-   (Правило 4). */
+/* Напоминание о копии: слова и жирный шрифт, а цвет даёт карточка
+   (`.notice.due`). */
 .reminder {
-  color: var(--warning-text);
   font-weight: var(--weight-strong);
 }
 
@@ -485,42 +612,6 @@ ul.items li.payment button {
 .actions button,
 .actions .button {
   margin-top: 0;
-}
-
-/* Ссылка и подпись, которые выглядят и работают как кнопка: файл копии
-   сохраняется настоящей ссылкой, а выбор файла открывает подпись поля. */
-.button {
-  display: inline-flex;
-  align-items: center;
-  box-sizing: border-box;
-  min-height: var(--touch);
-  margin-top: var(--space-3);
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-md);
-  background: var(--accent);
-  color: var(--on-accent);
-  font-weight: var(--weight-strong);
-  text-decoration: none;
-  cursor: pointer;
-}
-
-/* Второстепенная кнопка: рамка и текст акцента, без заливки — чтобы рядом
-   с главной было видно, какая главная. */
-button.secondary,
-.button.secondary {
-  border: 1px solid var(--border-strong);
-  background: none;
-  color: var(--accent-text);
-}
-
-/* Выключенная кнопка отличается от включённой не только курсором: фон
-   утоплен, текст приглушён (--text-muted на --surface-sunken — 5.6:1
-   и 8.1:1). */
-button:disabled {
-  border-color: var(--border);
-  background: var(--surface-sunken);
-  color: var(--text-muted);
-  cursor: default;
 }
 
 /* Поле, которое не видно, но которым можно пользоваться: выбор файла
