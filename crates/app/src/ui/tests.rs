@@ -579,6 +579,31 @@ async fn profile_is_saved_and_read_back() {
             wrong.push(format!("в итоге нет «{shown}»"));
         }
     }
+    // Строка итога открывает форму — на своей группе полей.
+    let row = host
+        .query_selector_all("#profile button.entry")
+        .ok()
+        .and_then(|rows| {
+            (0..rows.length())
+                .filter_map(|at| rows.item(at))
+                .map(JsCast::unchecked_into::<HtmlElement>)
+                .find(|row| row.text_content().unwrap_or_default().contains(t(lang, Key::ProfileActivities)))
+        });
+    match row {
+        Some(row) => row.click(),
+        None => wrong.push("в итоге нет строки видов деятельности".to_owned()),
+    }
+    sleep(100).await;
+    if host.query_selector("#profile-activities").ok().flatten().is_none()
+        || button(&host, &[t(lang, Key::ProfileSave)]).is_none()
+    {
+        wrong.push("строка итога не открыла форму".to_owned());
+    }
+    match button(&host, &[t(lang, Key::Cancel)]) {
+        Some(cancel) => cancel.click(),
+        None => wrong.push("в форме нет «Отмены»".to_owned()),
+    }
+    sleep(50).await;
 
     match stored_profile().await {
         Ok(Some(profile)) => {
@@ -623,10 +648,10 @@ fn client_names(host: &HtmlElement) -> Vec<String> {
         .collect()
 }
 
-/// Кнопка `label` у клиента `name` в списке `list` (CSS).
-fn row_button(host: &HtmlElement, list: &str, name: &str, label: &str) -> Option<HtmlElement> {
+/// Строка клиента `name` в списке `list` (CSS).
+fn client_row(host: &HtmlElement, list: &str, name: &str) -> Option<HtmlElement> {
     let items = host.query_selector_all(&format!("{list} li")).ok()?;
-    let item = (0..items.length())
+    (0..items.length())
         .filter_map(|at| items.item(at))
         .map(|node| node.unchecked_into::<HtmlElement>())
         .find(|item| {
@@ -636,8 +661,21 @@ fn row_button(host: &HtmlElement, list: &str, name: &str, label: &str) -> Option
                 .and_then(|title| title.text_content())
                 .as_deref()
                 == Some(name)
-        })?;
-    button(&item, &[label])
+        })
+}
+
+/// Кнопка `label` у клиента `name` в списке `list` (CSS).
+fn row_button(host: &HtmlElement, list: &str, name: &str, label: &str) -> Option<HtmlElement> {
+    button(&client_row(host, list, name)?, &[label])
+}
+
+/// Строка живого клиента `name` — кнопка, которая открывает его форму.
+fn client_entry(host: &HtmlElement, name: &str) -> Option<HtmlElement> {
+    client_row(host, "ul.clients:not(.deleted)", name)?
+        .query_selector("button.entry")
+        .ok()
+        .flatten()
+        .map(JsCast::unchecked_into)
 }
 
 /// Клиенты: форма не сохраняет без названия, с неверным ՀՎՀՀ и сроком
@@ -775,11 +813,13 @@ async fn clients_are_added_found_deleted_and_restored() {
         }
     }
 
-    let gone = "ul.clients:not(.deleted)";
-    match row_button(&host, gone, "Acme Inc.", t(lang, Key::ClientDelete)) {
-        Some(delete) => delete.click(),
-        None => wrong.push("нет кнопки удаления".to_owned()),
+    // Удаляют из формы клиента: строка списка открывает её.
+    match client_entry(&host, "Acme Inc.") {
+        Some(entry) => entry.click(),
+        None => wrong.push("нет строки Acme Inc.".to_owned()),
     }
+    sleep(50).await;
+    press(t(lang, Key::ClientDelete), &mut wrong);
     if !wait_for(&host, &fill(t(lang, Key::ClientDeleted), &["Acme Inc."])).await {
         wrong.push("удаление не подтвердилось".to_owned());
     }
@@ -793,9 +833,11 @@ async fn clients_are_added_found_deleted_and_restored() {
     if client_names(&host) != both {
         wrong.push(format!("после восстановления: {:?}", client_names(&host)));
     }
-    if let Some(delete) = row_button(&host, gone, "Acme Inc.", t(lang, Key::ClientDelete)) {
-        delete.click();
+    if let Some(entry) = client_entry(&host, "Acme Inc.") {
+        entry.click();
     }
+    sleep(50).await;
+    press(t(lang, Key::ClientDelete), &mut wrong);
     let toggle = fill(t(lang, Key::ClientsDeleted), &["1"]);
     if !wait_for(&host, &toggle).await {
         wrong.push("нет кнопки удалённых".to_owned());
@@ -811,9 +853,9 @@ async fn clients_are_added_found_deleted_and_restored() {
         wrong.push(format!("после восстановления из списка: {:?}", client_names(&host)));
     }
 
-    match row_button(&host, gone, name, t(lang, Key::ClientEdit)) {
-        Some(edit) => edit.click(),
-        None => wrong.push("нет кнопки «Изменить»".to_owned()),
+    match client_entry(&host, name) {
+        Some(entry) => entry.click(),
+        None => wrong.push(format!("нет строки «{name}»")),
     }
     sleep(50).await;
     match field(&host, t(lang, Key::ClientName), 0) {

@@ -29,6 +29,8 @@ pub enum Icon {
     Search,
     /// Сделано — галочка.
     Check,
+    /// Сохранить файл — стрелка вниз на полку.
+    Download,
 }
 
 /// Значок для разметки. Он только украшает: что делает кнопка или ссылка,
@@ -65,6 +67,7 @@ pub fn icon(icon: Icon) -> impl IntoView {
         }
         .into_any(),
         Icon::Check => view! { <path d="M20 6 9 17l-5-5" /> }.into_any(),
+        Icon::Download => view! { <path d="M12 4v11M7 10l5 5 5-5M5 20h14" /> }.into_any(),
     };
     view! {
         <svg

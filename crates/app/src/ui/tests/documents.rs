@@ -341,9 +341,15 @@ async fn invoice_flow(host: &HtmlElement, client: &Client, lang: Lang, today: Da
     }
 
     // Удалить клиента: документы остаются, и сообщение называет их число.
-    let delete = row_with(host, "ul.clients:not(.deleted)", "Acme Inc.")
-        .and_then(|row| button(&row, &[t(lang, Key::ClientDelete)]));
-    match delete {
+    // Удаляют из формы клиента: строка списка открывает её.
+    let entry = row_with(host, "ul.clients:not(.deleted)", "Acme Inc.")
+        .and_then(|row| row.query_selector("button.entry").ok().flatten());
+    match entry {
+        Some(entry) => entry.unchecked_into::<HtmlElement>().click(),
+        None => wrong.push("нет строки клиента".to_owned()),
+    }
+    sleep(50).await;
+    match button(host, &[t(lang, Key::ClientDelete)]) {
         Some(delete) => delete.click(),
         None => wrong.push("нет кнопки удаления клиента".to_owned()),
     }

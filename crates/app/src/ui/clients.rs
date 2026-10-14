@@ -29,11 +29,13 @@ use kvartik_core::model::tin::Tin;
 use leptos::ev::SubmitEvent;
 use leptos::prelude::*;
 
+use super::avatar::{Avatar, tone};
 use super::backup::Backups;
 use super::documents::Documents;
 use super::form::{
     AreaField, CURRENCIES, FieldError, TextField, currency_code, currency_key, optional,
 };
+use super::icon::{Icon, icon};
 use super::split::{part, split};
 use super::storage::error_key;
 use super::{Base, tr};
@@ -163,6 +165,18 @@ enum Phase {
     Failed(StoreError),
 }
 
+/// Общее у частей раздела.
+#[derive(Clone, Copy)]
+struct Ctx {
+    lang: ReadSignal<Lang>,
+    clients: Clients,
+    documents: Documents,
+    base: Base,
+    backups: Backups,
+    mode: RwSignal<Mode>,
+    notice: RwSignal<Option<Notice>>,
+}
+
 /// Раздел на языке окна — под заголовком экрана. Пока база открывается —
 /// пусто: «открываем…» только мигнуло бы.
 #[component]
@@ -173,8 +187,15 @@ pub fn ClientsSection(
     base: Base,
     backups: Backups,
 ) -> impl IntoView {
-    let mode = RwSignal::new(Mode::List);
-    let notice = RwSignal::new(None::<Notice>);
+    let ctx = Ctx {
+        lang,
+        clients,
+        documents,
+        base,
+        backups,
+        mode: RwSignal::new(Mode::List),
+        notice: RwSignal::new(None),
+    };
     let phase = Memo::new(move |_| {
         clients.state.with(|state| match state {
             State::Loading => Phase::Loading,
@@ -187,57 +208,95 @@ pub fn ClientsSection(
         move || base.replacements(),
         move |_, _, _| {
             if let Some(store) = base.get() {
-                mode.set(Mode::List);
-                notice.set(None);
+                ctx.mode.set(Mode::List);
+                ctx.notice.set(None);
                 leptos::task::spawn_local(async move { clients.load(&store).await });
             }
         },
         false,
     );
+    let back = move || ctx.mode.set(Mode::List);
     move || {
-        let body = match (phase.get(), mode.get()) {
+        let body = match (phase.get(), ctx.mode.get()) {
             (Phase::Loading, _) => return None,
             (Phase::Failed(error), _) => view! {
                 <p role="alert">{tr(lang, error_key(error))}</p>
             }
             .into_any(),
-            (Phase::Ready, Mode::List) => view! {
-                <ClientList lang clients documents base backups mode notice />
-            }
-            .into_any(),
-            (Phase::Ready, Mode::New) => part(
-                lang,
-                client_form(lang, None, clients, base, backups, mode, notice),
-                move || mode.set(Mode::List),
-            ),
-            (Phase::Ready, Mode::Edit(id)) => part(
-                lang,
-                client_form(lang, clients.get(id), clients, base, backups, mode, notice),
-                move || mode.set(Mode::List),
-            ),
+            (Phase::Ready, Mode::List) => view! { <ClientList ctx /> }.into_any(),
+            (Phase::Ready, Mode::New) => part(lang, client_form(ctx, None), back),
+            (Phase::Ready, Mode::Edit(id)) => part(lang, client_form(ctx, clients.get(id)), back),
         };
         Some(body)
     }
 }
 
-/// Действие над клиентом из списка.
+/// Действие над клиентом: удалить — из его формы, восстановить — из
+/// сообщения об удалении или из списка удалённых.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Action {
     Delete,
     Restore,
 }
 
-/// Список: поиск, живые клиенты по алфавиту, удалённые — по кнопке.
+/// Удалить или восстановить клиента и сказать об этом над списком. Пока
+/// идёт одно действие, второе не начинается.
+fn act(
+    ctx: Ctx,
+    busy: RwSignal<bool>,
+    failure: RwSignal<Option<StoreError>>,
+    id: RecordId,
+    action: Action,
+) {
+    if busy.get_untracked() {
+        return;
+    }
+    let Some(store) = ctx.base.get() else {
+        failure.set(Some(StoreError::Failed));
+        return;
+    };
+    busy.set(true);
+    failure.set(None);
+    leptos::task::spawn_local(async move {
+        let outcome = change(&store, id, action).await;
+        busy.set(false);
+        match outcome {
+            Ok(Some(client)) => {
+                let name = client.data().name.as_str().to_owned();
+                ctx.notice.set(Some(match action {
+                    Action::Delete => {
+                        let docs = ctx.documents.count_for_client(client.id());
+                        Notice::Deleted(client.id(), name, docs)
+                    }
+                    Action::Restore => Notice::Restored(name),
+                }));
+                ctx.clients.put(client);
+                ctx.backups.data_saved();
+                ctx.mode.set(Mode::List);
+            }
+            // Клиент уже в этом состоянии или пропал — его поменяла
+            // другая вкладка: окно показывает, что в базе.
+            Ok(None) => {
+                ctx.clients.load(&store).await;
+                ctx.mode.set(Mode::List);
+            }
+            Err(error) => failure.set(Some(error)),
+        }
+    });
+}
+
+/// Список (дизайн «Kvartik Design»): поиск, живые клиенты по алфавиту —
+/// строками с кружком инициалов, «Добавить клиента», удалённые — по
+/// кнопке. Строка открывает форму клиента; удаляют клиента из неё.
 #[component]
-fn ClientList(
-    lang: ReadSignal<Lang>,
-    clients: Clients,
-    documents: Documents,
-    base: Base,
-    backups: Backups,
-    mode: RwSignal<Mode>,
-    notice: RwSignal<Option<Notice>>,
-) -> impl IntoView {
+fn ClientList(ctx: Ctx) -> impl IntoView {
+    let Ctx {
+        lang,
+        clients,
+        mode,
+        notice,
+        ..
+    } = ctx;
     let query = RwSignal::new(String::new());
     let show_deleted = RwSignal::new(false);
     let failure = RwSignal::new(None::<StoreError>);
@@ -254,40 +313,6 @@ fn ClientList(
     let alive = Memo::new(move |_| clients.with(|list, _| list.iter().filter(|c| !c.is_deleted()).count()));
     let unreadable = Memo::new(move |_| clients.with(|_, unreadable| unreadable));
 
-    let act = move |id: RecordId, action: Action| {
-        if busy.get_untracked() {
-            return;
-        }
-        let Some(store) = base.get() else {
-            failure.set(Some(StoreError::Failed));
-            return;
-        };
-        busy.set(true);
-        failure.set(None);
-        leptos::task::spawn_local(async move {
-            let outcome = change(&store, id, action).await;
-            busy.set(false);
-            match outcome {
-                Ok(Some(client)) => {
-                    let name = client.data().name.as_str().to_owned();
-                    notice.set(Some(match action {
-                        Action::Delete => {
-                            let docs = documents.count_for_client(client.id());
-                            Notice::Deleted(client.id(), name, docs)
-                        }
-                        Action::Restore => Notice::Restored(name),
-                    }));
-                    clients.put(client);
-                    backups.data_saved();
-                }
-                // Клиент уже в этом состоянии или пропал — его поменяла
-                // другая вкладка: окно показывает, что в базе.
-                Ok(None) => clients.load(&store).await,
-                Err(error) => failure.set(Some(error)),
-            }
-        });
-    };
-
     view! {
         {move || (unreadable.get() > 0).then(|| view! {
             <p role="alert">
@@ -298,15 +323,6 @@ fn ClientList(
             </p>
         })}
         {move || (alive.get() == 0).then(|| view! { <p>{tr(lang, Key::ClientsAbout)}</p> })}
-        <button
-            type="button"
-            on:click=move |_| {
-                notice.set(None);
-                mode.set(Mode::New);
-            }
-        >
-            {tr(lang, Key::ClientAdd)}
-        </button>
         {move || notice.get().map(|shown| match shown {
             Notice::Saved => view! { <p role="status">{tr(lang, Key::ClientSaved)}</p> }.into_any(),
             Notice::Deleted(id, name, docs) => view! {
@@ -326,7 +342,7 @@ fn ClientList(
                         type="button"
                         class="secondary"
                         disabled=move || busy.get()
-                        on:click=move |_| act(id, Action::Restore)
+                        on:click=move |_| act(ctx, busy, failure, id, Action::Restore)
                     >
                         {tr(lang, Key::ClientRestore)}
                     </button>
@@ -340,23 +356,41 @@ fn ClientList(
         })}
         {move || failure.get().map(|error| view! { <p role="alert">{tr(lang, error_key(error))}</p> })}
         <Show when=move || { alive.get() > 0 }>
-            <label class="search">
-                {tr(lang, Key::ClientSearch)}
-                <input type="search" bind:value=query autocomplete="off" maxlength=Line::MAX_CHARS.to_string() />
+            <label class="search-field">
+                <span class="visually-hidden">{tr(lang, Key::ClientSearch)}</span>
+                {icon(Icon::Search)}
+                <input
+                    type="search"
+                    bind:value=query
+                    placeholder=move || t(lang.get(), Key::ClientSearch)
+                    autocomplete="off"
+                    maxlength=Line::MAX_CHARS.to_string()
+                />
             </label>
-            <ul class="clients">
+            <ul class="list clients">
                 <For
                     each=move || shown.get()
                     key=|client| (client.id(), client.meta().modified())
                     let(client)
                 >
-                    <ClientRow lang client mode notice busy act />
+                    <ClientRow lang client mode notice />
                 </For>
             </ul>
             {move || shown.with(Vec::is_empty).then(|| view! {
                 <p class="hint">{tr(lang, Key::ClientsNotFound)}</p>
             })}
         </Show>
+        <button
+            type="button"
+            class="wide"
+            on:click=move |_| {
+                notice.set(None);
+                mode.set(Mode::New);
+            }
+        >
+            {icon(Icon::Plus)}
+            <span>{tr(lang, Key::ClientAdd)}</span>
+        </button>
         <Show when=move || { !deleted.with(Vec::is_empty) }>
             <button
                 type="button"
@@ -381,7 +415,7 @@ fn ClientList(
                         key=|client| (client.id(), client.meta().modified())
                         let(client)
                     >
-                        <DeletedRow lang client busy act />
+                        <DeletedRow ctx client busy failure />
                     </For>
                 </ul>
             </Show>
@@ -389,57 +423,50 @@ fn ClientList(
     }
 }
 
-/// Живой клиент в списке: название, короткие сведения и кнопки.
+/// Живой клиент в списке (дизайн «Kvartik Design»): кружок с инициалами,
+/// название и короткие сведения через точку. Вся строка — кнопка: открывает
+/// форму клиента.
 #[component]
-fn ClientRow<A>(
+fn ClientRow(
     lang: ReadSignal<Lang>,
     client: Client,
     mode: RwSignal<Mode>,
     notice: RwSignal<Option<Notice>>,
-    busy: RwSignal<bool>,
-    act: A,
-) -> impl IntoView
-where
-    A: Fn(RecordId, Action) + Copy + Send + Sync + 'static,
-{
+) -> impl IntoView {
     let id = client.id();
     let data = client.data().clone();
+    let name = data.name.as_str().to_owned();
     view! {
         <li>
-            <p class="client-name">{data.name.as_str().to_owned()}</p>
-            <p class="hint facts">
-                {move || facts(lang.get(), &data).into_iter().map(|fact| view! { <span>{fact}</span> }).collect_view()}
-            </p>
-            <div class="actions">
-                <button
-                    type="button"
-                    class="secondary"
-                    on:click=move |_| {
-                        notice.set(None);
-                        mode.set(Mode::Edit(id));
-                    }
-                >
-                    {tr(lang, Key::ClientEdit)}
-                </button>
-                <button
-                    type="button"
-                    class="secondary"
-                    disabled=move || busy.get()
-                    on:click=move |_| act(id, Action::Delete)
-                >
-                    {tr(lang, Key::ClientDelete)}
-                </button>
-            </div>
+            <button
+                type="button"
+                class="entry"
+                on:click=move |_| {
+                    notice.set(None);
+                    mode.set(Mode::Edit(id));
+                }
+            >
+                <Avatar name=name.clone() tone=tone(id) />
+                <span class="entry-main">
+                    <span class="entry-title client-name">{name}</span>
+                    <span class="entry-meta">
+                        {move || facts(lang.get(), &data).into_iter().map(|fact| view! { <span>{fact}</span> }).collect_view()}
+                    </span>
+                </span>
+                {icon(Icon::Forward)}
+            </button>
         </li>
     }
 }
 
 /// Удалённый клиент в списке удалённых: название и «Восстановить».
 #[component]
-fn DeletedRow<A>(lang: ReadSignal<Lang>, client: Client, busy: RwSignal<bool>, act: A) -> impl IntoView
-where
-    A: Fn(RecordId, Action) + Copy + Send + Sync + 'static,
-{
+fn DeletedRow(
+    ctx: Ctx,
+    client: Client,
+    busy: RwSignal<bool>,
+    failure: RwSignal<Option<StoreError>>,
+) -> impl IntoView {
     let id = client.id();
     view! {
         <li>
@@ -449,9 +476,9 @@ where
                     type="button"
                     class="secondary"
                     disabled=move || busy.get()
-                    on:click=move |_| act(id, Action::Restore)
+                    on:click=move |_| act(ctx, busy, failure, id, Action::Restore)
                 >
-                    {tr(lang, Key::ClientRestore)}
+                    {tr(ctx.lang, Key::ClientRestore)}
                 </button>
             </div>
         </li>
@@ -595,32 +622,25 @@ impl Form {
 
 split! {
     /// Форма клиента — своей частью wasm (`ui/split.rs`): она нужна только
-    /// по «Добавить клиента» и «Изменить».
-    pub(super) fn client_form(
-        lang: ReadSignal<Lang>,
-        existing: Option<Client>,
-        clients: Clients,
-        base: Base,
-        backups: Backups,
-        mode: RwSignal<Mode>,
-        notice: RwSignal<Option<Notice>>,
-    ) -> AnyView, preload preload_form
-    {
-        view! { <ClientForm lang existing clients base backups mode notice /> }.into_any()
+    /// по «Добавить клиента» и по строке списка.
+    pub(super) fn client_form(ctx: Ctx, existing: Option<Client>) -> AnyView, preload preload_form {
+        view! { <ClientForm ctx existing /> }.into_any()
     }
 }
 
-/// Форма клиента: новый — `existing` пуст, правка — с его данными.
+/// Форма клиента: новый — `existing` пуст, правка — с его данными
+/// и «Удалить» внизу.
 #[component]
-fn ClientForm(
-    lang: ReadSignal<Lang>,
-    existing: Option<Client>,
-    clients: Clients,
-    base: Base,
-    backups: Backups,
-    mode: RwSignal<Mode>,
-    notice: RwSignal<Option<Notice>>,
-) -> impl IntoView {
+fn ClientForm(ctx: Ctx, existing: Option<Client>) -> impl IntoView {
+    let Ctx {
+        lang,
+        clients,
+        base,
+        backups,
+        mode,
+        notice,
+        ..
+    } = ctx;
     let form = Form::new(existing.as_ref().map(Client::data));
     let id = existing.as_ref().map(Client::id);
     let failure = RwSignal::new(None::<StoreError>);
@@ -778,6 +798,21 @@ fn ClientForm(
                     {tr(lang, Key::Cancel)}
                 </button>
             </div>
+            // Удалить — внизу, отдельно от сохранения: в строке списка
+            // кнопки больше нет (дизайн «Kvartik Design»). Удалённый
+            // восстанавливается из сообщения над списком.
+            {id.map(|id| view! {
+                <div class="actions">
+                    <button
+                        type="button"
+                        class="secondary"
+                        disabled=move || form.busy.get()
+                        on:click=move |_| act(ctx, form.busy, failure, id, Action::Delete)
+                    >
+                        {tr(lang, Key::ClientDelete)}
+                    </button>
+                </div>
+            })}
         </form>
     }
 }

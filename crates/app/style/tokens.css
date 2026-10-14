@@ -80,6 +80,19 @@
   --fill-selected: #ffe1d0;
   --on-fill-selected: #402310; /* 11.5 на fill-selected */
 
+  /* Кружки с инициалами клиентов — четыре оттенка — и карточка ИП
+     в профиле. */
+  --fill-avatar-1: #ccdbb2;
+  --on-fill-avatar-1: #272e1b; /* 9.6 на fill-avatar-1 */
+  --fill-avatar-2: #ffc6a5;
+  --on-fill-avatar-2: #402310; /* 9.4 на fill-avatar-2 */
+  --fill-avatar-3: #dcd3c4;
+  --on-fill-avatar-3: #2e2b25; /* 9.5 на fill-avatar-3 */
+  --fill-avatar-4: #e1eecc;
+  --on-fill-avatar-4: #272e1b; /* 11.5 на fill-avatar-4 */
+  --fill-identity: #e1eecc;
+  --on-fill-identity: #272e1b; /* 11.5 на fill-identity */
+
   /* Главная карточка экрана — оливковая, с кругом-украшением. */
   --fill-hero: #56633f;
   --on-fill-hero: #f0fae1; /* 5.9 на fill-hero */
@@ -171,6 +184,17 @@
 
     --fill-selected: #4d2b15;
     --on-fill-selected: #ffe1d0; /* 10.1 на fill-selected */
+
+    --fill-avatar-1: #56633f;
+    --on-fill-avatar-1: #f0fae1; /* 5.9 на fill-avatar-1 */
+    --fill-avatar-2: #8c491a;
+    --on-fill-avatar-2: #fff2eb; /* 6.2 на fill-avatar-2 */
+    --fill-avatar-3: #645c50;
+    --on-fill-avatar-3: #f9f4ed; /* 6.0 на fill-avatar-3 */
+    --fill-avatar-4: #3d472b;
+    --on-fill-avatar-4: #e1eecc; /* 8.1 на fill-avatar-4 */
+    --fill-identity: #34402a;
+    --on-fill-identity: #e1eecc; /* 9.0 на fill-identity */
 
     --fill-hero: #3d472b;
     --on-fill-hero: #f0fae1; /* 9.1 на fill-hero */

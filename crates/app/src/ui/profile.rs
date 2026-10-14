@@ -28,10 +28,12 @@ use leptos::ev::{Event, SubmitEvent};
 use leptos::prelude::*;
 use web_sys::HtmlInputElement;
 
+use super::avatar;
 use super::backup::Backups;
 use super::form::{
     AreaField, CURRENCIES, FieldError, TextField, currency_code, currency_key, optional,
 };
+use super::icon::{Icon, icon};
 use super::split::{part, split};
 use super::storage::error_key;
 use super::{Base, tr};
@@ -112,6 +114,28 @@ fn picture(logo: &Logo) -> Option<Arc<Picture>> {
     Picture::new(image.bytes(), image.format().mime()).map(Arc::new)
 }
 
+/// Группа полей формы профиля, к которой ведёт строка итога: форма
+/// открывается на ней.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Part {
+    Requisites,
+    Accounts,
+    Activities,
+    Person,
+}
+
+impl Part {
+    /// `id` группы полей в форме.
+    const fn id(self) -> &'static str {
+        match self {
+            Part::Requisites => "profile-requisites",
+            Part::Accounts => "profile-accounts",
+            Part::Activities => "profile-activities",
+            Part::Person => "profile-person",
+        }
+    }
+}
+
 /// Раздел на языке окна — под заголовком экрана. Пока база открывается —
 /// пусто: «открываем…» только мигнуло бы.
 #[component]
@@ -123,6 +147,8 @@ pub fn ProfileSection(
 ) -> impl IntoView {
     let editing = RwSignal::new(false);
     let saved = RwSignal::new(false);
+    // На какой группе полей открыть форму.
+    let focus = RwSignal::new(None::<Part>);
     // Сегодня — один раз (Архитектура, «Время — параметр»): по нему
     // проверяется год рождения и берутся правила налога.
     let today = clock::today();
@@ -138,6 +164,11 @@ pub fn ProfileSection(
         },
         false,
     );
+    let open = move |part: Option<Part>| {
+        saved.set(false);
+        focus.set(part);
+        editing.set(true);
+    };
     move || {
         let state = profiles.state.get();
         let body = match state {
@@ -150,30 +181,33 @@ pub fn ProfileSection(
                 let data = profile.map(|profile| profile.data().clone());
                 part(
                     lang,
-                    profile_form(lang, data, profiles, base, backups, editing, saved, today),
+                    profile_form(
+                        lang,
+                        data,
+                        profiles,
+                        base,
+                        backups,
+                        editing,
+                        saved,
+                        today,
+                        focus.get_untracked(),
+                    ),
                     move || editing.set(false),
                 )
             }
             State::Ready(Some(profile)) => view! {
-                <Summary lang data=profile.data().clone() picture=profiles.picture today />
                 {move || saved.get().then(|| view! {
                     <p role="status">{tr(lang, Key::ProfileSaved)}</p>
                 })}
-                <button
-                    type="button"
-                    class="secondary"
-                    on:click=move |_| {
-                        saved.set(false);
-                        editing.set(true);
-                    }
-                >
+                <Summary lang data=profile.data().clone() picture=profiles.picture today open />
+                <button type="button" class="secondary" on:click=move |_| open(None)>
                     {tr(lang, Key::ProfileEdit)}
                 </button>
             }
             .into_any(),
             State::Ready(None) => view! {
                 <p>{tr(lang, Key::ProfileAbout)}</p>
-                <button type="button" on:click=move |_| editing.set(true)>
+                <button type="button" on:click=move |_| open(None)>
                     {tr(lang, Key::ProfileFill)}
                 </button>
             }
@@ -212,45 +246,114 @@ fn excluded_warning(
     })
 }
 
-/// Заполненный профиль коротко: логотип, имя, ՀՎՀՀ, коды деятельности
-/// и предупреждения о них.
+/// Строка итога профиля: подпись, коротко — что в ней, и угол вправо. Вся
+/// строка — кнопка: открывает форму на своей группе полей.
 #[component]
-fn Summary(
+fn SummaryRow<F>(
+    lang: ReadSignal<Lang>,
+    label: Key,
+    meta: String,
+    part: Part,
+    open: F,
+) -> impl IntoView
+where
+    F: Fn(Option<Part>) + Copy + Send + Sync + 'static,
+{
+    view! {
+        <li>
+            <button type="button" class="entry" on:click=move |_| open(Some(part))>
+                <span class="entry-main">
+                    <span class="entry-title">{tr(lang, label)}</span>
+                    <span class="entry-meta">{meta}</span>
+                </span>
+                {icon(Icon::Forward)}
+            </button>
+        </li>
+    }
+}
+
+/// Заполненный профиль коротко (дизайн «Kvartik Design»): карточка ИП —
+/// логотип или кружок с инициалами, имя, ՀՎՀՀ и режим, — предупреждения
+/// о кодах и строки групп: что попадает в счета и акты и что нужно для
+/// налога.
+#[component]
+fn Summary<F>(
     lang: ReadSignal<Lang>,
     data: ProfileData,
     picture: RwSignal<Option<Arc<Picture>>>,
     today: Option<Date>,
-) -> impl IntoView {
+    open: F,
+) -> impl IntoView
+where
+    F: Fn(Option<Part>) + Copy + Send + Sync + 'static,
+{
     let name = data.name.clone();
+    let initials = data.name.clone();
     let tin = data.tin.as_ref().map(|tin| tin.as_str().to_owned());
-    let codes = (!data.activities.is_empty()).then(|| {
-        data.activities
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(", ")
-    });
+    let turnover = data.regime == Some(Regime::Turnover);
+    // Языки, на которых имя заполнено, — их имена на них самих.
+    let named: Vec<&str> = Lang::ALL
+        .into_iter()
+        .filter(|lang| !data.name.get(*lang).is_empty())
+        .map(Lang::native_name)
+        .collect();
+    let named = named.join(" · ");
+    let accounts = data.accounts.len();
+    let codes = data
+        .activities
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let born = data.person.birth_year.map(|year| year.to_string()).unwrap_or_default();
     view! {
-        {move || picture.get().map(|picture| view! {
-            <img class="logo" src=picture.url().to_owned() alt=move || t(lang.get(), Key::ProfileLogo) />
-        })}
-        <dl class="summary">
-            <dt>{tr(lang, Key::ProfileNameLabel)}</dt>
-            <dd>{move || name_for(&name, lang.get())}</dd>
-            {tin.map(|tin| view! {
-                <dt>{tr(lang, Key::ProfileTin)}</dt>
-                <dd>{tin}</dd>
-            })}
-            {codes.map(|codes| view! {
-                <dt>{tr(lang, Key::ProfileActivities)}</dt>
-                <dd>{codes}</dd>
-            })}
-        </dl>
+        <div class="identity">
+            {move || match picture.get() {
+                Some(picture) => view! {
+                    <img class="identity-logo" src=picture.url().to_owned() alt=move || t(lang.get(), Key::ProfileLogo) />
+                }
+                .into_any(),
+                None => {
+                    let initials = initials.clone();
+                    view! {
+                        <span class="avatar hero" aria-hidden="true">
+                            {move || avatar::initials(&name_for(&initials, lang.get()))}
+                        </span>
+                    }
+                    .into_any()
+                }
+            }}
+            <div class="identity-text">
+                <p class="identity-name">{move || name_for(&name, lang.get())}</p>
+                <p class="dotted">
+                    {tin.map(|tin| view! {
+                        <span>{move || fill(t(lang.get(), Key::TinShort), &[&tin])}</span>
+                    })}
+                    {turnover.then(|| view! { <span>{tr(lang, Key::RegimeTurnover)}</span> })}
+                </p>
+            </div>
+        </div>
         {data
             .activities
             .iter()
             .filter_map(|code| excluded_warning(lang, *code, today))
             .collect_view()}
+        <h2>{tr(lang, Key::ProfileOnDocuments)}</h2>
+        <ul class="list">
+            <SummaryRow lang label=Key::ProfileNameAddress meta=named part=Part::Requisites open />
+            <SummaryRow
+                lang
+                label=Key::ProfileAccounts
+                meta=accounts.to_string()
+                part=Part::Accounts
+                open
+            />
+        </ul>
+        <h2>{tr(lang, Key::ProfileForTax)}</h2>
+        <ul class="list">
+            <SummaryRow lang label=Key::ProfileActivities meta=codes part=Part::Activities open />
+            <SummaryRow lang label=Key::ProfilePerson meta=born part=Part::Person open />
+        </ul>
     }
 }
 
@@ -573,9 +676,10 @@ split! {
         editing: RwSignal<bool>,
         saved: RwSignal<bool>,
         today: Option<Date>,
+        focus: Option<Part>,
     ) -> AnyView, preload preload_form
     {
-        view! { <ProfileForm lang data profiles base backups editing saved today /> }.into_any()
+        view! { <ProfileForm lang data profiles base backups editing saved today focus /> }.into_any()
     }
 }
 
@@ -590,8 +694,21 @@ fn ProfileForm(
     editing: RwSignal<bool>,
     saved: RwSignal<bool>,
     today: Option<Date>,
+    focus: Option<Part>,
 ) -> impl IntoView {
     let form = Form::new(data.as_ref(), profiles.picture);
+    // Открыли по строке итога — к её группе полей; после кадра: к нему
+    // форма уже в странице.
+    if let Some(part) = focus {
+        request_animation_frame(move || {
+            let group = web_sys::window()
+                .and_then(|window| window.document())
+                .and_then(|document| document.get_element_by_id(part.id()));
+            if let Some(group) = group {
+                group.scroll_into_view();
+            }
+        });
+    }
     let failure = RwSignal::new(None::<StoreError>);
     let invalid = RwSignal::new(false);
 
@@ -717,7 +834,7 @@ async fn save(store: &Store, data: ProfileData, choice: &LogoChoice) -> Result<P
 fn Requisites(lang: ReadSignal<Lang>, form: Form) -> impl IntoView {
     let tried = form.tried;
     view! {
-        <fieldset>
+        <fieldset id=Part::Requisites.id()>
             <legend>{tr(lang, Key::ProfileRequisites)}</legend>
             <p class="hint">{tr(lang, Key::ProfileNameHint)}</p>
             <TextField lang label=Key::ProfileNameHy value=form.name.hy tried autocomplete="organization" />
@@ -873,7 +990,7 @@ fn Accounts(lang: ReadSignal<Lang>, form: Form) -> impl IntoView {
     let tried = form.tried;
     let full = move || form.accounts.with(|rows| rows.len() >= ProfileData::MAX_ACCOUNTS);
     view! {
-        <fieldset>
+        <fieldset id=Part::Accounts.id()>
             <legend>{tr(lang, Key::ProfileAccounts)}</legend>
             <For each=move || form.accounts.get() key=|row| row.key let(row)>
                 <div class="row">
@@ -962,7 +1079,7 @@ fn Activities(lang: ReadSignal<Lang>, form: Form, today: Option<Date>) -> impl I
     let tried = form.tried;
     let full = move || form.activities.with(|rows| rows.len() >= ProfileData::MAX_ACTIVITIES);
     view! {
-        <fieldset>
+        <fieldset id=Part::Activities.id()>
             <legend>{tr(lang, Key::ProfileActivities)}</legend>
             <p class="hint">{tr(lang, Key::ActivityHint)}</p>
             <For each=move || form.activities.get() key=|row| row.key let(row)>
@@ -1056,7 +1173,7 @@ fn PersonFields(lang: ReadSignal<Lang>, form: Form, today: Option<Date>) -> impl
     };
     let full = move || form.stops.with(|rows| rows.len() >= ProfileData::MAX_STOPS);
     view! {
-        <fieldset>
+        <fieldset id=Part::Person.id()>
             <legend>{tr(lang, Key::ProfilePerson)}</legend>
             <p class="hint">{tr(lang, Key::ProfilePersonAbout)}</p>
             <label>

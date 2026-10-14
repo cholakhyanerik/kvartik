@@ -152,24 +152,21 @@ pub fn BackupChip(
     }
 }
 
-/// Строка «Резервная копия» на экране профиля — ссылка на экран копии
-/// с днём последней.
+/// Строка «Резервная копия» в группе «Программа» на экране профиля —
+/// ссылка на экран копии с тем, когда была последняя; пора сделать новую —
+/// и словами метки, и точкой цвета напоминания.
 #[component]
-pub fn BackupLink(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
+pub fn BackupEntry(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
     view! {
-        <ul class="list">
-            <li>
-                <a class="entry" href=Screen::Backup.href()>
-                    <span class="entry-main">
-                        <span class="entry-title">{tr(lang, Key::BackupTitle)}</span>
-                        <span class="entry-meta">
-                            {move || ago(lang.get(), backups.last.get(), backups.today)}
-                        </span>
-                    </span>
-                    {icon(Icon::Forward)}
-                </a>
-            </li>
-        </ul>
+        <a class="entry" href=Screen::Backup.href()>
+            <span class="entry-main">
+                <span class="entry-title">{tr(lang, Key::BackupTitle)}</span>
+                <span class="entry-meta" class:due=move || backups.due()>
+                    {move || ago(lang.get(), backups.last.get(), backups.today)}
+                </span>
+            </span>
+            {icon(Icon::Forward)}
+        </a>
     }
 }
 
@@ -295,10 +292,15 @@ pub fn BackupSection(
     storage: RwSignal<Storage>,
 ) -> impl IntoView {
     let ready = move || matches!(storage.get(), Storage::Ready(_));
+    // Дизайн «Kvartik Design»: щит в круге, зачем копия, когда была
+    // последняя — меткой (пора сделать новую — тёплой), пароль и большая
+    // кнопка; восстановление — ссылкой ниже.
     view! {
         <Show when=ready>
+            <span class="hero-icon">{icon(Icon::Shield)}</span>
+            <h2 class="headline">{tr(lang, Key::BackupHeadline)}</h2>
             <p>{tr(lang, Key::BackupAbout)}</p>
-            <p>
+            <p class="chip backup-last" class:due=move || backups.due()>
                 {move || {
                     let lang = lang.get();
                     match backups.last.get() {
@@ -389,19 +391,20 @@ fn MakeBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
                 }
                 .into_any()
             }}
-            <div class="actions">
-                <button type="submit" disabled=busy>{tr(lang, Key::BackupMake)}</button>
-                {move || (!new_password()).then(|| view! {
-                    <button
-                        type="button"
-                        class="secondary"
-                        disabled=busy
-                        on:click=move |_| resetting.set(true)
-                    >
-                        {tr(lang, Key::BackupForgot)}
-                    </button>
-                })}
-            </div>
+            <button type="submit" class="wide" disabled=busy>
+                {icon(Icon::Download)}
+                <span>{tr(lang, Key::BackupMake)}</span>
+            </button>
+            {move || (!new_password()).then(|| view! {
+                <button
+                    type="button"
+                    class="link"
+                    disabled=busy
+                    on:click=move |_| resetting.set(true)
+                >
+                    {tr(lang, Key::BackupForgot)}
+                </button>
+            })}
         </form>
         {move || match making.get() {
             Making::Idle => None,
@@ -625,7 +628,7 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
                 // Поле выбора файла спрятано под подписью-кнопкой: нажатие на
                 // подпись открывает выбор без кода, и на iPhone тоже
                 // (разведка задачи 7, 2026-10-12).
-                <label class="button secondary file">
+                <label class="button link file">
                     {tr(lang, Key::BackupChooseFile)}
                     <input
                         type="file"

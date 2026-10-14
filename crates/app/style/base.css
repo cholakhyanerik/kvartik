@@ -777,7 +777,7 @@ dl.summary dd {
    (задача 11): карточка со скруглением, строки внутри разделены линией,
    как в дизайне. Линия, а не карточка на строку: на телефоне так помещается
    больше строк. */
-ul.clients,
+ul.clients.deleted,
 ul.documents.deleted,
 ul.items {
   display: grid;
@@ -788,7 +788,7 @@ ul.items {
   list-style: none;
 }
 
-ul.clients li,
+ul.clients.deleted li,
 ul.documents.deleted li,
 ul.items li {
   display: grid;
@@ -798,13 +798,13 @@ ul.items li {
   overflow-wrap: anywhere;
 }
 
-ul.clients li:last-child,
+ul.clients.deleted li:last-child,
 ul.documents.deleted li:last-child,
 ul.items li:last-child {
   border-bottom: 0;
 }
 
-ul.clients .actions,
+ul.clients.deleted .actions,
 ul.documents.deleted .actions {
   margin-top: var(--space-1);
 }
@@ -1165,4 +1165,183 @@ ol.history li::before {
 
 ol.history li.muted::before {
   background: var(--border-strong);
+}
+
+
+/* Строка списка, которая открывает форму, — кнопка, а не ссылка: клиент,
+   строка итога профиля. Выглядит как строка-ссылка (`.entry`), без пилюли
+   и заливки кнопки. */
+button.entry {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--text);
+  font-size: var(--font-size-md);
+  font-weight: var(--weight-regular);
+  line-height: var(--leading-normal);
+  text-align: start;
+  justify-content: flex-start;
+}
+
+/* Кружок с инициалами (дизайн «Kvartik Design»): четыре оттенка у клиентов,
+   оливковый — у ИП. Только украшает: имя написано рядом. */
+.avatar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch);
+  height: var(--touch);
+  border-radius: var(--radius-round);
+  font-size: var(--font-size-sm);
+  font-weight: var(--weight-strong);
+  line-height: 1;
+}
+
+.avatar.tone-1 {
+  background: var(--fill-avatar-1);
+  color: var(--on-fill-avatar-1);
+}
+
+.avatar.tone-2 {
+  background: var(--fill-avatar-2);
+  color: var(--on-fill-avatar-2);
+}
+
+.avatar.tone-3 {
+  background: var(--fill-avatar-3);
+  color: var(--on-fill-avatar-3);
+}
+
+.avatar.tone-4 {
+  background: var(--fill-avatar-4);
+  color: var(--on-fill-avatar-4);
+}
+
+.avatar.hero {
+  width: var(--control);
+  height: var(--control);
+  background: var(--fill-hero);
+  color: var(--on-fill-hero);
+  font-size: var(--font-size-lg);
+}
+
+/* Карточка ИП в профиле: логотип или кружок, имя, ՀՎՀՀ и режим. */
+.identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-xl);
+  background: var(--fill-identity);
+  color: var(--on-fill-identity);
+}
+
+.identity-logo {
+  flex: none;
+  max-width: 5rem;
+  max-height: var(--control);
+  border-radius: var(--radius-sm);
+}
+
+.identity-text {
+  display: grid;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.identity-name {
+  font-size: var(--font-size-lg);
+  font-weight: var(--weight-strong);
+  overflow-wrap: anywhere;
+}
+
+.identity .dotted {
+  font-size: var(--font-size-sm);
+}
+
+/* Строка настройки в группе «Программа»: подпись и выбор под ней. Выбор —
+   во всю ширину строки, подписи мельче: внутри карточки три языка иначе не
+   влезают в 360 точек, и «English» падал на вторую строку. */
+ul.list > li.setting {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) 0 var(--space-4);
+}
+
+li.setting .langs {
+  display: flex;
+  flex-wrap: nowrap;
+}
+
+li.setting .langs button {
+  flex: auto;
+  padding-inline: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+/* Пора сделать копию — строка копии в профиле говорит это и жирнее. */
+.entry-meta.due {
+  color: var(--warning-text);
+  font-weight: var(--weight-strong);
+}
+
+.privacy {
+  margin-top: var(--space-4);
+}
+
+/* Экран копии (дизайн «Kvartik Design»): щит в оливковом круге над
+   заголовком засечками. */
+.hero-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 5.5rem;
+  height: 5.5rem;
+  margin-top: var(--space-2);
+  border-radius: var(--radius-round);
+  background: var(--fill-avatar-1);
+  color: var(--on-fill-avatar-1);
+}
+
+.hero-icon .icon {
+  width: 2.5rem;
+  height: 2.5rem;
+}
+
+h2.headline {
+  margin: var(--space-4) 0 var(--space-2);
+  font-family: var(--font-serif);
+  font-size: var(--font-size-xl);
+  font-weight: var(--weight-heading);
+}
+
+.backup-last {
+  display: inline-flex;
+  margin-top: var(--space-3);
+}
+
+/* Действие словами — ссылкой, как в дизайне: «Забыли пароль?»,
+   «Восстановить из копии…». */
+button.link,
+.button.link {
+  min-height: var(--touch);
+  padding: 0 var(--space-1);
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font-weight: var(--weight-strong);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+form > button.wide,
+form > button.link {
+  margin-top: 0;
+}
+
+form > button.link {
+  justify-self: start;
 }

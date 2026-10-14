@@ -5,6 +5,7 @@
 //! `style/`, а не атрибутом `style` (Правило 4). Цвет литералом и опечатку
 //! в `var(--…)` ловит тест `crates/app/tests/tokens.rs`.
 
+mod avatar;
 mod backup;
 mod clients;
 mod documents;
@@ -27,7 +28,7 @@ use leptos::prelude::*;
 
 use crate::platform::clock;
 use crate::store::{self, Store};
-use backup::{BackupChip, BackupLink, BackupSection, Backups};
+use backup::{BackupChip, BackupEntry, BackupSection, Backups};
 use clients::{Clients, ClientsSection};
 use documents::{Documents, DocumentsScreen};
 use home::Home;
@@ -178,9 +179,17 @@ pub fn App() -> impl IntoView {
                     <h1 tabindex="-1">{tr(lang, Key::ProfileTitle)}</h1>
                     <BackupChip lang backups nudge=true />
                     <ProfileSection lang profiles base backups />
-                    <h2>{tr(lang, Key::Language)}</h2>
-                    <LangSwitch lang=window_lang />
-                    <BackupLink lang backups />
+                    <h2>{tr(lang, Key::ProfileApp)}</h2>
+                    <ul class="list">
+                        <li>
+                            <BackupEntry lang backups />
+                        </li>
+                        <li class="setting">
+                            <span class="entry-title">{tr(lang, Key::Language)}</span>
+                            <LangSwitch lang=window_lang />
+                        </li>
+                    </ul>
+                    <p class="hint privacy">{tr(lang, Key::ProfilePrivacy)}</p>
                 </section>
                 <section id=Screen::Backup.id() class="screen" hidden=hidden(Screen::Backup)>
                     <a class="back" href=Screen::Profile.href()>
