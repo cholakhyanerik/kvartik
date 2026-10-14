@@ -128,7 +128,9 @@ Rust 2024, четыре крейта: `kvartik-core` (`crates/core/`) — всё
 который режет wasm окна на части и пишет `sw.js` для работы без сети. Слои,
 их границы и правила работы над кодом
 описаны в [CLAUDE.md](CLAUDE.md); проверки оттуда же CI гоняет на каждый
-push.
+push. Дизайн окна — «Kvartik Design»,
+[docs/design/kvartik-design.html](docs/design/kvartik-design.html):
+страница открывается в браузере.
 
 ## Что изменилось
 
