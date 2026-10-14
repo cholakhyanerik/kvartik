@@ -11,9 +11,11 @@ use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::model::profile::{Profile, ProfileData};
 use kvartik_core::model::recurring::Recurring;
 use kvartik_core::model::text::{Line, Lines};
-use wasm_bindgen::JsCast;
+use js_sys::{Function, Promise, Reflect, Uint8Array};
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_test::wasm_bindgen_test;
-use web_sys::HtmlElement;
+use web_sys::{HtmlElement, Response};
 
 use super::{
     button, choose_file, field, mount, mount_at, pick_client, select, shown_step, sleep, type_into,
@@ -764,4 +766,204 @@ async fn documents_are_found_opened_and_marked_paid() {
     host.remove();
     forget_device();
     assert!(wrong.is_empty(), "экран документов: {wrong:#?}");
+}
+
+/// Файлы шрифтов документа — те же байты, что лежат в `public/fonts/`:
+/// раннер тестов раздаёт только свой wasm, а не папку шрифтов сайта.
+const FONT_FILES: [(&str, &[u8]); 11] = [
+    ("noto-sans-latin-400.ttf", include_bytes!("../../../public/fonts/noto-sans-latin-400.ttf")),
+    ("noto-sans-latin-ext-400.ttf", include_bytes!("../../../public/fonts/noto-sans-latin-ext-400.ttf")),
+    ("noto-sans-cyrillic-400.ttf", include_bytes!("../../../public/fonts/noto-sans-cyrillic-400.ttf")),
+    ("noto-sans-armenian-400.ttf", include_bytes!("../../../public/fonts/noto-sans-armenian-400.ttf")),
+    ("noto-sans-latin-600.ttf", include_bytes!("../../../public/fonts/noto-sans-latin-600.ttf")),
+    ("noto-sans-latin-ext-600.ttf", include_bytes!("../../../public/fonts/noto-sans-latin-ext-600.ttf")),
+    ("noto-sans-cyrillic-600.ttf", include_bytes!("../../../public/fonts/noto-sans-cyrillic-600.ttf")),
+    ("noto-sans-armenian-600.ttf", include_bytes!("../../../public/fonts/noto-sans-armenian-600.ttf")),
+    ("noto-serif-latin-800.ttf", include_bytes!("../../../public/fonts/noto-serif-latin-800.ttf")),
+    ("noto-serif-cyrillic-800.ttf", include_bytes!("../../../public/fonts/noto-serif-cyrillic-800.ttf")),
+    ("noto-serif-armenian-800.ttf", include_bytes!("../../../public/fonts/noto-serif-armenian-800.ttf")),
+];
+
+/// Ответ подмены `fetch`.
+type Answer = Closure<dyn Fn(JsValue) -> Promise>;
+
+/// Подмена `fetch` на время теста: на `fonts/<имя>` — байты файла из
+/// [`FONT_FILES`], на остальное — сетевая ошибка. Окно берёт шрифты
+/// документа у своего сайта (`platform::site`), и так тест проходит весь
+/// путь PDF в настоящем браузере. При сбросе прежний `fetch` возвращается.
+struct FontServer {
+    original: JsValue,
+    _answer: Answer,
+}
+
+impl FontServer {
+    fn install() -> Self {
+        let window = web_sys::window().expect("есть окно");
+        let original = Reflect::get(&window, &"fetch".into()).expect("есть fetch");
+        let answer = Answer::new(|input: JsValue| {
+            let url = input.as_string().unwrap_or_default();
+            let name = url.rsplit('/').next().unwrap_or_default();
+            let response = match FONT_FILES.iter().find(|(file, _)| *file == name) {
+                Some((_, bytes)) => Response::new_with_opt_u8_array(Some(&mut bytes.to_vec()))
+                    .unwrap_or_else(|_| Response::error()),
+                None => Response::error(),
+            };
+            Promise::resolve(&JsValue::from(response))
+        });
+        Reflect::set(&window, &"fetch".into(), answer.as_ref()).expect("fetch подменён");
+        Self {
+            original,
+            _answer: answer,
+        }
+    }
+
+    /// Байты по адресу — настоящим `fetch`: адрес `blob:` подмена не знает.
+    async fn bytes(&self, url: &str) -> Option<Vec<u8>> {
+        let window = web_sys::window()?;
+        let fetch: Function = self.original.clone().dyn_into().ok()?;
+        let promise: Promise = fetch.call1(&window, &url.into()).ok()?.dyn_into().ok()?;
+        let response: Response = promise.await.ok()?.dyn_into().ok()?;
+        let buffer = response.array_buffer().ok()?.await.ok()?;
+        Some(Uint8Array::new(&buffer).to_vec())
+    }
+}
+
+impl Drop for FontServer {
+    fn drop(&mut self) {
+        if let Some(window) = web_sys::window() {
+            let _ = Reflect::set(&window, &"fetch".into(), &self.original);
+        }
+    }
+}
+
+/// Подождать элемент по селектору; `false` — не дождались за пять секунд.
+async fn wait_selector(host: &HtmlElement, selector: &str) -> bool {
+    for _ in 0..100 {
+        if host.query_selector(selector).ok().flatten().is_some() {
+            return true;
+        }
+        sleep(50).await;
+    }
+    false
+}
+
+/// PDF и превью (задача 12): у выпущенного счёта «PDF» показывает его
+/// страницы на языке документа и даёт скачать файл PDF с понятным именем,
+/// «Скрыть» убирает их; у черновика на шаге проверки «Как будет выглядеть»
+/// показывает страницы без файла и говорит, что номер — при выпуске. Весь
+/// путь — ядро документа под wasm32, шрифты у сайта, файл и картинка.
+#[wasm_bindgen_test]
+async fn issued_document_gives_a_pdf_and_a_draft_a_preview() {
+    let client = fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let today = clock::today().expect("часы с датой");
+    let now = clock::now();
+    let data = DocumentData {
+        kind: DocKind::Invoice,
+        client: client.id(),
+        lang: Lang::En,
+        currency: Currency::Usd,
+        date: today,
+        service_date: today,
+        due: None,
+        items: vec![Item {
+            text: line("Software development"),
+            quantity_e3: 1_000,
+            price: 240_000,
+        }],
+        basis: None,
+        recurring: None,
+    };
+    let invoice = Document::create(data.clone(), now)
+        .expect("черновик")
+        .issue(&[], 0, Some(&profile()), &client, now)
+        .expect("выпущен");
+    let draft = Document::create(data, now).expect("черновик");
+    let mut writes = Writes::default();
+    writes.insert(&invoice);
+    writes.insert(&draft);
+    commit(writes).await;
+    let fonts = FontServer::install();
+
+    let address = format!("#/documents/{}", invoice.id());
+    let (host, mounted) = mount_at(&address);
+    let mut wrong = Vec::new();
+    let number = invoice.number().map(|number| number.to_string()).unwrap_or_default();
+    if !wait_for(&host, &number).await {
+        wrong.push("карточка счёта не открылась".to_owned());
+    }
+    match button(&host, &[t(lang, Key::DocPdf)]) {
+        Some(pdf) => pdf.click(),
+        None => wrong.push("в карточке нет «PDF»".to_owned()),
+    }
+    if wait_selector(&host, ".paper .paper-page").await {
+        let page = host
+            .query_selector(".paper .paper-page")
+            .ok()
+            .flatten()
+            .and_then(|page| page.text_content())
+            .unwrap_or_default();
+        let total = i18n::money(Lang::En, Money::new(240_000, Currency::Usd));
+        for piece in [t(Lang::En, Key::KindInvoice), "IE Aram Petrosyan", "Acme Inc.", total.as_str()] {
+            if !page.contains(piece) {
+                wrong.push(format!("на странице нет «{piece}»"));
+            }
+        }
+    } else {
+        let said = host.query_selector(".paper").ok().flatten().and_then(|p| p.text_content());
+        wrong.push(format!("страниц нет: {said:?}"));
+    }
+    match host.query_selector(".paper a[download]").ok().flatten() {
+        Some(link) => {
+            let name = link.get_attribute("download").unwrap_or_default();
+            if name != format!("Invoice-{number}.pdf") {
+                wrong.push(format!("имя файла — {name}"));
+            }
+            let href = link.get_attribute("href").unwrap_or_default();
+            let bytes = fonts.bytes(&href).await.unwrap_or_default();
+            if !bytes.starts_with(b"%PDF-1.7") || bytes.len() < 5_000 {
+                wrong.push(format!("файл PDF — {} байтов, начало {:?}", bytes.len(), bytes.get(..8)));
+            }
+        }
+        None => wrong.push("нет «Скачать PDF»".to_owned()),
+    }
+    if host.query_selector(".paper [role=alert]").ok().flatten().is_some() {
+        wrong.push("у PDF жалоба".to_owned());
+    }
+    match button(&host, &[t(lang, Key::PdfHide)]) {
+        Some(hide) => hide.click(),
+        None => wrong.push("нет «Скрыть»".to_owned()),
+    }
+    sleep(100).await;
+    if host.query_selector(".paper").ok().flatten().is_some() {
+        wrong.push("«Скрыть» не убрал страницы".to_owned());
+    }
+
+    // Черновик: строка списка открывает форму, а в ней — «Как будет выглядеть».
+    crate::platform::set_hash("#/documents");
+    sleep(200).await;
+    match host.query_selector("a.entry[href=\"#/documents\"]").ok().flatten() {
+        Some(entry) => entry.unchecked_into::<HtmlElement>().click(),
+        None => wrong.push("в списке нет черновика".to_owned()),
+    }
+    sleep(200).await;
+    match button(&host, &[t(lang, Key::DocPreview)]) {
+        Some(preview) => preview.click(),
+        None => wrong.push("в форме черновика нет «Как будет выглядеть»".to_owned()),
+    }
+    if !wait_selector(&host, ".paper .paper-page").await {
+        wrong.push("у черновика нет страниц".to_owned());
+    }
+    if host.query_selector(".paper a[download]").ok().flatten().is_some() {
+        wrong.push("у черновика — файл PDF".to_owned());
+    }
+    if !host.text_content().unwrap_or_default().contains(t(lang, Key::PdfDraftNote)) {
+        wrong.push("у черновика нет слов о номере".to_owned());
+    }
+    drop(mounted);
+    drop(fonts);
+    host.remove();
+    forget_device();
+    assert!(wrong.is_empty(), "PDF и превью: {wrong:#?}");
 }

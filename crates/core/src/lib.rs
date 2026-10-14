@@ -8,6 +8,7 @@
 //! Ядро не спрашивает часы и не держит язык глобалью: «сегодня» и `Lang`
 //! приходят параметром.
 
+pub mod doc;
 pub mod format;
 pub mod i18n;
 pub mod model;

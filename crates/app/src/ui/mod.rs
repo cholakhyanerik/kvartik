@@ -16,6 +16,7 @@ mod lang;
 mod nav;
 mod onboarding;
 pub mod panic;
+mod paper;
 mod profile;
 mod pwa;
 mod route;

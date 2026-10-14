@@ -127,6 +127,14 @@ impl Download {
         Some(Self { url })
     }
 
+    /// Файл из байтов с типом `mime` — PDF документа (задача 12). Тип —
+    /// настоящий, `application/pdf`: обход WebKit bug 263608 нужен текстовым
+    /// файлам, а PDF телефон и так сохраняет или показывает своей читалкой.
+    pub fn bytes(bytes: &[u8], mime: &str) -> Option<Self> {
+        let url = object_url(&Array::of1(&Uint8Array::from(bytes)), mime)?;
+        Some(Self { url })
+    }
+
     /// Адрес для `href`.
     pub fn url(&self) -> &str {
         &self.url

@@ -41,6 +41,7 @@ use super::backup::{BackupChip, Backups};
 use super::clients::Clients;
 use super::form::{CURRENCIES, TextField, WizardHead, currency_code, currency_key};
 use super::icon::{Icon, icon};
+use super::paper::{PaperPanel, Request};
 use super::route::{Router, Screen};
 use super::split::{part, split};
 use super::storage::error_key;
@@ -1396,6 +1397,47 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
     let leave = move || mode.set(Mode::List);
     // Шаг сменился — прежняя жалоба к нему не относится.
     Effect::watch(move || step.get(), move |_, _, _| invalid.set(false), false);
+    // «Как будет выглядеть» (задача 12): страницы черновика — снимок полей
+    // в момент нажатия. Поменяли поле шага или сам шаг — снимок устарел
+    // и убирается, а не показывает прежнее.
+    let preview = RwSignal::new(None::<Request>);
+    let show_preview = move |_| {
+        form.tried.set(true);
+        let Some(data) = form.data(lang.get_untracked()) else {
+            invalid.set(true);
+            return;
+        };
+        let client = alive.with_untracked(|list| {
+            list.iter()
+                .find(|client| client.id() == data.client)
+                .map(|client| client.data().clone())
+        });
+        let Some(client) = client else {
+            invalid.set(true);
+            return;
+        };
+        invalid.set(false);
+        let basis = data
+            .basis
+            .and_then(|basis| documents.get(basis))
+            .and_then(|invoice| invoice.number());
+        preview.set(Some(Request::Draft { data, client, basis }));
+    };
+    Effect::watch(
+        move || {
+            (
+                step.get(),
+                form.client.get(),
+                form.lang.get(),
+                form.currency.get(),
+                form.date.get(),
+                form.service_date.get(),
+                form.due.get(),
+            )
+        },
+        move |_, _, _| preview.set(None),
+        false,
+    );
     let last_day = move |_| {
         let text = form.service_date.get_untracked();
         let base = Date::from_iso(&text).or_else(|| Date::from_iso(&form.date.get_untracked()));
@@ -1724,6 +1766,19 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                 {move || (local() == Some(true)).then(|| view! {
                     <p class="hint">{tr(lang, Key::DocCashReceipt)}</p>
                 })}
+                <div class="actions">
+                    <button
+                        type="button"
+                        class="secondary"
+                        aria-expanded=move || preview.with(Option::is_some).to_string()
+                        on:click=show_preview
+                    >
+                        {tr(lang, Key::DocPreview)}
+                    </button>
+                </div>
+                {move || preview.get().map(|request| view! {
+                    <PaperPanel lang base=ctx.base request close=move || preview.set(None) />
+                })}
             </fieldset>
             {move || invalid.get().then(|| view! {
                 <p role="alert">{move || {
@@ -1913,7 +1968,8 @@ fn DocView(ctx: Ctx, id: RecordId) -> impl IntoView {
 /// клиент, даты и язык. У счёта, который ждёт оплаты, — главное действие
 /// «Отметить, что оплачен»: поступление на весь остаток сегодняшним днём;
 /// оплату частями и другим днём отмечают ниже, в оплатах. У действующего
-/// счёта — «Акт по счёту».
+/// счёта — «Акт по счёту», у всякого выпущенного документа рядом — «PDF»
+/// (задача 12): аннулированный тоже хранят, и в PDF он с пометкой.
 #[component]
 fn DocCard(
     ctx: Ctx,
@@ -1935,12 +1991,17 @@ fn DocCard(
     let id = document.id();
     let named = document.clone();
     let client = document.clone();
-    let basis = data.basis.and_then(|basis| {
-        documents
-            .get(basis)
-            .and_then(|invoice| invoice.number())
-            .map(|number| number.to_string())
-    });
+    let basis_number = data
+        .basis
+        .and_then(|basis| documents.get(basis))
+        .and_then(|invoice| invoice.number());
+    let basis = basis_number.map(|number| number.to_string());
+    // Документ на бумаге — по «PDF» (задача 12).
+    let paper = RwSignal::new(false);
+    let request = Request::Issued {
+        document: Box::new(document.clone()),
+        basis: basis_number,
+    };
     let total = document.total().ok();
     let left = document.left().ok().filter(|left| left.minor() > 0);
     let awaiting = matches!(status, Status::Unpaid | Status::PartlyPaid | Status::Overdue);
@@ -2005,8 +2066,8 @@ fn DocCard(
                 <span>{tr(lang, Key::DocMarkPaid)}</span>
             </button>
         })}
-        {(invoice && open).then(|| view! {
-            <div class="actions doc-next">
+        <div class="actions doc-next">
+            {(invoice && open).then(|| view! {
                 <button
                     type="button"
                     class="secondary"
@@ -2017,7 +2078,19 @@ fn DocCard(
                 >
                     {tr(lang, Key::DocActFromInvoice)}
                 </button>
-            </div>
+            })}
+            <button
+                type="button"
+                class="secondary"
+                aria-expanded=move || paper.get().to_string()
+                on:click=move |_| paper.update(|shown| *shown = !*shown)
+            >
+                {icon(Icon::Download)}
+                <span>{tr(lang, Key::DocPdf)}</span>
+            </button>
+        </div>
+        {move || paper.get().then(|| view! {
+            <PaperPanel lang base=ctx.base request=request.clone() close=move || paper.set(false) />
         })}
     }
 }

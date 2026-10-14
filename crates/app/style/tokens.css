@@ -23,6 +23,7 @@
      --text…, …-text      текст: 4.5:1 на каждом фоне;
      --fill-…             заливка плашки или карточки, на которой свой текст;
      --on-X               текст на заливке --X: 4.5:1 на ней;
+     --on-X-…             второй текст на той же заливке: --on-fill-paper-muted;
      --border-strong,     рамки полей и кнопок, кольцо фокуса, заливка
      --focus, --accent    кнопки: 3:1 на каждом фоне (WCAG 1.4.11);
      --border, --decor-…  разделитель и украшение: без порога.
@@ -101,6 +102,15 @@
   /* Круги первого запуска — только украшают и под текст не заходят. */
   --decor-olive: #ccdbb2;
   --decor-clay: #ffc6a5;
+
+  /* Бумага — превью счёта и акта (задача 12): белый лист и в тёмной теме,
+     как сам PDF. Цвета текста и линий — те, что пишет PDF (`doc::pdf::rgb`
+     в ядре), и тест tests/tokens.rs сверяет, что это одни и те же числа. */
+  --fill-paper: #ffffff;
+  --on-fill-paper: #201e1d; /* 16.6 на fill-paper */
+  --on-fill-paper-muted: #645c50; /* 6.5 на fill-paper */
+  --on-fill-paper-accent: #8c491a; /* 6.8 на fill-paper */
+  --decor-paper-rule: #dcd3c4;
 
   /* Шрифты (fonts.css): текст — Noto Sans, заголовки — Noto Serif, крупные
      суммы и «Kvartik» — Caprasimo. Системные — пока файл не пришёл и для
@@ -206,5 +216,11 @@
 
     --decor-olive: #34402a;
     --decor-clay: #4d2b15;
+
+    --fill-paper: #ffffff;
+    --on-fill-paper: #201e1d; /* 16.6 на fill-paper */
+    --on-fill-paper-muted: #645c50; /* 6.5 на fill-paper */
+    --on-fill-paper-accent: #8c491a; /* 6.8 на fill-paper */
+    --decor-paper-rule: #dcd3c4;
   }
 }

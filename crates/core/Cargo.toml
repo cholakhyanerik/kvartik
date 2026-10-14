@@ -35,6 +35,15 @@ serde = { version = "1.0.229", features = ["derive"] }
 # `serde_json::Value`. Своих зависимостей у фичи нет (по исходникам
 # serde_json 1.0.154, Cargo.toml; 2026-10-12).
 serde_json = { version = "1.0.154", features = ["raw_value"] }
+# Сжатие deflate для PDF (`doc/`, задача 12): шрифты, страницы и логотип
+# ложатся в файл сжатыми (FlateDecode), а логотип PNG разжимается, чтобы
+# отделить прозрачность в свою маску. Свой писатель PDF на нём, а не
+# `krilla` или `printpdf`: krilla прибавляла к wasm 462 КБ после brotli,
+# `subsetter` — 47, `pdf-writer` — 32, а `miniz_oxide` — около 10 (замер
+# 2026-10-14, разведка задачи 12). Владельцы — oyvindln и Frommi, MIT, Zlib
+# или Apache-2.0, `build.rs` нет; единственная зависимость — `adler2`.
+# По умолчанию — `with-alloc`: без неё нет сжатия.
+miniz_oxide = "0.9.1"
 
 [features]
 # Источник случайности на wasm32 — WebCrypto (`crypto.getRandomValues`):

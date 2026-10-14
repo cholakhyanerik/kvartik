@@ -1145,6 +1145,65 @@ dl.pairs dd {
   margin-top: var(--space-3);
 }
 
+/* «Акт по счёту» и «PDF» — поровну в ряд, как в дизайне (экран 05). */
+.doc-next button {
+  flex: 1 1 0;
+}
+
+/* Документ на бумаге (задача 12): страницы — картинкой SVG из тех же мест,
+   что в PDF, белым листом и в тёмной теме. Текст — шрифтами окна, а это
+   те же файлы, что в PDF; кернинг и лигатуры выключены: PDF их не
+   применяет, и строка в превью должна быть той же ширины. `pre` — пробелы
+   не схлопываются, как и в PDF. */
+.paper {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.paper-page {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--fill-paper);
+}
+
+.paper-sheet {
+  fill: var(--fill-paper);
+}
+
+.paper-text {
+  fill: var(--on-fill-paper);
+  font-family: var(--font-sans);
+  font-weight: var(--weight-regular);
+  font-kerning: none;
+  font-variant-ligatures: none;
+  white-space: pre;
+}
+
+.paper-text.strong {
+  font-weight: var(--weight-strong);
+}
+
+.paper-text.heading {
+  font-family: var(--font-serif);
+  font-weight: var(--weight-heading);
+}
+
+.paper-text.muted {
+  fill: var(--on-fill-paper-muted);
+}
+
+.paper-text.accent {
+  fill: var(--on-fill-paper-accent);
+}
+
+.paper-rule {
+  stroke: var(--decor-paper-rule);
+}
+
 /* История документа — свежее сверху, точкой слева: оливковой у сделанного,
    серой у аннулирования; что случилось, говорят слова. */
 ol.history {

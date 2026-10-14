@@ -425,3 +425,36 @@ fn digits_can_be_tabular() {
     }
     assert!(wrong.is_empty(), "цифры разной ширины, а tnum нет: {wrong:?}");
 }
+
+/// Шрифты документа (задача 12) — те же файлы, что у окна: таблица ядра
+/// `kvartik_core::doc::fonts::FILES` — копия правил `fonts.css` для текста
+/// и заголовков: файл, семейство, вес и диапазон, в том же порядке. По ней
+/// окно берёт файлы для PDF, а PDF ищет знак, — разойдись она с `fonts.css`,
+/// превью и PDF взяли бы знак из разных файлов. Знаки самих строк документа
+/// проверяет [`every_needed_char_is_in_the_fonts`]: таблица строк одна
+/// на окно и документ.
+#[test]
+fn document_fonts_copy_the_font_faces() {
+    let faces: Vec<Face> = read_faces()
+        .into_iter()
+        .filter(|face| face.family != "Kvartik Display")
+        .collect();
+    let files = kvartik_core::doc::fonts::FILES;
+    let mut wrong = Vec::new();
+    if faces.len() != files.len() {
+        wrong.push(format!("в fonts.css {} правил текста и заголовков, в ядре {}", faces.len(), files.len()));
+    }
+    for (face, file) in faces.iter().zip(files) {
+        let (family, weight) = file.face.css();
+        if face.file != file.name || face.family != family || face.weight != weight {
+            wrong.push(format!(
+                "{}: в fonts.css «{}» {} {}, в ядре «{family}» {weight} {}",
+                face.file, face.family, face.weight, face.file, file.name
+            ));
+        }
+        if face.ranges != file.ranges {
+            wrong.push(format!("{}: диапазоны разошлись", face.file));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}

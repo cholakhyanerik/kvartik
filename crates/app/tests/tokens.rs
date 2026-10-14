@@ -194,6 +194,20 @@ fn need(name: &str) -> Option<Need> {
     }
 }
 
+/// Заливка второго текста `--on-X-…`: самое длинное начало имени, которое
+/// объявлено, — `--on-fill-paper-muted` лежит на `--fill-paper`. Не нашлось
+/// — имя как есть, и тест скажет, что такого фона нет.
+fn on_fill(fill: &str, tokens: &Theme) -> String {
+    let mut name = fill;
+    while !tokens.contains_key(name) {
+        match name.rsplit_once('-') {
+            Some((shorter, _)) if shorter.len() > 2 => name = shorter,
+            _ => return fill.to_owned(),
+        }
+    }
+    name.to_owned()
+}
+
 /// Коэффициент, как его пишет комментарий: округлённый вниз до десятых,
 /// чтобы 4.49 не выглядело как 4.5.
 fn shown(ratio: f64) -> String {
@@ -278,7 +292,7 @@ fn contrast_meets_wcag_and_comments_tell_the_truth() {
                 Some(Need::OnSurfaces(min)) => {
                     surfaces.iter().map(|s| ((*s).clone(), min)).collect()
                 }
-                Some(Need::On(fill, min)) => vec![(fill, min)],
+                Some(Need::On(fill, min)) => vec![(on_fill(&fill, tokens), min)],
                 Some(Need::Surface | Need::Fill | Need::Decorative) | None => Vec::new(),
             };
             let mut claims = claimed(&token.comment);
@@ -469,4 +483,31 @@ fn every_used_variable_is_declared() {
         }
     }
     assert!(wrong.is_empty(), "переменной нет в tokens.css: {wrong:#?}");
+}
+
+/// Цвета PDF (`kvartik_core::doc::pdf::rgb`) — копии переменных бумаги
+/// светлой темы: превью в окне рисует ими же, и в превью тот же цвет, что
+/// в PDF (Правило 2). Поменяли цвет в `tokens.css` и забыли ядро — PDF
+/// остался бы прежнего цвета, и никто бы не заметил.
+#[test]
+fn pdf_colors_copy_tokens() {
+    use kvartik_core::doc::page::Ink;
+    use kvartik_core::doc::pdf::rgb;
+    let (light, _) = read_themes();
+    let mut wrong = Vec::new();
+    for (ink, token) in [
+        (Ink::Text, "--on-fill-paper"),
+        (Ink::Muted, "--on-fill-paper-muted"),
+        (Ink::Accent, "--on-fill-paper-accent"),
+        (Ink::Rule, "--decor-paper-rule"),
+    ] {
+        let [r, g, b] = rgb(ink);
+        let pdf = format!("#{r:02x}{g:02x}{b:02x}");
+        match light.get(token) {
+            Some(declared) if declared.value == pdf => {}
+            Some(declared) => wrong.push(format!("{ink:?}: в PDF {pdf}, а {token} — {}", declared.value)),
+            None => wrong.push(format!("{ink:?}: {token} нет в tokens.css")),
+        }
+    }
+    assert!(wrong.is_empty(), "цвета PDF разошлись с tokens.css: {wrong:#?}");
 }
