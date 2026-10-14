@@ -429,12 +429,15 @@ async fn chosen_file_is_read_within_limit() {
     assert_eq!(files::read(&file(b""), 1024).await, Ok(String::new()));
 }
 
-/// Файл для скачивания — адрес `blob:`, и по нему лежит ровно текст копии.
+/// Файл для скачивания — адрес `blob:`, и по нему лежит ровно текст копии;
+/// у самого файла — имя копии.
 #[wasm_bindgen_test]
 async fn download_holds_the_file() {
     let text = "{\"file\":\"kvartik-backup\",\"x\":\"֏\"}";
-    let download = Download::new(text).expect("файл собран");
+    let download = Download::text(text, "kvartik-2026-10-15.json").expect("файл собран");
     assert!(download.url().starts_with("blob:"), "{}", download.url());
+    assert_eq!(download.name(), "kvartik-2026-10-15.json");
+    assert_eq!(download.file().type_(), "application/octet-stream");
     let window = web_sys::window().expect("окно есть");
     let response: web_sys::Response = window
         .fetch_with_str(download.url())

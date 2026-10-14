@@ -1,11 +1,11 @@
 //! Документ на бумаге (задача 12): страницы картинкой и файл PDF.
 //!
 //! У выпущенного документа — по кнопке «PDF» в карточке (дизайн «Kvartik
-//! Design», экран 05): страницы и «Скачать PDF». У черновика — на шаге
-//! проверки, «Как будет выглядеть»: те же страницы без номера и без файла
-//! (решение человека 2026-10-14). Страницы раскладывает ядро (`doc`),
-//! и картинка здесь рисует ровно их, поэтому в превью то же, что в PDF
-//! (Правило 2).
+//! Design», экран 05): страницы, «Отправить PDF» (задача 13) и «Скачать
+//! PDF». У черновика — на шаге проверки, «Как будет выглядеть»: те же
+//! страницы без номера и без файла (решение человека 2026-10-14).
+//! Страницы раскладывает ядро (`doc`), и картинка здесь рисует ровно их,
+//! поэтому в превью то же, что в PDF (Правило 2).
 //!
 //! Сборка — своей частью wasm ([`paper_task`]): ядро документов, шрифты
 //! и сжатие нужны только по нажатию (Правило 1). Шрифты — файлы окна,
@@ -26,9 +26,11 @@ use kvartik_core::model::logo::Logo;
 use kvartik_core::model::profile::{Profile, ProfileData};
 use leptos::prelude::*;
 
+use super::icon::{Icon, icon};
 use super::split::{Task, split};
 use super::{Base, tr};
 use crate::platform::file::{Download, Picture};
+use crate::platform::share::{self, ShareError};
 use crate::platform::site;
 use crate::store::{Store, StoreError};
 
@@ -55,8 +57,8 @@ pub struct Paper {
     /// Язык документа: на нём текст страниц.
     lang: Lang,
     pages: Vec<Page>,
-    /// Файл и его имя — у выпущенного документа.
-    pdf: Option<(Download, String)>,
+    /// Файл PDF с именем — у выпущенного документа.
+    pdf: Option<Download>,
     /// Логотип для картинки страницы — тот же файл, что в PDF.
     logo: Option<Arc<Picture>>,
     /// Знаки, которых нет в шрифтах документа.
@@ -166,8 +168,8 @@ async fn make(base: Base, request: Request) -> Result<Paper, PaperProblem> {
                 },
             )
             .map_err(|_| PaperProblem::Fonts)?;
-            let download = Download::bytes(&bytes, "application/pdf").ok_or(PaperProblem::Read)?;
-            Some((download, file_name(data.kind, number)))
+            let name = file_name(data.kind, number);
+            Some(Download::bytes(&bytes, &name, "application/pdf").ok_or(PaperProblem::Read)?)
         }
         Request::Draft { .. } => None,
     };
@@ -251,19 +253,54 @@ fn ready(lang: ReadSignal<Lang>, paper: &Paper, draft: bool) -> impl IntoView {
             <p role="alert">{move || fill(t(lang.get(), Key::PdfMissingChars), &[&missing])}</p>
         })}
         {paper.logo_skipped.then(|| view! { <p role="alert">{tr(lang, Key::PdfLogoSkipped)}</p> })}
-        {paper.pdf.as_ref().map(|(download, name)| view! {
-            <p>
-                <a class="button" href=download.url().to_owned() download=name.clone()>
-                    {tr(lang, Key::PdfDownload)}
-                </a>
-            </p>
-        })}
+        {paper.pdf.as_ref().map(|download| sending(lang, download))}
         {paper
             .pages
             .iter()
             .enumerate()
             .map(|(i, page)| sheet_page(lang, paper.lang, page, i + 1, logo.clone()))
             .collect_view()}
+    }
+}
+
+/// Файл PDF: «Отправить PDF» — где браузер отдаёт файл системному меню
+/// «Поделиться» (задача 13), — и «Скачать PDF» всегда.
+///
+/// Байты готовы ещё до кнопки — их собрала «PDF», — и нажатие тратится
+/// только на само меню: браузер открывает его лишь от свежего нажатия
+/// (Правило 6). Кнопка не выключается, пока меню открыто: ответа от него
+/// можно и не дождаться — Android, бывает, его не присылает (по исходникам
+/// Chromium, `navigator_share.cc`, 2026-10-15), — а второе нажатие при
+/// открытом меню браузер отклонит сам ([`ShareError::Busy`]).
+fn sending(lang: ReadSignal<Lang>, download: &Download) -> impl IntoView {
+    let file = download.file().clone();
+    let shares = share::can_share(&file);
+    let failed = RwSignal::new(false);
+    let send = move |_| {
+        failed.set(false);
+        let sent = share::share(&file);
+        leptos::task::spawn_local(async move {
+            failed.set(sent.await == Err(ShareError::Failed));
+        });
+    };
+    view! {
+        <div class="actions">
+            {shares.then(|| view! {
+                <button type="button" on:click=send>
+                    {icon(Icon::Share)}
+                    <span>{tr(lang, Key::PdfShare)}</span>
+                </button>
+            })}
+            <a
+                class=if shares { "button secondary" } else { "button" }
+                href=download.url().to_owned()
+                download=download.name()
+            >
+                {icon(Icon::Download)}
+                <span>{tr(lang, Key::PdfDownload)}</span>
+            </a>
+        </div>
+        {move || failed.get().then(|| view! { <p role="alert">{tr(lang, Key::ShareFailed)}</p> })}
     }
 }
 

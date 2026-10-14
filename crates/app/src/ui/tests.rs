@@ -23,6 +23,7 @@ use crate::store::device::Device;
 use crate::store::{Store, StoreError, Writes};
 
 mod documents;
+mod share;
 
 wasm_bindgen_test_configure!(run_in_browser);
 

@@ -3,7 +3,7 @@
 
 use js_sys::{Array, Uint8Array};
 use wasm_bindgen::JsValue;
-use web_sys::{Blob, BlobPropertyBag, File, Url};
+use web_sys::{Blob, BlobPropertyBag, File, FilePropertyBag, Url};
 
 /// Почему выбранный файл не прочитан.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -109,35 +109,66 @@ impl Drop for Picture {
 /// открыт; обход из него же). Тип файлу при выборе даёт расширение `.json`.
 /// В приложении с экрана «Домой» скачивание может завести в тупик без
 /// кнопки «назад» (WebKit bug 290847, открыт, iOS 16.7–18.4; про `blob:` —
-/// только отзывы, что работает): проверить вживую, запасной путь — Web
-/// Share (задача 13).
+/// только отзывы, что работает): проверить вживую. Запасной путь —
+/// «Поделиться» ([`Download::file`], `platform::share`, задача 13).
 ///
 /// Адрес держит файл в памяти, пока его не отпустят: [`Download`] отпускает
 /// его при сбросе — когда готова следующая копия. Начатое скачивание это не
 /// прерывает: адрес разобран при нажатии (по спецификации URL; старые
 /// ошибки движков исправлены к 2020 году).
+///
+/// Файл — `File` с именем, а не безымянный `Blob`: тот же объект уходит
+/// и в «Поделиться» (`platform::share`, задача 13), а там имя файла — то,
+/// что увидит получатель. Байты переходят границу wasm один раз, при
+/// сборке, а не на каждое нажатие (Правило 1).
 pub struct Download {
     url: String,
+    file: File,
 }
 
 impl Download {
-    /// Файл из текста. `None` — браузер не дал собрать файл.
-    pub fn new(text: &str) -> Option<Self> {
-        let url = object_url(&Array::of1(&text.into()), "application/octet-stream")?;
-        Some(Self { url })
+    /// Файл `name` из текста. `None` — браузер не дал собрать файл.
+    pub fn text(text: &str, name: &str) -> Option<Self> {
+        Self::new(&Array::of1(&text.into()), name, "application/octet-stream")
     }
 
-    /// Файл из байтов с типом `mime` — PDF документа (задача 12). Тип —
-    /// настоящий, `application/pdf`: обход WebKit bug 263608 нужен текстовым
-    /// файлам, а PDF телефон и так сохраняет или показывает своей читалкой.
-    pub fn bytes(bytes: &[u8], mime: &str) -> Option<Self> {
-        let url = object_url(&Array::of1(&Uint8Array::from(bytes)), mime)?;
-        Some(Self { url })
+    /// Файл `name` из байтов с типом `mime` — PDF документа (задача 12).
+    /// Тип — настоящий, `application/pdf`: обход WebKit bug 263608 нужен
+    /// текстовым файлам, а PDF телефон и так сохраняет или показывает своей
+    /// читалкой. И Chromium отправляет через «Поделиться» только файлы
+    /// известных ему типов (`platform::share`).
+    pub fn bytes(bytes: &[u8], name: &str, mime: &str) -> Option<Self> {
+        Self::new(&Array::of1(&Uint8Array::from(bytes)), name, mime)
+    }
+
+    /// Файл из частей — строк или байтов. Как и у [`object_url`], у всех
+    /// `new_with_…_sequence_and_options` один вызов — `new File(части,
+    /// имя, параметры)`.
+    fn new(parts: &Array, name: &str, mime: &str) -> Option<Self> {
+        let options = FilePropertyBag::new();
+        options.set_type(mime);
+        let file = File::new_with_buffer_source_sequence_and_options(parts, name, &options)
+            .map_err(|error| log("File", &error))
+            .ok()?;
+        let url = Url::create_object_url_with_blob(&file)
+            .map_err(|error| log("createObjectURL", &error))
+            .ok()?;
+        Some(Self { url, file })
     }
 
     /// Адрес для `href`.
     pub fn url(&self) -> &str {
         &self.url
+    }
+
+    /// Имя файла — для `download` у ссылки.
+    pub fn name(&self) -> String {
+        self.file.name()
+    }
+
+    /// Сам файл — для «Поделиться».
+    pub fn file(&self) -> &File {
+        &self.file
     }
 }
 

@@ -390,14 +390,21 @@ pub fn installed() -> bool {
 }
 
 /// Ставят ли программу здесь только руками: iPhone или iPad в браузере.
+pub fn install_by_hand() -> bool {
+    apple_touch() && navigator_standalone() == Some(false)
+}
+
+/// iPhone или iPad — в браузере или программой с экрана «Домой».
 ///
 /// `navigator.standalone` есть у WebKit на всех устройствах Apple — с Safari
 /// 17 и на Mac (WebKit bug 257776; по исходникам WebKit, `Navigator.idl`,
 /// 2026-10-12), поэтому iPhone и iPad отличаются касанием: у iPad Safari
-/// называет себя Mac'ом, а у Mac точек касания нет.
-pub fn install_by_hand() -> bool {
+/// называет себя Mac'ом, а у Mac точек касания нет (`maxTouchPoints` — 5
+/// на iPhone и iPad, 0 на Mac; по исходникам WebKit, `Navigator.cpp`,
+/// 2026-10-15).
+pub fn apple_touch() -> bool {
     let touch = web_sys::window().is_some_and(|window| window.navigator().max_touch_points() > 0);
-    touch && navigator_standalone() == Some(false)
+    touch && navigator_standalone().is_some()
 }
 
 /// `navigator.standalone` — свойство WebKit: `true` в программе с экрана

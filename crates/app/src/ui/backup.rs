@@ -5,7 +5,8 @@
 //! напоминание о копии — вверху остальных экранов.
 //!
 //! Копия делается в два шага: собрать и зашифровать — потом сохранить
-//! ссылкой, которую человек нажимает сам (`platform::file::Download`).
+//! ссылкой, которую человек нажимает сам (`platform::file::Download`), а на
+//! iPhone и iPad ещё и отдать меню «Поделиться» (`platform::share`).
 //! Пароль спрашивается при каждой копии, чтобы не забылся, а опечатку ловит
 //! проверочное значение устройства (`DeviceKey`).
 
@@ -29,6 +30,7 @@ use super::{Base, tr};
 use crate::platform::clock;
 use crate::platform::crypto::{self, CryptoError};
 use crate::platform::file::{self, Download, FileError};
+use crate::platform::share::{self, ShareError};
 use crate::store::backup::{self as stored, Failure, Restored};
 use crate::store::device::Device;
 
@@ -257,7 +259,6 @@ fn counted(lang: ReadSignal<Lang>, key: Key, n: i64) -> impl Fn() -> String + Se
 /// Готовая копия: файл и что в нём.
 struct Ready {
     download: Download,
-    name: String,
     records: usize,
     unreadable: usize,
 }
@@ -338,7 +339,9 @@ fn MakeBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
     // «Забыли пароль?» — новый пароль поверх заданного.
     let resetting = RwSignal::new(false);
     let making = RwSignal::new_local(Making::Idle);
-    let saved = RwSignal::new(false);
+    // Как файл отдан: что сказать о нём.
+    let saved = RwSignal::new(None::<Key>);
+    let share_failed = RwSignal::new(false);
     let new_password = move || !backups.key_set.get() || resetting.get();
     let busy = move || matches!(making.get(), Making::Busy);
 
@@ -350,7 +353,8 @@ fn MakeBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
         let fresh = new_password();
         let (typed, again) = (password.get_untracked(), repeat.get_untracked());
         making.set(Making::Busy);
-        saved.set(false);
+        saved.set(None);
+        share_failed.set(false);
         leptos::task::spawn_local(async move {
             let outcome = match making_task(backups, typed, fresh.then_some(again)).await {
                 Ok(task) => task.await,
@@ -368,14 +372,15 @@ fn MakeBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
         });
     };
 
-    // Файл отдан браузеру: это и есть копия на устройстве. Сохранил ли
-    // браузер файл, он не говорит.
-    let on_save = move |_: MouseEvent| {
+    // Файл отдан браузеру или меню «Поделиться»: это и есть копия. Сохранили
+    // ли они файл, они не говорят.
+    let handed = move |said: Key| {
         let now = clock::now();
         Device::new().set_last_backup(now);
         backups.last.set(clock::local_date(now));
-        saved.set(true);
+        saved.set(Some(said));
     };
+    let on_save = move |_: MouseEvent| handed(Key::BackupSaved);
 
     view! {
         <form class="backup" on:submit=submit>
@@ -431,24 +436,48 @@ fn MakeBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
             }.into_any()),
             Making::Ready(ready) => {
                 let (records, unreadable) = (ready.records as i64, ready.unreadable as i64);
-                let name = ready.name.clone();
+                let name = ready.download.name();
+                // На iPhone и iPad — ещё и меню «Поделиться» (задача 13):
+                // `platform::share::can_share_any`. Меню открывается в самом
+                // нажатии, до первого `await` (Правило 6).
+                let file = ready.download.file().clone();
+                let shares = share::can_share_any(&file);
+                let send = move |_: MouseEvent| {
+                    share_failed.set(false);
+                    let sent = share::share(&file);
+                    leptos::task::spawn_local(async move {
+                        match sent.await {
+                            Ok(()) => handed(Key::BackupShared),
+                            Err(error) => share_failed.set(error == ShareError::Failed),
+                        }
+                    });
+                };
                 Some(view! {
                     <p role="status">{counted(lang, Key::BackupReady, records)}</p>
                     {(unreadable > 0).then(|| view! {
                         <p role="alert">{counted(lang, Key::BackupUnreadable, unreadable)}</p>
                     })}
-                    <p>
+                    <div class="actions backup-file">
                         <a
                             class="button"
                             href=ready.download.url().to_owned()
-                            download=ready.name.clone()
+                            download=ready.download.name()
                             on:click=on_save
                         >
                             {move || fill(t(lang.get(), Key::BackupSaveFile), &[&name])}
                         </a>
-                    </p>
-                    {move || saved.get().then(|| view! {
-                        <p role="status">{tr(lang, Key::BackupSaved)}</p>
+                        {shares.then(|| view! {
+                            <button type="button" class="secondary" on:click=send>
+                                {icon(Icon::Share)}
+                                <span>{tr(lang, Key::BackupShare)}</span>
+                            </button>
+                        })}
+                    </div>
+                    {move || saved.get().map(|said| view! {
+                        <p role="status">{tr(lang, said)}</p>
+                    })}
+                    {move || share_failed.get().then(|| view! {
+                        <p role="alert">{tr(lang, Key::ShareFailed)}</p>
                     })}
                 }.into_any())
             }
@@ -525,7 +554,8 @@ async fn make(backups: Backups, typed: &str, repeat: Option<&str>) -> Result<Rea
     let today = clock::local_date(now).ok_or(Problem::Say(Key::BackupFailed))?;
     let header = Header::new(env!("CARGO_PKG_VERSION"), now);
     let made = stored::make(&store, KINDS, &header, &key, &salt, iterations).await?;
-    let download = Download::new(&made.file).ok_or(Problem::Say(Key::BackupFailed))?;
+    let download = Download::text(&made.file, &backup::file_name(today))
+        .ok_or(Problem::Say(Key::BackupFailed))?;
     if current.is_none() {
         // Новый пароль запоминается, когда копия под ним уже собрана.
         if let Some(key) = DeviceKey::new(iterations, salt, key.check().to_vec()) {
@@ -535,7 +565,6 @@ async fn make(backups: Backups, typed: &str, repeat: Option<&str>) -> Result<Rea
     }
     Ok(Ready {
         download,
-        name: backup::file_name(today),
         records: made.records,
         unreadable: made.unreadable,
     })

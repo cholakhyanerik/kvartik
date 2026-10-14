@@ -29,7 +29,9 @@ console_error_panic_hook = "0.1.7"
 # хранении, шифр WebCrypto и файлы копии (задача 7), service worker
 # и установка (задача 8), консоль для причин ошибок, плашка сбоя прямо
 # в DOM (`src/ui/panic.rs`, задача 48), шрифты документа у своего сайта
-# (`fetch`, `Response`; задача 12). Все три крейта уже
+# (`fetch`, `Response`; задача 12), файл с именем для «Поделиться»
+# (`FilePropertyBag`; задача 13 — сам Web Share в `web-sys` нестабилен,
+# привязки к нему свои, `src/platform/share.rs`). Все три крейта уже
 # были в дереве через Leptos — новых авторов
 # нет; версии — те же, что в замке. Фичи `web-sys` — ровно нужные
 # интерфейсы: каждая лишняя — привязки, которые никто не зовёт. Будущее
@@ -52,6 +54,7 @@ web-sys = { version = "0.3.106", features = [
     "EventTarget",
     "File",
     "FileList",
+    "FilePropertyBag",
     "HtmlCollection",
     "HtmlElement",
     "HtmlInputElement",

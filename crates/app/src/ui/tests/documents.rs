@@ -17,6 +17,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_test::wasm_bindgen_test;
 use web_sys::{HtmlElement, Response};
 
+use super::share::ShareStub;
 use super::{
     button, choose_file, field, mount, mount_at, pick_client, select, shown_step, sleep, type_into,
     wait_for,
@@ -847,19 +848,10 @@ async fn wait_selector(host: &HtmlElement, selector: &str) -> bool {
     false
 }
 
-/// PDF и превью (задача 12): у выпущенного счёта «PDF» показывает его
-/// страницы на языке документа и даёт скачать файл PDF с понятным именем,
-/// «Скрыть» убирает их; у черновика на шаге проверки «Как будет выглядеть»
-/// показывает страницы без файла и говорит, что номер — при выпуске. Весь
-/// путь — ядро документа под wasm32, шрифты у сайта, файл и картинка.
-#[wasm_bindgen_test]
-async fn issued_document_gives_a_pdf_and_a_draft_a_preview() {
-    let client = fresh_base_with_client().await;
-    let lang = Lang::Ru;
-    Device::new().set_ui_lang(lang);
+/// Счёт клиенту на английском, сегодняшним днём, на 2 400 долларов.
+fn invoice_data(client: &Client) -> DocumentData {
     let today = clock::today().expect("часы с датой");
-    let now = clock::now();
-    let data = DocumentData {
+    DocumentData {
         kind: DocKind::Invoice,
         client: client.id(),
         lang: Lang::En,
@@ -874,7 +866,21 @@ async fn issued_document_gives_a_pdf_and_a_draft_a_preview() {
         }],
         basis: None,
         recurring: None,
-    };
+    }
+}
+
+/// PDF и превью (задача 12): у выпущенного счёта «PDF» показывает его
+/// страницы на языке документа и даёт скачать файл PDF с понятным именем,
+/// «Скрыть» убирает их; у черновика на шаге проверки «Как будет выглядеть»
+/// показывает страницы без файла и говорит, что номер — при выпуске. Весь
+/// путь — ядро документа под wasm32, шрифты у сайта, файл и картинка.
+#[wasm_bindgen_test]
+async fn issued_document_gives_a_pdf_and_a_draft_a_preview() {
+    let client = fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let now = clock::now();
+    let data = invoice_data(&client);
     let invoice = Document::create(data.clone(), now)
         .expect("черновик")
         .issue(&[], 0, Some(&profile()), &client, now)
@@ -966,4 +972,147 @@ async fn issued_document_gives_a_pdf_and_a_draft_a_preview() {
     host.remove();
     forget_device();
     assert!(wrong.is_empty(), "PDF и превью: {wrong:#?}");
+}
+
+/// Открыть страницы документа кнопкой «PDF»; `false` — файла не дождались.
+async fn open_paper(host: &HtmlElement, lang: Lang) -> bool {
+    match button(host, &[t(lang, Key::DocPdf)]) {
+        Some(pdf) => pdf.click(),
+        None => return false,
+    }
+    wait_selector(host, ".paper a[download]").await
+}
+
+/// Что на панели документа сказано тревогой.
+fn paper_alert(host: &HtmlElement) -> Option<String> {
+    host.query_selector(".paper [role=alert]")
+        .ok()
+        .flatten()
+        .and_then(|alert| alert.text_content())
+}
+
+/// «Отправить PDF» (задача 13): где браузер умеет «Поделиться», кнопка
+/// отдаёт меню один файл PDF с понятным именем — в самом нажатии, до
+/// первого `await`, иначе Safari и Chrome откажут за несвежестью нажатия.
+/// Отмена меню молчит, отказ говорит словами; где «Поделиться» нет — одна
+/// «Скачать PDF».
+#[wasm_bindgen_test]
+async fn issued_document_is_sent_by_the_share_menu() {
+    let client = fresh_base_with_client().await;
+    let lang = Lang::Am;
+    Device::new().set_ui_lang(lang);
+    let now = clock::now();
+    let invoice = Document::create(invoice_data(&client), now)
+        .expect("черновик")
+        .issue(&[], 0, Some(&profile()), &client, now)
+        .expect("выпущен");
+    let mut writes = Writes::default();
+    writes.insert(&invoice);
+    commit(writes).await;
+    let fonts = FontServer::install();
+    let sharing = ShareStub::install();
+
+    let address = format!("#/documents/{}", invoice.id());
+    let (host, mounted) = mount_at(&address);
+    let mut wrong = Vec::new();
+    let number = invoice.number().map(|number| number.to_string()).unwrap_or_default();
+    if !wait_for(&host, &number).await {
+        wrong.push("карточка счёта не открылась".to_owned());
+    }
+    if !open_paper(&host, lang).await {
+        wrong.push("файла PDF нет".to_owned());
+    }
+    let send = button(&host, &[t(lang, Key::PdfShare)]);
+    match &send {
+        Some(send) => {
+            send.click();
+            // Ни одного `await` после нажатия: меню открыто в нём самом.
+            if sharing.calls() != 1 {
+                wrong.push(format!("в самом нажатии share позван {} раз", sharing.calls()));
+            }
+        }
+        None => wrong.push("нет «Отправить PDF»".to_owned()),
+    }
+    if let Some((keys, files)) = sharing.shared(0) {
+        if keys != ["files"] {
+            wrong.push(format!("отдано меню: {keys:?}"));
+        }
+        match files.as_slice() {
+            [file] => {
+                if file.name() != format!("Invoice-{number}.pdf") {
+                    wrong.push(format!("имя файла — {}", file.name()));
+                }
+                if file.type_() != "application/pdf" || file.size() < 5_000.0 {
+                    wrong.push(format!("файл — {} байтов, тип {}", file.size(), file.type_()));
+                }
+            }
+            _ => wrong.push(format!("файлов отдано: {}", files.len())),
+        }
+    }
+    sleep(100).await;
+    if let Some(said) = paper_alert(&host) {
+        wrong.push(format!("после отправки — жалоба: {said}"));
+    }
+    match host.query_selector(".paper a[download]").ok().flatten() {
+        Some(link) if link.class_name() != "button secondary" => {
+            wrong.push(format!("«Скачать PDF» рядом с «Отправить» — {}", link.class_name()));
+        }
+        _ => {}
+    }
+
+    // Человек закрыл меню — говорить не о чем.
+    sharing.answer.set(Some("AbortError"));
+    if let Some(send) = &send {
+        send.click();
+    }
+    sleep(100).await;
+    if let Some(said) = paper_alert(&host) {
+        wrong.push(format!("после отмены — жалоба: {said}"));
+    }
+    // Браузер отказал — словами, а следующее нажатие пробует снова.
+    sharing.answer.set(Some("NotAllowedError"));
+    if let Some(send) = &send {
+        send.click();
+    }
+    sleep(100).await;
+    if paper_alert(&host).as_deref() != Some(t(lang, Key::ShareFailed)) {
+        wrong.push(format!("после отказа сказано: {:?}", paper_alert(&host)));
+    }
+    sharing.answer.set(None);
+    if let Some(send) = &send {
+        send.click();
+    }
+    sleep(100).await;
+    if let Some(said) = paper_alert(&host) {
+        wrong.push(format!("после новой отправки жалоба осталась: {said}"));
+    }
+    if sharing.calls() != 4 {
+        wrong.push(format!("share позван {} раз на четыре нажатия", sharing.calls()));
+    }
+
+    // Браузер не умеет «Поделиться» — одна «Скачать PDF», главной кнопкой.
+    match button(&host, &[t(lang, Key::PdfHide)]) {
+        Some(hide) => hide.click(),
+        None => wrong.push("нет «Скрыть»".to_owned()),
+    }
+    sleep(100).await;
+    sharing.can.set(false);
+    if !open_paper(&host, lang).await {
+        wrong.push("файла PDF нет без «Поделиться»".to_owned());
+    }
+    if button(&host, &[t(lang, Key::PdfShare)]).is_some() {
+        wrong.push("«Отправить PDF» там, где браузер не умеет".to_owned());
+    }
+    match host.query_selector(".paper a[download]").ok().flatten() {
+        Some(link) if link.class_name() != "button" => {
+            wrong.push(format!("одна «Скачать PDF» — {}", link.class_name()));
+        }
+        _ => {}
+    }
+    drop(mounted);
+    drop(sharing);
+    drop(fonts);
+    host.remove();
+    forget_device();
+    assert!(wrong.is_empty(), "«Отправить PDF»: {wrong:#?}");
 }
