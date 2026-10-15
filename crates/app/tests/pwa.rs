@@ -104,14 +104,27 @@ fn names_come_from_the_string_table() {
 /// Что Chrome требует для установки (по исходникам Chromium,
 /// `installable_evaluator.cc`; сверено 2026-10-12): имя, явный
 /// `start_url`, `display` и значок «any» не меньше 144 точек — а web.dev
-/// советует 192 и 512. Адреса — относительные: сайт может жить и не
-/// в корне домена (задача 65). Каждый значок есть и того размера, что
-/// написан: значок не того размера Chrome отбрасывает молча.
+/// советует 192 и 512. `start_url`, `scope` и значки — относительные: они
+/// считаются от адреса манифеста, а программа живёт в папке сайта `/app/`
+/// (задача 65). А `id` — нет: его браузер разбирает от начала адреса
+/// `start_url`, от домена (по спецификации Web App Manifest, «process the
+/// `id` member», сверено 2026-10-16; Chrome 155 — так же), и `"./"` назвал
+/// бы программу корнем сайта, где её нет. Поэтому `id` — папка программы,
+/// как `public_url` в `Trunk.toml`, и навсегда: другой `id` — другая
+/// программа, и установленную пришлось бы ставить заново. Каждый значок
+/// есть и того размера, что написан: значок не того размера Chrome
+/// отбрасывает молча.
 #[test]
 fn manifest_makes_the_app_installable() {
     let manifest = manifest();
+    let trunk = fs::read_to_string(app_dir().join("Trunk.toml")).expect("Trunk.toml читается");
+    let public_url = trunk
+        .lines()
+        .find_map(|line| line.strip_prefix("public_url = \""))
+        .and_then(|rest| rest.strip_suffix('"'))
+        .expect("в Trunk.toml есть public_url");
     for (field, expected) in [
-        ("id", "./"),
+        ("id", public_url),
         ("start_url", "./"),
         ("scope", "./"),
         ("display", "standalone"),
@@ -245,18 +258,20 @@ fn page_links_the_manifest_and_icons() {
     );
 }
 
-/// Wasm окна и `sw.js` собирает хук сборки (`Trunk.toml`), а не Trunk.
-/// Шаблон service worker лежит там, откуда его берёт хук, и сам в сайт не
-/// копируется: в сайте должен оказаться только `sw.js`, написанный
-/// `kvartik-sw`, — шаблон с `"dev"` выключил бы обновления у всех. А wasm
-/// Trunk не собирает (`data-trunk-skip`): без этого он собрал бы свой,
-/// неразрезанный, со своим запуском (задача 58).
+/// Раскладку сайта, wasm окна и `sw.js` собирает хук сборки (`Trunk.toml`),
+/// а не Trunk. Шаблон service worker лежит там, откуда его берёт хук,
+/// и сам в сайт не копируется: в сайте должен оказаться только `sw.js`,
+/// написанный `kvartik-sw`, — шаблон с `"dev"` выключил бы обновления
+/// у всех. Файлы корня сайта Trunk не копирует тоже: он положил бы их
+/// в папку программы, а не в корень (задача 65). А wasm Trunk не собирает
+/// (`data-trunk-skip`): без этого он собрал бы свой, неразрезанный, со
+/// своим запуском (задача 58).
 #[test]
 fn wasm_and_service_worker_go_through_the_hook() {
     let trunk = fs::read_to_string(app_dir().join("Trunk.toml")).expect("Trunk.toml читается");
     assert!(
         trunk.contains(
-            r#"command_arguments = ["run", "--quiet", "--package", "kvartik-sw", "--", "--wasm", "kvartik-app", "public/sw.js"]"#
+            r#"command_arguments = ["run", "--quiet", "--package", "kvartik-sw", "--", "--root", "public/root", "--wasm", "kvartik-app", "public/sw.js"]"#
         ),
         "хук kvartik-sw в Trunk.toml не найден"
     );
@@ -266,6 +281,10 @@ fn wasm_and_service_worker_go_through_the_hook() {
         !page.contains("public/sw.js") && !page.contains(r#"href="public""#),
         "шаблон sw.js копируется в сайт как есть"
     );
+    assert!(
+        !page.contains(r#"href="public/root"#),
+        "файлы корня сайта копирует Trunk — в папку программы"
+    );
     let rust: Vec<_> = page
         .split('<')
         .filter(|tag| tag.starts_with("link ") && tag.contains(r#"rel="rust""#))
@@ -274,4 +293,83 @@ fn wasm_and_service_worker_go_through_the_hook() {
         rust.len() == 1 && rust[0].contains("data-trunk-skip"),
         "wasm окна собирает Trunk, а не хук: {rust:?}"
     );
+}
+
+/// Программа живёт в папке сайта, а корень — лендингу (задача 65). Папку
+/// называет одна строка — `public_url` в `Trunk.toml`, а файлы корня
+/// (`public/root/`) знают её сами, и каждый — молча: корень, который ведёт
+/// не туда, `404.html`, который ведёт в пустоту, правило `_headers`, которое
+/// не подходит ни к одному файлу программы, — ни ошибки сборки, ни ошибки
+/// в браузере. Поэтому тест сверяет их с `public_url`.
+#[test]
+fn the_site_root_knows_the_app_folder() {
+    let trunk = fs::read_to_string(app_dir().join("Trunk.toml")).expect("Trunk.toml читается");
+    let setting = |name: &str| {
+        trunk
+            .lines()
+            .find_map(|line| line.strip_prefix(&format!("{name} = \"")))
+            .and_then(|rest| rest.strip_suffix('"'))
+            .unwrap_or_else(|| panic!("в Trunk.toml нет {name}"))
+            .to_owned()
+    };
+    let app = setting("public_url");
+    assert!(
+        app.len() > 2 && app.starts_with('/') && app.ends_with('/'),
+        "public_url «{app}» — не папка сайта"
+    );
+    // `trunk serve` отдаёт сайт от корня, как хостинг: иначе программа
+    // оказалась бы в /app/app/.
+    assert_eq!(setting("serve_base"), "/");
+
+    let root = |name: &str| {
+        fs::read_to_string(app_dir().join("public/root").join(name))
+            .unwrap_or_else(|_| panic!("в public/root нет {name}"))
+    };
+    let mut wrong = Vec::new();
+
+    // Корень — в программу, временной переадресацией: постоянную браузер
+    // запомнил бы навсегда, и лендинга не увидел бы никто.
+    let rules: Vec<_> = root("_redirects")
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(str::to_owned)
+        .collect();
+    if rules != [format!("/ {app} 302")] {
+        wrong.push(format!("_redirects: {rules:?}, а ждали «/ {app} 302»"));
+    }
+
+    // Неизвестный адрес — в программу.
+    let missing = root("404.html");
+    for needed in [format!("content=\"0; url={app}\""), format!("<a href=\"{app}\">")] {
+        if !missing.contains(&needed) {
+            wrong.push(format!("404.html: нет {needed}"));
+        }
+    }
+
+    // Долгий кэш — только файлам программы с хэшем в имени: правило без её
+    // папки к ним не подойдёт.
+    let headers = root("_headers");
+    let mut path = "";
+    for line in headers.lines() {
+        if line.starts_with('/') {
+            path = line.trim();
+        } else if line.contains("immutable") && !path.starts_with(app.as_str()) {
+            wrong.push(format!("_headers: immutable у «{path}» — не в {app}"));
+        }
+    }
+
+    // `sw.js` корня — прежний service worker корня снимает себя, по
+    // согласию, как любая новая версия, и запросов не перехватывает.
+    let sw = root("sw.js");
+    for needed in ["\"skip-waiting\"", "self.skipWaiting()", "self.registration.unregister()"] {
+        if !sw.contains(needed) {
+            wrong.push(format!("sw.js корня: нет {needed}"));
+        }
+    }
+    if sw.contains("\"fetch\"") || sw.contains("\"install\"") {
+        wrong.push("sw.js корня перехватывает запросы или включается без согласия".into());
+    }
+
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }

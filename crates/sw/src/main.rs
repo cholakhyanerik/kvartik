@@ -1,17 +1,29 @@
-//! Сборка сайта после Trunk: wasm окна с частями (задача 58, `wasm.rs`)
-//! и `sw.js` со списком файлов для кэша и хэшем сборки (задача 8).
+//! Сборка сайта после Trunk: раскладка сайта (задача 65), wasm окна
+//! с частями (задача 58, `wasm.rs`) и `sw.js` со списком файлов для кэша
+//! и хэшем сборки (задача 8).
 //!
 //! Зовёт её Trunk хуком `post_build` (`crates/app/Trunk.toml`): к этому
 //! времени остальные файлы сайта уже лежат в папке сборки, а `index.html`
 //! дописан (по исходникам trunk 0.22.0-rc.2, `src/pipelines/html.rs`).
-//! Папку она берёт из переменной `TRUNK_STAGING_DIR`, а шаблон — путём из
-//! аргумента: `kvartik-sw [--wasm <пакет>] <шаблон sw.js>`. С `--wasm`
-//! она сначала собирает wasm пакета и вписывает его запуск в страницу,
-//! а потом пишет `sw.js` по всем файлам, wasm в том числе. Одна программа,
-//! а не два хука: хуки одной стадии Trunk идут одновременно (по исходникам
-//! trunk 0.22.0-rc.2, `src/hooks.rs`), а `sw.js` должен видеть готовый wasm.
-//! Без `--wasm` — только `sw.js`: так переписывают `sw.js` у копии `dist/`
-//! для прогона новой версии (CLAUDE.md, Правило 2).
+//! Папку она берёт из переменной `TRUNK_STAGING_DIR`, адрес программы —
+//! из `TRUNK_PUBLIC_URL`, а остальное — из аргументов:
+//! `kvartik-sw [--root <папка>] [--wasm <пакет>] <шаблон sw.js>`.
+//!
+//! Программа живёт в папке сайта — `/app/`, `public_url` в `Trunk.toml`, —
+//! а корень отдан лендингу (задача 65). Trunk кладёт всё собранное в корень
+//! папки сборки, а `public_url` меняет только адреса в странице (по
+//! исходникам trunk 0.22.0-rc.2, `pipelines/html.rs`, `pipelines/css.rs`).
+//! Поэтому с `--root` программа перекладывает собранное Trunk в папку
+//! программы, а в корень кладёт файлы корня сайта из `<папка>`. Разложил
+//! бы и сам Trunk (`html_output` и `data-target-path`), но имя папки стояло
+//! бы тогда в восьми местах, а не в одном `public_url`.
+//!
+//! С `--wasm` она собирает wasm пакета и вписывает его запуск в страницу,
+//! а потом пишет `sw.js` программы по всем файлам, wasm в том числе. Одна
+//! программа, а не три хука: хуки одной стадии Trunk идут одновременно (по
+//! исходникам trunk 0.22.0-rc.2, `src/hooks.rs`), а `sw.js` должен видеть
+//! готовый wasm. Без `--root` и `--wasm` — только `sw.js`: так переписывают
+//! `sw.js` у копии `dist/` для прогона новой версии (CLAUDE.md, Правило 2).
 //!
 //! Зачем: браузер узнаёт о новой версии сайта, только сравнивая `sw.js`
 //! с прошлым байт в байт (по спецификации Service Worker, «Update»). Имена
@@ -34,7 +46,7 @@ const FILES_LINE: &str = "const FILES = [];";
 /// Строка шаблона, вместо которой встают файлы, на которые ссылается
 /// страница: по ним service worker видит, что страница той же сборки.
 const LINKED_LINE: &str = "const LINKED = [];";
-/// Что программа пишет в папку сборки.
+/// Что программа пишет в папку программы.
 const OUTPUT: &str = "sw.js";
 /// Страница программы: в кэше она лежит под адресом папки (`SHELL`
 /// в шаблоне), а в списке её нет — шапка шаблона объясняет почему.
@@ -57,34 +69,110 @@ fn run() -> Result<String, String> {
     let staging = env::var_os("TRUNK_STAGING_DIR")
         .map(PathBuf::from)
         .ok_or("нет TRUNK_STAGING_DIR: программу зовёт хук Trunk (crates/app/Trunk.toml)")?;
+    let public_url = env::var("TRUNK_PUBLIC_URL")
+        .map_err(|_| "нет TRUNK_PUBLIC_URL: программу зовёт хук Trunk (crates/app/Trunk.toml)")?;
+    let app = app_folder(&public_url)?;
+    let (mut root, mut package, mut template_path) = (None, None, None);
     let mut args = env::args().skip(1);
-    let mut first = args.next();
-    let package = if first.as_deref() == Some("--wasm") {
-        let package = args.next().ok_or("после --wasm ожидалось имя пакета")?;
-        first = args.next();
-        Some(package)
-    } else {
-        None
-    };
-    let template_path = PathBuf::from(first.ok_or("ожидался путь к шаблону sw.js")?);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--root" => root = Some(PathBuf::from(args.next().ok_or("после --root ожидалась папка")?)),
+            "--wasm" => package = Some(args.next().ok_or("после --wasm ожидалось имя пакета")?),
+            _ if template_path.is_none() => template_path = Some(PathBuf::from(arg)),
+            _ => return Err(format!("лишний аргумент «{arg}»")),
+        }
+    }
+    let template_path = template_path.ok_or("ожидался путь к шаблону sw.js")?;
     let template = fs::read_to_string(&template_path)
         .map_err(|error| format!("{}: {error}", template_path.display()))?;
+    if let Some(root) = &root {
+        lay_out(&staging, app, root)?;
+    }
+    let app_dir = staging.join(app);
     let wasm = match &package {
         Some(package) => {
-            let built = wasm::build(package, &staging)?;
+            let built = wasm::build(package, &app_dir, &public_url)?;
             format!(", wasm {} с частями: {}", built.hash, built.parts)
         }
         None => String::new(),
     };
-    let files = collect(&staging)?;
+    let files = collect(&staging, app)?;
     let build = build_id(&template, &files);
-    let sw = render(&template, &build, &files)?;
-    let output = staging.join(OUTPUT);
+    let sw = render(&template, &build, &files, app)?;
+    let output = app_dir.join(OUTPUT);
     fs::write(&output, sw).map_err(|error| format!("{}: {error}", output.display()))?;
     Ok(format!(
-        "kvartik-sw: сборка {build}, файлов в кэше {}{wasm}",
-        precached(&files).count() + 1
+        "kvartik-sw: сборка {build}, программа в {public_url}, файлов в кэше {}{wasm}",
+        precached(&files, app).count() + 1
     ))
+}
+
+/// Папка программы в сайте — `public_url` без косых черт по краям:
+/// `/app/` — `app`. Корень (`/`) не годится: там лендинг и файлы корня
+/// (задача 65), и `sw.js` программы лёг бы на место `sw.js` корня. Адрес
+/// с доменом — тоже: папку берут из пути, а хостинг отдаёт файлы по нему.
+fn app_folder(public_url: &str) -> Result<&str, String> {
+    public_url
+        .strip_prefix('/')
+        .and_then(|path| path.strip_suffix('/'))
+        .filter(|path| {
+            path.split('/')
+                .all(|part| !part.is_empty() && part != "." && part != ".." && !part.contains('\\'))
+        })
+        .ok_or_else(|| {
+            format!(
+                "public_url «{public_url}»: программа живёт в папке сайта, ожидался путь \
+                 вида /app/ (crates/app/Trunk.toml)"
+            )
+        })
+}
+
+/// Раскладка сайта (задача 65): всё, что собрал Trunk, — в папку программы
+/// `app`, а в корень — файлы корня сайта из папки `root`. До раскладки
+/// в сборке нет ничего с именем папки программы, а после — ни один файл
+/// корня не лёг на чужое место: иначе одно молча затёрло бы другое.
+fn lay_out(staging: &Path, app: &str, root: &Path) -> Result<(), String> {
+    let top = app.split('/').next().unwrap_or(app);
+    if staging.join(top).exists() {
+        return Err(format!("в сборке Trunk уже есть «{top}» — имя папки программы"));
+    }
+    let built: Vec<_> = fs::read_dir(staging)
+        .and_then(|entries| entries.map(|entry| entry.map(|entry| entry.file_name())).collect())
+        .map_err(|error| format!("{}: {error}", staging.display()))?;
+    let app_dir = staging.join(app);
+    fs::create_dir_all(&app_dir).map_err(|error| format!("{}: {error}", app_dir.display()))?;
+    for name in built {
+        let (from, to) = (staging.join(&name), app_dir.join(&name));
+        fs::rename(&from, &to).map_err(|error| format!("{}: {error}", from.display()))?;
+    }
+    copy_new(root, staging)
+}
+
+/// Скопировать содержимое папки `from` в `to`, со вложенными папками.
+/// Файл, который уже есть, — ошибка, а не замена. Скрытые файлы не идут,
+/// как и в [`collect`].
+fn copy_new(from: &Path, to: &Path) -> Result<(), String> {
+    let entries = fs::read_dir(from).map_err(|error| format!("{}: {error}", from.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("{}: {error}", from.display()))?;
+        if entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+        let target = to.join(entry.file_name());
+        let kind = entry
+            .file_type()
+            .map_err(|error| format!("{}: {error}", entry.path().display()))?;
+        if kind.is_dir() {
+            fs::create_dir_all(&target).map_err(|error| format!("{}: {error}", target.display()))?;
+            copy_new(&entry.path(), &target)?;
+        } else if target.exists() {
+            return Err(format!("{}: файл корня лёг бы на файл программы", target.display()));
+        } else {
+            fs::copy(entry.path(), &target)
+                .map_err(|error| format!("{}: {error}", entry.path().display()))?;
+        }
+    }
+    Ok(())
 }
 
 /// Файл сайта: путь от корня сайта через `/` и содержимое.
@@ -94,12 +182,13 @@ struct File {
     bytes: Vec<u8>,
 }
 
-/// Все файлы сайта, по пути. Кроме самого `sw.js` — его пишет эта
-/// программа — и скрытых файлов: Trunk держит в папках служебные
-/// (`.trunk-lock`). Настройки хостинга (`_headers`) здесь есть: в кэш они
-/// не идут ([`precached`]), а в хэш сборки идут.
-fn collect(root: &Path) -> Result<Vec<File>, String> {
-    fn walk(dir: &Path, prefix: &str, out: &mut Vec<File>) -> Result<(), String> {
+/// Все файлы сайта — и корня, и программы в папке `app`, — по пути. Кроме
+/// `sw.js` программы — его пишет эта программа — и скрытых файлов: Trunk
+/// держит в папках служебные (`.trunk-lock`). Настройки хостинга
+/// (`_headers`) здесь есть: в кэш они не идут ([`precached`]), а в хэш
+/// сборки идут.
+fn collect(root: &Path, app: &str) -> Result<Vec<File>, String> {
+    fn walk(dir: &Path, prefix: &str, skip: &str, out: &mut Vec<File>) -> Result<(), String> {
         let entries = fs::read_dir(dir).map_err(|error| format!("{}: {error}", dir.display()))?;
         for entry in entries {
             let entry = entry.map_err(|error| format!("{}: {error}", dir.display()))?;
@@ -115,8 +204,8 @@ fn collect(root: &Path) -> Result<Vec<File>, String> {
                 .file_type()
                 .map_err(|error| format!("{path}: {error}"))?;
             if kind.is_dir() {
-                walk(&entry.path(), &format!("{path}/"), out)?;
-            } else if path != OUTPUT {
+                walk(&entry.path(), &format!("{path}/"), skip, out)?;
+            } else if path != skip {
                 let bytes = fs::read(entry.path()).map_err(|error| format!("{path}: {error}"))?;
                 out.push(File { path, bytes });
             }
@@ -124,7 +213,7 @@ fn collect(root: &Path) -> Result<Vec<File>, String> {
         Ok(())
     }
     let mut files = Vec::new();
-    walk(root, "", &mut files)?;
+    walk(root, "", &format!("{app}/{OUTPUT}"), &mut files)?;
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
 }
@@ -165,18 +254,21 @@ fn digest<'a>(entries: impl IntoIterator<Item = (&'a str, &'a [u8])>) -> String 
     format!("{hash:016x}")
 }
 
-/// Файлы, которые service worker кладёт в кэш по их путям: все, кроме
-/// страниц HTML и настроек хостинга (задача 15) — установка, которая их
-/// ждёт, не удалась бы ни у кого никогда. Настройки, имена которых
-/// начинаются с `_` (`_headers`), Cloudflare Pages не отдаёт вовсе.
-/// На `/404.html` он отвечает переадресацией на `/404` (308; по исходникам
-/// workers-sdk, pages-shared/asset-server, 2026-10-15), а ответ
-/// с переадресацией установка не принимает. Страница программы лежит
-/// в кэше под адресом папки — шапка шаблона.
-fn precached(files: &[File]) -> impl Iterator<Item = &str> {
+/// Файлы, которые service worker программы кладёт в кэш, — пути от его
+/// папки `app`: все файлы программы, кроме страниц HTML и настроек
+/// хостинга (задача 15) — установка, которая их ждёт, не удалась бы ни
+/// у кого никогда. Настройки, имена которых начинаются с `_` (`_headers`),
+/// Cloudflare Pages не отдаёт вовсе. На `/404.html` он отвечает
+/// переадресацией на `/404` (308; по исходникам workers-sdk,
+/// pages-shared/asset-server, 2026-10-15), а ответ с переадресацией
+/// установка не принимает. Страница программы лежит в кэше под адресом
+/// папки — шапка шаблона. Файлы корня сайта — не программы: их service
+/// worker не трогает (задача 65).
+fn precached<'a>(files: &'a [File], app: &str) -> impl Iterator<Item = &'a str> {
+    let prefix = format!("{app}/");
     files
         .iter()
-        .map(|file| file.path.as_str())
+        .filter_map(move |file| file.path.strip_prefix(prefix.as_str()))
         .filter(|path| !path.ends_with(".html") && !hosting(path))
 }
 
@@ -185,20 +277,22 @@ fn hosting(path: &str) -> bool {
     path.rsplit('/').next().unwrap_or(path).starts_with('_')
 }
 
-/// Файлы из списка, на которые ссылается страница: wasm, клей JS, CSS,
-/// манифест, значки. Страница не своей сборки их не назовёт.
-fn linked(files: &[File]) -> Result<Vec<&str>, String> {
+/// Файлы из списка, на которые ссылается страница программы: wasm, клей
+/// JS, CSS, манифест, значки. Страница не своей сборки их не назовёт.
+fn linked<'a>(files: &'a [File], app: &str) -> Result<Vec<&'a str>, String> {
+    let path = format!("{app}/{PAGE}");
     let page = files
         .iter()
-        .find(|file| file.path == PAGE)
-        .ok_or(format!("в сборке нет {PAGE}"))?;
+        .find(|file| file.path == path)
+        .ok_or(format!("в сборке нет {path}"))?;
     let page = String::from_utf8_lossy(&page.bytes);
-    Ok(precached(files).filter(|path| page.contains(path)).collect())
+    Ok(precached(files, app).filter(|file| page.contains(file)).collect())
 }
 
-/// `sw.js` из шаблона: каждая из трёх строк на месте ровно по разу, иначе
-/// ошибка — молча оставленное `"dev"` выключило бы обновления у всех.
-fn render(template: &str, build: &str, files: &[File]) -> Result<String, String> {
+/// `sw.js` программы из шаблона: каждая из трёх строк на месте ровно по
+/// разу, иначе ошибка — молча оставленное `"dev"` выключило бы обновления
+/// у всех.
+fn render(template: &str, build: &str, files: &[File], app: &str) -> Result<String, String> {
     fn list<'a>(name: &str, paths: impl Iterator<Item = &'a str>) -> String {
         let mut out = format!("const {name} = [\n");
         for path in paths {
@@ -207,7 +301,7 @@ fn render(template: &str, build: &str, files: &[File]) -> Result<String, String>
         out.push_str("];\n");
         out
     }
-    let linked = linked(files)?;
+    let linked = linked(files, app)?;
     let mut out = String::with_capacity(template.len() + files.len() * 96);
     let mut seen = [0; 3];
     for line in template.split_inclusive('\n') {
@@ -218,7 +312,7 @@ fn render(template: &str, build: &str, files: &[File]) -> Result<String, String>
             }
             FILES_LINE => {
                 seen[1] += 1;
-                out.push_str(&list("FILES", precached(files)));
+                out.push_str(&list("FILES", precached(files, app)));
             }
             LINKED_LINE => {
                 seen[2] += 1;
@@ -297,23 +391,27 @@ mod tests {
 
     /// Вложенные папки — через `/` и на Windows: путь с `\` service worker
     /// попросил бы у сервера буквально, и установка упала бы на 404.
-    /// Служебные файлы Trunk и прошлый `sw.js` в сборку не попадают,
-    /// а страницы HTML и настройки хостинга — в кэш.
+    /// Служебные файлы Trunk и прошлый `sw.js` программы в сборку не
+    /// попадают, а `sw.js` корня попадает: это другой файл. В кэш — только
+    /// файлы программы, путями от её папки, без страниц HTML и настроек
+    /// хостинга.
     #[test]
     fn collects_site_files_with_forward_slashes() {
         let temp = Temp::new("collect");
-        temp.put("index.html", b"<html>");
         temp.put("404.html", b"<html>");
-        temp.put("kvartik-app-1a2b.js", b"js");
-        temp.put("fonts/noto-sans-latin-400.ttf", b"ttf");
-        temp.put("icons/icon-192.png", b"png");
+        temp.put("_headers", b"/*\n  X-Frame-Options: DENY");
+        temp.put("_redirects", b"/ /app/ 302");
+        temp.put("sw.js", b"root sw");
+        temp.put("app/index.html", b"<html>");
+        temp.put("app/kvartik-app-1a2b.js", b"js");
+        temp.put("app/fonts/noto-sans-latin-400.ttf", b"ttf");
+        temp.put("app/icons/icon-192.png", b"png");
+        temp.put("app/_headers", b"");
+        temp.put("app/sw.js", b"old sw");
         temp.put(".trunk-lock", b"");
         temp.put(".stage/old.js", b"old");
-        temp.put("_headers", b"/*\n  X-Frame-Options: DENY");
-        temp.put("_redirects", b"");
-        temp.put("sw.js", b"old sw");
 
-        let files = collect(&temp.0).expect("папка читается");
+        let files = collect(&temp.0, "app").expect("папка читается");
         let paths: Vec<&str> = files.iter().map(|file| file.path.as_str()).collect();
         assert_eq!(
             paths,
@@ -321,16 +419,66 @@ mod tests {
                 "404.html",
                 "_headers",
                 "_redirects",
-                "fonts/noto-sans-latin-400.ttf",
-                "icons/icon-192.png",
-                "index.html",
-                "kvartik-app-1a2b.js",
+                "app/_headers",
+                "app/fonts/noto-sans-latin-400.ttf",
+                "app/icons/icon-192.png",
+                "app/index.html",
+                "app/kvartik-app-1a2b.js",
+                "sw.js",
             ]
         );
         assert_eq!(
-            precached(&files).collect::<Vec<_>>(),
+            precached(&files, "app").collect::<Vec<_>>(),
             ["fonts/noto-sans-latin-400.ttf", "icons/icon-192.png", "kvartik-app-1a2b.js"]
         );
+    }
+
+    /// Папка программы — путь `public_url`; корень, адрес с доменом и путь
+    /// с переходом вверх — ошибка сборки, а не программа не на своём месте.
+    #[test]
+    fn app_folder_comes_from_the_public_url() {
+        assert_eq!(app_folder("/app/"), Ok("app"));
+        assert_eq!(app_folder("/a/b/"), Ok("a/b"));
+        let mut wrong = Vec::new();
+        for url in ["/", "", "app/", "/app", "https://kvartik.com/app/", "/../", "/a//b/", "/a\\b/"] {
+            if app_folder(url).is_ok() {
+                wrong.push(url);
+            }
+        }
+        assert!(wrong.is_empty(), "приняты: {wrong:?}");
+    }
+
+    /// Собранное Trunk уходит в папку программы целиком, со вложенными
+    /// папками, а файлы корня ложатся в корень. Имя папки программы в
+    /// сборке Trunk и файл корня на месте файла программы — ошибка, а не
+    /// молча затёртый файл.
+    #[test]
+    fn lays_the_site_out() {
+        let temp = Temp::new("layout");
+        temp.put("stage/index.html", b"page");
+        temp.put("stage/fonts/a.ttf", b"ttf");
+        temp.put("root/_headers", b"headers");
+        temp.put("root/sw.js", b"root sw");
+        temp.put("root/.hidden", b"");
+        let stage = temp.0.join("stage");
+        lay_out(&stage, "app", &temp.0.join("root")).expect("раскладка");
+        let files = collect(&stage, "app").expect("папка читается");
+        let paths: Vec<&str> = files.iter().map(|file| file.path.as_str()).collect();
+        assert_eq!(paths, ["_headers", "app/fonts/a.ttf", "app/index.html", "sw.js"]);
+
+        let clash = Temp::new("clash");
+        clash.put("stage/app", b"file");
+        clash.put("root/_headers", b"");
+        let error = lay_out(&clash.0.join("stage"), "app", &clash.0.join("root"))
+            .expect_err("в сборке Trunk есть «app»");
+        assert!(error.contains("уже есть «app»"), "{error}");
+
+        let over = Temp::new("over");
+        over.put("stage/index.html", b"page");
+        over.put("root/app/index.html", b"other page");
+        let error = lay_out(&over.0.join("stage"), "app", &over.0.join("root"))
+            .expect_err("файл корня на месте файла программы");
+        assert!(error.contains("лёг бы на файл программы"), "{error}");
     }
 
     /// Новый `_headers` — новая сборка: страница в кэше service worker
@@ -338,11 +486,11 @@ mod tests {
     #[test]
     fn hosting_settings_change_the_build() {
         let temp = Temp::new("headers");
-        temp.put("index.html", b"<html>");
+        temp.put("app/index.html", b"<html>");
         temp.put("_headers", b"/*\n  Content-Security-Policy: default-src 'self'");
-        let before = build_id(TEMPLATE, &collect(&temp.0).expect("папка читается"));
+        let before = build_id(TEMPLATE, &collect(&temp.0, "app").expect("папка читается"));
         temp.put("_headers", b"/*\n  Content-Security-Policy: default-src 'self'; img-src 'self' blob:");
-        let after = build_id(TEMPLATE, &collect(&temp.0).expect("папка читается"));
+        let after = build_id(TEMPLATE, &collect(&temp.0, "app").expect("папка читается"));
         assert_ne!(before, after);
     }
 
@@ -376,12 +524,17 @@ mod tests {
     #[test]
     fn renders_the_real_template() {
         let files = [
-            file("index.html", br#"<link href=/kvartik-app-1a2b.js><link href="kvartik-app-1a2b_bg.wasm">"#),
-            file("fonts/noto-sans-armenian-400.ttf", b"ttf"),
-            file("kvartik-app-1a2b.js", b"js"),
-            file("kvartik-app-1a2b_bg.wasm", b"wasm"),
+            file("404.html", b"<html>"),
+            file(
+                "app/index.html",
+                br#"<link href=/app/kvartik-app-1a2b.js><link href="kvartik-app-1a2b_bg.wasm">"#,
+            ),
+            file("app/fonts/noto-sans-armenian-400.ttf", b"ttf"),
+            file("app/kvartik-app-1a2b.js", b"js"),
+            file("app/kvartik-app-1a2b_bg.wasm", b"wasm"),
+            file("sw.js", b"root sw"),
         ];
-        let sw = render(TEMPLATE, "0123456789abcdef", &files).expect("шаблон узнан");
+        let sw = render(TEMPLATE, "0123456789abcdef", &files, "app").expect("шаблон узнан");
         assert!(sw.contains("const BUILD = \"0123456789abcdef\";\n"));
         assert!(sw.contains(
             "const FILES = [\n  \"fonts/noto-sans-armenian-400.ttf\",\n  \"kvartik-app-1a2b.js\",\n  \"kvartik-app-1a2b_bg.wasm\",\n];\n"
@@ -390,14 +543,16 @@ mod tests {
             "const LINKED = [\n  \"kvartik-app-1a2b.js\",\n  \"kvartik-app-1a2b_bg.wasm\",\n];\n"
         ));
         assert!(!sw.contains(BUILD_LINE) && !sw.contains(FILES_LINE) && !sw.contains(LINKED_LINE));
-        assert!(!sw.contains("\"index.html\""));
+        assert!(!sw.contains("index.html\"") && !sw.contains("\"sw.js\""));
     }
 
-    /// Сборка без страницы — ошибка: проверять сборку страницы было бы не
-    /// по чему, а сайт без неё не откроется.
+    /// Сборка без страницы программы — ошибка: проверять сборку страницы
+    /// было бы не по чему, а программа без неё не откроется. Страница
+    /// в корне сайта — не её страница.
     #[test]
     fn a_build_without_the_page_is_an_error() {
-        assert!(render(TEMPLATE, "id", &[file("a.js", b"")]).is_err());
+        assert!(render(TEMPLATE, "id", &[file("app/a.js", b"")], "app").is_err());
+        assert!(render(TEMPLATE, "id", &[file("index.html", b""), file("app/a.js", b"")], "app").is_err());
     }
 
     /// Шаблон без строки или с ней дважды — ошибка сборки, а не `sw.js`,
@@ -405,9 +560,9 @@ mod tests {
     /// повод не узнать строку.
     #[test]
     fn template_needs_each_line_exactly_once() {
-        let files = [file("index.html", b""), file("a.js", b"")];
+        let files = [file("app/index.html", b""), file("app/a.js", b"")];
         let all = format!("{BUILD_LINE}\r\n{FILES_LINE}\r\n{LINKED_LINE}\r\n");
-        assert!(render(&all, "id", &files).is_ok());
+        assert!(render(&all, "id", &files, "app").is_ok());
 
         let mut wrong = Vec::new();
         for template in [
@@ -418,7 +573,7 @@ mod tests {
             format!("{BUILD_LINE}\n{FILES_LINE}\n{FILES_LINE}\n{LINKED_LINE}\n"),
             format!("{BUILD_LINE}\n{FILES_LINE}\n{LINKED_LINE}\n{LINKED_LINE}\n"),
         ] {
-            if render(&template, "id", &files).is_ok() {
+            if render(&template, "id", &files, "app").is_ok() {
                 wrong.push(template);
             }
         }

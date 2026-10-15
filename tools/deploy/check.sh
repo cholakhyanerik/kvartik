@@ -24,7 +24,9 @@ fi
 site="${1%/}"
 dist="$2"
 headers_file="$dist/_headers"
-[ -f "$dist/index.html" ] || { echo "в $dist нет index.html" >&2; exit 2; }
+# Программа живёт в папке сайта, корень — лендингу (задача 65).
+app=app
+[ -f "$dist/$app/index.html" ] || { echo "в $dist нет $app/index.html" >&2; exit 2; }
 [ -f "$headers_file" ] || { echo "в $dist нет _headers" >&2; exit 2; }
 
 work="$(mktemp -d)"
@@ -67,15 +69,15 @@ csp="$(sed -n 's/^ *Content-Security-Policy: *//p' "$headers_file" | head -n 1 |
 # вписывает свой скрипт (счётчик Web Analytics) только в ответ на
 # `text/html`, а на `*/*` curl'а отдаёт страницу нетронутой (проверено
 # 2026-10-15 на kvartik.com).
-page_hash="$(sha256sum "$dist/index.html" | cut -d' ' -f1)"
+page_hash="$(sha256sum "$dist/$app/index.html" | cut -d' ' -f1)"
 for attempt in $(seq 1 12); do
   code="$(curl -sS --compressed -o "$work/page" -D "$work/page-head" -w '%{http_code}' \
-    -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' "$site/" || true)"
+    -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' "$site/$app/" || true)"
   if [ "$code" = 200 ] && [ "$(sha256sum "$work/page" | cut -d' ' -f1)" = "$page_hash" ]; then
     break
   fi
   if [ "$attempt" = 12 ]; then
-    echo "$site/: $code, страница не этой сборки" >&2
+    echo "$site/$app/: $code, страница не этой сборки" >&2
     grep -o '<script[^>]*src="https\?://[^"]*"' "$work/page" | sed 's/^/  чужой скрипт: /' >&2 || true
     exit 1
   fi
@@ -87,18 +89,36 @@ done
 check_page() {
   local got
   got="$(header content-security-policy "$work/page-head")"
-  [ "$got" = "$csp" ] || fail "/: CSP «$got», а в _headers «$csp»"
+  [ "$got" = "$csp" ] || fail "/$app/: CSP «$got», а в _headers «$csp»"
   for expected in 'x-content-type-options: nosniff' 'referrer-policy: no-referrer' \
     'cross-origin-opener-policy: same-origin'; do
     got="$(header "${expected%%:*}" "$work/page-head")"
-    [ "$got" = "${expected#*: }" ] || fail "/: ${expected%%:*} «$got», а ждали «${expected#*: }»"
+    [ "$got" = "${expected#*: }" ] || fail "/$app/: ${expected%%:*} «$got», а ждали «${expected#*: }»"
   done
   got="$(header cache-control "$work/page-head")"
   case "$got" in
-    *immutable* | *max-age=[1-9]*) fail "/: Cache-Control «$got» — страница без хэша в имени" ;;
+    *immutable* | *max-age=[1-9]*) fail "/$app/: Cache-Control «$got» — страница без хэша в имени" ;;
   esac
 }
 check_page
+
+# Корень ведёт в программу, пока там нет лендинга (`_redirects`), — 302,
+# а не 301: постоянную переадресацию браузер запомнил бы навсегда. И адрес
+# программы без косой черты — туда же: относительные ссылки страницы
+# с `/app` ушли бы в корень. Строка запроса — с собой.
+check_redirects() {
+  local pair from code got location
+  for pair in "/?q=1 302" "/$app?q=1 308"; do
+    from="${pair% *}"
+    code="${pair#* }"
+    got="$(curl -sS -o /dev/null -D "$work/redirect-head" -w '%{http_code}' "$site$from" || true)"
+    location="$(header location "$work/redirect-head")"
+    location="${location#"$site"}"
+    [ "$got $location" = "$code /$app/?q=1" ] \
+      || fail "$from: «$got $location», а ждали $code на /$app/?q=1"
+  done
+}
+check_redirects
 
 # Свой домен (задача 16). Его зона Cloudflare стоит перед Pages и меняет
 # ответы, а зона `*.pages.dev` — не наша, и там этого не проверить.
@@ -132,15 +152,18 @@ esac
 
 # Неизвестный адрес — 404.html с кодом 404 и без кэша, а не страница
 # программы с 200: иначе пропавший файл с хэшем лёг бы в кэш браузера
-# страницей с `immutable` на год (шапка 404.html).
+# страницей с `immutable` на год (шапка 404.html). И в корне, и в папке
+# программы: 404.html один, в корне, и Pages ищет его вверх по папкам.
 check_missing() {
-  local code got
-  code="$(curl -sS --compressed -o "$work/missing" -D "$work/missing-head" -w '%{http_code}' \
-    "$site/kvartik-no-such-file-0000000000000000.js" || true)"
-  [ "$code" = 404 ] || fail "неизвестный адрес: $code, а ждали 404"
-  cmp -s "$work/missing" "$dist/404.html" || fail "неизвестный адрес: тело — не 404.html этой сборки"
-  got="$(header cache-control "$work/missing-head")"
-  [[ "$got" == *no-store* ]] || fail "неизвестный адрес: Cache-Control «$got», а ждали no-store"
+  local code got path
+  for path in "kvartik-no-such-file-0000000000000000.js" "$app/kvartik-no-such-file-0000000000000000.js"; do
+    code="$(curl -sS --compressed -o "$work/missing" -D "$work/missing-head" -w '%{http_code}' \
+      "$site/$path" || true)"
+    [ "$code" = 404 ] || fail "/$path: $code, а ждали 404"
+    cmp -s "$work/missing" "$dist/404.html" || fail "/$path: тело — не 404.html этой сборки"
+    got="$(header cache-control "$work/missing-head")"
+    [[ "$got" == *no-store* ]] || fail "/$path: Cache-Control «$got», а ждали no-store"
+  done
 }
 check_missing
 
@@ -158,11 +181,11 @@ expected_type() {
   esac
 }
 
-# Каждый файл сборки. С хэшем в имени (Trunk и хук сборки пишут его
-# шестнадцатью знаками перед расширением) — `immutable`; без хэша — без
-# долгого кэша. Тексты и wasm — сжатыми. Страницы HTML — выше: на
-# `/404.html` Pages отвечает переадресацией на `/404`. Скрытые файлы
-# (`.trunk-lock` Trunk) в выкладку не идут: их не берёт артефакт CI.
+# Каждый файл сборки — и корня, и программы. С хэшем в имени (Trunk и хук
+# сборки пишут его шестнадцатью знаками перед расширением) — `immutable`;
+# без хэша — без долгого кэша. Тексты и wasm — сжатыми. Страницы HTML —
+# выше: на `/404.html` Pages отвечает переадресацией на `/404`. Скрытые
+# файлы (`.trunk-lock` Trunk) в выкладку не идут: их не берёт артефакт CI.
 checked=0
 while IFS= read -r path; do
   checked=$((checked + 1))
@@ -192,12 +215,14 @@ while IFS= read -r path; do
       [ -n "$encoding" ] || fail "$path: не сжат"
       ;;
   esac
-  # Тело `sw.js` — этой сборки: по нему браузер узнаёт новую версию.
-  if [ "$path" = sw.js ]; then
-    if curl -sS --compressed -o "$work/sw" "$site/sw.js"; then
-      cmp -s "$work/sw" "$dist/sw.js" || fail "sw.js: не этой сборки"
+  # Тело обоих `sw.js` — этой сборки: по `sw.js` программы браузер
+  # узнаёт новую версию, а по `sw.js` корня — что прежний service worker
+  # корня пора снять.
+  if [ "${path##*/}" = sw.js ]; then
+    if curl -sS --compressed -o "$work/sw" "$site/$path"; then
+      cmp -s "$work/sw" "$dist/$path" || fail "$path: не этой сборки"
     else
-      fail "sw.js: не скачан"
+      fail "$path: не скачан"
     fi
   fi
 done < <(cd "$dist" && find . -type f ! -name '_*' ! -name '.*' ! -name '*.html' | sed 's|^\./||' | sort)
@@ -208,4 +233,4 @@ if [ ${#failures[@]} -gt 0 ]; then
   printf '%s\n' "Выкладка $site — провалов: ${#failures[@]}" "${failures[@]}" >&2
   exit 1
 fi
-echo "Выкладка $site: страница, CSP и $checked файлов — как задумано"
+echo "Выкладка $site: страница программы, переадресации, CSP и $checked файлов — как задумано"

@@ -25,18 +25,16 @@
          узкий канал с wasm, а CSS со шрифтами браузер находит и так раньше. -->
     <!-- Программа как приложение (задача 8): манифест и значки — под
          постоянными именами, без хэша: на них ссылается манифест, а его Trunk
-         не переписывает. Адреса относительные: сайт может жить и не в корне
-         домена (задача 65; Trunk тогда собирает с `public_url`). Значок
-         вкладки объявлен, и браузер не просит
-         /favicon.ico, которого нет. `sw.js` пишет хук сборки (Trunk.toml),
-         а регистрирует окно (src/platform/pwa.rs). -->
+         не переписывает. Адреса относительные: программа живёт в папке сайта
+         /app/, а не в корне (задача 65, `public_url` в Trunk.toml). Значок
+         вкладки объявлен, и браузер не просит /favicon.ico, которого нет.
+         `sw.js` пишет хук сборки (Trunk.toml), а регистрирует окно
+         (src/platform/pwa.rs). Файлы корня сайта — заголовки хостинга,
+         404.html, переадресацию корня на программу — кладёт в корень тот же
+         хук из public/root/, а не Trunk: Trunk положил бы их в папку
+         программы. -->
     <link data-trunk rel="copy-file" href="public/manifest.webmanifest" />
     <link data-trunk rel="copy-dir" href="public/icons" />
-    <!-- Заголовки хостинга (задача 15): CSP и кэш. Cloudflare Pages читает
-         файл из корня выкладки и сам его не отдаёт. И ответ на адрес,
-         которого нет, — шапка 404.html. -->
-    <link data-trunk rel="copy-file" href="public/_headers" />
-    <link data-trunk rel="copy-file" href="public/404.html" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="icons/icon-32.png" sizes="32x32" type="image/png" />
     <link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png" />

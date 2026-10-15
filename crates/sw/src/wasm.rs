@@ -94,9 +94,10 @@ pub struct Built {
     pub parts: usize,
 }
 
-/// Собрать wasm пакета `package` в папку сборки `staging` и вписать запуск
-/// в её `index.html`.
-pub fn build(package: &str, staging: &Path) -> Result<Built, String> {
+/// Собрать wasm пакета `package` в папку программы `app` и вписать запуск
+/// в её `index.html`. `public_url` — адрес этой папки на сайте (`/app/`):
+/// с него страница просит wasm и клей.
+pub fn build(package: &str, app: &Path, public_url: &str) -> Result<Built, String> {
     let release = match env::var("TRUNK_PROFILE").as_deref() {
         Ok("release") => true,
         Ok("debug") => false,
@@ -106,7 +107,6 @@ pub fn build(package: &str, staging: &Path) -> Result<Built, String> {
             );
         }
     };
-    let public_url = env::var("TRUNK_PUBLIC_URL").unwrap_or_else(|_| "/".to_owned());
     let bindgen = Tool::wasm_bindgen()?;
     let opt = if release {
         Some(Tool::wasm_opt()?)
@@ -264,7 +264,7 @@ pub fn build(package: &str, staging: &Path) -> Result<Built, String> {
     }
     outputs.push((loader_name.clone(), loader.into_bytes()));
 
-    let page_path = staging.join("index.html");
+    let page_path = app.join("index.html");
     let page = text(&page_path)?;
     let integrity = |name: &str| {
         let bytes = &outputs
@@ -277,14 +277,14 @@ pub fn build(package: &str, staging: &Path) -> Result<Built, String> {
     let page = with_start(
         &page,
         &Start {
-            public_url: &public_url,
+            public_url,
             glue: (&glue_name, &integrity(&glue_name)),
             loader: (!parts.is_empty()).then(|| (loader_name.as_str(), integrity(&loader_name))),
             wasm: (&wasm_name, &integrity(&wasm_name)),
         },
     )?;
     for (name, bytes) in &outputs {
-        let path = staging.join(name);
+        let path = app.join(name);
         fs::write(&path, bytes).map_err(|error| format!("{}: {error}", path.display()))?;
     }
     fs::write(&page_path, page).map_err(|error| format!("{}: {error}", page_path.display()))?;
@@ -790,7 +790,7 @@ mod tests {
     #[test]
     fn start_goes_before_head_end() {
         let links = Start {
-            public_url: "/",
+            public_url: "/app/",
             glue: ("kvartik-app-1.js", "sha384-b"),
             loader: Some(("kvartik-split-1.js", "sha384-c".to_owned())),
             wasm: ("kvartik-app-1_bg.wasm", "sha384-d"),
@@ -803,9 +803,9 @@ mod tests {
         assert_eq!(
             page,
             "<html><head><title>K</title>\
-             <script type=module src=\"/kvartik-app-1.js\" integrity=\"sha384-b\" crossorigin></script>\
-             <link rel=modulepreload href=\"/kvartik-split-1.js\" integrity=\"sha384-c\" crossorigin>\
-             <link rel=preload as=fetch type=application/wasm href=\"/kvartik-app-1_bg.wasm\" \
+             <script type=module src=\"/app/kvartik-app-1.js\" integrity=\"sha384-b\" crossorigin></script>\
+             <link rel=modulepreload href=\"/app/kvartik-split-1.js\" integrity=\"sha384-c\" crossorigin>\
+             <link rel=preload as=fetch type=application/wasm href=\"/app/kvartik-app-1_bg.wasm\" \
              integrity=\"sha384-d\" crossorigin></head><body></body></html>"
         );
         assert!(with_start("<html><body></body></html>", &links).is_err());
