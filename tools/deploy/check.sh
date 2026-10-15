@@ -35,9 +35,22 @@ header() {
 
 # Ответ на GET: код, заголовки — в файл, тело — в файл. `Accept-Encoding`
 # — как у браузера; тело не разжимается, чтобы видеть, сжал ли хостинг.
+# Сразу после выкладки край Cloudflare бывает отвечает 5xx: у первой
+# выкладки 16 файлов из 79 пришли с 522 («не дождался источника»), а через
+# минуту все — с 200 и верными заголовками (2026-10-15). Поэтому 5xx
+# и обрыв связи (000) повторяются до пяти раз, и провал — только
+# устойчивый.
 fetch() {
-  curl -sS -o "$work/body" -D "$work/head" -w '%{http_code}' \
-    -H 'Accept-Encoding: br, gzip' "$site/$1"
+  local code attempt
+  for attempt in 1 2 3 4 5; do
+    code="$(curl -sS -o "$work/body" -D "$work/head" -w '%{http_code}' \
+      -H 'Accept-Encoding: br, gzip' "$site/$1" || true)"
+    case "$code" in
+      5?? | 000) [ "$attempt" = 5 ] || sleep 3 ;;
+      *) break ;;
+    esac
+  done
+  echo "$code"
 }
 
 # CSP — та строка, что в `_headers` у правила `/*`: проверяется, что
