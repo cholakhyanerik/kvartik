@@ -28,9 +28,10 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # Проект Cloudflare Pages с прямой загрузкой (задача 50): сайт —
-  # `kvartik.pages.dev`, пока нет своего домена (задача 16).
+  # Проект Cloudflare Pages с прямой загрузкой (задача 50) и его свой
+  # домен (задача 16): `kvartik.pages.dev` переадресует на него.
   PAGES_PROJECT: kvartik
+  SITE_URL: https://kvartik.com
   # Та же версия, что в `trunk-version` у crates/app/Trunk.toml: старше Trunk
   # откажется собирать. Меняется версия — меняются оба места и сумма ниже.
   TRUNK_VERSION: v0.22.0-rc.2
@@ -246,3 +247,10 @@ jobs:
         env:
           URL: ${{ steps.site.outputs.url }}
         run: bash tools/deploy/check.sh "$URL" dist
+
+      # И на своём домене: его зона Cloudflare стоит перед Pages и меняет
+      # ответы, а настройку зоны в панели правят без сборки и без CI. Адрес
+      # выкладки выше её не проходит.
+      - name: Проверка своего домена
+        if: github.event_name == 'push'
+        run: bash tools/deploy/check.sh "$SITE_URL" dist

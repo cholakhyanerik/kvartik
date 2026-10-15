@@ -3,7 +3,11 @@
 # как она задумана. Зовёт её CI сразу после выкладки (`.github/workflows/
 # ci.yml`), а можно и руками — с адресом и собранной папкой:
 #
-#   tools/deploy/check.sh https://kvartik.pages.dev crates/app/dist
+#   tools/deploy/check.sh https://kvartik.com crates/app/dist
+#
+# Папка — та, что выложена: с живым сайтом сверяется артефакт `dist`
+# прогона CI (`gh run download <прогон>`). Сборка на Windows байт в байт
+# с ним не совпадает: в wasm записаны пути исходников (2026-10-15).
 #
 # Зачем: заголовки решает хостинг, а не сборка, и молча (CLAUDE.md,
 # Правило 6). Без CSP «ничего не уходит с устройства» держится только на
@@ -59,14 +63,22 @@ csp="$(sed -n 's/^ *Content-Security-Policy: *//p' "$headers_file" | head -n 1 |
 [ -n "$csp" ] || { echo "в _headers нет Content-Security-Policy" >&2; exit 2; }
 
 # Выкладка доходит до края сети не мгновенно: первый запрос ждёт страницу
-# этой сборки до минуты.
+# этой сборки до минуты. Страница — с `Accept` браузера: зона Cloudflare
+# вписывает свой скрипт (счётчик Web Analytics) только в ответ на
+# `text/html`, а на `*/*` curl'а отдаёт страницу нетронутой (проверено
+# 2026-10-15 на kvartik.com).
 page_hash="$(sha256sum "$dist/index.html" | cut -d' ' -f1)"
 for attempt in $(seq 1 12); do
-  code="$(curl -sS --compressed -o "$work/page" -D "$work/page-head" -w '%{http_code}' "$site/" || true)"
+  code="$(curl -sS --compressed -o "$work/page" -D "$work/page-head" -w '%{http_code}' \
+    -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' "$site/" || true)"
   if [ "$code" = 200 ] && [ "$(sha256sum "$work/page" | cut -d' ' -f1)" = "$page_hash" ]; then
     break
   fi
-  [ "$attempt" = 12 ] && { echo "$site/: $code, страница не этой сборки" >&2; exit 1; }
+  if [ "$attempt" = 12 ]; then
+    echo "$site/: $code, страница не этой сборки" >&2
+    grep -o '<script[^>]*src="https\?://[^"]*"' "$work/page" | sed 's/^/  чужой скрипт: /' >&2 || true
+    exit 1
+  fi
   sleep 5
 done
 
@@ -87,6 +99,36 @@ check_page() {
   esac
 }
 check_page
+
+# Свой домен (задача 16). Его зона Cloudflare стоит перед Pages и меняет
+# ответы, а зона `*.pages.dev` — не наша, и там этого не проверить.
+# Отчёты о сбоях (`Nel`, `Report-To`) браузер слал бы на
+# a.nel.cloudflare.com (CLAUDE.md, Правило 13), а второй CSP «только
+# отчёт» (Client-side security, бывший Page Shield) — список скриптов
+# страницы в Cloudflare; `Speculation-Rules` (Speed Brain) загружал бы
+# страницы заранее. HSTS — сайт только по https. А http
+# и `www` — переадресацией сюда же, с путём и строкой запроса: программа
+# на втором адресе завела бы человеку данные второго происхождения.
+host="${site#*://}"
+host="${host%%/*}"
+check_own_domain() {
+  local got name from
+  for name in nel report-to content-security-policy-report-only speculation-rules; do
+    got="$(header "$name" "$work/page-head")"
+    [ -z "$got" ] || fail "/: заголовок $name «$got» — зона его ставить не должна"
+  done
+  got="$(header strict-transport-security "$work/page-head")"
+  [[ "$got" == *max-age=[1-9]* ]] || fail "/: Strict-Transport-Security «$got», а ждали max-age"
+  for from in "http://$host" "https://www.$host"; do
+    got="$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' "$from/kvartik-path?q=1" || true)"
+    [ "$got" = "301 https://$host/kvartik-path?q=1" ] \
+      || fail "$from: «$got», а ждали 301 на https://$host/kvartik-path?q=1"
+  done
+}
+case "$host" in
+  *.pages.dev) ;;
+  *) check_own_domain ;;
+esac
 
 # Неизвестный адрес — 404.html с кодом 404 и без кэша, а не страница
 # программы с 200: иначе пропавший файл с хэшем лёг бы в кэш браузера

@@ -44,7 +44,7 @@ use web_sys::{
 use super::reload;
 
 /// Адрес service worker — от адреса страницы: сайт может жить и не в корне
-/// домена (задача 16; Trunk тогда собирает с `public_url`).
+/// домена (задача 65; Trunk тогда собирает с `public_url`).
 const SCRIPT: &str = "sw.js";
 
 /// Начало имён кэшей service worker (`PREFIX` в `sw.js`).
