@@ -1110,7 +1110,12 @@ async fn clients_are_added_found_deleted_and_restored() {
         Some(restore) => restore.click(),
         None => wrong.push("удалённого нет в списке удалённых".to_owned()),
     }
-    sleep(100).await;
+    // Список меняется, когда запись легла на диск (`durability: "strict"`):
+    // ждать слова о восстановлении, а не паузы — на диске CI 100 мс не
+    // хватило (2026-10-15).
+    if !wait_for(&host, &fill(t(lang, Key::ClientRestored), &["Acme Inc."])).await {
+        wrong.push("восстановление из списка удалённых не подтвердилось".to_owned());
+    }
     if client_names(&host) != both {
         wrong.push(format!("после восстановления из списка: {:?}", client_names(&host)));
     }
