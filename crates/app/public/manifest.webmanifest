@@ -1,16 +1,16 @@
 {
   "id": "./",
-  "name": "ԱՁ գրասենյակ",
-  "short_name": "ԱՁ գրասենյակ",
+  "name": "Kvartik",
+  "short_name": "Kvartik",
   "name_localized": {
-    "hy": "ԱՁ գրասենյակ",
-    "ru": "Офис ИП",
-    "en": "IE Office"
+    "hy": "Kvartik",
+    "ru": "Kvartik",
+    "en": "Kvartik"
   },
   "short_name_localized": {
-    "hy": "ԱՁ գրասենյակ",
-    "ru": "Офис ИП",
-    "en": "IE Office"
+    "hy": "Kvartik",
+    "ru": "Kvartik",
+    "en": "Kvartik"
   },
   "lang": "hy",
   "dir": "ltr",
