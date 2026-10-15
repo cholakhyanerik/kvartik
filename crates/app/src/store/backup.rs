@@ -1,5 +1,9 @@
 //! Файл копии из базы и обратно (задача 7).
 //!
+//! Долгие шаги — разбор записей, сжатие, base64 — идут кусками с паузой
+//! (`platform::pause`): с файлами книги копия — десятки мегабайт, и одним
+//! куском она держала страницу секундами (0.0.28).
+//!
 //! Что в файле и как записи сливаются — ядро (`kvartik_core::format::backup`),
 //! шифр — WebCrypto (`crate::platform::crypto`). Здесь — путь между ними
 //! и базой: прочитать все записи одной транзакцией, собрать и зашифровать
@@ -13,6 +17,7 @@ use kvartik_core::format::backup::{
 
 use super::{Dumped, Store, StoreError, Writes};
 use crate::platform::crypto::{self, CryptoError, Key};
+use crate::platform::pause::breathe;
 
 /// Почему копия не сделана или не восстановлена.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -68,15 +73,17 @@ pub async fn make(
     iterations: u32,
 ) -> Result<Made, Failure> {
     let dumped = store.read()?.dump().await?;
-    let collected = backup::collect(kinds, dumped.iter().map(Dumped::raw)).map_err(newer)?;
+    let collected = backup::collect_sliced(kinds, dumped.iter().map(Dumped::raw), &mut breathe)
+        .await
+        .map_err(newer)?;
     for why in collected.unreadable() {
         super::log("backup", &format!("не вошла в копию: {why}").into());
     }
-    let packed = backup::pack(header, collected.entries());
+    let packed = backup::pack_sliced(header, collected.entries(), &mut breathe).await;
     let iv = crypto::random(IV_BYTES)?;
     let lock = Lock::new(iterations, salt.to_vec(), iv).ok_or(CryptoError::Failed)?;
     let ciphertext = crypto::encrypt(key, lock.iv(), &packed).await?;
-    let file = backup::seal(header, &lock, &ciphertext);
+    let file = backup::seal_sliced(header, &lock, &ciphertext, &mut breathe).await;
     if file.len() as u64 > MAX_FILE_BYTES {
         return Err(Failure::TooLarge);
     }
@@ -98,7 +105,7 @@ pub async fn unlock(
     let lock = sealed.lock();
     let key = crypto::derive(password, lock.salt(), lock.iterations()).await?;
     let plaintext = crypto::decrypt(&key, lock.iv(), sealed.ciphertext()).await?;
-    let entries = backup::read(kinds, sealed, &plaintext)?;
+    let entries = backup::read_sliced(kinds, sealed, &plaintext, &mut breathe).await?;
     Ok((entries, key))
 }
 

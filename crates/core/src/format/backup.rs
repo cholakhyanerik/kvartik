@@ -42,6 +42,17 @@
 //! байтов. Сжат ли текст, говорит версия в шапке, а не отдельное поле:
 //! версии 1–5 не сжимали, с 6-й сжимают всегда.
 //!
+//! # Кусками, с паузой
+//!
+//! С файлами книги копия — десятки мегабайт, и разбор, сжатие и base64
+//! одним куском держали страницу секундами (замер 0.0.27: 20 МБ —
+//! кадр в 5,7 с на телефоне). Поэтому долгие шаги — `*_sliced` — идут
+//! кусками по [`SLICE_BYTES`] и между ними ждут паузу, которую даёт окно:
+//! отдать управление браузеру (Правило 1). Ядро паузу не выбирает и часов
+//! не знает — меряет работу байтами. Те же шаги без пауз (`collect`,
+//! `pack`, `seal`, `open`, `read`) — та же работа одним куском: так их
+//! зовут тесты и ядро.
+//!
 //! Что меняет этот файл — меняет версию формата ([`FORMAT_VERSION`]):
 //! шапку, замок, имена шифра, вид записи в списке. Прошлые версии читаются
 //! по своему номеру; образец копии каждой выпущенной версии лежит
@@ -64,12 +75,15 @@
 //! (задача 41).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
+use std::pin::pin;
+use std::task::{Context, Poll, Waker};
 
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 use super::{
-    FIRST_VERSION, FORMAT_VERSION, FormatError, Stored, base64, decode_record, split, wrap,
+    FIRST_VERSION, FORMAT_VERSION, FormatError, Stored, base64, decode_record, split_raw, wrap,
 };
 use crate::model::attachment::Attachment;
 use crate::model::client::Client;
@@ -107,6 +121,61 @@ const PACKED_SINCE: u32 = 6;
 /// Вдвое больше предела файла — с запасом на текст записей, который
 /// сжимается в разы.
 pub const MAX_PLAIN_BYTES: usize = 2 * MAX_FILE_BYTES as usize;
+
+/// Сколько байтов работы между паузами у шагов `*_sliced`: полмегабайта —
+/// около 12 мс сжатия в wasm на машине автора и до 80 мс с замедлением
+/// процессора ×4 (замер 0.0.28; мегабайт там давал кадры по 160 мс):
+/// страница стоит не дольше нескольких кадров, а пауз на копию в 20 МБ —
+/// сотня.
+pub const SLICE_BYTES: usize = 512 << 10;
+
+/// Сколько весит в счётчике пауз запись короче этого: разбор мелкой записи
+/// с её полями дороже, чем столько же байтов base64 файла, — 2 000 записей
+/// книги по полкилобайта без этого шли одним куском почти в полсекунды
+/// на телефоне (замер 0.0.28).
+const RECORD_WEIGHT: usize = 4 << 10;
+
+/// Работа целиком, без пауз: будущее, которое ни разу не ждёт (`no_pause`),
+/// готово с первого опроса.
+fn at_once<F: Future>(work: F) -> F::Output {
+    let mut work = pin!(work);
+    let mut context = Context::from_waker(Waker::noop());
+    loop {
+        if let Poll::Ready(output) = work.as_mut().poll(&mut context) {
+            return output;
+        }
+    }
+}
+
+/// Пауза, которая не ждёт.
+fn no_pause() -> std::future::Ready<()> {
+    std::future::ready(())
+}
+
+/// Счётчик работы: набрался кусок в [`SLICE_BYTES`] — пауза.
+struct Meter<'p, P> {
+    pause: &'p mut P,
+    done: usize,
+}
+
+impl<'p, P, F> Meter<'p, P>
+where
+    P: FnMut() -> F,
+    F: Future<Output = ()>,
+{
+    fn new(pause: &'p mut P) -> Self {
+        Self { pause, done: 0 }
+    }
+
+    /// Сделано ещё `bytes` байтов работы.
+    async fn add(&mut self, bytes: usize) {
+        self.done += bytes;
+        if self.done >= SLICE_BYTES {
+            self.done = 0;
+            (self.pause)().await;
+        }
+    }
+}
 
 /// Уровень сжатия `miniz_oxide`: первый, самый быстрый. Замер 2026-10-15
 /// (задача 14, машина автора, сборка `release`): копия в 22 МБ — 2 МБ
@@ -171,7 +240,7 @@ pub const REMIND_AFTER_DAYS: i32 = 7;
 #[derive(Clone, Copy)]
 pub struct Kind {
     name: &'static str,
-    check: fn(u32, &str) -> Result<Checked, FormatError>,
+    check: fn(u32, &RawValue) -> Result<Checked, FormatError>,
 }
 
 impl Kind {
@@ -219,13 +288,22 @@ struct Checked {
 
 /// Разбор записи вида `T` той версии формата, которой она сделана, и запись
 /// её обратно — уже в текущей.
-fn check<T: Stored>(version: u32, record: &str) -> Result<Checked, FormatError> {
-    let record: T = decode_record(version, record)?;
-    let json = serde_json::value::to_raw_value(&record).expect(
-        "запись в JSON не падает: в типах записей нет ни словарей с ключами-структурами, ни своих ошибок",
-    );
+///
+/// Запись текущей версии ложится тем же текстом: разобрать её нужно —
+/// это проверка, — а записывать заново незачем: что программа пишет, то
+/// она и читает, слово в слово. Так файлы книги не перекодируются в base64
+/// второй раз — у копии с файлами это была треть разбора (замер 0.0.28).
+fn check<T: Stored>(version: u32, record: &RawValue) -> Result<Checked, FormatError> {
+    let parsed: T = decode_record(version, record.get())?;
+    let json = if version == FORMAT_VERSION {
+        record.to_owned()
+    } else {
+        serde_json::value::to_raw_value(&parsed).expect(
+            "запись в JSON не падает: в типах записей нет ни словарей с ключами-структурами, ни своих ошибок",
+        )
+    };
     Ok(Checked {
-        meta: record.meta().clone(),
+        meta: parsed.meta().clone(),
         record: json,
     })
 }
@@ -271,7 +349,7 @@ fn read_stored(kinds: &[Kind], raw: Raw<'_>) -> Result<Entry, FormatError> {
         .ok_or_else(|| FormatError::Damaged("значение не строка".to_owned()))?;
     // Версия — раньше вида: незнакомый вид новее программы — это запись
     // новой версии, а не порча.
-    let (version, record) = split(text)?;
+    let (version, record) = split_raw(text)?;
     let kind = find(kinds, raw.kind)
         .ok_or_else(|| FormatError::Damaged(format!("вид «{}» программе незнаком", raw.kind)))?;
     let checked = (kind.check)(version, record)?;
@@ -321,6 +399,20 @@ pub fn collect<'a>(
     kinds: &[Kind],
     raw: impl IntoIterator<Item = Raw<'a>>,
 ) -> Result<Collected, FormatError> {
+    at_once(collect_sliced(kinds, raw, &mut no_pause))
+}
+
+/// [`collect`] кусками: пауза — после каждого мегабайта разобранных записей.
+pub async fn collect_sliced<'a, P, F>(
+    kinds: &[Kind],
+    raw: impl IntoIterator<Item = Raw<'a>>,
+    pause: &mut P,
+) -> Result<Collected, FormatError>
+where
+    P: FnMut() -> F,
+    F: Future<Output = ()>,
+{
+    let mut meter = Meter::new(pause);
     let mut entries = Vec::new();
     let mut unreadable = Vec::new();
     for item in raw {
@@ -331,6 +423,7 @@ pub fn collect<'a>(
                 unreadable.push(format!("{} {}: {why}", item.kind, item.id));
             }
         }
+        meter.add(item.text.map_or(0, str::len).max(RECORD_WEIGHT)).await;
     }
     Ok(Collected {
         entries,
@@ -409,7 +502,65 @@ pub fn plaintext(header: &Header, entries: &[Entry]) -> String {
 /// То, что окно шифрует: открытый текст копии ([`plaintext`]), сжатый
 /// DEFLATE (RFC 1951) — так пишет версия формата 6 и новее.
 pub fn pack(header: &Header, entries: &[Entry]) -> Vec<u8> {
-    miniz_oxide::deflate::compress_to_vec(plaintext(header, entries).as_bytes(), PACK_LEVEL)
+    at_once(pack_sliced(header, entries, &mut no_pause))
+}
+
+/// [`pack`] кусками: пауза — после каждого мегабайта сжатого текста.
+pub async fn pack_sliced<P, F>(header: &Header, entries: &[Entry], pause: &mut P) -> Vec<u8>
+where
+    P: FnMut() -> F,
+    F: Future<Output = ()>,
+{
+    deflate_sliced(plaintext(header, entries).as_bytes(), pause).await
+}
+
+/// Сжатие DEFLATE без обёртки (RFC 1951) кусками по [`SLICE_BYTES`] —
+/// поток один, и разжимается он целиком, как сжатый одним куском.
+async fn deflate_sliced<P, F>(input: &[u8], pause: &mut P) -> Vec<u8>
+where
+    P: FnMut() -> F,
+    F: Future<Output = ()>,
+{
+    use miniz_oxide::deflate::core::{
+        CompressorOxide, TDEFLFlush, TDEFLStatus, compress, create_comp_flags_from_zip_params,
+    };
+    // Окно 0 — без обёртки zlib, как у `compress_to_vec`.
+    let flags = create_comp_flags_from_zip_params(i32::from(PACK_LEVEL), 0, 0);
+    let mut compressor = CompressorOxide::new(flags);
+    let mut output = vec![0; input.len() / 2 + 1024];
+    let mut written = 0;
+    let mut meter = Meter::new(pause);
+    let mut rest = input;
+    loop {
+        let (mut chunk, after) = rest.split_at(rest.len().min(SLICE_BYTES));
+        let last = after.is_empty();
+        let flush = if last { TDEFLFlush::Finish } else { TDEFLFlush::None };
+        let taken = chunk.len();
+        loop {
+            if output.len() - written < 1024 {
+                output.resize(output.len() * 2 + 1024, 0);
+            }
+            let (status, used, made) = compress(&mut compressor, chunk, &mut output[written..], flush);
+            chunk = &chunk[used..];
+            written += made;
+            match status {
+                TDEFLStatus::Done => {
+                    output.truncate(written);
+                    return output;
+                }
+                TDEFLStatus::Okay if chunk.is_empty() && !last => break,
+                // Нужно больше места — или конец ещё не записан.
+                TDEFLStatus::Okay => {}
+                // С постоянными параметрами и без своего обработчика вывода
+                // этого не бывает — так считает и `compress_to_vec`.
+                TDEFLStatus::BadParam | TDEFLStatus::PutBufFailed => {
+                    unreachable!("сжатие с постоянными параметрами не отказывает")
+                }
+            }
+        }
+        rest = after;
+        meter.add(taken).await;
+    }
 }
 
 /// Замок одного файла: из чего ключ получается из пароля и вектор шифра.
@@ -478,7 +629,16 @@ struct SealedOut<'a> {
 
 /// Файл копии: шапка, замок и шифротекст.
 pub fn seal(header: &Header, lock: &Lock, ciphertext: &[u8]) -> String {
-    serde_json::to_string(&SealedOut {
+    at_once(seal_sliced(header, lock, ciphertext, &mut no_pause))
+}
+
+/// [`seal`] кусками: base64 шифротекста — по мегабайту с паузой.
+pub async fn seal_sliced<P, F>(header: &Header, lock: &Lock, ciphertext: &[u8], pause: &mut P) -> String
+where
+    P: FnMut() -> F,
+    F: Future<Output = ()>,
+{
+    let mut file = serde_json::to_string(&SealedOut {
         file: FILE_MARK,
         format_version: header.format_version,
         app_version: &header.app_version,
@@ -492,9 +652,24 @@ pub fn seal(header: &Header, lock: &Lock, ciphertext: &[u8]) -> String {
             name: CIPHER_NAME.to_owned(),
             iv: base64::encode(&lock.iv),
         },
-        data: base64::encode(ciphertext),
+        data: String::new(),
     })
-    .expect("файл копии в JSON не падает: в нём только строки и числа")
+    .expect("файл копии в JSON не падает: в нём только строки и числа");
+    // Данные встают в конец, между кавычками `"data":""}`, а не идут через
+    // serde: тот прошёл бы по десяткам мегабайт ещё раз, ища, что
+    // экранировать, а в base64 нет ни кавычек, ни обратной косой черты.
+    let tail = file.split_off(file.len() - 2);
+    debug_assert_eq!(tail, "\"}");
+    file.reserve(ciphertext.len().div_ceil(3) * 4 + tail.len());
+    // Куски — по три байта целиком: base64 кусков подряд — base64 целого.
+    let piece = SLICE_BYTES / 3 * 3;
+    let mut meter = Meter::new(pause);
+    for chunk in ciphertext.chunks(piece) {
+        file.push_str(&base64::encode(chunk));
+        meter.add(chunk.len()).await;
+    }
+    file.push_str(&tail);
+    file
 }
 
 /// Почему файл копии не открыт.
@@ -575,6 +750,15 @@ struct SealedIn {
 /// новее программы с незнакомыми полями иначе выглядела бы испорченной.
 /// Свой файл программа узнаёт и обрезанным: он всегда начинается с метки.
 pub fn open(text: &str) -> Result<Sealed, BackupError> {
+    at_once(open_sliced(text, &mut no_pause))
+}
+
+/// [`open`] кусками: шифротекст из base64 — по мегабайту с паузой.
+pub async fn open_sliced<P, F>(text: &str, pause: &mut P) -> Result<Sealed, BackupError>
+where
+    P: FnMut() -> F,
+    F: Future<Output = ()>,
+{
     let mark = match serde_json::from_str::<Mark>(text) {
         Ok(mark) => mark,
         Err(_) if text.starts_with(MARK_PREFIX) => {
@@ -608,7 +792,9 @@ pub fn open(text: &str) -> Result<Sealed, BackupError> {
     let iv = base64::decode(&fields.cipher.iv).ok_or_else(|| damaged("вектор — не base64"))?;
     let lock = Lock::new(fields.kdf.iterations, salt, iv)
         .ok_or_else(|| damaged("параметры шифра за пределами допустимого"))?;
-    let ciphertext = base64::decode(&fields.data).ok_or_else(|| damaged("данные — не base64"))?;
+    let ciphertext = decode_sliced(&fields.data, pause)
+        .await
+        .ok_or_else(|| damaged("данные — не base64"))?;
     if ciphertext.len() < TAG_BYTES {
         return Err(damaged("данные короче метки подлинности"));
     }
@@ -621,6 +807,34 @@ pub fn open(text: &str) -> Result<Sealed, BackupError> {
         lock,
         ciphertext,
     })
+}
+
+/// Байты из base64 кусками по четыре знака целиком, с паузой после
+/// каждого мегабайта. Выравнивание `=` бывает только в конце всего текста,
+/// а не в конце куска: иначе подправленный файл читался бы «как-нибудь»
+/// (Правило 13). `None` — не base64.
+async fn decode_sliced<P, F>(text: &str, pause: &mut P) -> Option<Vec<u8>>
+where
+    P: FnMut() -> F,
+    F: Future<Output = ()>,
+{
+    if !text.len().is_multiple_of(4) || !text.is_ascii() {
+        return None;
+    }
+    let piece = SLICE_BYTES / 4 * 4;
+    let mut bytes = Vec::with_capacity(text.len() / 4 * 3);
+    let mut meter = Meter::new(pause);
+    let mut rest = text;
+    while !rest.is_empty() {
+        let (chunk, after) = rest.split_at(rest.len().min(piece));
+        if !after.is_empty() && chunk.ends_with('=') {
+            return None;
+        }
+        bytes.extend(base64::decode(chunk)?);
+        meter.add(chunk.len()).await;
+        rest = after;
+    }
+    Some(bytes)
 }
 
 /// Начало каждого файла копии: так его пишет [`seal`].
@@ -662,9 +876,23 @@ struct RecordIn<'a> {
 /// знает, или две записи с одним идентификатором — и не читается вся копия.
 /// Половина копии в базе выглядела бы восстановленной, а не была бы ею.
 pub fn read(kinds: &[Kind], sealed: &Sealed, opened: &[u8]) -> Result<Vec<Entry>, BackupError> {
+    at_once(read_sliced(kinds, sealed, opened, &mut no_pause))
+}
+
+/// [`read`] кусками: разжатие и разбор записей — по мегабайту с паузой.
+pub async fn read_sliced<P, F>(
+    kinds: &[Kind],
+    sealed: &Sealed,
+    opened: &[u8],
+    pause: &mut P,
+) -> Result<Vec<Entry>, BackupError>
+where
+    P: FnMut() -> F,
+    F: Future<Output = ()>,
+{
     let unpacked;
     let plaintext = if sealed.header.format_version >= PACKED_SINCE {
-        unpacked = unpack(opened, MAX_PLAIN_BYTES)?;
+        unpacked = unpack_sliced(opened, MAX_PLAIN_BYTES, pause).await?;
         unpacked.as_slice()
     } else {
         opened
@@ -681,10 +909,12 @@ pub fn read(kinds: &[Kind], sealed: &Sealed, opened: &[u8]) -> Result<Vec<Entry>
     }
     let mut seen = BTreeSet::new();
     let mut entries = Vec::with_capacity(plain.records.len());
+    let mut meter = Meter::new(pause);
     for item in plain.records {
+        meter.add(item.record.get().len().max(RECORD_WEIGHT)).await;
         let kind = find(kinds, &item.kind)
             .ok_or_else(|| damaged(format!("вид «{}» программе незнаком", item.kind)))?;
-        let checked = (kind.check)(inner.format_version, item.record.get())?;
+        let checked = (kind.check)(inner.format_version, item.record)?;
         if !seen.insert((kind.name, checked.meta.id())) {
             return Err(damaged(format!(
                 "запись {} {} в копии дважды",
@@ -703,9 +933,47 @@ pub fn read(kinds: &[Kind], sealed: &Sealed, opened: &[u8]) -> Result<Vec<Entry>
 
 /// Сжатый текст копии ([`pack`]), разжатый не больше чем до `limit`
 /// байтов: дальше разжатие останавливается, и текст — порча.
+#[cfg(test)]
 fn unpack(packed: &[u8], limit: usize) -> Result<Vec<u8>, BackupError> {
-    miniz_oxide::inflate::decompress_to_vec_with_limit(packed, limit)
-        .map_err(|error| damaged(format!("сжатый текст не разжимается: {:?}", error.status)))
+    at_once(unpack_sliced(packed, limit, &mut no_pause))
+}
+
+/// Разжатие потоком, с паузой после каждого мегабайта разжатого текста
+/// и с пределом: перешагнул — порча, а не гигабайты в памяти (Правило 13).
+/// Лишние байты после конца сжатого потока — тоже порча: программа их не
+/// пишет.
+async fn unpack_sliced<P, F>(packed: &[u8], limit: usize, pause: &mut P) -> Result<Vec<u8>, BackupError>
+where
+    P: FnMut() -> F,
+    F: Future<Output = ()>,
+{
+    use miniz_oxide::inflate::stream::{InflateState, inflate};
+    use miniz_oxide::{DataFormat, MZFlush, MZStatus};
+    let mut state = InflateState::new_boxed(DataFormat::Raw);
+    let mut output = Vec::new();
+    let mut window = vec![0; 1 << 16];
+    let mut input = packed;
+    let mut meter = Meter::new(pause);
+    loop {
+        let result = inflate(&mut state, input, &mut window, MZFlush::None);
+        input = &input[result.bytes_consumed..];
+        if output.len() + result.bytes_written > limit {
+            return Err(damaged("сжатый текст больше предела"));
+        }
+        output.extend_from_slice(&window[..result.bytes_written]);
+        match result.status {
+            Ok(MZStatus::StreamEnd) => break,
+            Ok(MZStatus::Ok) => {}
+            Ok(MZStatus::NeedDict) | Err(_) => {
+                return Err(damaged(format!("сжатый текст не разжимается: {:?}", result.status)));
+            }
+        }
+        meter.add(result.bytes_written).await;
+    }
+    if !input.is_empty() {
+        return Err(damaged("после сжатого текста — лишние байты"));
+    }
+    Ok(output)
 }
 
 /// Что слияние копии с базой запишет.
@@ -766,6 +1034,9 @@ pub fn merge<'a, 'b>(
         updated: 0,
         unchanged: 0,
     };
+    // Начало строки базы у записи текущей версии: `{"format_version":6,"record":`.
+    let empty = wrap("");
+    let prefix = &empty[..empty.len() - 1];
     for entry in incoming {
         let id = entry.meta.id().to_string();
         let Some(&raw) = existing.get(&(entry.kind, id.as_str())) else {
@@ -773,6 +1044,19 @@ pub fn merge<'a, 'b>(
             merge.writes.push(entry);
             continue;
         };
+        // Слово в слово та же запись — без изменений, без разбора: разбор
+        // идёт внутри транзакции записи, а там паузы быть не может
+        // (Правило 6), и копия поверх той же базы разбирала бы все её
+        // файлы одним куском.
+        let same = raw
+            .text
+            .and_then(|text| text.strip_prefix(prefix))
+            .and_then(|text| text.strip_suffix('}'))
+            == Some(entry.record.get());
+        if same {
+            merge.unchanged += 1;
+            continue;
+        }
         let newer = match read_stored(kinds, raw) {
             Ok(stored) => entry.meta.modified() > stored.meta.modified(),
             Err(FormatError::Newer { found }) => return Err(FormatError::Newer { found }),

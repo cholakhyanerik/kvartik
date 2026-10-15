@@ -30,6 +30,7 @@ use super::{Base, tr};
 use crate::platform::clock;
 use crate::platform::crypto::{self, CryptoError};
 use crate::platform::file::{self, Download, FileError};
+use crate::platform::pause::breathe;
 use crate::platform::share::{self, ShareError};
 use crate::store::backup::{self as stored, Failure, Restored};
 use crate::store::device::Device;
@@ -506,9 +507,12 @@ split! {
 }
 
 split! {
-    /// Разбор выбранного файла копии — своей частью wasm (`ui/split.rs`).
-    pub(super) fn opening(text: String) -> Result<Sealed, Problem>, preload preload_open {
-        backup::open(&text).map_err(Problem::from)
+    /// Разбор выбранного файла копии — своей частью wasm (`ui/split.rs`);
+    /// шифротекст из base64 — кусками с паузой (`platform::pause`).
+    pub(super) fn opening(text: String) -> Task<Result<Sealed, Problem>>, preload preload_open {
+        Box::pin(async move {
+            backup::open_sliced(&text, &mut breathe).await.map_err(Problem::from)
+        })
     }
 }
 
@@ -592,9 +596,10 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
         restoring.set(Restoring::Busy);
         leptos::task::spawn_local(async move {
             let opened = match file::read(&chosen, MAX_FILE_BYTES).await {
-                Ok(text) => opening(text)
-                    .await
-                    .unwrap_or(Err(Problem::Say(Key::PartFailed))),
+                Ok(text) => match opening(text).await {
+                    Ok(task) => task.await,
+                    Err(_) => Err(Problem::Say(Key::PartFailed)),
+                },
                 Err(error) => Err(Problem::from(error)),
             };
             // Тот же файл можно будет выбрать снова: без сброса браузер

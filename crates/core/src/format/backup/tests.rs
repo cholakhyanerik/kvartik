@@ -929,3 +929,79 @@ fn lock_limits() {
     ];
     assert!(rejected.iter().all(Option::is_none), "{rejected:#?}");
 }
+
+/// Записи `note` длиной около `len` байтов каждая — `count` штук, в конвертах
+/// текущей версии, как в базе: идентификатор и текст.
+fn big_notes(count: usize, len: usize) -> Vec<(String, String)> {
+    (0..count)
+        .map(|n| {
+            let note = Note {
+                meta: RecordMeta::new(at(1_760_000_000_000 + n as i64)),
+                text: format!("{n} ").repeat(len / 2),
+            };
+            (note.meta.id().to_string(), encode(&note))
+        })
+        .collect()
+}
+
+/// Долгие шаги кусками (0.0.28): между мегабайтами работы — пауза, которую
+/// даёт окно, а итог — тот же, что одним куском. Сжатое разжимает
+/// и стандартный DEFLATE: поток один, как у сжатого целиком.
+#[test]
+fn sliced_steps_pause_and_match_the_whole() {
+    let notes = big_notes(30, 100_000);
+    let raws: Vec<Raw<'_>> = notes.iter().map(|(id, text)| raw("note", id, text)).collect();
+    let mut pauses = 0;
+    let mut pause = || {
+        pauses += 1;
+        std::future::ready(())
+    };
+
+    let collected = at_once(collect_sliced(KINDS_UNDER_TEST, raws.iter().copied(), &mut pause))
+        .expect("собрано");
+    let whole = collect(KINDS_UNDER_TEST, raws.iter().copied()).expect("собрано");
+    let stored = |c: &Collected| c.entries().iter().map(Entry::stored).collect::<Vec<_>>();
+    assert_eq!(stored(&collected), stored(&whole));
+
+    let header = sample_header();
+    let packed = at_once(pack_sliced(&header, collected.entries(), &mut pause));
+    let text = plaintext(&header, collected.entries());
+    assert!(text.len() > 2 * SLICE_BYTES, "проба больше двух кусков");
+    assert_eq!(
+        miniz_oxide::inflate::decompress_to_vec(&packed).ok().as_deref(),
+        Some(text.as_bytes()),
+        "сжатое кусками разжимается целиком"
+    );
+    assert_eq!(unpack(&pack(&header, collected.entries()), MAX_PLAIN_BYTES).ok().as_deref(), Some(text.as_bytes()));
+
+    // «Шифротекст» — сам сжатый текст: шифра в ядре нет.
+    let file = at_once(seal_sliced(&header, &sample_lock(), &packed, &mut pause));
+    assert_eq!(file, seal(&header, &sample_lock(), &packed));
+    let sealed = at_once(open_sliced(&file, &mut pause)).expect("файл открывается");
+    assert_eq!(sealed, open(&file).expect("файл открывается"));
+    let entries = at_once(read_sliced(KINDS_UNDER_TEST, &sealed, sealed.ciphertext(), &mut pause))
+        .expect("записи читаются");
+    let read_whole = read(KINDS_UNDER_TEST, &sealed, sealed.ciphertext()).expect("записи читаются");
+    assert_eq!(
+        entries.iter().map(Entry::stored).collect::<Vec<_>>(),
+        read_whole.iter().map(Entry::stored).collect::<Vec<_>>()
+    );
+    assert_eq!(entries.len(), 30);
+    // Каждый шаг перешагнул два мегабайта: пауз — не меньше двух на шаг.
+    drop(pause);
+    assert!(pauses >= 10, "пауз — {pauses}");
+}
+
+/// Выравнивание `=` бывает только в конце всего base64, а не в конце куска:
+/// файл, подправленный так, не читается и кусками.
+#[test]
+fn padding_inside_the_data_is_damage() {
+    let piece = SLICE_BYTES / 4 * 4;
+    let data = format!("{}QQ==QUFB", "A".repeat(piece - 4));
+    let text = format!(
+        r#"{{"file":"kvartik-backup","format_version":6,"app_version":"0.0.27","created":1760270400000,"kdf":{{"name":"PBKDF2-SHA256","iterations":600000,"salt":"AAECAwQFBgcICQoLDA0ODw=="}},"cipher":{{"name":"AES-256-GCM","iv":"ZGVmZ2hpamtsbW5v"}},"data":"{data}"}}"#
+    );
+    assert!(matches!(open(&text), Err(BackupError::Damaged(_))));
+    let fine = text.replace("QQ==QUFB", "QUFBQUFB");
+    assert!(open(&fine).is_ok(), "без «=» посередине файл читается");
+}

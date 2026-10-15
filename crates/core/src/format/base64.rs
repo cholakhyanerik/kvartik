@@ -12,9 +12,11 @@
 
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-/// Байты в base64.
+/// Байты в base64. Знаки копятся байтами, а строкой становятся один раз:
+/// посимвольная запись в `String` была вчетверо медленнее, а у копии
+/// с файлами книги это десятки мегабайт (замер 0.0.28).
 pub(crate) fn encode(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    let mut out = Vec::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
         let byte = |at: usize| u32::from(chunk.get(at).copied().unwrap_or(0));
         let group = (byte(0) << 16) | (byte(1) << 8) | byte(2);
@@ -23,13 +25,13 @@ pub(crate) fn encode(bytes: &[u8]) -> String {
         let kept = chunk.len() + 1;
         for (at, shift) in [18, 12, 6, 0].into_iter().enumerate() {
             out.push(if at < kept {
-                char::from(ALPHABET[((group >> shift) & 63) as usize])
+                ALPHABET[((group >> shift) & 63) as usize]
             } else {
-                '='
+                b'='
             });
         }
     }
-    out
+    String::from_utf8(out).expect("в base64 только знаки ASCII")
 }
 
 /// Байты из base64; `None` — запись не base64 или не та, что дал бы

@@ -139,6 +139,12 @@ pub fn decode<T: DeserializeOwned>(text: &str) -> Result<T, FormatError> {
 /// Версия и ещё не разобранная запись из конверта. Версия — раньше
 /// остального: конверт новой версии может быть и другим.
 fn split(text: &str) -> Result<(u32, &str), FormatError> {
+    split_raw(text).map(|(version, record)| (version, record.get()))
+}
+
+/// [`split`], но запись — нетронутым куском JSON: копия кладёт запись
+/// текущей версии тем же текстом (`backup`).
+fn split_raw(text: &str) -> Result<(u32, &RawValue), FormatError> {
     let header: Header = serde_json::from_str(text).map_err(damaged)?;
     if header.format_version > FORMAT_VERSION {
         return Err(FormatError::Newer {
@@ -146,7 +152,7 @@ fn split(text: &str) -> Result<(u32, &str), FormatError> {
         });
     }
     let envelope: Envelope<'_> = serde_json::from_str(text).map_err(damaged)?;
-    Ok((envelope.format_version, envelope.record.get()))
+    Ok((envelope.format_version, envelope.record))
 }
 
 /// Запись версии формата `version` из JSON её полей.

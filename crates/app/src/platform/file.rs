@@ -128,8 +128,12 @@ pub struct Download {
 
 impl Download {
     /// Файл `name` из текста. `None` — браузер не дал собрать файл.
+    ///
+    /// Байтами UTF-8, а не строкой JS: строка прошла бы через UTF-16 туда
+    /// и обратно, и копия в 20 МБ стояла на этом четверть секунды на
+    /// телефоне (замер 0.0.28). Байты файла — те же.
     pub fn text(text: &str, name: &str) -> Option<Self> {
-        Self::new(&Array::of1(&text.into()), name, "application/octet-stream")
+        Self::bytes(text.as_bytes(), name, "application/octet-stream")
     }
 
     /// Файл `name` из байтов с типом `mime` — PDF документа (задача 12).
