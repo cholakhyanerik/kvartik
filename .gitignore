@@ -20,3 +20,6 @@ keys/
 # Окружение Python для пересборки шрифтов (tools/fonts.py): fontTools
 # ставится туда, а не в систему, и в репозитории ему не место.
 /.venv-fonts/
+# wrangler для выкладки (tools/deploy): ставит его `npm ci` в CI, а версию
+# держит замок рядом.
+/tools/deploy/node_modules/

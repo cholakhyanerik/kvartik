@@ -1,0 +1,11 @@
+{
+  "name": "kvartik-deploy",
+  "private": true,
+  "description": "Выкладка сайта Kvartik на Cloudflare Pages из CI (задачи 15 и 50): только wrangler, закреплённый замком. В сайт не попадает.",
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "wrangler": "4.149.0"
+  }
+}

@@ -1,8 +1,13 @@
-# Проверка на каждый push и pull request.
+# Проверка на каждый push и pull request, а после неё — выкладка: push
+# в main — сайт всем, pull request — предпросмотр (задачи 15 и 50).
 #
 # Одна ОС, Linux: wasm одинаков на всех системах, а ядро не трогает ничего
 # системного. Матрица ОС понадобится только с настольной версией (задача 40).
 # Репозиторий приватный, и минуты здесь считаются (Правило 11 в CLAUDE.md).
+#
+# Действия — по SHA коммита, а не по тегу: тег можно переписать (Правило 13).
+# Выкладка видит токен Cloudflare, а проверка собирает то, что выкладка
+# отдаст людям, — подменённое действие в любом из заданий дошло бы до всех.
 name: CI
 
 on:
@@ -11,13 +16,21 @@ on:
   pull_request:
 
 # Новый push в ту же ветку отменяет предыдущий прогон: держать очередь
-# из устаревших сборок незачем.
+# из устаревших сборок незачем. Прерванная выкладка ничего не меняет:
+# Cloudflare переключает сайт на новую сборку, только когда она залита вся.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Ключу GitHub в прогонах — только чтение: писать в репозиторий незачем.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
+  # Проект Cloudflare Pages с прямой загрузкой (задача 50): сайт —
+  # `kvartik.pages.dev`, пока нет своего домена (задача 16).
+  PAGES_PROJECT: kvartik
   # Та же версия, что в `trunk-version` у crates/app/Trunk.toml: старше Trunk
   # откажется собирать. Меняется версия — меняются оба места и сумма ниже.
   TRUNK_VERSION: v0.22.0-rc.2
@@ -56,14 +69,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7
-
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+
+      # Коммит ветки `stable` от 2026-10-09; Rust — последний стабильный,
+      # как и раньше.
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
           components: clippy
           targets: wasm32-unknown-unknown
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       # Готовая сборка с GitHub, а не `cargo install`: та собирается
       # из исходников минут восемь на каждом прогоне.
@@ -141,3 +159,90 @@ jobs:
       # Новая запись в базе RustSec краснит прогон и без нашего изменения —
       # так и задумано: что с ней делать, решает человек (`deny.toml`).
       - run: cargo deny check
+      # Собранный и проверенный сайт — заданию выкладки: выкладывается ровно
+      # он, а не пересборка (задача 50). Последним шагом — когда все
+      # проверки прошли. День хранения: больше он никому не нужен.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: crates/app/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  # Выкладка на Cloudflare Pages — только после зелёной проверки и только
+  # тем, что она собрала (задача 50). Push в main — сайт всем; pull request
+  # — предпросмотр на адресе `<ветка>.kvartik.pages.dev` с данными своими
+  # (CLAUDE.md, «Происхождение сайта»). У pull request из чужой копии
+  # репозитория секретов нет, и он не выкладывается.
+  deploy:
+    name: Выкладка
+    needs: check
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+
+    steps:
+      # Из репозитория нужны только wrangler с замком и скрипты выкладки.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: tools/deploy
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+
+      # wrangler и всё его дерево — из замка `tools/deploy/package-lock.json`,
+      # каждый пакет со своей суммой. Скрипты установки не запускаются:
+      # `pages deploy` работает и без них (разведка задачи 15, 2026-10-15).
+      # Node — из образа: wrangler нужен 22 или новее, а в ubuntu-24.04 —
+      # 22, в 26.04 — 24.
+      - run: npm ci --ignore-scripts
+        working-directory: tools/deploy
+
+      # Сначала — предпросмотр той же сборки и проверка на нём: заголовки
+      # решает хостинг, и увидеть их можно только на выкладке (CSP, кэш, тип
+      # и сжатие каждого файла, страница и `sw.js` этой сборки — шапка
+      # `tools/deploy/check.sh`). Сайт всем — только после неё: иначе CSP
+      # без `'wasm-unsafe-eval'` дошёл бы до людей пустой страницей раньше,
+      # чем покраснел CI. У push в main предпросмотр — ветка `ci-check`;
+      # у pull request — его ветка, и `main` ей быть нельзя: такая выкладка
+      # стала бы сайтом всем мимо push в main. Вторая заливка почти
+      # бесплатна: файлы, которые уже есть, Pages не принимает заново.
+      - name: Выкладка предпросмотра
+        id: preview
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BRANCH: ${{ github.event_name == 'pull_request' && github.head_ref || 'ci-check' }}
+          COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          [ "$BRANCH" != main ] || { echo "ветка pull request — main: его выкладка стала бы сайтом всем"; exit 1; }
+          url="$(bash tools/deploy/deploy.sh "$BRANCH" dist "$COMMIT")"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Предпросмотр: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Проверка предпросмотра
+        env:
+          URL: ${{ steps.preview.outputs.url }}
+        run: bash tools/deploy/check.sh "$URL" dist
+
+      - name: Выкладка всем
+        id: site
+        if: github.event_name == 'push'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          url="$(bash tools/deploy/deploy.sh main dist "$COMMIT")"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Сайт: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      # Та же проверка на выкладке всем: что переключилась она, а не
+      # осталась прежняя.
+      - name: Проверка сайта
+        if: github.event_name == 'push'
+        env:
+          URL: ${{ steps.site.outputs.url }}
+        run: bash tools/deploy/check.sh "$URL" dist

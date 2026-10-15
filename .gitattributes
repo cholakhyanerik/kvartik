@@ -14,3 +14,7 @@ crates/core/tests/backups/**/*.json -text
 # Дизайн человека «Kvartik Design» — файл как он есть, байт в байт: git не
 # трогает в нём концы строк.
 docs/design/** -text
+
+# Скрипты bash (tools/deploy/check.sh) — с концами строк LF и на Windows:
+# bash читает `\r` частью команды, и скрипт падает на первой строке.
+*.sh text eol=lf

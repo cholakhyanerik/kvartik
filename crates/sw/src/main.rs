@@ -95,10 +95,9 @@ struct File {
 }
 
 /// Все файлы сайта, по пути. Кроме самого `sw.js` — его пишет эта
-/// программа, — скрытых файлов: Trunk держит в папках служебные
-/// (`.trunk-lock`), — и настроек хостинга, имена которых начинаются с `_`
-/// (`_headers`, `_redirects` у Cloudflare Pages, задача 15): хостинг их не
-/// отдаёт, и установка, которая их ждёт, не удалась бы ни у кого никогда.
+/// программа — и скрытых файлов: Trunk держит в папках служебные
+/// (`.trunk-lock`). Настройки хостинга (`_headers`) здесь есть: в кэш они
+/// не идут ([`precached`]), а в хэш сборки идут.
 fn collect(root: &Path) -> Result<Vec<File>, String> {
     fn walk(dir: &Path, prefix: &str, out: &mut Vec<File>) -> Result<(), String> {
         let entries = fs::read_dir(dir).map_err(|error| format!("{}: {error}", dir.display()))?;
@@ -108,7 +107,7 @@ fn collect(root: &Path) -> Result<Vec<File>, String> {
             let name = name
                 .to_str()
                 .ok_or_else(|| format!("{}: имя файла не UTF-8", entry.path().display()))?;
-            if name.starts_with(['.', '_']) {
+            if name.starts_with('.') {
                 continue;
             }
             let path = format!("{prefix}{name}");
@@ -132,7 +131,10 @@ fn collect(root: &Path) -> Result<Vec<File>, String> {
 
 /// Хэш сборки: FNV-1a, 64 бита, по шаблону `sw.js` и путям и содержимому
 /// всех файлов. Шаблон — тоже: новый `sw.js` с теми же файлами иначе писал
-/// бы в кэш, которым открывается работающая версия.
+/// бы в кэш, которым открывается работающая версия. И настройки хостинга:
+/// страница лежит в кэше вместе со своими заголовками, CSP в том числе,
+/// и открывается с ними же. Новый `_headers` без нового `sw.js` не дошёл
+/// бы до тех, у кого программа уже в кэше, никогда.
 ///
 /// Свой, а не `DefaultHasher`: тот может смениться с версией Rust, и та же
 /// сборка получила бы другой хэш — у всех пользователей разом «новая
@@ -164,12 +166,23 @@ fn digest<'a>(entries: impl IntoIterator<Item = (&'a str, &'a [u8])>) -> String 
 }
 
 /// Файлы, которые service worker кладёт в кэш по их путям: все, кроме
-/// страницы.
+/// страниц HTML и настроек хостинга (задача 15) — установка, которая их
+/// ждёт, не удалась бы ни у кого никогда. Настройки, имена которых
+/// начинаются с `_` (`_headers`), Cloudflare Pages не отдаёт вовсе.
+/// На `/404.html` он отвечает переадресацией на `/404` (308; по исходникам
+/// workers-sdk, pages-shared/asset-server, 2026-10-15), а ответ
+/// с переадресацией установка не принимает. Страница программы лежит
+/// в кэше под адресом папки — шапка шаблона.
 fn precached(files: &[File]) -> impl Iterator<Item = &str> {
     files
         .iter()
         .map(|file| file.path.as_str())
-        .filter(|path| *path != PAGE)
+        .filter(|path| !path.ends_with(".html") && !hosting(path))
+}
+
+/// Настройка хостинга: имя файла начинается с `_`.
+fn hosting(path: &str) -> bool {
+    path.rsplit('/').next().unwrap_or(path).starts_with('_')
 }
 
 /// Файлы из списка, на которые ссылается страница: wasm, клей JS, CSS,
@@ -284,12 +297,13 @@ mod tests {
 
     /// Вложенные папки — через `/` и на Windows: путь с `\` service worker
     /// попросил бы у сервера буквально, и установка упала бы на 404.
-    /// Служебные файлы Trunk, настройки хостинга и прошлый `sw.js` в список
-    /// не попадают.
+    /// Служебные файлы Trunk и прошлый `sw.js` в сборку не попадают,
+    /// а страницы HTML и настройки хостинга — в кэш.
     #[test]
     fn collects_site_files_with_forward_slashes() {
         let temp = Temp::new("collect");
         temp.put("index.html", b"<html>");
+        temp.put("404.html", b"<html>");
         temp.put("kvartik-app-1a2b.js", b"js");
         temp.put("fonts/noto-sans-latin-400.ttf", b"ttf");
         temp.put("icons/icon-192.png", b"png");
@@ -304,12 +318,32 @@ mod tests {
         assert_eq!(
             paths,
             [
+                "404.html",
+                "_headers",
+                "_redirects",
                 "fonts/noto-sans-latin-400.ttf",
                 "icons/icon-192.png",
                 "index.html",
                 "kvartik-app-1a2b.js",
             ]
         );
+        assert_eq!(
+            precached(&files).collect::<Vec<_>>(),
+            ["fonts/noto-sans-latin-400.ttf", "icons/icon-192.png", "kvartik-app-1a2b.js"]
+        );
+    }
+
+    /// Новый `_headers` — новая сборка: страница в кэше service worker
+    /// открывается со старыми заголовками, пока не сменится `sw.js`.
+    #[test]
+    fn hosting_settings_change_the_build() {
+        let temp = Temp::new("headers");
+        temp.put("index.html", b"<html>");
+        temp.put("_headers", b"/*\n  Content-Security-Policy: default-src 'self'");
+        let before = build_id(TEMPLATE, &collect(&temp.0).expect("папка читается"));
+        temp.put("_headers", b"/*\n  Content-Security-Policy: default-src 'self'; img-src 'self' blob:");
+        let after = build_id(TEMPLATE, &collect(&temp.0).expect("папка читается"));
+        assert_ne!(before, after);
     }
 
     /// Хэш меняется с любым байтом, с именем файла и с шаблоном `sw.js`,
