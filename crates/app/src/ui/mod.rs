@@ -13,6 +13,7 @@ mod form;
 mod home;
 mod icon;
 mod lang;
+mod ledger;
 mod nav;
 mod onboarding;
 pub mod panic;
@@ -36,6 +37,7 @@ use documents::{Documents, DocumentsScreen};
 use home::Home;
 use icon::{Icon, icon};
 use lang::{LangSwitch, WindowLang};
+use ledger::LedgerScreen;
 use nav::Nav;
 use onboarding::Welcome;
 use profile::{ProfileSection, Profiles};
@@ -56,6 +58,9 @@ fn tr(lang: ReadSignal<Lang>, key: Key) -> impl Fn() -> &'static str + Copy + Se
 #[derive(Clone, Copy)]
 pub struct Base {
     store: StoredValue<Option<Rc<Store>>, LocalStorage>,
+    /// Открылась ли база — отслеживаемое: раздел, который рисуется позже
+    /// окна (книга, `ui/ledger.rs`), читает своё, когда она открыта.
+    open: RwSignal<bool>,
     /// Растёт, когда данные в базе заменило не действие раздела, а
     /// восстановление из копии: разделы с данными перечитывают своё.
     replaced: RwSignal<u32>,
@@ -65,12 +70,19 @@ impl Base {
     fn new() -> Self {
         Self {
             store: StoredValue::new_local(None),
+            open: RwSignal::new(false),
             replaced: RwSignal::new(0),
         }
     }
 
     fn opened(&self, store: Rc<Store>) {
         self.store.set_value(Some(store));
+        self.open.set(true);
+    }
+
+    /// Открыта ли база — отслеживаемое.
+    pub fn is_open(&self) -> bool {
+        self.open.get()
     }
 
     /// Открытая база; `None` — ещё открывается или не открылась.
@@ -92,7 +104,7 @@ impl Base {
 }
 
 /// Корень окна (дизайн «Kvartik Design»): меню разделов и экраны —
-/// главный, счета и акты, клиенты, профиль и копия внутри него
+/// главный, счета и акты, книга, клиенты, профиль и копия внутри него
 /// (`ui/route.rs`). Все экраны — в странице, открытый виден, остальные
 /// спрятаны: начатое в форме не пропадает при переходе.
 ///
@@ -176,6 +188,9 @@ pub fn App() -> impl IntoView {
                 </section>
                 <section id=Screen::Documents.id() class="screen" hidden=hidden(Screen::Documents)>
                     <DocumentsScreen lang documents clients base backups router />
+                </section>
+                <section id=Screen::Ledger.id() class="screen" hidden=hidden(Screen::Ledger)>
+                    <LedgerScreen lang documents clients profiles base backups router />
                 </section>
                 <section id=Screen::Clients.id() class="screen" hidden=hidden(Screen::Clients)>
                     <h1 tabindex="-1">{tr(lang, Key::ClientsTitle)}</h1>

@@ -75,6 +75,15 @@ impl Profiles {
         self.state.with(|state| *state == State::Ready(None))
     }
 
+    /// Коды деятельности профиля — у расхода книги (задача 14); пока
+    /// профиля нет — пусто. Отслеживаемое.
+    pub(super) fn activities(&self) -> Vec<ActivityCode> {
+        self.state.with(|state| match state {
+            State::Ready(Some(profile)) => profile.data().activities.clone(),
+            State::Ready(None) | State::Loading | State::Failed(_) => Vec::new(),
+        })
+    }
+
     /// База открылась: прочитать профиль и его логотип.
     pub async fn load(&self, store: &Store) {
         match read(store).await {

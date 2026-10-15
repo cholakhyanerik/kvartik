@@ -24,6 +24,8 @@ pub enum Screen {
     /// Выпущенный документ — карточкой: на телефоне вместо списка, на
     /// компьютере рядом с ним. «Назад» ведёт от него к списку.
     Document(RecordId),
+    /// Книга доходов и расходов (задача 14).
+    Ledger,
     Clients,
     Profile,
     /// Резервная копия и хранение данных — экран внутри профиля.
@@ -35,9 +37,10 @@ const DOCUMENT: &str = "#/documents/";
 
 impl Screen {
     /// Экраны без параметров — в порядке разделов.
-    pub const PLAIN: [Screen; 5] = [
+    pub const PLAIN: [Screen; 6] = [
         Screen::Home,
         Screen::Documents,
+        Screen::Ledger,
         Screen::Clients,
         Screen::Profile,
         Screen::Backup,
@@ -50,6 +53,7 @@ impl Screen {
             Screen::Home => "#/".to_owned(),
             Screen::Documents => "#/documents".to_owned(),
             Screen::Document(id) => format!("{DOCUMENT}{id}"),
+            Screen::Ledger => "#/ledger".to_owned(),
             Screen::Clients => "#/clients".to_owned(),
             Screen::Profile => "#/profile".to_owned(),
             Screen::Backup => "#/backup".to_owned(),
@@ -93,6 +97,7 @@ impl Screen {
         match self.page() {
             Screen::Home => "home",
             Screen::Documents | Screen::Document(_) => "documents",
+            Screen::Ledger => "ledger",
             Screen::Clients => "clients",
             Screen::Profile => "profile",
             Screen::Backup => "backup",
@@ -202,7 +207,7 @@ mod tests {
         assert_eq!(document.page(), Screen::Documents);
         assert_eq!(document.id(), "documents");
         assert_eq!(Screen::Backup.page(), Screen::Backup);
-        for screen in [Screen::Home, Screen::Documents, Screen::Clients, Screen::Profile] {
+        for screen in [Screen::Home, Screen::Documents, Screen::Ledger, Screen::Clients, Screen::Profile] {
             assert_eq!(screen.section(), screen);
             assert_eq!(screen.page(), screen);
         }

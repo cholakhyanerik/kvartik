@@ -186,3 +186,11 @@ fn log(context: &str, error: &JsValue) {
 pub fn chosen(input: &web_sys::HtmlInputElement) -> Option<File> {
     input.files()?.get(0)
 }
+
+/// Все выбранные файлы поля `<input type="file" multiple>` — по порядку.
+pub fn chosen_all(input: &web_sys::HtmlInputElement) -> Vec<File> {
+    let Some(files) = input.files() else {
+        return Vec::new();
+    };
+    (0..files.length()).filter_map(|at| files.get(at)).collect()
+}

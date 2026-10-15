@@ -41,6 +41,7 @@ use super::backup::{BackupChip, Backups};
 use super::clients::Clients;
 use super::form::{CURRENCIES, TextField, WizardHead, currency_code, currency_key};
 use super::icon::{Icon, icon};
+use super::ledger::{equivalent, rate_problem};
 use super::paper::{PaperPanel, Request};
 use super::route::{Router, Screen};
 use super::split::{part, split};
@@ -186,8 +187,9 @@ impl Documents {
     }
 
     /// Что-то, посчитанное по прочитанным документам и повторам; пока их
-    /// нет — значение по умолчанию.
-    fn with<T: Default>(&self, read: impl FnOnce(&[Document], &[Recurring], usize) -> T) -> T {
+    /// нет — значение по умолчанию. Отслеживаемое: книга (`ui/ledger.rs`)
+    /// берёт из документов доход.
+    pub(super) fn with<T: Default>(&self, read: impl FnOnce(&[Document], &[Recurring], usize) -> T) -> T {
         self.state.with(|state| match state {
             State::Ready {
                 documents,
@@ -269,6 +271,8 @@ enum Notice {
     Deleted(RecordId),
     Restored,
     Paid,
+    /// Курс документа сохранён (задача 14).
+    RateSaved,
 }
 
 /// Что не вышло: хранилище или команда ядра.
@@ -316,7 +320,8 @@ impl Problem {
                 | DocError::NotInvoice
                 | DocError::TooManyPayments
                 | DocError::WrongClient
-                | DocError::NumbersExhausted,
+                | DocError::NumbersExhausted
+                | DocError::Rate,
             ) => Key::StoreFailed,
         }
     }
@@ -456,7 +461,7 @@ pub fn DocumentsScreen(
 }
 
 /// Слова вида документа.
-const fn kind_key(kind: DocKind) -> Key {
+pub(super) const fn kind_key(kind: DocKind) -> Key {
     match kind {
         DocKind::Invoice => Key::KindInvoice,
         DocKind::Act => Key::KindAct,
@@ -488,7 +493,7 @@ fn row_title(lang: Lang, document: &Document) -> String {
 /// этого цена после смены языка молча стала бы другой или перестала бы
 /// читаться. Не прочитанное прежним языком остаётся как есть: его ещё
 /// набирают.
-fn retype<T>(
+pub(super) fn retype<T>(
     field: RwSignal<String>,
     read: impl FnOnce(&str) -> Result<T, ParseError>,
     write: impl FnOnce(T) -> String,
@@ -897,6 +902,7 @@ fn NoticeLine(ctx: Ctx, busy: RwSignal<bool>, failure: RwSignal<Option<Problem>>
         notice.get().map(|shown| match shown {
             Notice::Saved => view! { <p role="status">{tr(lang, Key::DocSaved)}</p> }.into_any(),
             Notice::Paid => view! { <p role="status">{tr(lang, Key::PaymentSaved)}</p> }.into_any(),
+            Notice::RateSaved => view! { <p role="status">{tr(lang, Key::DocRateSaved)}</p> }.into_any(),
             Notice::Restored => {
                 view! { <p role="status">{tr(lang, Key::DocRestoredNotice)}</p> }.into_any()
             }
@@ -961,6 +967,9 @@ enum Change {
     Restore,
     AddPayment(Payment),
     RemovePayment(Payment),
+    /// Курс выпущенного документа: драмы за единицу в десятитысячных,
+    /// `None` — убрать (задача 14).
+    SetRate(Option<i64>),
 }
 
 /// Сделать `change` с документом `id` и, если записано, — `done` с ним.
@@ -1014,6 +1023,7 @@ async fn apply(store: &Store, id: RecordId, change: Change) -> Result<Option<Doc
         Change::Restore => document.restore(now),
         Change::AddPayment(payment) => Some(document.add_payment(payment, now)?),
         Change::RemovePayment(payment) => document.remove_payment(payment, now),
+        Change::SetRate(per_unit_e4) => document.set_rate(per_unit_e4, now)?,
     };
     let Some(changed) = changed else {
         return Ok(None);
@@ -1054,6 +1064,9 @@ struct Form {
     date: RwSignal<String>,
     service_date: RwSignal<String>,
     due: RwSignal<String>,
+    /// Курс ЦБ для дня оказания услуги — строкой языка окна; пусто — курса
+    /// ещё нет (задача 14).
+    rate: RwSignal<String>,
     items: RwSignal<Vec<ItemRow>>,
     basis: Option<RecordId>,
     recurring: Option<RecordId>,
@@ -1087,6 +1100,11 @@ impl Form {
             date: RwSignal::new(iso(data.map(|d| d.date).or(today))),
             service_date: RwSignal::new(iso(data.map(|d| d.service_date).or(today))),
             due: RwSignal::new(iso(data.and_then(|d| d.due))),
+            rate: RwSignal::new(
+                data.and_then(|d| d.rate)
+                    .map(|rate| i18n::rate(window, rate.per_unit_e4()))
+                    .unwrap_or_default(),
+            ),
             items: RwSignal::new(Vec::new()),
             basis: data.and_then(|d| d.basis),
             recurring: data.and_then(|d| d.recurring),
@@ -1167,7 +1185,7 @@ impl Form {
             "" => None,
             text => Some(Date::from_iso(text)?),
         };
-        let data = DocumentData {
+        let mut data = DocumentData {
             kind: self.kind,
             client: self.client.get_untracked()?,
             lang: self.lang.get_untracked()?,
@@ -1181,7 +1199,15 @@ impl Form {
             items,
             basis: self.basis,
             recurring: self.recurring,
+            rate: None,
         };
+        // Курс — только у валюты и для дня оказания услуги: поменяли день
+        // или валюту — курс в данных следует за ними (`rate_for`).
+        let typed = self.rate.get_untracked();
+        if currency != Currency::Amd && !typed.trim().is_empty() {
+            let per_unit_e4 = i18n::parse_rate(window, &typed).ok()?;
+            data.rate = Some(data.rate_for(per_unit_e4).ok()?);
+        }
         data.check().ok()?;
         Some(data)
     }
@@ -1204,7 +1230,7 @@ impl ItemRow {
 
 /// Ошибка введённого числа — словами, с примером верной записи на языке
 /// окна.
-fn number_problem(lang: Lang, error: ParseError, example: &str) -> String {
+pub(super) fn number_problem(lang: Lang, error: ParseError, example: &str) -> String {
     match error {
         ParseError::Empty => fill(t(lang, Key::NumberEmpty), &[example]),
         ParseError::Invalid => fill(t(lang, Key::NumberInvalid), &[example]),
@@ -1244,7 +1270,7 @@ fn price_problem(lang: Lang, text: &str, currency: Option<Currency>) -> Option<S
 }
 
 /// Ошибка поля — словами, после первой попытки сохранить.
-fn shown_problem(
+pub(super) fn shown_problem(
     tried: RwSignal<bool>,
     problem: impl Fn() -> Option<String> + Send + Sync + 'static,
 ) -> impl IntoView {
@@ -1421,7 +1447,11 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
             .basis
             .and_then(|basis| documents.get(basis))
             .and_then(|invoice| invoice.number());
-        preview.set(Some(Request::Draft { data, client, basis }));
+        preview.set(Some(Request::Draft {
+            data: Box::new(data),
+            client,
+            basis,
+        }));
     };
     Effect::watch(
         move || {
@@ -1445,18 +1475,27 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
             form.service_date.set(day.last_of_month().iso());
         }
     };
-    let total = move || {
-        let lang = lang.get();
+    let total_money = move |lang: Lang| {
         let currency = form.currency.get()?;
         let lines = form.items.with(|rows| {
             rows.iter()
                 .map(|row| line_total(lang, *row, currency))
                 .collect::<Option<Vec<_>>>()
         })?;
-        Money::total(currency, lines)
-            .ok()
-            .map(|sum| fill(t(lang, Key::DocTotal), &[&i18n::money(lang, sum)]))
+        Money::total(currency, lines).ok()
     };
+    let total = move || {
+        let lang = lang.get();
+        total_money(lang).map(|sum| fill(t(lang, Key::DocTotal), &[&i18n::money(lang, sum)]))
+    };
+    // Итог в драмах по курсу из поля — как в дизайне «Kvartik Design»
+    // (экран 04), когда курс уже есть.
+    let in_drams = move || {
+        let lang = lang.get();
+        let date = form.service_date.with(|text| Date::from_iso(text));
+        form.rate.with(|rate| equivalent(lang, total_money(lang), rate, date))
+    };
+    let foreign = move || form.currency.get().is_some_and(|currency| currency != Currency::Amd);
     let full = move || form.items.with(|rows| rows.len() >= DocumentData::MAX_ITEMS);
     // Выбранный клиент карточкой — на втором и третьем шаге: что о нём
     // знает документ и «Изменить», которое возвращает к выбору.
@@ -1490,6 +1529,7 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                 return;
             };
             let currency = form.currency.get_untracked();
+            retype(form.rate, |text| i18n::parse_rate(before, text), |rate| i18n::rate(now, rate));
             for row in form.items.get_untracked() {
                 retype(
                     row.quantity,
@@ -1716,6 +1756,7 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                     <span>{tr(lang, Key::ItemAdd)}</span>
                 </button>
                 <p class="total">{total}</p>
+                <p class="hint">{in_drams}</p>
             </fieldset>
             <fieldset hidden=move || !shows(3)>
                 {wizard.then(|| view! {
@@ -1752,6 +1793,19 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                 <button type="button" class="secondary" on:click=last_day>
                     {tr(lang, Key::DocLastDay)}
                 </button>
+                <Show when=foreign>
+                    <label>
+                        {move || {
+                            let lang = lang.get();
+                            let code = form.currency.get().map(currency_code).unwrap_or_default();
+                            fill(t(lang, Key::OpRate), &[code])
+                        }}
+                        <input type="text" inputmode="decimal" autocomplete="off" maxlength="24" bind:value=form.rate />
+                    </label>
+                    <p class="hint">{tr(lang, Key::RateHint)}</p>
+                    {shown_problem(tried, move || form.rate.with(|text| rate_problem(lang.get(), text)))}
+                    {wizard.then(|| view! { <p class="hint">{in_drams}</p> })}
+                </Show>
                 {(form.kind == DocKind::Invoice).then(|| view! {
                     <label>
                         {tr(lang, Key::DocDue)}
@@ -1864,7 +1918,7 @@ fn line_total(lang: Lang, row: ItemRow, currency: Currency) -> Option<Money> {
 
 /// Поле даты: подпись, `<input type="date">` и ошибка, если даты нет.
 #[component]
-fn DateField(lang: ReadSignal<Lang>, label: Key, value: RwSignal<String>, tried: RwSignal<bool>) -> impl IntoView {
+pub(super) fn DateField(lang: ReadSignal<Lang>, label: Key, value: RwSignal<String>, tried: RwSignal<bool>) -> impl IntoView {
     view! {
         <label>
             {tr(lang, label)}
@@ -1950,9 +2004,11 @@ fn DocView(ctx: Ctx, id: RecordId) -> impl IntoView {
             .into_any();
         };
         let invoice = shown.data().kind == DocKind::Invoice;
+        let foreign = shown.data().currency != Currency::Amd && shown.annulled().is_none();
         view! {
             {back}
             <DocCard ctx document=shown.clone() busy failure />
+            {foreign.then(|| view! { <DocRate ctx document=shown.clone() busy failure /> })}
             <NoticeLine ctx busy failure />
             {move || failure.get().map(|problem| view! { <p role="alert">{tr(lang, problem.key())}</p> })}
             <DocItems ctx document=shown.clone() />
@@ -2030,6 +2086,25 @@ fn DocCard(
             <h2 class="doc-heading" tabindex="-1">{move || title(lang.get(), &named)}</h2>
             <span class=format!("{status_class} dot")>{tr(lang, status_key)}</span>
             <p class="amount">{move || money_text(lang.get(), total)}</p>
+            // Итог в драмах по курсу ЦБ — под итогом, как в дизайне «Kvartik
+            // Design» (экран 05); у действующего документа в валюте.
+            {(data.currency != Currency::Amd && open).then(|| {
+                let amd = data.total_amd().ok();
+                let (currency, rate) = (data.currency, data.rate);
+                view! {
+                    <p class="hint">{move || {
+                        let lang = lang.get();
+                        match (amd, rate) {
+                            (Some(amd), Some(rate)) => format!(
+                                "{} ({})",
+                                fill(t(lang, Key::LedgerInDrams), &[&i18n::money(lang, amd)]),
+                                i18n::rate_pair(lang, currency, rate.per_unit_e4())
+                            ),
+                            _ => t(lang, Key::DocRateMissing).to_owned(),
+                        }
+                    }}</p>
+                }
+            })}
             <p class="doc-client">{move || client_label(lang.get(), &client, clients)}</p>
             <dl class="pairs">
                 <div>
@@ -2092,6 +2167,91 @@ fn DocCard(
         {move || paper.get().then(|| view! {
             <PaperPanel lang base=ctx.base request=request.clone() close=move || paper.set(false) />
         })}
+    }
+}
+
+/// Курс документа в валюте для книги (задача 14): «Указать курс ЦБ» или
+/// «Изменить курс» — полем по нажатию; итог в драмах — в карточке, под
+/// итогом. В PDF курса нет: выпущенный документ от него не меняется
+/// (`Document::set_rate`).
+#[component]
+fn DocRate(
+    ctx: Ctx,
+    document: Document,
+    busy: RwSignal<bool>,
+    failure: RwSignal<Option<Problem>>,
+) -> impl IntoView {
+    let Ctx { lang, notice, .. } = ctx;
+    let id = document.id();
+    let data = document.data().clone();
+    let rate = data.rate;
+    let editing = RwSignal::new(false);
+    let typed = RwSignal::new(
+        rate.map(|rate| i18n::rate(lang.get_untracked(), rate.per_unit_e4()))
+            .unwrap_or_default(),
+    );
+    let tried = RwSignal::new(false);
+    // Сменили язык окна — курс в поле записывается по-новому (`retype`).
+    Effect::watch(
+        move || lang.get(),
+        move |now: &Lang, before: Option<&Lang>, _| {
+            if let Some(&before) = before {
+                retype(typed, |text| i18n::parse_rate(before, text), |rate| i18n::rate(*now, rate));
+            }
+        },
+        false,
+    );
+    let save = move |_| {
+        tried.set(true);
+        let text = typed.get_untracked();
+        let per_unit_e4 = if text.trim().is_empty() {
+            None
+        } else {
+            match i18n::parse_rate(lang.get_untracked(), &text) {
+                Ok(rate) if rate > 0 => Some(rate),
+                _ => return,
+            }
+        };
+        act(ctx, busy, failure, id, Change::SetRate(per_unit_e4), move |_| {
+            notice.set(Some(Notice::RateSaved));
+        });
+    };
+    let currency = data.currency;
+    let service = data.service_date;
+    let total = data.total().ok();
+    view! {
+        <div class="rate-box">
+            {move || if editing.get() {
+                view! {
+                    <label>
+                        {move || fill(t(lang.get(), Key::OpRate), &[currency_code(currency)])}
+                        <input type="text" inputmode="decimal" autocomplete="off" maxlength="24" bind:value=typed />
+                    </label>
+                    <p class="hint">{tr(lang, Key::RateHint)}</p>
+                    {shown_problem(tried, move || typed.with(|text| rate_problem(lang.get(), text)))}
+                    <p class="hint">{move || {
+                        let lang = lang.get();
+                        typed.with(|text| equivalent(lang, total, text, Some(service)))
+                    }}</p>
+                    <div class="actions">
+                        <button type="button" disabled=move || busy.get() on:click=save>
+                            {tr(lang, Key::DocRateSave)}
+                        </button>
+                        <button type="button" class="secondary" on:click=move |_| editing.set(false)>
+                            {tr(lang, Key::Cancel)}
+                        </button>
+                    </div>
+                }
+                .into_any()
+            } else {
+                view! {
+                    <button type="button" class="secondary" on:click=move |_| editing.set(true)>
+                        {tr(lang, if rate.is_some() { Key::DocRateChange } else { Key::DocRateSet })}
+                    </button>
+                }
+                .into_any()
+            }}
+        </div>
     }
 }
 

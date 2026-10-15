@@ -1725,3 +1725,115 @@ legend.question {
     margin-top: var(--space-8);
   }
 }
+
+/* Книга доходов и расходов (`ui/ledger.rs`): квартал — стрелками по
+   краям, итог квартала — карточкой, строки — как у документов. */
+.quarter-bar {
+  display: grid;
+  grid-template-columns: var(--touch) minmax(0, 1fr) var(--touch);
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.quarter-name {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--font-size-xl);
+  font-weight: var(--weight-heading);
+  text-align: center;
+}
+
+.ledger-card {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
+}
+
+.ledger-card > *,
+.ledger-card dl.pairs {
+  margin: 0;
+}
+
+/* Итог — крупно и табличными цифрами, как сумма в карточке документа. */
+.ledger-sum {
+  font-family: var(--font-display);
+  font-size: var(--font-size-xl);
+  font-variant-numeric: tabular-nums;
+}
+
+/* «Добавить доход» и «Добавить расход» — поровну в ряд. */
+.ledger-add button {
+  flex: 1 1 0;
+}
+
+/* Файлы записи: миниатюра и имя — ссылкой на файл, размер и «Убрать» —
+   в строку; узко — переносятся. */
+ul.file-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.file-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.file-row > p,
+.file-row > button {
+  margin: 0;
+}
+
+.file-link {
+  display: inline-flex;
+  flex: 1 1 10rem;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--accent-text);
+  overflow-wrap: anywhere;
+}
+
+.file-thumb {
+  flex: none;
+  width: 3rem;
+  height: 3rem;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
+
+/* Подпись-кнопка выбора файла, пока прошлые файлы готовятся, — как
+   выключенная кнопка: выбор подождёт. */
+.button.disabled {
+  border-color: var(--border);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+/* Курс документа в карточке: сумма в драмах, поле по нажатию. */
+.rate-box {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.rate-box > p {
+  margin: 0;
+}
+
+.rate-box > button {
+  justify-self: start;
+}
+
+/* Подсказка книги — не вплотную к кнопкам над ней. */
+.ledger-add + .hint {
+  margin-top: var(--space-4);
+}

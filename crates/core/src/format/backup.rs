@@ -35,6 +35,13 @@
 //! у файла. Копия собирается из базы разбором каждой записи ([`collect`]),
 //! поэтому записи прошлых версий в ней уже переведены в текущую.
 //!
+//! С версии 6 (0.0.27) открытый текст перед шифром сжат ([`pack`]) —
+//! DEFLATE без обёртки (RFC 1951): во вложениях книги (задача 14) байты
+//! файлов лежат base64, а он сжимается на четверть, текст записей — в разы.
+//! Сжимать после шифра бесполезно: шифротекст неотличим от случайных
+//! байтов. Сжат ли текст, говорит версия в шапке, а не отдельное поле:
+//! версии 1–5 не сжимали, с 6-й сжимают всегда.
+//!
 //! Что меняет этот файл — меняет версию формата ([`FORMAT_VERSION`]):
 //! шапку, замок, имена шифра, вид записи в списке. Прошлые версии читаются
 //! по своему номеру; образец копии каждой выпущенной версии лежит
@@ -64,9 +71,11 @@ use serde_json::value::RawValue;
 use super::{
     FIRST_VERSION, FORMAT_VERSION, FormatError, Stored, base64, decode_record, split, wrap,
 };
+use crate::model::attachment::Attachment;
 use crate::model::client::Client;
 use crate::model::date::Date;
 use crate::model::document::Document;
+use crate::model::ledger::Operation;
 use crate::model::logo::Logo;
 use crate::model::profile::Profile;
 use crate::model::record::{RecordMeta, Timestamp};
@@ -77,11 +86,35 @@ use crate::model::recurring::Recurring;
 pub const FILE_MARK: &str = "kvartik-backup";
 
 /// Больше этого файл копии не читается — проверяется до чтения
-/// (Правило 13): файл в сотни мегабайт повесил бы страницу. Запас большой:
-/// год работы занятого ИП — около 2 МБ (600 документов по 1–2 КБ и тысяча
-/// операций книги по полкилобайта), 32 МБ — полтора десятка лет. Вложения
-/// (задача 14) и Pro (задача 38) этот предел пересмотрят.
-pub const MAX_FILE_BYTES: u64 = 32 << 20;
+/// (Правило 13): файл в гигабайт повесил бы страницу, а то и закрыл бы её
+/// на телефоне. Год работы занятого ИП без вложений — около 2 МБ текста
+/// (600 документов по 1–2 КБ и тысяча операций книги по полкилобайта),
+/// а сжатым — сотни килобайт. Место занимают вложения (задача 14): фото
+/// чека — сотни килобайт, и 128 МБ — это около трёхсот фото по
+/// 300 КБ (base64 и шифр — ещё треть). Предел был 32 МБ до вложений;
+/// Pro (задача 38) его пересмотрит. Копию больше предела окно не делает:
+/// она бы не открылась.
+pub const MAX_FILE_BYTES: u64 = 128 << 20;
+
+/// С этой версии формата открытый текст копии сжат перед шифром ([`pack`]).
+const PACKED_SINCE: u32 = 6;
+
+/// Больше этого открытый текст копии не разжимается: разжатие
+/// останавливается на пределе, а не после (Правило 13), — иначе
+/// подложенный файл в килобайты разжался бы в гигабайты нулей и закрыл бы
+/// страницу. Настоящий текст больше файла не намного: файлы вложений
+/// в base64 сжимаются на четверть, а файл копии — сам base64 шифротекста.
+/// Вдвое больше предела файла — с запасом на текст записей, который
+/// сжимается в разы.
+pub const MAX_PLAIN_BYTES: usize = 2 * MAX_FILE_BYTES as usize;
+
+/// Уровень сжатия `miniz_oxide`: первый, самый быстрый. Замер 2026-10-15
+/// (задача 14, машина автора, сборка `release`): копия в 22 МБ — 2 МБ
+/// текста и 60 вложений по 250 КБ — на уровне 1 сжимается до 68,8 % за
+/// 86 мс, на уровнях 3 и 6 — до 69,1 % за 465–478 мс; 2 МБ текста — до
+/// 4,8 % за 2 мс и до 2,8–2,9 % за 7–9 мс. Файлы вложений уже сжаты
+/// (JPEG, PDF), и более высокий уровень лишь дольше держит страницу.
+const PACK_LEVEL: u8 = 1;
 
 /// Как из пароля получается ключ: PBKDF2 с HMAC-SHA-256.
 pub const KDF_NAME: &str = "PBKDF2-SHA256";
@@ -170,6 +203,8 @@ pub const KINDS: &[Kind] = &[
     Kind::of::<Client>(),
     Kind::of::<Document>(),
     Kind::of::<Recurring>(),
+    Kind::of::<Operation>(),
+    Kind::of::<Attachment>(),
 ];
 
 fn find(kinds: &[Kind], name: &str) -> Option<Kind> {
@@ -353,7 +388,7 @@ struct RecordOut<'a> {
     record: &'a RawValue,
 }
 
-/// Открытый текст копии: шапка и записи.
+/// Открытый текст копии: шапка и записи — JSON, ещё не сжатый ([`pack`]).
 pub fn plaintext(header: &Header, entries: &[Entry]) -> String {
     serde_json::to_string(&PlainOut {
         file: FILE_MARK,
@@ -369,6 +404,12 @@ pub fn plaintext(header: &Header, entries: &[Entry]) -> String {
             .collect(),
     })
     .expect("копия в JSON не падает: записи уже в JSON, остальное — строки и числа")
+}
+
+/// То, что окно шифрует: открытый текст копии ([`plaintext`]), сжатый
+/// DEFLATE (RFC 1951) — так пишет версия формата 6 и новее.
+pub fn pack(header: &Header, entries: &[Entry]) -> Vec<u8> {
+    miniz_oxide::deflate::compress_to_vec(plaintext(header, entries).as_bytes(), PACK_LEVEL)
 }
 
 /// Замок одного файла: из чего ключ получается из пароля и вектор шифра.
@@ -545,9 +586,9 @@ pub fn open(text: &str) -> Result<Sealed, BackupError> {
         return Err(BackupError::NotBackup);
     }
     match mark.format_version {
-        // Шапка, замок и список записей у версий 1–5 одинаковы: версии 2–5
-        // прибавили виды записей и поле, а их разбирает `decode_record` по
-        // версии файла.
+        // Шапка, замок и список записей у версий 1–6 одинаковы: версии 2–6
+        // прибавили виды записей и поля, а их разбирает `decode_record` по
+        // версии файла; сжат ли текст, `read` узнаёт по ней же.
         FIRST_VERSION..=FORMAT_VERSION => {}
         found if found > FORMAT_VERSION => return Err(BackupError::Newer { found }),
         // Версий до первой нет.
@@ -613,12 +654,21 @@ struct RecordIn<'a> {
     record: &'a RawValue,
 }
 
-/// Записи расшифрованной копии — каждая разобрана своим видом.
+/// Записи расшифрованной копии — каждая разобрана своим видом. `opened` —
+/// то, что дала расшифровка: у версии 6 и новее — сжатый текст ([`pack`]),
+/// у прежних — сам текст.
 ///
 /// Всё или ничего: одна испорченная запись, вид, которого программа не
 /// знает, или две записи с одним идентификатором — и не читается вся копия.
 /// Половина копии в базе выглядела бы восстановленной, а не была бы ею.
-pub fn read(kinds: &[Kind], sealed: &Sealed, plaintext: &[u8]) -> Result<Vec<Entry>, BackupError> {
+pub fn read(kinds: &[Kind], sealed: &Sealed, opened: &[u8]) -> Result<Vec<Entry>, BackupError> {
+    let unpacked;
+    let plaintext = if sealed.header.format_version >= PACKED_SINCE {
+        unpacked = unpack(opened, MAX_PLAIN_BYTES)?;
+        unpacked.as_slice()
+    } else {
+        opened
+    };
     let text = std::str::from_utf8(plaintext).map_err(damaged)?;
     let plain: PlainIn<'_> = serde_json::from_str(text).map_err(damaged)?;
     let inner = Header {
@@ -649,6 +699,13 @@ pub fn read(kinds: &[Kind], sealed: &Sealed, plaintext: &[u8]) -> Result<Vec<Ent
         });
     }
     Ok(entries)
+}
+
+/// Сжатый текст копии ([`pack`]), разжатый не больше чем до `limit`
+/// байтов: дальше разжатие останавливается, и текст — порча.
+fn unpack(packed: &[u8], limit: usize) -> Result<Vec<u8>, BackupError> {
+    miniz_oxide::inflate::decompress_to_vec_with_limit(packed, limit)
+        .map_err(|error| damaged(format!("сжатый текст не разжимается: {:?}", error.status)))
 }
 
 /// Что слияние копии с базой запишет.

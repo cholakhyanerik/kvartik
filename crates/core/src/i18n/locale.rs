@@ -25,7 +25,7 @@
 //! как в CLDR у всех трёх языков.
 
 use super::Lang;
-use crate::model::date::Date;
+use crate::model::date::{Date, Quarter};
 use crate::model::money::{Currency, Money, RATE_DIGITS};
 
 /// Неразрывный пробел: между разрядами в армянском и русском и перед знаком
@@ -203,6 +203,42 @@ pub fn month_heading(lang: Lang, year: u16, month: u8, this_year: u16) -> String
         Lang::Am => format!("{year} թ\u{2024} {name}"),
         Lang::Ru => format!("{name} {year} г."),
         Lang::En => format!("{name} {year}"),
+    }
+}
+
+/// Квартал — заголовком книги (задача 14): «III квартал 2026», по-армянски
+/// «III եռամսյակ 2026» — так в дизайне «Kvartik Design» (экран 10),
+/// по-английски «Q3 2026». Римская цифра квартала — как пишут в русских
+/// и армянских отчётах; CLDR квартала с годом не задаёт.
+pub fn quarter(lang: Lang, quarter: Quarter) -> String {
+    const ROMAN: [&str; 4] = ["I", "II", "III", "IV"];
+    let number = usize::from(quarter.number().clamp(1, 4) - 1);
+    let year = quarter.year();
+    match lang {
+        Lang::Am => format!("{}{NBSP}եռամսյակ {year}", ROMAN[number]),
+        Lang::Ru => format!("{}{NBSP}квартал {year}", ROMAN[number]),
+        Lang::En => format!("Q{}{NBSP}{year}", number + 1),
+    }
+}
+
+/// Курс парой — «единица валюты = драмы» (задача 14): `1 $ = 388,00 ֏`,
+/// по-английски `$1 = AMD 388.00`. Знаки валют — те же, что у [`money`],
+/// а число курса — [`rate`]. Пробелы — неразрывные, и вокруг «=» тоже:
+/// пара — одно значение, и перенос посреди неё оставлял «1 $» без курса
+/// (глазной прогон 2026-10-15).
+pub fn rate_pair(lang: Lang, currency: Currency, per_unit_e4: i64) -> String {
+    let value = rate(lang, per_unit_e4);
+    let sign = match currency {
+        Currency::Usd => "$",
+        Currency::Eur => "€",
+        Currency::Amd => match lang {
+            Lang::Am | Lang::Ru => "֏",
+            Lang::En => "AMD\u{A0}",
+        },
+    };
+    match lang {
+        Lang::Am | Lang::Ru => format!("1{NBSP}{sign}{NBSP}={NBSP}{value}{NBSP}֏"),
+        Lang::En => format!("{sign}1{NBSP}={NBSP}AMD{NBSP}{value}"),
     }
 }
 
@@ -650,6 +686,46 @@ mod tests {
             }
         }
         assert!(wrong.is_empty(), "курсы записаны не так: {wrong:#?}");
+    }
+
+    /// Курс парой: единица валюты и драмы — знаками своего языка.
+    #[test]
+    fn rate_pairs_follow_each_language() {
+        let cases = [
+            (Lang::Am, Currency::Usd, 3_880_000, "1 $ = 388,00 ֏"),
+            (Lang::Ru, Currency::Eur, 4_055_800, "1 € = 405,58 ֏"),
+            (Lang::En, Currency::Usd, 3_880_000, "$1 = AMD 388.00"),
+            (Lang::En, Currency::Eur, 4_055_849, "€1 = AMD 405.5849"),
+        ];
+        let mut wrong = Vec::new();
+        for (lang, currency, per_unit_e4, expected) in cases {
+            let got = rate_pair(lang, currency, per_unit_e4);
+            let expected = nb(expected);
+            if got != expected {
+                wrong.push(format!("{lang:?} {currency:?}: «{got}», а не «{expected}»"));
+            }
+        }
+        assert!(wrong.is_empty(), "курс парой записан не так: {wrong:#?}");
+    }
+
+    /// Квартал: римской цифрой по-армянски и по-русски, «Q3» по-английски.
+    #[test]
+    fn quarters_follow_each_language() {
+        let third = Quarter::new(2026, 3).expect("квартал есть");
+        let fourth = Quarter::new(2025, 4).expect("квартал есть");
+        let cases = [
+            (Lang::Am, third, "III\u{A0}եռամսյակ 2026"),
+            (Lang::Ru, fourth, "IV\u{A0}квартал 2025"),
+            (Lang::En, third, "Q3\u{A0}2026"),
+        ];
+        let mut wrong = Vec::new();
+        for (lang, shown, expected) in cases {
+            let got = quarter(lang, shown);
+            if got != expected {
+                wrong.push(format!("{lang:?}: «{got}», а не «{expected}»"));
+            }
+        }
+        assert!(wrong.is_empty(), "кварталы записаны не так: {wrong:#?}");
     }
 
     /// Количество — без нулей в конце дробной части, разряды — по языку.

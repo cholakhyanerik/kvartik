@@ -24,9 +24,16 @@
 //! строки и сумма оплаты лежат числом, валюта — одна на документ, и строки
 //! в чужой валюте не бывает. Количество — в тысячных: 37,5 часа — 37 500.
 //!
+//! **Курс** документа в валюте — курс ЦБ, который человек указал для дня
+//! оказания услуги (задача 14): по нему доход документа ложится в книгу
+//! в драмах. Неизвестный курс — `None`, а не ноль (Правило 6). В PDF курса
+//! нет, поэтому у выпущенного документа его можно указать и поправить
+//! ([`Document::set_rate`]): текст документа от этого не меняется.
+//!
 //! Меняется документ только командами ядра (CLAUDE.md, «Данные меняются
 //! одним путём»): [`Document::create`], `edit`, `issue`, `annul`,
-//! `unannul`, `delete`, `restore`, `add_payment`, `remove_payment`.
+//! `unannul`, `delete`, `restore`, `add_payment`, `remove_payment`,
+//! `set_rate`.
 //!
 //! В данных: `{"meta":{…},"data":{…},"issued":{…},"annulled":null,
 //! "payments":[…]}`; образец — в тесте `data_shape_is_pinned`.
@@ -39,7 +46,9 @@ use serde::{Deserialize, Serialize};
 use super::bank::BankAccount;
 use super::client::{Client, ClientData};
 use super::date::Date;
-use super::money::{Currency, Money, MoneyError, div_round_half_away_from_zero};
+use super::money::{
+    Currency, ExchangeRate, Money, MoneyError, RateError, RateSource, div_round_half_away_from_zero,
+};
 use super::profile::{Email, Localized, ProfileData};
 use super::record::{RecordId, RecordMeta, Timestamp};
 use super::text::{Line, Lines, fold};
@@ -172,6 +181,10 @@ pub struct DocumentData {
     /// Повтор, черновиком которого появился счёт (`model::recurring`); у акта
     /// и у счёта, выписанного руками, — `None`.
     pub recurring: Option<RecordId>,
+    /// Курс валюты документа к драму — для книги (задача 14); у документа
+    /// в драмах и пока курс не указан — `None`. Дата курса — день оказания
+    /// услуги: курс, который человек указал для него ([`Self::rate_for`]).
+    pub rate: Option<ExchangeRate>,
 }
 
 /// Поля документа, как они лежат в данных, — до проверки.
@@ -188,6 +201,9 @@ struct DocumentDataFields {
     items: Vec<Item>,
     basis: Option<RecordId>,
     recurring: Option<RecordId>,
+    /// С версии формата 6 (0.0.27): у документа прошлых версий курса нет.
+    #[serde(default)]
+    rate: Option<ExchangeRate>,
 }
 
 /// Почему документ или команда над ним не приняты.
@@ -240,6 +256,9 @@ pub enum DocError {
     NumbersUnknown,
     /// Номера серии кончились (`u32::MAX`) — только от испорченных данных.
     NumbersExhausted,
+    /// Курс не годится: не больше нуля, у документа в драмах или другой
+    /// валюты, чем документ.
+    Rate,
 }
 
 impl DocumentData {
@@ -277,6 +296,9 @@ impl DocumentData {
             }
             DocKind::Invoice | DocKind::Act => {}
         }
+        if self.rate.is_some_and(|rate| rate.currency() != self.currency) {
+            return Err(DocError::Rate);
+        }
         self.total().map(|_| ()).map_err(|_| DocError::TooLarge)
     }
 
@@ -289,6 +311,25 @@ impl DocumentData {
             .map(|item| item.total(self.currency))
             .collect::<Result<Vec<_>, _>>()?;
         Money::total(self.currency, lines)
+    }
+
+    /// Итог в драмах — по курсу документа (`Money::to_amd`): документ — одна
+    /// поставка и один курс. Валюта без курса — `RateUnknown`, а не ноль.
+    pub fn total_amd(&self) -> Result<Money, MoneyError> {
+        self.total()?.to_amd(self.rate)
+    }
+
+    /// Курс валюты документа для дня оказания услуги: `per_unit_e4` — драмы
+    /// за единицу валюты в десятитысячных (`RATE_SCALE`), как их прочитал
+    /// `i18n::parse_rate`. Курс ввёл человек (`RateSource::Manual`); его дата
+    /// — день оказания услуги, к которому он относится. Какой курс ЦБ брать
+    /// для этого дня, говорит закон (НК 16), а окно — подсказкой.
+    pub fn rate_for(&self, per_unit_e4: i64) -> Result<ExchangeRate, DocError> {
+        ExchangeRate::new(self.currency, per_unit_e4, self.service_date, RateSource::Manual).map_err(
+            |error| match error {
+                RateError::NotPositive | RateError::Amd => DocError::Rate,
+            },
+        )
     }
 }
 
@@ -307,6 +348,7 @@ impl<'de> Deserialize<'de> for DocumentData {
             items,
             basis,
             recurring,
+            rate,
         } = DocumentDataFields::deserialize(deserializer)?;
         let data = Self {
             kind,
@@ -319,6 +361,7 @@ impl<'de> Deserialize<'de> for DocumentData {
             items,
             basis,
             recurring,
+            rate,
         };
         data.check()
             .map_err(|error| de::Error::custom(format!("документ не годится: {error:?}")))?;
@@ -672,9 +715,29 @@ impl Document {
         Some(document)
     }
 
+    /// Команда «указать курс» выпущенного действующего документа в валюте:
+    /// `per_unit_e4` — как у [`DocumentData::rate_for`], `None` — убрать
+    /// курс. Курса в тексте документа и в PDF нет, поэтому выпущенный
+    /// документ от этого не меняется — меняется его строка в книге. Черновик
+    /// получает курс из своей формы (`edit`). `Ok(None)` — курс тот же.
+    pub fn set_rate(&self, per_unit_e4: Option<i64>, now: Timestamp) -> Result<Option<Self>, DocError> {
+        self.must_be_issued()?;
+        if self.annulled.is_some() {
+            return Err(DocError::Annulled);
+        }
+        let rate = per_unit_e4.map(|e4| self.data.rate_for(e4)).transpose()?;
+        if rate == self.data.rate {
+            return Ok(None);
+        }
+        let mut document = self.clone();
+        document.data.rate = rate;
+        document.meta.touch(now);
+        Ok(Some(document))
+    }
+
     /// Данные акта по этому счёту — «акт из счёта одним нажатием»: тот же
-    /// клиент, язык, валюта, строки и дата оказания услуги, дата акта —
-    /// `today`, основание — этот счёт.
+    /// клиент, язык, валюта, строки, дата оказания услуги и курс для неё,
+    /// дата акта — `today`, основание — этот счёт.
     pub fn act_data(&self, today: Date) -> Result<DocumentData, DocError> {
         self.must_be_invoice()?;
         if self.annulled.is_some() {
@@ -693,7 +756,8 @@ impl Document {
     /// Данные `n`-го черновика повтора `recurring` — копия счёта на `n`
     /// месяцев позже (`model::recurring`): даты сдвинуты
     /// (`Date::add_months`), срок оплаты — тот же промежуток от даты счёта.
-    /// `None` — календарь кончился.
+    /// Курса нет: он был для прежнего дня оказания услуги, а у нового —
+    /// свой. `None` — календарь кончился.
     pub(crate) fn repeat_data(&self, n: u32, recurring: RecordId) -> Option<DocumentData> {
         let date = self.data.date.add_months(n)?;
         let due = match self.data.due {
@@ -705,6 +769,7 @@ impl Document {
             service_date: self.data.service_date.add_months(n)?,
             due,
             recurring: Some(recurring),
+            rate: None,
             ..self.data.clone()
         })
     }

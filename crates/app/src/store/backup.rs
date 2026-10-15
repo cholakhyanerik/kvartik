@@ -8,7 +8,7 @@
 
 use kvartik_core::format::FormatError;
 use kvartik_core::format::backup::{
-    self, BackupError, Entry, Header, IV_BYTES, Kind, Lock, Sealed,
+    self, BackupError, Entry, Header, IV_BYTES, Kind, Lock, MAX_FILE_BYTES, Sealed,
 };
 
 use super::{Dumped, Store, StoreError, Writes};
@@ -23,6 +23,9 @@ pub enum Failure {
     Crypto(CryptoError),
     /// Файл копии не открывается.
     File(BackupError),
+    /// Копия вышла больше `MAX_FILE_BYTES`: такую программа не откроет,
+    /// и отдавать её человеку — обещать то, чего она не вернёт.
+    TooLarge,
 }
 
 impl From<StoreError> for Failure {
@@ -69,12 +72,16 @@ pub async fn make(
     for why in collected.unreadable() {
         super::log("backup", &format!("не вошла в копию: {why}").into());
     }
-    let plaintext = backup::plaintext(header, collected.entries());
+    let packed = backup::pack(header, collected.entries());
     let iv = crypto::random(IV_BYTES)?;
     let lock = Lock::new(iterations, salt.to_vec(), iv).ok_or(CryptoError::Failed)?;
-    let ciphertext = crypto::encrypt(key, lock.iv(), plaintext.as_bytes()).await?;
+    let ciphertext = crypto::encrypt(key, lock.iv(), &packed).await?;
+    let file = backup::seal(header, &lock, &ciphertext);
+    if file.len() as u64 > MAX_FILE_BYTES {
+        return Err(Failure::TooLarge);
+    }
     Ok(Made {
-        file: backup::seal(header, &lock, &ciphertext),
+        file,
         records: collected.entries().len(),
         unreadable: collected.unreadable().len(),
     })

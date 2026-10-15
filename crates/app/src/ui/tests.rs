@@ -23,6 +23,7 @@ use crate::store::device::Device;
 use crate::store::{Store, StoreError, Writes};
 
 mod documents;
+mod ledger;
 mod share;
 
 wasm_bindgen_test_configure!(run_in_browser);
@@ -303,6 +304,22 @@ async fn choosing_a_language_translates_the_whole_window() {
         wrong.push("нет клиента в выборе формы счёта".to_owned());
     }
     sleep(50).await;
+    // Экран книги рисуется с первого показа (`ui/ledger.rs`): открыть его
+    // и форму расхода в долларах — с подсказками о курсе и документе.
+    crate::platform::set_hash("#/ledger");
+    if !wait_for(&host, t(Lang::Am, Key::LedgerAddExpense)).await {
+        wrong.push("экран книги не открылся".to_owned());
+    }
+    match button(&host, &[t(Lang::Am, Key::LedgerAddExpense)]) {
+        Some(add) => add.click(),
+        None => wrong.push("нет кнопки нового расхода".to_owned()),
+    }
+    sleep(50).await;
+    match host.query_selector("form.operation select").ok().flatten() {
+        Some(currency) => pick(currency.unchecked_ref(), "USD"),
+        None => wrong.push("нет выбора валюты расхода".to_owned()),
+    }
+    sleep(50).await;
 
     let typed: Option<HtmlInputElement> = host
         .query_selector("input[type=password]")
@@ -338,6 +355,9 @@ async fn choosing_a_language_translates_the_whole_window() {
             Key::DocWhatHint,
             Key::DocCashReceipt,
             Key::ClientInArmeniaHint,
+            Key::RateHint,
+            Key::ProofHint,
+            Key::NatureHint,
         ] {
             if !text.contains(t(lang, key)) {
                 wrong.push(format!("{lang:?}: нет {key:?} на этом языке"));
@@ -385,6 +405,7 @@ async fn choosing_a_language_translates_the_whole_window() {
 
     drop(mounted);
     host.remove();
+    crate::platform::set_hash("");
     if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten())
     {
         let _ = storage.remove_item("kvartik.lang");
@@ -528,7 +549,8 @@ fn current_tabs(host: &HtmlElement) -> Vec<String> {
 /// Экран — по адресу: окно, открытое с `#/clients`, показывает клиентов,
 /// а остальные экраны прячет; вкладка меню открывает свой экран и отмечена
 /// открытой; «Назад» браузера возвращает прежний экран, а не уводит из
-/// программы; копия — экран внутри профиля; чужой адрес — главный экран.
+/// программы; книга — своей вкладкой; копия — экран внутри профиля; чужой
+/// адрес — главный экран.
 #[wasm_bindgen_test]
 async fn screens_follow_the_address() {
     use crate::platform::{hash, set_hash};
@@ -561,6 +583,13 @@ async fn screens_follow_the_address() {
     }
     sleep(200).await;
     look("«Назад»", "clients", "#/clients", &mut wrong);
+
+    match host.query_selector(r##".tabs a[href="#/ledger"]"##).ok().flatten() {
+        Some(tab) => tab.unchecked_into::<HtmlElement>().click(),
+        None => wrong.push("нет вкладки книги".to_owned()),
+    }
+    sleep(100).await;
+    look("вкладка книги", "ledger", "#/ledger", &mut wrong);
 
     set_hash("#/backup");
     sleep(100).await;

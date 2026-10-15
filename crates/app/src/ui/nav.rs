@@ -18,11 +18,13 @@ use super::icon::{Icon, icon};
 use super::route::{Router, Screen};
 use super::tr;
 
-/// Разделы меню: экран, значок и подпись. «Налог» появится с расчётом
-/// налога (строка плана 0.2): пустой вкладки, которая обещает расчёт, нет.
-const TABS: [(Screen, Icon, Key); 4] = [
+/// Разделы меню: экран, значок и подпись. Книга — пятой вкладкой (решение
+/// человека 2026-10-15, задача 14). «Налог» появится с расчётом налога
+/// (строка плана 0.2): пустой вкладки, которая обещает расчёт, нет.
+const TABS: [(Screen, Icon, Key); 5] = [
     (Screen::Home, Icon::Home, Key::NavHome),
     (Screen::Documents, Icon::Document, Key::NavDocuments),
+    (Screen::Ledger, Icon::Book, Key::NavLedger),
     (Screen::Clients, Icon::Clients, Key::ClientsTitle),
     (Screen::Profile, Icon::Person, Key::NavProfile),
 ];

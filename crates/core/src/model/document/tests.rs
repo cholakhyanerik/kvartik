@@ -20,14 +20,15 @@ fn line(text: &str) -> Line {
 
 /// Выпущенный счёт в долларах: две строки — 5 000,00 $ и 12,5 часа по
 /// 40,00 $, итого 5 500,00 $, — оплачен двумя платежами, 2 000,00 $
-/// и 3 500,00 $.
+/// и 3 500,00 $; курс для книги — 388,00 ֏ на день оказания услуги.
 const INVOICE: &str = concat!(
     r#"{"meta":{"id":"7c9e6679-7425-40de-944b-e07fc1f90ae7","modified":1760000000000,"deleted":null},"#,
     r#""data":{"kind":"invoice","client":"5b0e8f9a-3c2d-4e1f-8a7b-9c6d5e4f3a2b","lang":"en","currency":"USD","#,
     r#""date":"2026-10-01","service_date":"2026-09-30","due":"2026-10-15","#,
     r#""items":[{"text":"Software development services, September 2026","quantity_e3":1000,"price":500000},"#,
     r#"{"text":"Code review","quantity_e3":12500,"price":4000}],"#,
-    r#""basis":null,"recurring":null},"#,
+    r#""basis":null,"recurring":null,"#,
+    r#""rate":{"currency":"USD","per_unit_e4":3880000,"date":"2026-09-30","source":"manual"}},"#,
     r#""issued":{"number":{"year":2026,"seq":7},"#,
     r#""seller":{"name":{"hy":"ԱՁ Արամ Պետրոսյան","ru":"ИП Арам Петросян","en":"IE Aram Petrosyan"},"#,
     r#""tin":"07654321","registration":"271.1234567","#,
@@ -47,7 +48,7 @@ const ACT: &str = concat!(
     r#""data":{"kind":"act","client":"5b0e8f9a-3c2d-4e1f-8a7b-9c6d5e4f3a2b","lang":"hy","currency":"AMD","#,
     r#""date":"2026-10-13","service_date":"2026-10-13","due":null,"#,
     r#""items":[{"text":"Ծրագրային ապահովման մշակում","quantity_e3":1000,"price":1500000}],"#,
-    r#""basis":"7c9e6679-7425-40de-944b-e07fc1f90ae7","recurring":null},"#,
+    r#""basis":"7c9e6679-7425-40de-944b-e07fc1f90ae7","recurring":null,"rate":null},"#,
     r#""issued":null,"annulled":null,"payments":[]}"#
 );
 
@@ -74,6 +75,8 @@ fn data_shape_is_pinned() {
     assert_eq!(issued.buyer().country, Country::from_code("DE"));
     assert_eq!(invoice.total(), Ok(Money::new(550_000, Currency::Usd)));
     assert_eq!(invoice.paid(), Ok(Money::new(550_000, Currency::Usd)));
+    // 5 500,00 $ × 388,00 = 2 134 000 ֏.
+    assert_eq!(invoice.data().total_amd(), Ok(Money::new(2_134_000, Currency::Amd)));
     assert_eq!(invoice.status(day(2026, 10, 30)), Status::Paid);
     assert_eq!(serde_json::to_string(&invoice).ok().as_deref(), Some(INVOICE));
 
@@ -83,7 +86,27 @@ fn data_shape_is_pinned() {
     assert_eq!(act.number(), None);
     assert_eq!(act.total(), Ok(Money::new(1_500_000, Currency::Amd)));
     assert_eq!(act.status(day(2026, 10, 13)), Status::Draft);
+    assert_eq!(act.data().rate, None);
+    assert_eq!(act.data().total_amd(), Ok(Money::new(1_500_000, Currency::Amd)));
     assert_eq!(serde_json::to_string(&act).ok().as_deref(), Some(ACT));
+}
+
+/// Документ версии формата 5 — без поля курса — читается с неизвестным
+/// курсом, а пишется уже с полем (Правило 2): данные прошлых версий не
+/// теряются.
+#[test]
+fn documents_without_rate_still_read() {
+    let old = INVOICE.replacen(
+        r#","rate":{"currency":"USD","per_unit_e4":3880000,"date":"2026-09-30","source":"manual"}"#,
+        "",
+        1,
+    );
+    assert_ne!(old, INVOICE);
+    let invoice: Document = serde_json::from_str(&old).expect("счёт без курса читается");
+    assert_eq!(invoice.data().rate, None);
+    assert_eq!(invoice.data().total_amd(), Err(MoneyError::RateUnknown));
+    let written = serde_json::to_string(&invoice).expect("записывается");
+    assert!(written.contains(r#""recurring":null,"rate":null}"#), "{written}");
 }
 
 /// Испорченное не читается: незнакомое поле, запретное значение, состояние,
@@ -93,7 +116,7 @@ fn data_rejects_what_commands_never_write() {
     let invoice = |from: &str, to: &str| INVOICE.replacen(from, to, 1);
     let act = |from: &str, to: &str| ACT.replacen(from, to, 1);
     let cases = [
-        invoice(r#""recurring":null}"#, r#""recurring":null,"note":"x"}"#),
+        invoice(r#""recurring":null,"#, r#""recurring":null,"note":"x","#),
         invoice(r#""payments":["#, r#""extra":1,"payments":["#),
         invoice(r#""kind":"invoice""#, r#""kind":"receipt""#),
         invoice(r#""quantity_e3":1000"#, r#""quantity_e3":0"#),
@@ -118,6 +141,9 @@ fn data_rejects_what_commands_never_write() {
         act(r#""annulled":null"#, r#""annulled":"2026-10-13""#),
         act(r#""payments":[]"#, r#""payments":[{"date":"2026-10-13","amount":1}]"#),
         act(r#","payments":[]"#, ""),
+        act(r#""rate":null"#, r#""rate":{"currency":"USD","per_unit_e4":3880000,"date":"2026-10-13","source":"manual"}"#),
+        invoice(r#""currency":"USD","per_unit_e4""#, r#""currency":"EUR","per_unit_e4""#),
+        invoice(r#""per_unit_e4":3880000"#, r#""per_unit_e4":0"#),
     ];
     let mut wrong = Vec::new();
     for (index, text) in cases.iter().enumerate() {
@@ -214,6 +240,7 @@ fn data(kind: DocKind, client: &Client, date: Date) -> DocumentData {
         }],
         basis: None,
         recurring: None,
+        rate: None,
     }
 }
 
@@ -435,6 +462,65 @@ fn act_from_an_invoice() {
     assert_eq!(draft.act_data(today), Err(DocError::NotIssued));
     let annulled = invoice.annul(today, at(4_000)).expect("выпущен").expect("аннулирован");
     assert_eq!(annulled.act_data(today), Err(DocError::Annulled));
+}
+
+/// Счёт в долларах для проб курса: 1 000,00 $, услуга оказана 30 сентября.
+fn dollar_invoice(client: &Client) -> Document {
+    let mut dollars = data(DocKind::Invoice, client, day(2026, 10, 1));
+    dollars.currency = Currency::Usd;
+    dollars.service_date = day(2026, 9, 30);
+    Document::create(dollars, at(2_000))
+        .expect("черновик")
+        .issue(&[], 0, Some(&profile()), client, at(3_000))
+        .expect("выпускается")
+}
+
+/// Курс выпущенного документа указывают и правят: он валюты документа и на
+/// день оказания услуги, а текст документа не меняется. Тот же курс — нечего
+/// писать; у аннулированного, у черновика и у документа в драмах — нельзя.
+#[test]
+fn rate_is_set_on_an_issued_document() {
+    let client = client();
+    let invoice = dollar_invoice(&client);
+    assert_eq!(invoice.data().total_amd(), Err(MoneyError::RateUnknown));
+    let rated = invoice.set_rate(Some(3_880_000), at(4_000)).expect("годен").expect("указан");
+    let rate = rated.data().rate.expect("курс есть");
+    assert_eq!(
+        (rate.currency(), rate.per_unit_e4(), rate.date(), rate.source()),
+        (Currency::Usd, 3_880_000, day(2026, 9, 30), RateSource::Manual)
+    );
+    // Строка — 100 000 центов: 1 000,00 $ × 388,00 = 388 000 ֏.
+    assert_eq!(rated.data().total_amd(), Ok(Money::new(388_000, Currency::Amd)));
+    assert_eq!(rated.meta().modified(), at(4_000));
+    assert_eq!((rated.number(), rated.issued()), (invoice.number(), invoice.issued()));
+    assert_eq!(rated.data().items, invoice.data().items);
+    assert_eq!(rated.set_rate(Some(3_880_000), at(5_000)), Ok(None));
+    let cleared = rated.set_rate(None, at(5_000)).expect("годен").expect("убран");
+    assert_eq!(cleared.data().rate, None);
+    assert_eq!(invoice.set_rate(Some(0), at(4_000)), Err(DocError::Rate));
+
+    let annulled = invoice.annul(day(2026, 10, 2), at(4_000)).expect("выпущен").expect("аннулирован");
+    assert_eq!(annulled.set_rate(Some(3_880_000), at(5_000)), Err(DocError::Annulled));
+    let draft = Document::create(data(DocKind::Invoice, &client, day(2026, 10, 1)), at(2_000)).expect("черновик");
+    assert_eq!(draft.set_rate(Some(3_880_000), at(5_000)), Err(DocError::NotIssued));
+    let drams = issued(DocKind::Invoice, &client, day(2026, 10, 1), &[]);
+    assert_eq!(drams.set_rate(Some(3_880_000), at(5_000)), Err(DocError::Rate));
+}
+
+/// Акт по счёту берёт курс счёта — день услуги тот же; повтор счёта — нет:
+/// у следующего месяца свой курс.
+#[test]
+fn rate_follows_the_act_but_not_the_repeat() {
+    let client = client();
+    let rated = dollar_invoice(&client)
+        .set_rate(Some(3_880_000), at(4_000))
+        .expect("годен")
+        .expect("указан");
+    let act = rated.act_data(day(2026, 10, 13)).expect("акт");
+    assert_eq!(act.rate, rated.data().rate);
+    let next = rated.repeat_data(1, RecordId::random()).expect("календарь не кончился");
+    assert_eq!(next.service_date, day(2026, 10, 31));
+    assert_eq!(next.rate, None);
 }
 
 /// Список: черновики первыми, потом выпущенные — свежие сверху; удалённые —

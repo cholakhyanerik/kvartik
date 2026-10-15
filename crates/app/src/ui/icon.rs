@@ -13,6 +13,10 @@ pub enum Icon {
     Home,
     /// Счета и акты — лист с загнутым углом и строками.
     Document,
+    /// Книга доходов и расходов — раскрытая книга.
+    Book,
+    /// Вложение — скрепка.
+    Clip,
     /// Клиенты — двое.
     Clients,
     /// Профиль — один человек.
@@ -48,6 +52,15 @@ pub fn icon(icon: Icon) -> impl IntoView {
         Icon::Document => view! {
             <path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z" />
             <path d="M14 3v5h5M9 13h6M9 17h6" />
+        }
+        .into_any(),
+        Icon::Book => view! {
+            <path d="M12 6.5C10.3 5 7.8 4.5 4 4.5v13c3.8 0 6.3.5 8 2 1.7-1.5 4.2-2 8-2v-13c-3.8 0-6.3.5-8 2z" />
+            <path d="M12 6.5v13" />
+        }
+        .into_any(),
+        Icon::Clip => view! {
+            <path d="m20 11.5-7.6 7.6a5 5 0 0 1-7-7l8.2-8.2a3.3 3.3 0 0 1 4.7 4.7l-8.2 8.2a1.7 1.7 0 0 1-2.4-2.4l7.5-7.5" />
         }
         .into_any(),
         Icon::Clients => view! {

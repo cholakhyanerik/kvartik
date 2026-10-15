@@ -178,6 +178,8 @@ enum Problem {
     Say(Key),
     TooShort,
     TooLarge,
+    /// Сделанная копия вышла больше предела: такую программа не откроет.
+    Oversized,
 }
 
 impl Problem {
@@ -190,6 +192,10 @@ impl Problem {
             ),
             Self::TooLarge => fill(
                 t(lang, Key::BackupTooLarge),
+                &[&i18n::integer(lang, (MAX_FILE_BYTES >> 20) as i64)],
+            ),
+            Self::Oversized => fill(
+                t(lang, Key::BackupOversized),
                 &[&i18n::integer(lang, (MAX_FILE_BYTES >> 20) as i64)],
             ),
         }
@@ -244,6 +250,7 @@ impl From<Failure> for Problem {
             Failure::Store(error) => Self::Say(error_key(error)),
             Failure::Crypto(error) => error.into(),
             Failure::File(error) => error.into(),
+            Failure::TooLarge => Self::Oversized,
         }
     }
 }

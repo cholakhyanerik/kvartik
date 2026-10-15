@@ -343,6 +343,42 @@ impl Quarter {
         }
     }
 
+    /// Прошлый квартал: перед первым — четвёртый прошлого года. `None` —
+    /// раньше календаря `Date`.
+    pub const fn previous(self) -> Option<Self> {
+        if self.number > 1 {
+            Some(Self {
+                year: self.year,
+                number: self.number - 1,
+            })
+        } else if self.year > Date::MIN_YEAR {
+            Some(Self {
+                year: self.year - 1,
+                number: 4,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Следующий квартал: после четвёртого — первый следующего года.
+    /// `None` — позже календаря `Date`.
+    pub const fn next(self) -> Option<Self> {
+        if self.number < 4 {
+            Some(Self {
+                year: self.year,
+                number: self.number + 1,
+            })
+        } else if self.year < Date::MAX_YEAR {
+            Some(Self {
+                year: self.year + 1,
+                number: 1,
+            })
+        } else {
+            None
+        }
+    }
+
     /// Первый месяц квартала: 1, 4, 7 или 10.
     const fn first_month(self) -> u8 {
         (self.number - 1) * 3 + 1
@@ -400,6 +436,19 @@ mod tests {
             }
         }
         assert!(wrong.is_empty(), "не тот квартал: {wrong:#?}");
+    }
+
+    /// Соседний квартал — через границу года и до краёв календаря: перед
+    /// первым кварталом 2026 года — четвёртый 2025-го, после четвёртого —
+    /// первый 2027-го.
+    #[test]
+    fn neighbour_quarters_cross_the_year() {
+        assert_eq!(quarter(2026, 1).previous(), Some(quarter(2025, 4)));
+        assert_eq!(quarter(2026, 3).previous(), Some(quarter(2026, 2)));
+        assert_eq!(quarter(2026, 4).next(), Some(quarter(2027, 1)));
+        assert_eq!(quarter(2026, 2).next(), Some(quarter(2026, 3)));
+        assert_eq!(quarter(Date::MIN_YEAR, 1).previous(), None);
+        assert_eq!(quarter(Date::MAX_YEAR, 4).next(), None);
     }
 
     /// День недели — по календарю, а не той же формулой: 1970-01-01 —

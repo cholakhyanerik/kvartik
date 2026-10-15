@@ -26,12 +26,12 @@ use crate::platform::clock;
 use crate::store::device::Device;
 use crate::store::{Store, Writes};
 
-fn line(text: &str) -> Line {
+pub(super) fn line(text: &str) -> Line {
     Line::new(text).expect("в тесте — годный текст")
 }
 
 /// Профиль ИП с именем на трёх языках.
-fn profile() -> ProfileData {
+pub(super) fn profile() -> ProfileData {
     let mut data = ProfileData::default();
     data.name.hy = line("ԱՁ Արամ Պետրոսյան");
     data.name.ru = line("ИП Арам Петросян");
@@ -56,7 +56,7 @@ fn acme() -> ClientData {
 
 /// Пустая база программы с профилем и клиентом — записанными командами
 /// ядра. Возвращает клиента.
-async fn fresh_base_with_client() -> Client {
+pub(super) async fn fresh_base_with_client() -> Client {
     crate::store::delete_database(crate::store::DB_NAME).await;
     let now = clock::now();
     let profile = Profile::save(None, profile(), now)
@@ -71,7 +71,7 @@ async fn fresh_base_with_client() -> Client {
 }
 
 /// Записать в базу программы одним действием.
-async fn commit(writes: Writes) {
+pub(super) async fn commit(writes: Writes) {
     let store = Store::open(|_| {}).await.expect("база открыта");
     store
         .write()
@@ -91,7 +91,7 @@ async fn stored() -> (Vec<Document>, Vec<Recurring>) {
 }
 
 /// Строка списка `list` (CSS), в тексте которой есть `text`.
-fn row_with(host: &HtmlElement, list: &str, text: &str) -> Option<HtmlElement> {
+pub(super) fn row_with(host: &HtmlElement, list: &str, text: &str) -> Option<HtmlElement> {
     let rows = host.query_selector_all(&format!("{list} li")).ok()?;
     (0..rows.length())
         .filter_map(|at| rows.item(at))
@@ -100,7 +100,7 @@ fn row_with(host: &HtmlElement, list: &str, text: &str) -> Option<HtmlElement> {
 }
 
 /// Убрать за собой то, что тест оставил на устройстве.
-fn forget_device() {
+pub(super) fn forget_device() {
     if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten())
     {
         let _ = storage.remove_item("kvartik.lang");
@@ -497,6 +497,7 @@ async fn a_repeating_invoice_appears_when_the_app_opens() {
         }],
         basis: None,
         recurring: None,
+        rate: None,
     };
     let source = Document::create(data, now)
         .expect("черновик")
@@ -651,6 +652,7 @@ async fn documents_are_found_opened_and_marked_paid() {
         }],
         basis: None,
         recurring: None,
+        rate: None,
     };
     let issue = |kind: DocKind, price: i64, before: &[Document]| {
         Document::create(data(kind, price), now)
@@ -838,7 +840,7 @@ impl Drop for FontServer {
 }
 
 /// Подождать элемент по селектору; `false` — не дождались за пять секунд.
-async fn wait_selector(host: &HtmlElement, selector: &str) -> bool {
+pub(super) async fn wait_selector(host: &HtmlElement, selector: &str) -> bool {
     for _ in 0..100 {
         if host.query_selector(selector).ok().flatten().is_some() {
             return true;
@@ -849,7 +851,7 @@ async fn wait_selector(host: &HtmlElement, selector: &str) -> bool {
 }
 
 /// Счёт клиенту на английском, сегодняшним днём, на 2 400 долларов.
-fn invoice_data(client: &Client) -> DocumentData {
+pub(super) fn invoice_data(client: &Client) -> DocumentData {
     let today = clock::today().expect("часы с датой");
     DocumentData {
         kind: DocKind::Invoice,
@@ -866,6 +868,7 @@ fn invoice_data(client: &Client) -> DocumentData {
         }],
         basis: None,
         recurring: None,
+        rate: None,
     }
 }
 

@@ -132,6 +132,7 @@ pub async fn preload() {
     let _ = super::clients::preload_form().await;
     let _ = super::documents::preload_form().await;
     let _ = super::documents::preload_opened().await;
+    let _ = super::ledger::preload_ledger().await;
     let _ = super::paper::preload_paper().await;
     let _ = super::backup::preload_make().await;
     let _ = super::backup::preload_open().await;

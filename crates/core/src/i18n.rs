@@ -26,7 +26,7 @@ mod locale;
 
 pub use locale::{
     ParseError, amount, date, day_long, decimal, integer, money, month_heading, parse_decimal,
-    parse_money, parse_rate, rate,
+    parse_money, parse_rate, quarter, rate, rate_pair,
 };
 
 use serde::de::{self, Deserializer};
@@ -1180,6 +1180,206 @@ strings! {
         "Новые черновики повторяющихся счетов: {}. Проверьте и выпустите их.",
         "New drafts of repeating invoices: {}. Check and issue them.",
         "Կրկնվող հաշիվների նոր սևագրեր՝ {}։ Ստուգեք և թողարկեք դրանք։";
+
+    /// Книга доходов и расходов (задача 14): вкладка меню и экран. Термина
+    /// для книги в законе нет — в НК «մատյան» только в «գրանցամատյան»
+    /// (по закону: разведка 2026-10-15), — поэтому вкладка названа
+    /// описательным словом, а экран — тем, что в нём.
+    NavLedger = "Книга", "Ledger", "Մատյան";
+    LedgerTitle = "Доходы и расходы", "Income and expenses", "Եկամուտներ և ծախսեր";
+    LedgerAbout =
+        "Доход по выпущенным счетам и актам книга берёт сама\u{A0}— по дню оказания услуги. Здесь добавляйте доход без документа в программе и расходы.",
+        "The ledger takes income from issued invoices and acts by itself, by the date of service. Add income without a document in the app and expenses here.",
+        "Թողարկված հաշիվներից և ակտերից եկամուտը մատյանն ինքն է վերցնում՝ ըստ ծառայության մատուցման ամսաթվի։ Այստեղ ավելացրեք ծրագրում փաստաթուղթ չունեցող եկամուտները և ծախսերը։";
+    LedgerPrevQuarter = "Прошлый квартал", "Previous quarter", "Նախորդ եռամսյակ";
+    LedgerNextQuarter = "Следующий квартал", "Next quarter", "Հաջորդ եռամսյակ";
+    LedgerIncome = "Доход", "Income", "Եկամուտ";
+    LedgerExpense = "Расход", "Expense", "Ծախս";
+    LedgerExpenses = "Расходы", "Expenses", "Ծախսեր";
+    /// Шаблон: сколько строк в валюте без курса. Без курса строка в итог не
+    /// идёт молча (Правило 6) — окно говорит это словами.
+    LedgerUnrated =
+        "Строк в валюте без курса ЦБ: {}. В итог они не вошли\u{A0}— укажите курс.",
+        "Foreign-currency lines without a CBA rate: {}. They aren't in the totals\u{A0}— enter the rate.",
+        "Արժույթով տողեր առանց ԿԲ փոխարժեքի՝ {}։ Դրանք հանրագումարում չեն. նշեք փոխարժեքը։";
+    LedgerAddIncome = "Добавить доход", "Add income", "Ավելացնել եկամուտ";
+    LedgerAddExpense = "Добавить расход", "Add an expense", "Ավելացնել ծախս";
+    LedgerFilter = "Какие записи показать", "Which entries to show", "Որ գրառումները ցույց տալ";
+    /// Выбор «доходы» над строками. По-армянски — «Եկամուտ»: с «Եկամուտներ»
+    /// три кнопки не влезали в 360 точек (глазной прогон 2026-10-15).
+    LedgerIncomes = "Доходы", "Income", "Եկամուտ";
+    LedgerEmpty = "В этом квартале записей нет.", "Nothing in this quarter.", "Այս եռամսյակում գրառումներ չկան։";
+    /// Шаблон: сумма в драмах по курсу строки — под суммой в валюте, как
+    /// в дизайне «Kvartik Design» (экраны 04 и 05). Не «≈»: сумма по курсу
+    /// ЦБ — база налога, а не прикидка, и знака «≈» нет в подмножествах
+    /// шрифтов (Правило 4).
+    LedgerInDrams = "{} по курсу ЦБ", "{} at the CBA rate", "{}՝ ըստ ԿԲ փոխարժեքի";
+    LedgerNoRate = "нет курса ЦБ", "no CBA rate", "ԿԲ փոխարժեք չկա";
+    /// Шаблон: сколько файлов у записи.
+    LedgerFiles = "файлов: {}", "files: {}", "ֆայլեր՝ {}";
+    LedgerUnreadable =
+        "Не читаются записей книги: {}. Восстановите их из резервной копии.",
+        "Ledger records that can't be read: {}. Restore them from a backup.",
+        "Չեն կարդացվում մատյանի գրառումներ՝ {}։ Վերականգնեք դրանք պահուստային պատճենից։";
+    LedgerDeleted = "Удалённые записи ({})", "Deleted entries ({})", "Ջնջված գրառումներ ({})";
+    LedgerDeletedHide = "Скрыть удалённые записи", "Hide deleted entries", "Թաքցնել ջնջված գրառումները";
+    LedgerSaved = "Запись сохранена.", "Entry saved.", "Գրառումը պահպանվեց։";
+    LedgerDeletedNotice =
+        "Запись удалена. Её можно восстановить.",
+        "Entry deleted. You can restore it.",
+        "Գրառումը ջնջվեց։ Այն կարելի է վերականգնել։";
+    LedgerRestoredNotice = "Запись восстановлена.", "Entry restored.", "Գրառումը վերականգնվեց։";
+
+    /// Форма записи книги.
+    OpNewIncome = "Новый доход", "New income", "Նոր եկամուտ";
+    OpNewExpense = "Новый расход", "New expense", "Նոր ծախս";
+    OpText = "За что", "What for", "Ինչի համար";
+    OpTextIncomeHint =
+        "Например: «Разработка сайта, сентябрь».",
+        "For example: “Website development, September”.",
+        "Օրինակ՝ «Կայքի մշակում, սեպտեմբեր»։";
+    OpTextExpenseHint =
+        "Например: «Аренда офиса, октябрь».",
+        "For example: “Office rent, October”.",
+        "Օրինակ՝ «Գրասենյակի վարձ, հոկտեմբեր»։";
+    OpTextMissing = "Напишите, за что.", "Say what it's for.", "Գրեք՝ ինչի համար։";
+    OpNoClient = "Не из списка клиентов", "Not from the client list", "Հաճախորդների ցուցակից չէ";
+    OpSupplier = "Продавец", "Seller", "Վաճառողը";
+    OpSupplierHint = "Как он назван в документе.", "As named in the document.", "Ինչպես նշված է փաստաթղթում։";
+    OpReceived =
+        "Дата получения товара или услуги",
+        "Date the goods or service were received",
+        "Ապրանքի կամ ծառայության ստացման ամսաթիվը";
+    /// Расход квартала — по начислению (НК, ст. 258, ч. 6, п. 1, «ա»; по
+    /// закону, сверено 2026-10-15).
+    OpReceivedHint =
+        "По этой дате расход попадает в квартал, а не по дню оплаты.",
+        "The expense counts towards the quarter of this date, not of the payment.",
+        "Ծախսը եռամսյակին է վերագրվում այս ամսաթվով, այլ ոչ թե վճարման օրով։";
+    OpPaid = "Дата оплаты, если была", "Payment date, if paid", "Վճարման ամսաթիվը, եթե վճարվել է";
+    OpAmount = "Сумма", "Amount", "Գումարը";
+    OpAmountZero = "Сумма\u{A0}— больше нуля.", "The amount must be more than zero.", "Գումարը պետք է լինի զրոյից մեծ։";
+    /// Шаблон: курс — драмов за единицу этой валюты (код ISO 4217).
+    OpRate = "Курс ЦБ: драмов за 1\u{A0}{}", "CBA rate: drams per 1\u{A0}{}", "ԿԲ փոխարժեքը՝ դրամ 1\u{A0}{}-ի դիմաց";
+    /// Какой курс ЦБ брать (НК, ст. 16: с 2026-07-01 — ч. 1, п. 2 и ч. 2,
+    /// п. 1 в редакции ՀՕ-234-Ն, раньше — ч. 1, п. 2 и 4 и ч. 2; по закону:
+    /// https://www.arlis.am/hy/acts/230455 и /226064, сверено 2026-10-15).
+    RateHint =
+        "Курс ЦБ (cba.am): с 1 июля 2026 года\u{A0}— опубликованный в предыдущий рабочий день перед днём операции, раньше\u{A0}— на день выписки расчётного документа (НК, ст.\u{A0}16). Пока курса нет, запись не входит в итог в драмах.",
+        "CBA rate (cba.am): from 1 July 2026, the one published on the working day before the transaction; earlier, the one on the day the settlement document was issued (Tax Code, Art.\u{A0}16). Until there's a rate, the entry isn't in the totals in drams.",
+        "ԿԲ փոխարժեքը (cba.am)՝ 2026 թ. հուլիսի 1-ից՝ գործարքի օրվան նախորդող աշխատանքային օրը հրապարակվածը, մինչ այդ՝ հաշվարկային փաստաթղթի դուրսգրման օրվանը (Հարկային օրենսգիրք, հոդված\u{A0}16)։ Քանի դեռ փոխարժեք չկա, գրառումը դրամով հանրագումարում չէ։";
+    RateZero = "Курс\u{A0}— больше нуля.", "The rate must be more than zero.", "Փոխարժեքը պետք է լինի զրոյից մեծ։";
+    /// Шаблон: сумма в драмах и курс парой (`i18n::rate_pair`) — под
+    /// суммой формы, как в дизайне «Kvartik Design» (экран 04).
+    RateEquivalent =
+        "В драмах: {} по курсу ЦБ ({}). Налог считается в драмах.",
+        "In drams: {} at the CBA rate ({}). Tax is counted in drams.",
+        "Դրամով՝ {}՝ ըստ ԿԲ փոխարժեքի ({})։ Հարկը հաշվում ենք դրամով։";
+    /// Документ продавца (`model::ledger::Proof`). Названия — как в НК,
+    /// ст. 55, ч. 2, и его официальных переводах на arlis.am (сверено
+    /// 2026-10-15): «հաշիվ վավերագիր» — «счёт-фактура» и «tax bill», чек —
+    /// «հսկիչ դրամարկղային մեքենայի կտրոն» (ՀԴՄ), «cash register receipt».
+    OpProof = "Документ продавца", "Seller's document", "Վաճառողի փաստաթուղթը";
+    ProofTaxInvoice = "Налоговый счёт (հարկային հաշիվ)", "Tax invoice (հարկային հաշիվ)", "Հարկային հաշիվ";
+    ProofSettlementInvoice = "Счёт-фактура (հաշիվ վավերագիր)", "Tax bill (հաշիվ վավերագիր)", "Հաշիվ վավերագիր";
+    ProofCashReceipt = "Чек ККМ с вашим ИНН (ՀՎՀՀ)", "Cash register receipt with your TIN (ՀՎՀՀ)", "ՀԴՄ կտրոն՝ ձեր ՀՎՀՀ-ով";
+    ProofIndividualPurchase =
+        "Документ о покупке у физлица",
+        "Document of purchase from an individual",
+        "Ֆիզիկական անձից ձեռքբերման փաստաթուղթ";
+    ProofContract = "Договор и акт с физлицом", "Contract and act with an individual", "Պայմանագիր և ակտ ֆիզիկական անձի հետ";
+    ProofForeignSupplier =
+        "Счёт иностранного поставщика и платёж",
+        "Foreign supplier's invoice and payment",
+        "Օտարերկրյա մատակարարի հաշիվ և վճարում";
+    ProofBankPayment = "Только банковский платёж", "Bank payment only", "Միայն բանկային վճարում";
+    ProofNone = "Документа нет", "No document", "Փաստաթուղթ չկա";
+    /// Что подтверждает расход (НК, ст. 258, ч. 6, п. 1; ст. 55, ч. 2, 12
+    /// и 13; по закону, сверено 2026-10-15). «Обычно»: банковского платежа
+    /// хватает налогам, пошлинам, зарплате и услугам банка (ч. 12).
+    ProofHint =
+        "Для вычета нужен документ продавца; одного банковского платежа обычно мало\u{A0}— кроме налогов, пошлин, зарплаты и услуг банка (НК, ст.\u{A0}55 и\u{A0}258). Сверьте с бухгалтером.",
+        "A deduction needs the seller's document; a bank payment alone is usually not enough\u{A0}— except for taxes, duties, salaries and bank services (Tax Code, Art.\u{A0}55 and\u{A0}258). Check with your accountant.",
+        "Նվազեցման համար պետք է վաճառողի փաստաթուղթը. միայն բանկային վճարումը սովորաբար բավարար չէ՝ բացի հարկերից, տուրքերից, աշխատավարձից և բանկի ծառայություններից (Հարկային օրենսգիրք, հոդվածներ\u{A0}55 և\u{A0}258)։ Ճշտեք հաշվապահի հետ։";
+    /// Что это за расход (`model::ledger::Nature`). Названия — как в НК,
+    /// ст. 258, ч. 6, п. 2, и его официальных переводах: «secondment
+    /// expenses», «representation expenses» (сверено 2026-10-15).
+    OpNature = "Что это за расход", "Kind of expense", "Ծախսի տեսակը";
+    NatureOrdinary =
+        "Обычный: товары, материалы, услуги",
+        "Ordinary: goods, materials, services",
+        "Սովորական՝ ապրանքներ, նյութեր, ծառայություններ";
+    NatureAsset =
+        "Основное средство или нематериальный актив",
+        "Fixed asset or intangible asset",
+        "Հիմնական միջոց կամ ոչ նյութական ակտիվ";
+    NatureTravel = "Командировочные расходы", "Secondment expenses", "Գործուղման ծախսեր";
+    NatureHospitality = "Представительские расходы", "Representation expenses", "Ներկայացուցչական ծախսեր";
+    NatureHint =
+        "Основные средства и нематериальные активы, командировочные и представительские расходы в вычет не идут (НК, ст.\u{A0}258, ч.\u{A0}6).",
+        "Fixed and intangible assets, secondment and representation expenses are not deductible (Tax Code, Art.\u{A0}258, part\u{A0}6).",
+        "Հիմնական միջոցները և ոչ նյութական ակտիվները, գործուղման և ներկայացուցչական ծախսերը չեն նվազեցվում (Հարկային օրենսգիրք, հոդված\u{A0}258, մաս\u{A0}6)։";
+    /// Вид деятельности расхода — у ИП с несколькими кодами.
+    OpActivity = "Вид деятельности", "Activity", "Գործունեության տեսակը";
+    OpActivityShared = "Общий для всех видов", "Shared by all activities", "Ընդհանուր՝ բոլոր տեսակների համար";
+    /// НК, ст. 260, ч. 3 (по закону, сверено 2026-10-15).
+    OpActivityHint =
+        "Общие административные и сбытовые расходы делятся по долям оборота видов деятельности (НК, ст.\u{A0}260, ч.\u{A0}3).",
+        "Shared administrative and sales expenses are split by each activity's share of turnover (Tax Code, Art.\u{A0}260, part\u{A0}3).",
+        "Ընդհանուր վարչական և իրացման ծախսերը բաշխվում են ըստ գործունեության տեսակների շրջանառության կշռի (Հարկային օրենսգիրք, հոդված\u{A0}260, մաս\u{A0}3)։";
+    /// Вложения (решение человека 2026-10-15: в этой задаче). Хранить
+    /// документы о доходах и расходах — не меньше пяти лет (НК, ст. 33, ч. 1,
+    /// п. 5; по закону, сверено 2026-10-15).
+    OpFiles = "Файлы: чек, счёт, договор", "Files: receipt, invoice, contract", "Ֆայլեր՝ կտրոն, հաշիվ, պայմանագիր";
+    /// Шаблон: сколько файлов можно и предел PDF в мегабайтах.
+    OpFilesHint =
+        "Фото или PDF, не больше {} файлов. Фото программа уменьшает, PDF\u{A0}— не больше {}\u{A0}МБ. Документы о доходах и расходах хранят не меньше пяти лет (НК, ст.\u{A0}33).",
+        "Photos or PDFs, up to {} files. The app shrinks photos; a PDF must be under {}\u{A0}MB. Keep income and expense documents for at least five years (Tax Code, Art.\u{A0}33).",
+        "Լուսանկար կամ PDF, ոչ ավելի, քան {} ֆայլ։ Լուսանկարները ծրագիրը փոքրացնում է, PDF-ը՝ ոչ ավելի, քան {}\u{A0}ՄԲ։ Եկամուտների և ծախսերի փաստաթղթերը պահվում են առնվազն հինգ տարի (Հարկային օրենսգիրք, հոդված\u{A0}33)։";
+    OpFileAdd = "Добавить файл", "Add a file", "Ավելացնել ֆայլ";
+    OpFilePreparing = "Готовим файл…", "Preparing the file…", "Պատրաստում ենք ֆայլը…";
+    /// Шаблоны: имя файла и, у первого, предел в мегабайтах.
+    OpFileTooLarge =
+        "«{}» больше {}\u{A0}МБ\u{A0}— сохраните PDF меньшего размера.",
+        "“{}” is over {}\u{A0}MB\u{A0}— save a smaller PDF.",
+        "«{}»-ը {}\u{A0}ՄԲ-ից մեծ է. պահպանեք ավելի փոքր PDF։";
+    OpFileNotSupported =
+        "«{}»: это не фото JPEG или PNG и не PDF.",
+        "“{}” isn't a JPEG or PNG photo or a PDF.",
+        "«{}»-ը JPEG կամ PNG լուսանկար կամ PDF չէ։";
+    OpFileUnreadable =
+        "«{}» не читается\u{A0}— выберите его ещё раз.",
+        "“{}” can't be read\u{A0}— choose it again.",
+        "«{}»-ը չի կարդացվում. ընտրեք այն նորից։";
+    /// Шаблон: предел файлов у записи.
+    OpFilesFull =
+        "У записи уже {} файлов\u{A0}— больше не поместится.",
+        "The entry already has {} files\u{A0}— no more fit.",
+        "Գրառումն արդեն ունի {} ֆայլ. ավելին չի տեղավորվի։";
+    OpDelete = "Удалить запись", "Delete the entry", "Ջնջել գրառումը";
+    /// Шаблон: размер файла в килобайтах.
+    OpFileSize = "{}\u{A0}КБ", "{}\u{A0}KB", "{}\u{A0}ԿԲ";
+    OpProofMissing =
+        "Выберите, какой документ у вас есть.",
+        "Choose which document you have.",
+        "Ընտրեք, թե որ փաստաթուղթն ունեք։";
+
+    /// Курс документа в валюте — в карточке выпущенного (задача 14).
+    DocRateSet = "Указать курс ЦБ", "Enter the CBA rate", "Նշել ԿԲ փոխարժեքը";
+    DocRateChange = "Изменить курс", "Change the rate", "Փոխել փոխարժեքը";
+    DocRateMissing =
+        "Курс ЦБ не указан: в книге этот доход\u{A0}— без суммы в драмах.",
+        "No CBA rate yet: in the ledger this income has no amount in drams.",
+        "ԿԲ փոխարժեքը նշված չէ. մատյանում այս եկամուտն առանց դրամային գումարի է։";
+    DocRateSave = "Сохранить курс", "Save the rate", "Պահպանել փոխարժեքը";
+    DocRateSaved = "Курс сохранён.", "Rate saved.", "Փոխարժեքը պահպանվեց։";
+
+    /// Шаблон: предел файла копии в мегабайтах. Копия больше предела не
+    /// откроется (`format::backup::MAX_FILE_BYTES`) — окно её не отдаёт.
+    BackupOversized =
+        "Копия вышла больше {}\u{A0}МБ\u{A0}— такую программа не откроет. Уберите из книги лишние файлы и сделайте копию снова.",
+        "The backup came out over {}\u{A0}MB, and the app can't open one that large. Remove unneeded files from the ledger and make the backup again.",
+        "Պատճենը ստացվեց {}\u{A0}ՄԲ-ից մեծ, իսկ այդպիսին ծրագիրը չի բացի։ Հեռացրեք մատյանից ավելորդ ֆայլերը և նորից պատճեն արեք։";
 }
 
 /// Подставляет значения в шаблон вместо `{}`, по порядку.
