@@ -39,22 +39,37 @@ header() {
   grep -i "^$1:" "$2" | tail -n 1 | cut -d: -f2- | sed 's/^ *//' | tr -d '\r' || true
 }
 
+# Выкладка доходит до края сети не вся разом: на kvartik.com страница /app/
+# была уже новой, а часть файлов, `/app` и `404.html` ещё отвечали
+# прежней выкладкой — 404 и её телами; через пять минут всё было новым
+# (2026-10-16). Поэтому ответ прежней выкладки повторяется, пока не выйдут
+# три минуты от первой страницы этой сборки (`settle_until` ставится, когда
+# она пришла), и провал — только устойчивый. `settling` ждёт три секунды
+# и отвечает, есть ли ещё время.
+settle_until=0
+settling() {
+  [ "$(date +%s)" -lt "$settle_until" ] || return 1
+  sleep 3
+}
+
 # Ответ на GET: код, заголовки — в файл, тело — в файл. `Accept-Encoding`
 # — как у браузера; тело не разжимается, чтобы видеть, сжал ли хостинг.
 # Сразу после выкладки край Cloudflare бывает отвечает 5xx: у первой
 # выкладки 16 файлов из 79 пришли с 522 («не дождался источника»), а через
 # минуту все — с 200 и верными заголовками (2026-10-15). Поэтому 5xx
-# и обрыв связи (000) повторяются до пяти раз, и провал — только
-# устойчивый.
+# и обрыв связи (000) повторяются до пяти раз, а 404 — пока выкладка
+# доходит (выше): файл из сборки есть, и 404 на него — ответ прежней.
 fetch() {
-  local code attempt
-  for attempt in 1 2 3 4 5; do
+  local code attempt=1
+  while :; do
     code="$(curl -sS -o "$work/body" -D "$work/head" -w '%{http_code}' \
       -H 'Accept-Encoding: br, gzip' "$site/$1" || true)"
     case "$code" in
-      5?? | 000) [ "$attempt" = 5 ] || sleep 3 ;;
+      5?? | 000) [ "$attempt" -lt 5 ] || break; sleep 3 ;;
+      404) settling || break ;;
       *) break ;;
     esac
+    attempt=$((attempt + 1))
   done
   echo "$code"
 }
@@ -83,6 +98,7 @@ for attempt in $(seq 1 12); do
   fi
   sleep 5
 done
+settle_until=$(($(date +%s) + 180))
 
 # Страница — байт в байт та, что собрана: хостинг ничего в неё не вписал
 # (счётчик Web Analytics, включённый в панели, вписал бы скрипт).
@@ -111,11 +127,13 @@ check_redirects() {
   for pair in "/?q=1 302" "/$app?q=1 308"; do
     from="${pair% *}"
     code="${pair#* }"
-    got="$(curl -sS -o /dev/null -D "$work/redirect-head" -w '%{http_code}' "$site$from" || true)"
-    location="$(header location "$work/redirect-head")"
-    location="${location#"$site"}"
-    [ "$got $location" = "$code /$app/?q=1" ] \
-      || fail "$from: «$got $location», а ждали $code на /$app/?q=1"
+    while :; do
+      got="$(curl -sS -o /dev/null -D "$work/redirect-head" -w '%{http_code}' "$site$from" || true)"
+      location="$(header location "$work/redirect-head")"
+      location="${location#"$site"}"
+      [ "$got $location" != "$code /$app/?q=1" ] || break
+      settling || { fail "$from: «$got $location», а ждали $code на /$app/?q=1"; break; }
+    done
   done
 }
 check_redirects
@@ -157,8 +175,14 @@ esac
 check_missing() {
   local code got path
   for path in "kvartik-no-such-file-0000000000000000.js" "$app/kvartik-no-such-file-0000000000000000.js"; do
-    code="$(curl -sS --compressed -o "$work/missing" -D "$work/missing-head" -w '%{http_code}' \
-      "$site/$path" || true)"
+    while :; do
+      code="$(curl -sS --compressed -o "$work/missing" -D "$work/missing-head" -w '%{http_code}' \
+        "$site/$path" || true)"
+      if [ "$code" = 404 ] && cmp -s "$work/missing" "$dist/404.html"; then
+        break
+      fi
+      settling || break
+    done
     [ "$code" = 404 ] || fail "/$path: $code, а ждали 404"
     cmp -s "$work/missing" "$dist/404.html" || fail "/$path: тело — не 404.html этой сборки"
     got="$(header cache-control "$work/missing-head")"
@@ -219,11 +243,12 @@ while IFS= read -r path; do
   # узнаёт новую версию, а по `sw.js` корня — что прежний service worker
   # корня пора снять.
   if [ "${path##*/}" = sw.js ]; then
-    if curl -sS --compressed -o "$work/sw" "$site/$path"; then
-      cmp -s "$work/sw" "$dist/$path" || fail "$path: не этой сборки"
-    else
-      fail "$path: не скачан"
-    fi
+    while :; do
+      if curl -sS --compressed -o "$work/sw" "$site/$path" && cmp -s "$work/sw" "$dist/$path"; then
+        break
+      fi
+      settling || { fail "$path: не этой сборки или не скачан"; break; }
+    done
   fi
 done < <(cd "$dist" && find . -type f ! -name '_*' ! -name '.*' ! -name '*.html' | sed 's|^\./||' | sort)
 
