@@ -37,7 +37,8 @@
 //!
 //! wasm-bindgen и wasm-opt — программы из PATH той версии, что ждёт сборка:
 //! wasm-bindgen — та же, что крейт в `Cargo.lock` (Правило 3), wasm-opt —
-//! [`WASM_OPT_VERSION`]. Где их взять — CLAUDE.md, Правило 3; в CI их
+//! [`WASM_OPT_VERSION`]. Где их взять — skill `update-deps`
+//! (`.claude/skills/update-deps/SKILL.md`); в CI их
 //! ставит `ci.yml`, сверяя сумму.
 
 use std::collections::BTreeSet;
@@ -83,7 +84,7 @@ const SHARED: &str = "__wasm_split";
 /// `ci.yml`, и замер размера (Правило 1).
 const WASM_OPT_VERSION: &str = "131";
 /// Уровень wasm-opt: `s`, а не `z` — после brotli `z` не меньше
-/// (замер 2026-10-13, задача 57; CLAUDE.md, Правило 1).
+/// (замер 2026-10-13, задача 57; docs/measurements.md).
 const WASM_OPT_LEVEL: &str = "-Os";
 
 /// Что сборка wasm кладёт в папку сайта.

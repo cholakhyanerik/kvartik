@@ -52,7 +52,38 @@
       "PowerShell(git ls-files *)",
       "PowerShell(git check-ignore *)",
       "PowerShell(gh run *)",
+      "Bash(node .claude/*)",
+      "PowerShell(node .claude/*)",
       "Read(~/.cargo/registry/src/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write|NotebookEdit|Grep|Glob|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/guard.mjs"],
+            "timeout": 10,
+            "onFailure": "block"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/lf.mjs"],
+            "timeout": 10
+          }
+        ]
+      }
     ]
   },
   "worktree": {
