@@ -16,7 +16,7 @@ cargo update            # в рамках semver, из Cargo.lock
 cargo upgrade           # поднять сами требования версий в Cargo.toml
 ```
 
-Потом — семь проверок Правила 2 (skill `finish-task`, шаг 1; `cargo deny
+Потом — восемь проверок Правила 2 (skill `finish-task`, шаг 1; `cargo deny
 check` здесь обязателен: новые лицензии, дубли и записи RustSec), потом —
 открыть приложение и пройти сценарии Правила 2 (skill `browser-run`),
 выпустить PDF образца. В отчёт — что обновилось и что пришлось адаптировать.
@@ -167,6 +167,19 @@ chromedriver-win64.zip`; сумм CfT не публикует, md5 сверен 
 `chrome.exe --version` на Windows открывает окно вместо ответа. Раннер ищет
 драйвер в PATH и первым берёт geckodriver: появится он — переменная
 `CHROMEDRIVER` выберет Chrome явно (так в CI).
+
+Для тех же тестов в Firefox (задача 54) — geckodriver 0.37.1 в
+`~/.cargo/drivers/` (2026-10-16), **вне PATH**: в PATH раннер взял бы его
+первым, и обычный прогон ушёл бы в Firefox; выбирает его переменная
+`GECKODRIVER`. Архив `geckodriver-v0.37.1-win64.zip` (github.com/mozilla/
+geckodriver), сумма sha256 сверена с полем `digest` в API GitHub;
+`geckodriver.exe` — `e95b4eac…020d`. Firefox — 158.0 на машине (версия —
+`Version` в `application.ini` рядом с `firefox.exe`), 157.0 в образах CI
+24.04 и 26.04 (`$GECKOWEBDRIVER`, runner-images, 2026-10-16). Драйвер
+к сборке Firefox не привязан, как chromedriver к Chrome: geckodriver
+поддерживает диапазон версий — его список в выпуске на GitHub. Настройки
+профиля Firefox для тестов — `crates/app/webdriver.json` (CLAUDE.md,
+Правило 2).
 
 Шрифты пересобирает `tools/fonts.py` — Python 3 и fontTools 4.60.1 в своём
 окружении `.venv-fonts/` (как — в шапке скрипта); сборке и CI они не нужны:

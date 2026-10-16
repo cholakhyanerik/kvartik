@@ -155,6 +155,21 @@ jobs:
           CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver" \
             cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app 2>&1 | tee browser-tests.log
           grep -E "test result: ok\. [1-9][0-9]* passed" browser-tests.log
+      # Те же тесты — в headless Firefox образа (задача 54): хранилище
+      # держится на поведении движка — жива ли транзакция после `await`, где
+      # приходит `QuotaExceededError`, — и поломка в одном движке прошла бы
+      # зелёной в другом. Окно Firefox «Разрешить хранить данные?» на
+      # `persist()` не дало бы ответа никогда: его снимают настройки профиля
+      # из `crates/app/webdriver.json` (раннер читает файл из каталога
+      # пакета; по исходникам wasm-bindgen-cli 0.2.129, `headless.rs`).
+      # Драйвер — явно, а что тесты шли в Firefox, проверяет строка раннера.
+      - name: cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app (Firefox)
+        shell: bash
+        run: |
+          GECKODRIVER="$GECKOWEBDRIVER/geckodriver" \
+            cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app 2>&1 | tee browser-tests-firefox.log
+          grep -q "Running headless tests in Firefox" browser-tests-firefox.log
+          grep -E "test result: ok\. [1-9][0-9]* passed" browser-tests-firefox.log
       - run: trunk build --release
         working-directory: crates/app
       # Новая запись в базе RustSec краснит прогон и без нашего изменения —

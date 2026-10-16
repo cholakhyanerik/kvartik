@@ -1,6 +1,6 @@
 ---
 name: finish-task
-description: Конец задачи Kvartik — семь проверок Правила 2, четыре вопроса Правила 5 (версия, формат, README, CLAUDE.md), запись CHANGELOG.md, реестр FEATURE_TASKS.md, коммит и git push origin main, ожидание CI, уборка временного и отчёт. Брать, когда код задачи готов и пора её закрывать или сводить пачку задач (Правила 2, 5, 7, 10, 11, 12 CLAUDE.md).
+description: Конец задачи Kvartik — восемь проверок Правила 2, четыре вопроса Правила 5 (версия, формат, README, CLAUDE.md), запись CHANGELOG.md, реестр FEATURE_TASKS.md, коммит и git push origin main, ожидание CI, уборка временного и отчёт. Брать, когда код задачи готов и пора её закрывать или сводить пачку задач (Правила 2, 5, 7, 10, 11, 12 CLAUDE.md).
 ---
 
 # Конец задачи
@@ -19,16 +19,20 @@ cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo clippy -p kvartik-app --target wasm32-unknown-unknown --all-targets -- -D warnings
 cargo test --workspace
-cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app   # браузерные
+cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app   # браузерные, Chrome
+GECKODRIVER=~/.cargo/drivers/geckodriver.exe cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app   # они же в Firefox
 trunk build --release          # в crates/app
 cargo deny check               # в CI всегда, на машине — по желанию
 ```
 
-- Все семь — ровно то, что гоняет CI (`.github/workflows/ci.yml`). Новая
+- Все восемь — ровно то, что гоняет CI (`.github/workflows/ci.yml`). Новая
   проверка — сюда и в `ci.yml` вместе.
 - Браузерные тесты: число прошедших больше нуля — раннер при нуле тестов
-  выходит с кодом 0 («no tests to run!»). Упали с «session not created» —
-  Chrome обновился, а chromedriver нет: skill `update-deps`.
+  выходит с кодом 0 («no tests to run!»), — и браузер тот: строка
+  «Running headless tests in Firefox» (или «in Chrome»). Упали с «session
+  not created» — Chrome обновился, а chromedriver нет: skill `update-deps`.
+  geckodriver лежит вне PATH (`~/.cargo/drivers/`): в PATH раннер взял бы
+  его первым, и обычный прогон ушёл бы в Firefox.
 - Тесты — по одному процессу cargo за раз: параллельные `build`, `clippy`
   и `test` ждут блокировку `target/` (Правило 8).
 - Правились `.claude/hooks/` — ещё `node .claude/hooks/test.mjs`, и один
