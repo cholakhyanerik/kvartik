@@ -34,7 +34,8 @@ use super::form::{
     AreaField, CURRENCIES, FieldError, TextField, currency_code, currency_key, optional,
 };
 use super::icon::{Icon, icon};
-use super::split::{part, split};
+use super::route::{Router, Screen};
+use super::split::{screen, split};
 use super::storage::error_key;
 use super::{Base, tr};
 use crate::platform::clock;
@@ -145,34 +146,84 @@ impl Part {
     }
 }
 
-/// Раздел на языке окна — под заголовком экрана. Пока база открывается —
-/// пусто: «открываем…» только мигнуло бы.
+/// Общее у частей раздела.
+#[derive(Clone, Copy)]
+struct Ctx {
+    lang: ReadSignal<Lang>,
+    profiles: Profiles,
+    base: Base,
+    backups: Backups,
+    /// Открыта ли форма.
+    editing: RwSignal<bool>,
+    /// Сохранили ли только что: «Сохранено» над итогом.
+    saved: RwSignal<bool>,
+    /// На какой группе полей открыть форму.
+    focus: RwSignal<Option<Part>>,
+    /// Сегодня — один раз (Архитектура, «Время — параметр»): по нему
+    /// проверяется год рождения и берутся правила налога.
+    today: Option<Date>,
+}
+
+/// Раздел на языке окна — под заголовком экрана, частью wasm с первого
+/// показа (`split::screen`).
 #[component]
 pub fn ProfileSection(
     lang: ReadSignal<Lang>,
     profiles: Profiles,
     base: Base,
     backups: Backups,
+    router: Router,
 ) -> impl IntoView {
-    let editing = RwSignal::new(false);
-    let saved = RwSignal::new(false);
-    // На какой группе полей открыть форму.
-    let focus = RwSignal::new(None::<Part>);
-    // Сегодня — один раз (Архитектура, «Время — параметр»): по нему
-    // проверяется год рождения и берутся правила налога.
-    let today = clock::today();
+    let ctx = Ctx {
+        lang,
+        profiles,
+        base,
+        backups,
+        editing: RwSignal::new(false),
+        saved: RwSignal::new(false),
+        focus: RwSignal::new(None),
+        today: clock::today(),
+    };
     // Копию восстановили — профиль в базе мог стать другим или появиться.
+    // Здесь, а не в части экрана: профиль нужен и главному экрану, и книге,
+    // а экран мог ещё ни разу не показываться.
     Effect::watch(
         move || base.replacements(),
         move |_, _, _| {
             if let Some(store) = base.get() {
-                editing.set(false);
-                saved.set(false);
+                ctx.editing.set(false);
+                ctx.saved.set(false);
                 leptos::task::spawn_local(async move { profiles.load(&store).await });
             }
         },
         false,
     );
+    screen(lang, router, Screen::Profile, move || profile_screen(ctx))
+}
+
+split! {
+    /// Итог или форма экрана «Профиль» — своей частью wasm (`ui/split.rs`):
+    /// первому заходу нужен только главный экран.
+    pub(super) fn profile_screen(ctx: Ctx) -> AnyView, preload preload_screen {
+        view! { <ProfileBody ctx /> }.into_any()
+    }
+}
+
+/// Итог или форма — форма в той же части: без экрана её не открыть,
+/// а своя часть у неё умножала бы общие куски частей (`ui/split.rs`).
+/// Пока база открывается — пусто: «открываем…» только мигнуло бы.
+#[component]
+fn ProfileBody(ctx: Ctx) -> impl IntoView {
+    let Ctx {
+        lang,
+        profiles,
+        base,
+        backups,
+        editing,
+        saved,
+        focus,
+        today,
+    } = ctx;
     let open = move |part: Option<Part>| {
         saved.set(false);
         focus.set(part);
@@ -188,21 +239,9 @@ pub fn ProfileSection(
             .into_any(),
             State::Ready(profile) if editing.get() => {
                 let data = profile.map(|profile| profile.data().clone());
-                part(
-                    lang,
-                    profile_form(
-                        lang,
-                        data,
-                        profiles,
-                        base,
-                        backups,
-                        editing,
-                        saved,
-                        today,
-                        focus.get_untracked(),
-                    ),
-                    move || editing.set(false),
-                )
+                let focus = focus.get_untracked();
+                view! { <ProfileForm lang data profiles base backups editing saved today focus /> }
+                    .into_any()
             }
             State::Ready(Some(profile)) => view! {
                 {move || saved.get().then(|| view! {
@@ -669,26 +708,6 @@ const fn code_key(error: CodeError) -> Key {
         CodeError::Malformed | CodeError::NoSuchDivision | CodeError::WrongSection => {
             Key::ActivityCodeInvalid
         }
-    }
-}
-
-split! {
-    /// Форма профиля — своей частью wasm (`ui/split.rs`): она нужна только
-    /// по «Заполнить» и «Изменить», а весит больше всех форм.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn profile_form(
-        lang: ReadSignal<Lang>,
-        data: Option<ProfileData>,
-        profiles: Profiles,
-        base: Base,
-        backups: Backups,
-        editing: RwSignal<bool>,
-        saved: RwSignal<bool>,
-        today: Option<Date>,
-        focus: Option<Part>,
-    ) -> AnyView, preload preload_form
-    {
-        view! { <ProfileForm lang data profiles base backups editing saved today focus /> }.into_any()
     }
 }
 

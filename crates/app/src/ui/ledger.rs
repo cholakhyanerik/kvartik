@@ -42,7 +42,7 @@ use super::form::{CURRENCIES, TextField, currency_code, currency_key, optional};
 use super::icon::{Icon, icon};
 use super::profile::Profiles;
 use super::route::{Router, Screen};
-use super::split::{part, split};
+use super::split::{screen, split};
 use super::storage::error_key;
 use super::{Base, tr};
 use crate::platform::{clock, file, image};
@@ -79,10 +79,7 @@ pub(super) struct Ctx {
 }
 
 /// Экран книги на языке окна: заголовок — сразу, остальное — частью wasm
-/// с первого показа. Показанный однажды экран больше не снимается
-/// (CLAUDE.md, Правило 2): начатое в форме не пропадает при переходе.
-/// Часть не загрузилась — «Отмена» ведёт на главный экран, и следующий
-/// показ пробует снова.
+/// с первого показа (`split::screen`).
 #[component]
 pub fn LedgerScreen(
     lang: ReadSignal<Lang>,
@@ -102,20 +99,10 @@ pub fn LedgerScreen(
         backups,
         today: clock::today(),
     };
-    let shown = RwSignal::new(false);
-    Effect::new(move |_| {
-        if router.shows(Screen::Ledger) && !shown.get_untracked() {
-            shown.set(true);
-        }
-    });
-    let back = move || {
-        shown.set(false);
-        router.go(Screen::Home);
-    };
     view! {
         <h1 tabindex="-1">{tr(lang, Key::LedgerTitle)}</h1>
         <BackupChip lang backups nudge=true />
-        {move || shown.get().then(|| part(lang, ledger_screen(ctx), back))}
+        {screen(lang, router, Screen::Ledger, move || ledger_screen(ctx))}
     }
 }
 

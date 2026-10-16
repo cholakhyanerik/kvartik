@@ -44,7 +44,7 @@ use super::icon::{Icon, icon};
 use super::ledger::{equivalent, rate_problem};
 use super::paper::{PaperPanel, Request};
 use super::route::{Router, Screen};
-use super::split::{part, split};
+use super::split::{part, screen, split};
 use super::storage::error_key;
 use super::{Base, tr};
 use crate::platform::clock;
@@ -360,9 +360,9 @@ impl Ctx {
 }
 
 /// Экран «Счета и акты» на языке окна (дизайн «Kvartik Design»): список
-/// или форма, а выпущенный документ — карточкой: на телефоне вместо списка,
-/// на компьютере рядом с ним. Пока база открывается — только заголовок:
-/// «открываем…» лишь мигнуло бы.
+/// или форма — частью wasm с первого показа (`split::screen`), а выпущенный
+/// документ — карточкой, своей частью: на телефоне вместо списка, на
+/// компьютере рядом с ним.
 #[component]
 pub fn DocumentsScreen(
     lang: ReadSignal<Lang>,
@@ -390,7 +390,9 @@ pub fn DocumentsScreen(
             State::Failed(error) => Phase::Failed(*error),
         })
     });
-    // Копию восстановили — документы в базе могли стать другими.
+    // Копию восстановили — документы в базе могли стать другими. Здесь,
+    // а не в части экрана: документы нужны и главному экрану, а экран мог
+    // ещё ни разу не показываться.
     Effect::watch(
         move || base.replacements(),
         move |_, _, _| {
@@ -402,8 +404,7 @@ pub fn DocumentsScreen(
         },
         false,
     );
-    // Часть формы не загрузилась — назад к списку; часть карточки — тоже.
-    let back = move || ctx.mode.set(Mode::List);
+    // Часть карточки не загрузилась — назад к списку.
     let close = move || router.go(Screen::Documents);
     // Открытый документ — из адреса; открытая форма его прячет.
     let opened = Memo::new(move |_| match router.screen() {
@@ -411,37 +412,6 @@ pub fn DocumentsScreen(
         _ => None,
     });
     let listing = Memo::new(move |_| ctx.mode.get() == Mode::List && phase.get() == Phase::Ready);
-    let body = move || {
-        let body = match (phase.get(), ctx.mode.get()) {
-            (Phase::Loading, _) => return None,
-            (Phase::Failed(error), _) => view! {
-                <p role="alert">{tr(lang, error_key(error))}</p>
-            }
-            .into_any(),
-            (Phase::Ready, Mode::List) => view! { <DocList ctx /> }.into_any(),
-            (Phase::Ready, Mode::New(kind)) => {
-                part(lang, document_form(ctx, None, Start::Blank(kind, ctx.today)), back)
-            }
-            (Phase::Ready, Mode::ActFor(id)) => {
-                let start = ctx
-                    .documents
-                    .get(id)
-                    .and_then(|invoice| invoice.act_data(ctx.today_or(invoice.data().date)).ok());
-                match start {
-                    Some(data) => part(lang, document_form(ctx, None, Start::Data(data)), back),
-                    None => view! { <DocList ctx /> }.into_any(),
-                }
-            }
-            (Phase::Ready, Mode::Edit(id)) => match ctx.documents.get(id) {
-                Some(draft) => {
-                    let start = Start::Data(draft.data().clone());
-                    part(lang, document_form(ctx, Some(draft), start), back)
-                }
-                None => view! { <DocList ctx /> }.into_any(),
-            },
-        };
-        Some(body)
-    };
     let detail = move || {
         let id = opened.get()?;
         listing.get().then(|| view! {
@@ -453,10 +423,58 @@ pub fn DocumentsScreen(
             <div class="docs-main">
                 <h1 tabindex="-1">{tr(lang, Key::DocsTitle)}</h1>
                 <BackupChip lang backups nudge=true />
-                {body}
+                {screen(lang, router, Screen::Documents, move || documents_screen(ctx, phase))}
             </div>
             {detail}
         </div>
+    }
+}
+
+split! {
+    /// Список или форма экрана «Счета и акты» — своей частью wasm
+    /// (`ui/split.rs`): первому заходу нужен только главный экран.
+    pub(super) fn documents_screen(ctx: Ctx, phase: Memo<Phase>) -> AnyView, preload preload_screen {
+        view! { <DocBody ctx phase /> }.into_any()
+    }
+}
+
+/// Список или форма — форма в той же части: без экрана её не открыть,
+/// а своя часть у неё умножала бы общие куски частей (`ui/split.rs`).
+/// Пока база открывается — пусто: «открываем…» лишь мигнуло бы.
+#[component]
+fn DocBody(ctx: Ctx, phase: Memo<Phase>) -> impl IntoView {
+    let lang = ctx.lang;
+    move || {
+        let body = match (phase.get(), ctx.mode.get()) {
+            (Phase::Loading, _) => return None,
+            (Phase::Failed(error), _) => view! {
+                <p role="alert">{tr(lang, error_key(error))}</p>
+            }
+            .into_any(),
+            (Phase::Ready, Mode::List) => view! { <DocList ctx /> }.into_any(),
+            (Phase::Ready, Mode::New(kind)) => {
+                let start = Start::Blank(kind, ctx.today);
+                view! { <DocForm ctx existing=None start /> }.into_any()
+            }
+            (Phase::Ready, Mode::ActFor(id)) => {
+                let start = ctx
+                    .documents
+                    .get(id)
+                    .and_then(|invoice| invoice.act_data(ctx.today_or(invoice.data().date)).ok());
+                match start {
+                    Some(data) => view! { <DocForm ctx existing=None start=Start::Data(data) /> }.into_any(),
+                    None => view! { <DocList ctx /> }.into_any(),
+                }
+            }
+            (Phase::Ready, Mode::Edit(id)) => match ctx.documents.get(id) {
+                Some(draft) => {
+                    let start = Start::Data(draft.data().clone());
+                    view! { <DocForm ctx existing=Some(draft) start /> }.into_any()
+                }
+                None => view! { <DocList ctx /> }.into_any(),
+            },
+        };
+        Some(body)
     }
 }
 
@@ -1280,16 +1298,6 @@ pub(super) fn shown_problem(
             .then(&problem)
             .flatten()
             .map(|text| view! { <p class="field-error" role="alert">{text}</p> })
-    }
-}
-
-split! {
-    /// Форма документа — своей частью wasm (`ui/split.rs`): она нужна только
-    /// по «Новый счёт», «Новый акт», «Акт по счёту» и правке черновика.
-    pub(super) fn document_form(ctx: Ctx, existing: Option<Document>, start: Start) -> AnyView,
-        preload preload_form
-    {
-        view! { <DocForm ctx existing start /> }.into_any()
     }
 }
 

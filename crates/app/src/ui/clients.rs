@@ -37,7 +37,8 @@ use super::form::{
     optional,
 };
 use super::icon::{Icon, icon};
-use super::split::{part, split};
+use super::route::{Router, Screen};
+use super::split::{screen, split};
 use super::storage::error_key;
 use super::{Base, tr};
 use crate::platform::clock;
@@ -178,8 +179,8 @@ struct Ctx {
     notice: RwSignal<Option<Notice>>,
 }
 
-/// Раздел на языке окна — под заголовком экрана. Пока база открывается —
-/// пусто: «открываем…» только мигнуло бы.
+/// Раздел на языке окна — под заголовком экрана, частью wasm с первого
+/// показа (`split::screen`).
 #[component]
 pub fn ClientsSection(
     lang: ReadSignal<Lang>,
@@ -187,6 +188,7 @@ pub fn ClientsSection(
     documents: Documents,
     base: Base,
     backups: Backups,
+    router: Router,
 ) -> impl IntoView {
     let ctx = Ctx {
         lang,
@@ -197,14 +199,9 @@ pub fn ClientsSection(
         mode: RwSignal::new(Mode::List),
         notice: RwSignal::new(None),
     };
-    let phase = Memo::new(move |_| {
-        clients.state.with(|state| match state {
-            State::Loading => Phase::Loading,
-            State::Ready { .. } => Phase::Ready,
-            State::Failed(error) => Phase::Failed(*error),
-        })
-    });
-    // Копию восстановили — клиенты в базе могли стать другими.
+    // Копию восстановили — клиенты в базе могли стать другими. Здесь, а не
+    // в части экрана: клиенты нужны и счетам на главном экране, а экран мог
+    // ещё ни разу не показываться.
     Effect::watch(
         move || base.replacements(),
         move |_, _, _| {
@@ -216,7 +213,30 @@ pub fn ClientsSection(
         },
         false,
     );
-    let back = move || ctx.mode.set(Mode::List);
+    screen(lang, router, Screen::Clients, move || clients_screen(ctx))
+}
+
+split! {
+    /// Список или форма экрана «Клиенты» — своей частью wasm
+    /// (`ui/split.rs`): первому заходу нужен только главный экран.
+    pub(super) fn clients_screen(ctx: Ctx) -> AnyView, preload preload_screen {
+        view! { <ClientsBody ctx /> }.into_any()
+    }
+}
+
+/// Список или форма — форма в той же части: без экрана её не открыть,
+/// а своя часть у неё умножала бы общие куски частей (`ui/split.rs`).
+/// Пока база открывается — пусто: «открываем…» только мигнуло бы.
+#[component]
+fn ClientsBody(ctx: Ctx) -> impl IntoView {
+    let Ctx { lang, clients, .. } = ctx;
+    let phase = Memo::new(move |_| {
+        clients.state.with(|state| match state {
+            State::Loading => Phase::Loading,
+            State::Ready { .. } => Phase::Ready,
+            State::Failed(error) => Phase::Failed(*error),
+        })
+    });
     move || {
         let body = match (phase.get(), ctx.mode.get()) {
             (Phase::Loading, _) => return None,
@@ -225,8 +245,10 @@ pub fn ClientsSection(
             }
             .into_any(),
             (Phase::Ready, Mode::List) => view! { <ClientList ctx /> }.into_any(),
-            (Phase::Ready, Mode::New) => part(lang, client_form(ctx, None), back),
-            (Phase::Ready, Mode::Edit(id)) => part(lang, client_form(ctx, clients.get(id)), back),
+            (Phase::Ready, Mode::New) => view! { <ClientForm ctx existing=None /> }.into_any(),
+            (Phase::Ready, Mode::Edit(id)) => {
+                view! { <ClientForm ctx existing=clients.get(id) /> }.into_any()
+            }
         };
         Some(body)
     }
@@ -650,14 +672,6 @@ impl Form {
         };
         data.check().ok()?;
         Some(data)
-    }
-}
-
-split! {
-    /// Форма клиента — своей частью wasm (`ui/split.rs`): она нужна только
-    /// по «Добавить клиента» и по строке списка.
-    pub(super) fn client_form(ctx: Ctx, existing: Option<Client>) -> AnyView, preload preload_form {
-        view! { <ClientForm ctx existing /> }.into_any()
     }
 }
 

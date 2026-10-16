@@ -19,6 +19,7 @@ use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 use web_sys::{Document, Element, HtmlElement, HtmlInputElement, HtmlSelectElement};
 
 use super::App;
+use super::route::Screen;
 use crate::store::device::Device;
 use crate::store::{Store, StoreError, Writes};
 
@@ -68,6 +69,24 @@ fn mount_at(hash: &str) -> (HtmlElement, impl Sized) {
         .expect("вставляется");
     let mounted = leptos::mount::mount_to(host.clone(), App);
     (host, mounted)
+}
+
+/// Показать экраны по очереди и вернуться на главный. Счета, книга, клиенты
+/// и профиль рисуются с первого показа (`split::screen`, задача 61),
+/// а показанный однажды остаётся в странице спрятанным — с полями
+/// и кнопками, которые тест потом нажимает. В тестах часть не грузится,
+/// а зовётся (`ui/split.rs`): экран виден — его содержимое уже нарисовано.
+async fn visit(host: &HtmlElement, screens: &[Screen]) {
+    for screen in screens.iter().chain([&Screen::Home]) {
+        crate::platform::set_hash(&screen.href());
+        for _ in 0..100 {
+            if shown_screens(host) == [screen.id()] {
+                break;
+            }
+            sleep(10).await;
+        }
+    }
+    sleep(50).await;
 }
 
 /// Подождать, пока в окне появится текст; `false` — не дождались за пять
@@ -281,6 +300,7 @@ async fn choosing_a_language_translates_the_whole_window() {
     if !wait_for(&host, t(Lang::Am, Key::BackupChooseFile)).await {
         wrong.push("раздел копии не появился".to_owned());
     }
+    visit(&host, &[Screen::Documents, Screen::Clients, Screen::Profile]).await;
     match button(
         &host,
         &[t(Lang::Am, Key::ProfileFill), t(Lang::Am, Key::ProfileEdit)],
@@ -609,6 +629,77 @@ async fn screens_follow_the_address() {
     assert!(wrong.is_empty(), "экраны: {wrong:#?}");
 }
 
+/// Текст раздела `#id` окна; нет раздела — пусто.
+fn section_text(host: &HtmlElement, id: &str) -> String {
+    host.query_selector(&format!("#{id}"))
+        .ok()
+        .flatten()
+        .and_then(|section| section.text_content())
+        .unwrap_or_default()
+}
+
+/// Счета, клиенты и профиль рисуются с первого показа (`split::screen`,
+/// задача 61): до него в странице только заголовок экрана, а показанный
+/// однажды экран остаётся в ней спрятанным — с тем, что начато в его поле.
+/// Данные разделов прочитаны и без показа: главный экран знает профиль.
+#[wasm_bindgen_test]
+async fn hidden_screens_are_drawn_on_first_show() {
+    let client = documents::fresh_base_with_client().await;
+    let name = client.data().name.as_str().to_owned();
+    let profile = documents::profile().name.ru.as_str().to_owned();
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount();
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::BackupChooseFile)).await {
+        wrong.push("база не открылась".to_owned());
+    }
+    if section_text(&host, "home").contains(t(lang, Key::HomeProfileMissing)) {
+        wrong.push("главный экран не знает профиля, пока экран профиля не показан".to_owned());
+    }
+    let drawn = |host: &HtmlElement, wrong: &mut Vec<String>, step: &str, expected: [bool; 3]| {
+        let shown = [
+            section_text(host, "documents").contains(t(lang, Key::DocsAbout)),
+            section_text(host, "clients").contains(&name),
+            section_text(host, "profile").contains(&profile),
+        ];
+        if shown != expected {
+            wrong.push(format!("{step}: нарисованы счета, клиенты, профиль — {shown:?}, а не {expected:?}"));
+        }
+    };
+    drawn(&host, &mut wrong, "до показа", [false, false, false]);
+
+    crate::platform::set_hash(&Screen::Clients.href());
+    if !wait_for(&host, &name).await {
+        wrong.push("экран клиентов не нарисовался при показе".to_owned());
+    }
+    let search: Option<HtmlInputElement> = host
+        .query_selector("#clients input[type=search]")
+        .ok()
+        .flatten()
+        .map(JsCast::unchecked_into);
+    match &search {
+        Some(input) => type_into(input, "Ac"),
+        None => wrong.push("у клиентов нет поиска".to_owned()),
+    }
+    visit(&host, &[]).await;
+    drawn(&host, &mut wrong, "после клиентов", [false, true, false]);
+    match &search {
+        Some(input) if input.is_connected() && input.value() == "Ac" => {}
+        Some(_) => wrong.push("начатое в поиске клиентов пропало при уходе с экрана".to_owned()),
+        None => {}
+    }
+
+    visit(&host, &[Screen::Documents, Screen::Profile]).await;
+    drawn(&host, &mut wrong, "после всех", [true, true, true]);
+
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "экраны с первого показа: {wrong:#?}");
+}
+
 /// Положить файл в поле выбора файла, как будто его выбрал человек.
 fn choose_file(input: &HtmlInputElement, name: &str, text: &str) {
     let file = web_sys::File::new_with_str_sequence(&js_sys::Array::of1(&text.into()), name)
@@ -669,6 +760,19 @@ async fn restoring_a_backup_shows_its_profile() {
     if !wait_for(&host, done).await {
         wrong.push("восстановление не завершилось".to_owned());
     }
+    // Экран профиля ещё ни разу не показан (`split::screen`), а главный
+    // экран обязан узнать профиль копии и без него.
+    let missing = t(lang, Key::HomeProfileMissing);
+    for _ in 0..100 {
+        if !section_text(&host, "home").contains(missing) {
+            break;
+        }
+        sleep(50).await;
+    }
+    if section_text(&host, "home").contains(missing) {
+        wrong.push("после восстановления главный экран всё просит заполнить профиль".to_owned());
+    }
+    visit(&host, &[Screen::Profile]).await;
     if !wait_for(&host, "ИП Арам Петросян").await {
         wrong.push("после восстановления раздел профиля не показал профиль копии".to_owned());
     }
@@ -702,7 +806,7 @@ async fn profile_is_saved_and_read_back() {
     let lang = Lang::Ru;
     let device = Device::new();
     device.set_ui_lang(lang);
-    let (host, mounted) = mount();
+    let (host, mounted) = mount_at("#/profile");
     let mut wrong = Vec::new();
     // Заголовок экрана профиля виден сразу, а кнопка — когда база прочитана.
     if !wait_for(&host, t(lang, Key::ProfileFill)).await {
@@ -819,7 +923,7 @@ async fn profile_is_saved_and_read_back() {
 
     drop(mounted);
     host.remove();
-    let (host, mounted) = mount();
+    let (host, mounted) = mount_at("#/profile");
     if !wait_for(&host, &name).await {
         wrong.push("после нового открытия профиля не видно".to_owned());
     }
@@ -886,7 +990,7 @@ async fn clients_are_added_found_deleted_and_restored() {
     crate::store::delete_database(crate::store::DB_NAME).await;
     let lang = Lang::Ru;
     Device::new().set_ui_lang(lang);
-    let (host, mounted) = mount();
+    let (host, mounted) = mount_at("#/clients");
     let mut wrong = Vec::new();
     let press = |label: &str, wrong: &mut Vec<String>| match button(&host, &[label]) {
         Some(button) => button.click(),
@@ -1163,7 +1267,7 @@ async fn clients_are_added_found_deleted_and_restored() {
 
     drop(mounted);
     host.remove();
-    let (host, mounted) = mount();
+    let (host, mounted) = mount_at("#/clients");
     if !wait_for(&host, name).await || !wait_for(&host, "Acme Inc.").await {
         wrong.push("после нового открытия клиентов не видно".to_owned());
     }
@@ -1185,7 +1289,7 @@ async fn restoring_a_backup_shows_its_clients() {
     crate::store::delete_database(crate::store::DB_NAME).await;
     let lang = Lang::Ru;
     Device::new().set_ui_lang(lang);
-    let (host, mounted) = mount();
+    let (host, mounted) = mount_at("#/clients");
     let mut wrong = Vec::new();
     if !wait_for(&host, t(lang, Key::ClientsAbout)).await {
         wrong.push("пустая база — а о клиентах ни слова".to_owned());

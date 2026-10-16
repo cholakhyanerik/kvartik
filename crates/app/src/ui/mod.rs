@@ -106,7 +106,12 @@ impl Base {
 /// Корень окна (дизайн «Kvartik Design»): меню разделов и экраны —
 /// главный, счета и акты, книга, клиенты, профиль и копия внутри него
 /// (`ui/route.rs`). Все экраны — в странице, открытый виден, остальные
-/// спрятаны: начатое в форме не пропадает при переходе.
+/// спрятаны: начатое в форме не пропадает при переходе. Содержимое
+/// счетов, книги, клиентов и профиля — частями wasm с первого показа
+/// (`split::screen`, задача 61); данные разделов окно читает всё равно при
+/// открытии базы: документы, клиенты и профиль нужны главному экрану.
+/// «Программа» на экране профиля — копия и язык окна — не в части: язык
+/// меняют и тогда, когда часть не загрузилась.
 ///
 /// Над экранами — то, о чём окно обязано сказать, где бы человек ни был:
 /// новая версия и беда с хранилищем. Напоминание о копии — карточкой на
@@ -195,12 +200,12 @@ pub fn App() -> impl IntoView {
                 <section id=Screen::Clients.id() class="screen" hidden=hidden(Screen::Clients)>
                     <h1 tabindex="-1">{tr(lang, Key::ClientsTitle)}</h1>
                     <BackupChip lang backups nudge=true />
-                    <ClientsSection lang clients documents base backups />
+                    <ClientsSection lang clients documents base backups router />
                 </section>
                 <section id=Screen::Profile.id() class="screen" hidden=hidden(Screen::Profile)>
                     <h1 tabindex="-1">{tr(lang, Key::ProfileTitle)}</h1>
                     <BackupChip lang backups nudge=true />
-                    <ProfileSection lang profiles base backups />
+                    <ProfileSection lang profiles base backups router />
                     <h2>{tr(lang, Key::ProfileApp)}</h2>
                     <ul class="list">
                         <li>

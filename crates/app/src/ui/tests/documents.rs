@@ -20,8 +20,9 @@ use web_sys::{HtmlElement, Response};
 use super::share::ShareStub;
 use super::{
     button, choose_file, field, mount, mount_at, pick_client, select, shown_step, sleep, type_into,
-    wait_for,
+    visit, wait_for,
 };
+use crate::ui::route::Screen;
 use crate::platform::clock;
 use crate::store::device::Device;
 use crate::store::{Store, Writes};
@@ -123,6 +124,8 @@ async fn an_invoice_is_issued_paid_and_followed_by_an_act() {
     Device::new().set_ui_lang(lang);
     let today = clock::today().expect("часы с датой");
     let (host, mounted) = mount();
+    // Удаляют клиента — из его экрана: он тоже должен быть в странице.
+    visit(&host, &[Screen::Documents, Screen::Clients]).await;
     let wrong = invoice_flow(&host, &client, lang, today).await;
     drop(mounted);
     host.remove();
@@ -405,7 +408,7 @@ async fn restoring_a_backup_shows_its_documents() {
     crate::store::delete_database(crate::store::DB_NAME).await;
     let lang = Lang::Ru;
     Device::new().set_ui_lang(lang);
-    let (host, mounted) = mount();
+    let (host, mounted) = mount_at("#/documents");
     let mut wrong = Vec::new();
     if !wait_for(&host, t(lang, Key::DocsAbout)).await {
         wrong.push("пустая база — а о документах ни слова".to_owned());
@@ -511,7 +514,7 @@ async fn a_repeating_invoice_appears_when_the_app_opens() {
     writes.insert(&recurring);
     commit(writes).await;
 
-    let (host, mounted) = mount();
+    let (host, mounted) = mount_at("#/documents");
     let mut wrong = Vec::new();
     let created = fill(t(lang, Key::RecurCreated), &["1"]);
     if !wait_for(&host, &created).await {
@@ -534,7 +537,7 @@ async fn a_repeating_invoice_appears_when_the_app_opens() {
 
     // Второе открытие черновиков не прибавляет. Ждать — счёт в списке:
     // заголовок экрана виден и до того, как база прочитана.
-    let (host, mounted) = mount();
+    let (host, mounted) = mount_at("#/documents");
     let number = source.number().map(|number| number.to_string()).unwrap_or_default();
     let named = fill(t(lang, Key::DocNumbered), &[t(lang, Key::KindInvoice), &number]);
     if !wait_for(&host, &named).await {
@@ -559,7 +562,7 @@ async fn a_repeating_invoice_appears_when_the_app_opens() {
 async fn numbers_follow_the_window_language() {
     let client = fresh_base_with_client().await;
     Device::new().set_ui_lang(Lang::En);
-    let (host, mounted) = mount();
+    let (host, mounted) = mount_at("#/documents");
     let mut wrong = Vec::new();
     if !wait_for(&host, t(Lang::En, Key::DocsAbout)).await {
         wrong.push("раздела документов нет".to_owned());

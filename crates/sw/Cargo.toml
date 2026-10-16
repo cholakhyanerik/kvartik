@@ -23,7 +23,7 @@ wasm_split_cli_support = "0.2.3"
 # Импорты и экспорты частей и главного модуля для проверки, что они
 # сходятся (`src/wasm.rs`). Уже в дереве через `wasm_split_cli_support` —
 # той же версии.
-wasmparser = "0.258.0"
+wasmparser = "0.258.3"
 # Путь к собранному wasm — из сообщений `cargo build --message-format=json`.
 # Уже в дереве через ядро.
 serde_json = "1.0.154"
@@ -35,4 +35,4 @@ base64 = "0.22.1"
 [dev-dependencies]
 # Модуль wasm для теста чтения импортов и экспортов. Уже в дереве через
 # `wasm_split_cli_support` — той же версии.
-wasm-encoder = "0.258.0"
+wasm-encoder = "0.258.3"
