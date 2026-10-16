@@ -121,17 +121,23 @@ pub fn part(
             loading.set(false);
             match loaded {
                 Ok(content) => content,
-                Err(_) => view! {
-                    <p role="alert">{tr(lang, Key::PartFailed)}</p>
-                    <div class="actions">
-                        <button type="button" class="secondary" on:click=move |_| back()>
-                            {tr(lang, Key::Cancel)}
-                        </button>
-                    </div>
-                }
-                .into_any(),
+                Err(_) => failed(lang, back),
             }
         })}
+    }
+    .into_any()
+}
+
+/// Слова о части, которая не загрузилась, и «Отмена». Кнопка — одна и без
+/// ряда `.actions`: ряд снимает у кнопки отступ сверху, а держать его здесь
+/// нечему — слова стоят вне формы, и «Отмена» легла бы вплотную к ним
+/// (0.0.18–0.0.38).
+fn failed(lang: ReadSignal<Lang>, back: impl Fn() + Copy + Send + Sync + 'static) -> AnyView {
+    view! {
+        <p role="alert">{tr(lang, Key::PartFailed)}</p>
+        <button type="button" class="secondary" on:click=move |_| back()>
+            {tr(lang, Key::Cancel)}
+        </button>
     }
     .into_any()
 }
@@ -182,4 +188,47 @@ pub async fn preload() {
     let _ = super::backup::preload_make().await;
     let _ = super::backup::preload_open().await;
     let _ = super::backup::preload_restore().await;
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod browser {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_test::wasm_bindgen_test;
+    use web_sys::HtmlElement;
+
+    use super::*;
+
+    /// Слова о несгруженной части и «Отмена» — со стилями сайта: между ними
+    /// воздух, а не кнопка вплотную к словам (дефект 0.0.18–0.0.38). Часть
+    /// в тестах не грузится, поэтому вид сбоя рисуется сам по себе.
+    #[wasm_bindgen_test]
+    fn failed_part_keeps_cancel_apart_from_the_words() {
+        let document = web_sys::window()
+            .and_then(|window| window.document())
+            .expect("есть документ");
+        let body = document.body().expect("есть <body>");
+        let style = document.create_element("style").expect("создаётся");
+        style.set_text_content(Some(concat!(
+            include_str!("../../style/tokens.css"),
+            include_str!("../../style/base.css"),
+        )));
+        body.append_child(&style).expect("вставляется");
+        let host: HtmlElement = document.create_element("div").expect("создаётся").unchecked_into();
+        body.append_child(&host).expect("вставляется");
+        let (lang, _) = signal(Lang::Ru);
+        let mounted = leptos::mount::mount_to(host.clone(), move || failed(lang, || {}));
+        let element = |selector: &str| -> HtmlElement {
+            host.query_selector(selector)
+                .ok()
+                .flatten()
+                .expect("нарисовано")
+                .unchecked_into()
+        };
+        let (words, cancel) = (element("p[role=alert]"), element("button"));
+        let gap = cancel.offset_top() - (words.offset_top() + words.offset_height());
+        drop(mounted);
+        host.remove();
+        style.remove();
+        assert!(gap >= 8, "«Отмена» в {gap} точках от слов");
+    }
 }
