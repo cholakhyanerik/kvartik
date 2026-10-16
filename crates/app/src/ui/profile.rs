@@ -8,7 +8,8 @@
 //! Ошибки полей окно показывает после первой попытки сохранить, а дальше —
 //! сразу при вводе: красное под пустой формой только пугает. Предупреждение
 //! о коде, который закрывает налог с оборота, — сразу, ещё до сохранения:
-//! узнать об этом в конце квартала поздно.
+//! узнать об этом в конце квартала поздно. Так же — о номере счёта с
+//! несходящейся контрольной цифрой: опечатку видно, пока номер перед глазами.
 
 use std::sync::Arc;
 
@@ -1060,6 +1061,16 @@ fn Accounts(lang: ReadSignal<Lang>, form: Form) -> impl IntoView {
                             (started && missing).then_some(Key::AccountNumberMissing)
                         }
                     />
+                    // Сразу, ещё до сохранения, и сохранить не мешает
+                    // (задача 56): счёт бывает и в чужом банке.
+                    {move || {
+                        let swift = row.swift.with(|text| Swift::parse(text).ok());
+                        row.number
+                            .with(|number| BankAccount::mistyped(number, swift.as_ref()))
+                            .then(|| view! {
+                                <p class="warning" role="alert">{tr(lang, Key::AccountNumberTypo)}</p>
+                            })
+                    }}
                     <TextField lang label=Key::AccountBank value=row.bank tried autocomplete="off" />
                     <TextField
                         lang

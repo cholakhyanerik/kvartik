@@ -6,6 +6,25 @@
 //!
 //! В данных: `{"currency":"USD","number":"…","bank":"…","swift":"ARMIAM22",
 //! "correspondent":"…"}`; `swift` — `null`, если не указан.
+//!
+//! У номера счёта в банке Армении есть контрольная цифра (задача 56), и
+//! опечатку в нём окно называет сразу при вводе (`BankAccount::mistyped`):
+//! платёж иностранного клиента на чужой номер возвращается через неделю,
+//! за вычетом комиссий SWIFT. Решение совета ЦБ РА № 178-Ն от 23.07.2013,
+//! п. 28–40 (по закону: https://www.arlis.am/hy/acts/216785, редакция
+//! с 29.11.2025; сверено 2026-10-16, разведка задачи 56; то же правило —
+//! с 06.02.2003, в решении № 394-Ն, отменённом этим):
+//! - п. 28 — номера счетов клиентов ЦБ, коммерческих банков
+//!   и Казначейства, о валюте ни слова: валютные счета там же;
+//! - п. 29–30 — «Հաշվեհամարը թվերի հաջորդականություն է»: 12 обязательных
+//!   цифр (банк — 3, подразделение — 2, клиент — 6, «ստուգիչ նիշը» — 12-я)
+//!   и до 4 необязательных после неё;
+//! - п. 33–35 — необязательные в контрольную не входят, а на бумаге
+//!   отделяются дефисом: `220185546730-21`;
+//! - п. 39–40 — проверка: первые 12 цифр с весами 2 и 1 слева направо,
+//!   у произведения складываются цифры, и сумма делится на 10. Это алгоритм
+//!   Луна ровно по первым 12 цифрам; по всей строке он дал бы ложную тревогу
+//!   у настоящих 16-значных номеров. Пример акта — `127027482877`.
 
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
@@ -16,8 +35,9 @@ use super::text::{Line, Lines};
 /// Счёт в банке.
 ///
 /// Номер обязателен: счёт без номера в реквизиты не годится. Остальное —
-/// как в реквизитах банка: формат номера не проверяется, потому что счёт
-/// ИП может быть и не в армянском банке.
+/// как в реквизитах банка: формат номера не запрещается, потому что счёт
+/// ИП может быть и не в армянском банке, а о похожем на опечатку окно
+/// только предупреждает ([`BankAccount::mistyped`]).
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize)]
 pub struct BankAccount {
     currency: Currency,
@@ -90,6 +110,61 @@ impl BankAccount {
     pub const fn correspondent(&self) -> &Lines {
         &self.correspondent
     }
+
+    /// Похоже на опечатку: номер — счёт в банке Армении, а контрольная
+    /// цифра не сходится (решение ЦБ № 178-Ն, шапка модуля).
+    ///
+    /// Номером банка Армении считается номер только из цифр — пробелы
+    /// и дефисы между ними не в счёт, — 12–16 цифр, и SWIFT банка не
+    /// указан или он армянский. Номер с буквами (IBAN) и SWIFT другой
+    /// страны — не тот случай: правило ЦБ о них ничего не говорит. Это
+    /// предупреждение, а не запрет: чисто цифровой номер бывает и у
+    /// иностранного банка, а сверить, что номер верен, можно только
+    /// с реквизитами банка. Перестановку соседних 0 и 9 и ошибку в 13–16-й
+    /// цифре проверка не ловит.
+    pub fn mistyped(number: &str, swift: Option<&Swift>) -> bool {
+        if swift.is_some_and(|swift| swift.country() != "AM") {
+            return false;
+        }
+        let mut digits = [0; ARMENIAN_DIGITS_MAX];
+        let mut count = 0;
+        for c in number.chars() {
+            if c.is_whitespace() || c == '-' {
+                continue;
+            }
+            let Some(digit) = c.to_digit(10) else {
+                return false;
+            };
+            let Some(slot) = digits.get_mut(count) else {
+                return false;
+            };
+            *slot = digit;
+            count += 1;
+        }
+        count >= ARMENIAN_DIGITS_CHECKED
+            && !check_sum(&digits[..ARMENIAN_DIGITS_CHECKED]).is_multiple_of(10)
+    }
+}
+
+/// Обязательных цифр в номере счёта банка Армении; последняя из них —
+/// контрольная (решение ЦБ № 178-Ն, п. 29–30).
+const ARMENIAN_DIGITS_CHECKED: usize = 12;
+
+/// Цифр в номере вместе с необязательными (там же).
+const ARMENIAN_DIGITS_MAX: usize = 16;
+
+/// Сумма проверки по п. 39: цифры с весами 2, 1, 2, 1… слева направо,
+/// у произведения складываются цифры — 14 даёт 1 + 4. У верного номера
+/// она делится на 10.
+fn check_sum(digits: &[u32]) -> u32 {
+    digits
+        .iter()
+        .enumerate()
+        .map(|(at, digit)| {
+            let product = if at.is_multiple_of(2) { digit * 2 } else { *digit };
+            product / 10 + product % 10
+        })
+        .sum()
 }
 
 /// Счёт читается через [`BankAccount::new`]: счёт без номера — порча.
@@ -154,6 +229,11 @@ impl Swift {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Страна банка — 5-й и 6-й знаки, ISO 3166-1: `AM`.
+    pub fn country(&self) -> &str {
+        &self.0[4..6]
+    }
 }
 
 /// Код читается только в той записи, что пишет [`Swift::parse`].
@@ -207,6 +287,106 @@ mod tests {
             }
         }
         assert!(wrong.is_empty(), "SWIFT: {wrong:#?}");
+    }
+
+    /// Номера решения ЦБ № 178-Ն и публичные реквизиты — счета ЦБ
+    /// в драмах и валюте, Казначейства и 16-значный Америабанка (разведка
+    /// задачи 56) — сходятся в любой записи; любая неверная цифра из
+    /// первых 12 и перестановка соседних — опечатка. Чужое не проверяется.
+    #[test]
+    fn armenian_number_has_a_check_digit() {
+        let armenian = Swift::parse("ARMIAM22").ok();
+        let foreign = Swift::parse("CITIUS33").ok();
+        let mut wrong = Vec::new();
+        let fits = [
+            // п. 35 и 37: оба примера, на бумаге и в платеже.
+            "127027482877",
+            "220185546730",
+            "220185546730-21",
+            "22018554673021",
+            // ЦБ РА: AMD, USD, EUR, RUB (zinapah.am).
+            "103008660005",
+            "103008661011",
+            "103008661490",
+            "103008661581",
+            // Казначейство (e-payments.am).
+            "900005003315",
+            // Америабанк, 16 цифр (ameriabank.am): Лун по всей строке
+            // назвал бы его опечаткой.
+            "1570036910764400",
+            "15700 369107 64400",
+            " 1570 0369 1076 4400 ",
+            "1570036910764400\u{A0}",
+        ];
+        for number in fits {
+            for swift in [None, armenian.as_ref()] {
+                if BankAccount::mistyped(number, swift) {
+                    wrong.push(format!("«{number}» ({swift:?}) назван опечаткой"));
+                }
+            }
+        }
+        for good in ["127027482877", "220185546730"] {
+            let digits: Vec<char> = good.chars().collect();
+            for at in 0..digits.len() {
+                for other in ('0'..='9').filter(|&other| other != digits[at]) {
+                    let mut typo = digits.clone();
+                    typo[at] = other;
+                    let typo: String = typo.into_iter().collect();
+                    for tail in ["", "21", "0001"] {
+                        let number = format!("{typo}{tail}");
+                        if !BankAccount::mistyped(&number, None) {
+                            wrong.push(format!("«{number}»: цифра {} не замечена", at + 1));
+                        }
+                    }
+                }
+                // 0 и 9 местами Лун не различает (шапка `mistyped`).
+                let pair = digits.get(at..at + 2);
+                if let Some(&[a, b]) = pair
+                    && a != b
+                    && !matches!((a, b), ('0', '9') | ('9', '0'))
+                {
+                    let mut typo = digits.clone();
+                    typo.swap(at, at + 1);
+                    let number: String = typo.into_iter().collect();
+                    if !BankAccount::mistyped(&number, armenian.as_ref()) {
+                        wrong.push(format!("«{number}»: перестановка {} и {} не замечена", at + 1, at + 2));
+                    }
+                }
+            }
+        }
+        let skipped = [
+            ("", None),
+            // Короче 12 и длиннее 16 цифр.
+            ("12702748287", None),
+            ("12702748287812345", None),
+            ("40702810900000012345", None),
+            // Буквы и чужие цифры.
+            ("DE89370400440532013000", None),
+            ("AM12702748287800", None),
+            ("12702748287A", None),
+            ("127027482878/1", None),
+            ("١٢٧٠٢٧٤٨٢٨٧٨", None),
+            // Банк другой страны.
+            ("127027482878", foreign.as_ref()),
+            // Необязательные цифры в контрольную не входят (п. 33).
+            ("1570036910769999", None),
+        ];
+        for (number, swift) in skipped {
+            if BankAccount::mistyped(number, swift) {
+                wrong.push(format!("«{number}» ({swift:?}) проверен, а не должен"));
+            }
+        }
+        if !BankAccount::mistyped("127027482878", armenian.as_ref()) {
+            wrong.push("армянский SWIFT выключил проверку".to_owned());
+        }
+        let countries: Vec<_> = [armenian, foreign, Swift::parse("COBADEFFXXX").ok()]
+            .iter()
+            .map(|swift| swift.as_ref().map(Swift::country).unwrap_or_default().to_owned())
+            .collect();
+        if countries != ["AM", "US", "DE"] {
+            wrong.push(format!("страны SWIFT: {countries:?}"));
+        }
+        assert!(wrong.is_empty(), "контрольная цифра: {wrong:#?}");
     }
 
     /// Без номера счёта нет — ни из формы, ни из данных.

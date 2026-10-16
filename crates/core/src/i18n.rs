@@ -670,6 +670,13 @@ strings! {
     AccountCurrency = "Валюта счёта", "Account currency", "Հաշվի արժույթը";
     AccountNumber = "Номер счёта", "Account number", "Հաշվեհամար";
     AccountNumberMissing = "Укажите номер счёта.", "Enter the account number.", "Նշեք հաշվեհամարը։";
+    /// Контрольная цифра номера банка Армении (`BankAccount::mistyped`):
+    /// предупреждение, а не запрет. «Ստուգիչ նիշ» — как в решении ЦБ
+    /// № 178-Ն.
+    AccountNumberTypo =
+        "Похоже на опечатку: контрольная цифра номера не сходится с остальными. Сверьте номер с реквизитами банка, а если банк не армянский, сохраните как есть.",
+        "This looks like a typo: the check digit doesn't match the rest of the number. Compare it with your bank details, or, if the bank isn't Armenian, save it as it is.",
+        "Կարծես վրիպակ կա. համարի ստուգիչ նիշը չի համապատասխանում մյուս թվանշաններին։ Համեմատեք համարը բանկի վավերապայմանների հետ, իսկ եթե բանկը հայկական չէ, պահպանեք այնպես, ինչպես կա։";
     AccountBank = "Банк", "Bank", "Բանկ";
     AccountSwift = "SWIFT-код банка", "Bank SWIFT code", "Բանկի SWIFT կոդը";
     /// Формат — ISO 9362 (`model::bank::Swift`).

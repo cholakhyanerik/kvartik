@@ -796,8 +796,9 @@ async fn stored_profile() -> Result<Option<Profile>, StoreError> {
 
 /// Профиль сохраняется одной командой и читается обратно: ошибочный ՀՎՀՀ
 /// не даёт сохранить и говорит об этом у поля, код, закрывающий налог
-/// с оборота, предупреждает сразу при вводе, а сохранённое лежит в базе
-/// и видно в окне после нового открытия.
+/// с оборота, и опечатка в номере счёта предупреждают сразу при вводе,
+/// но сохранить не мешают, а сохранённое лежит в базе и видно в окне после
+/// нового открытия.
 #[wasm_bindgen_test]
 async fn profile_is_saved_and_read_back() {
     // С пустой базы: профиль, оставленный другим тестом, принёс бы свои
@@ -850,6 +851,27 @@ async fn profile_is_saved_and_read_back() {
         .to_owned();
     if !host.text_content().is_some_and(|text| text.contains(warning.trim())) {
         wrong.push("код 70.22.0 не предупредил до сохранения".to_owned());
+    }
+    // Опечатка в номере счёта — предупреждение сразу, а сохранить не мешает.
+    if let Some(add) = button(&host, &[t(lang, Key::AccountAdd)]) {
+        add.click();
+    }
+    sleep(50).await;
+    let typo = t(lang, Key::AccountNumberTypo);
+    match field(&host, t(lang, Key::AccountNumber), 0) {
+        Some(input) => {
+            type_into(&input, "1270 2748 2877");
+            sleep(50).await;
+            if host.text_content().is_some_and(|text| text.contains(typo)) {
+                wrong.push("верный номер 127027482877 назван опечаткой".to_owned());
+            }
+            type_into(&input, "127027482878");
+            sleep(50).await;
+            if !host.text_content().is_some_and(|text| text.contains(typo)) {
+                wrong.push("номер 127027482878 не предупредил до сохранения".to_owned());
+            }
+        }
+        None => wrong.push("нет поля номера счёта".to_owned()),
     }
 
     let save = button(&host, &[t(lang, Key::ProfileSave)]);
@@ -911,6 +933,8 @@ async fn profile_is_saved_and_read_back() {
                 || data.tin.as_ref().map(|tin| tin.as_str()) != Some("00054321")
                 || data.activities.iter().map(ToString::to_string).collect::<Vec<_>>()
                     != ["70.22.0"]
+                || data.accounts.iter().map(|account| account.number().as_str()).collect::<Vec<_>>()
+                    != ["127027482878"]
             {
                 wrong.push(format!("в базе не то: {data:?}"));
             }
