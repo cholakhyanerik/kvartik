@@ -38,7 +38,7 @@ const INVOICE: &str = concat!(
     r#""correspondent":"Citibank N.A., New York"}]},"#,
     r#""buyer":{"name":"Beispiel GmbH","country":"DE","address":"Hauptstraße 1\n10115 Berlin","tin":null,"#,
     r#""tax_id":"DE123456789","currency":"EUR","lang":"en","payment_days":14}},"#,
-    r#""annulled":null,"#,
+    r#""annulled":null,"signed":null,"#,
     r#""payments":[{"date":"2026-10-10","amount":200000},{"date":"2026-10-20","amount":350000}]}"#
 );
 
@@ -49,7 +49,7 @@ const ACT: &str = concat!(
     r#""date":"2026-10-13","service_date":"2026-10-13","due":null,"#,
     r#""items":[{"text":"Ծրագրային ապահովման մշակում","quantity_e3":1000,"price":1500000}],"#,
     r#""basis":"7c9e6679-7425-40de-944b-e07fc1f90ae7","recurring":null,"rate":null},"#,
-    r#""issued":null,"annulled":null,"payments":[]}"#
+    r#""issued":null,"annulled":null,"signed":null,"payments":[]}"#
 );
 
 /// Образцы читаются в ожидаемые значения, а их запись — слово в слово
@@ -109,6 +109,60 @@ fn documents_without_rate_still_read() {
     assert!(written.contains(r#""recurring":null,"rate":null}"#), "{written}");
 }
 
+/// Документ версии формата 6 — без поля подписи — читается неподписанным,
+/// а пишется уже с полем (Правило 2).
+#[test]
+fn documents_without_signature_still_read() {
+    let mut wrong = Vec::new();
+    for (name, sample) in [("счёт", INVOICE), ("акт", ACT)] {
+        let old = sample.replacen(r#""signed":null,"#, "", 1);
+        if old == sample {
+            wrong.push(format!("{name}: образец без поля подписи не получился"));
+            continue;
+        }
+        match serde_json::from_str::<Document>(&old) {
+            Ok(document) if document.signed().is_none() => {
+                if serde_json::to_string(&document).ok().as_deref() != Some(sample) {
+                    wrong.push(format!("{name}: записан не с полем подписи"));
+                }
+            }
+            other => wrong.push(format!("{name}: {other:?}")),
+        }
+    }
+    assert!(wrong.is_empty(), "документы без подписи: {wrong:#?}");
+}
+
+/// Выпущенный акт по образцу счёта: без срока и оплат.
+fn issued_act_sample() -> String {
+    INVOICE
+        .replacen(r#""kind":"invoice""#, r#""kind":"act""#, 1)
+        .replacen(r#""due":"2026-10-15""#, r#""due":null"#, 1)
+        .replacen(
+            r#""payments":[{"date":"2026-10-10","amount":200000},{"date":"2026-10-20","amount":350000}]"#,
+            r#""payments":[]"#,
+            1,
+        )
+}
+
+/// Подпись читается у выпущенного акта — и в день акта, и аннулированного:
+/// аннулирование её не снимает.
+#[test]
+fn signed_acts_read() {
+    let act = issued_act_sample();
+    let mut wrong = Vec::new();
+    for (case, from, to) in [
+        ("в день акта", r#""signed":null"#, r#""signed":"2026-10-01""#),
+        ("аннулированный", r#""annulled":null,"signed":null"#, r#""annulled":"2026-10-20","signed":"2026-10-05""#),
+    ] {
+        let text = act.replacen(from, to, 1);
+        match serde_json::from_str::<Document>(&text) {
+            Ok(document) if document.signed().is_some() => {}
+            other => wrong.push(format!("{case}: {other:?}")),
+        }
+    }
+    assert!(wrong.is_empty(), "подписанные акты: {wrong:#?}");
+}
+
 /// Испорченное не читается: незнакомое поле, запретное значение, состояние,
 /// которого команды не пишут.
 #[test]
@@ -161,6 +215,17 @@ fn data_rejects_what_commands_never_write() {
     );
     if serde_json::from_str::<Document>(&paid_act).is_ok() {
         wrong.push("акт с оплатами прочитан".to_owned());
+    }
+    // Подпись — только у выпущенного акта и не раньше его даты.
+    let act = issued_act_sample();
+    for (case, text) in [
+        ("подписанный счёт", invoice(r#""signed":null"#, r#""signed":"2026-10-20""#)),
+        ("подписанный черновик", ACT.replacen(r#""signed":null"#, r#""signed":"2026-10-13""#, 1)),
+        ("подпись раньше акта", act.replacen(r#""signed":null"#, r#""signed":"2026-09-30""#, 1)),
+    ] {
+        if serde_json::from_str::<Document>(&text).is_ok() {
+            wrong.push(format!("{case} прочитан"));
+        }
     }
     assert!(wrong.is_empty(), "прочитано испорченное: {wrong:#?}");
 }
@@ -375,6 +440,47 @@ fn issued_documents_are_annulled_not_edited() {
 
     let draft = Document::create(data(DocKind::Invoice, &client, today), at(2_000)).expect("черновик");
     assert_eq!(draft.annul(today, at(3_000)), Err(DocError::NotIssued));
+}
+
+/// Акт отмечают подписанным клиентом в день подписи и снимают отметку;
+/// другой день — поправка; раньше даты акта, у счёта, черновика
+/// и аннулированного — нельзя. Аннулирование подпись не снимает,
+/// а возвращённый акт снова подписан.
+#[test]
+fn acts_are_signed_by_the_client() {
+    let client = client();
+    let date = day(2026, 10, 1);
+    let act = issued(DocKind::Act, &client, date, &[]);
+    let today = day(2026, 10, 9);
+    assert_eq!(act.status(today), Status::Issued);
+    assert_eq!(act.signed(), None);
+
+    let signed = act.sign(day(2026, 10, 5), at(4_000)).expect("годно").expect("подписан");
+    assert_eq!(signed.signed(), Some(day(2026, 10, 5)));
+    assert_eq!(signed.status(today), Status::Signed);
+    assert_eq!(signed.meta().modified(), at(4_000));
+    assert_eq!(signed.sign(day(2026, 10, 5), at(5_000)), Ok(None));
+    let moved = signed.sign(date, at(5_000)).expect("годно").expect("поправлен");
+    assert_eq!(moved.signed(), Some(date));
+    assert_eq!(act.sign(day(2026, 9, 30), at(4_000)), Err(DocError::SignedBeforeDate));
+
+    let annulled = signed.annul(today, at(6_000)).expect("выпущен").expect("аннулирован");
+    assert_eq!(annulled.status(today), Status::Annulled);
+    assert_eq!(annulled.signed(), Some(day(2026, 10, 5)), "аннулирование подпись не снимает");
+    assert_eq!(annulled.sign(today, at(7_000)), Err(DocError::Annulled));
+    let back = annulled.unannul(at(7_000)).expect("возвращён");
+    assert_eq!(back.status(today), Status::Signed);
+
+    let unsigned = signed.unsign(at(8_000)).expect("отметка снята");
+    assert_eq!(unsigned.signed(), None);
+    assert_eq!(unsigned.status(today), Status::Issued);
+    assert_eq!(unsigned.meta().modified(), at(8_000));
+    assert_eq!(unsigned.unsign(at(9_000)), None);
+
+    let invoice = issued(DocKind::Invoice, &client, date, &[]);
+    assert_eq!(invoice.sign(today, at(4_000)), Err(DocError::NotAct));
+    let draft = Document::create(data(DocKind::Act, &client, date), at(2_000)).expect("черновик");
+    assert_eq!(draft.sign(today, at(3_000)), Err(DocError::NotIssued));
 }
 
 /// Черновик правится, удаляется меткой и восстанавливается.

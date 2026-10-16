@@ -770,7 +770,7 @@ where
         return Err(BackupError::NotBackup);
     }
     match mark.format_version {
-        // Шапка, замок и список записей у версий 1–6 одинаковы: версии 2–6
+        // Шапка, замок и список записей у версий 1–7 одинаковы: версии 2–7
         // прибавили виды записей и поля, а их разбирает `decode_record` по
         // версии файла; сжат ли текст, `read` узнаёт по ней же.
         FIRST_VERSION..=FORMAT_VERSION => {}
@@ -1034,7 +1034,7 @@ pub fn merge<'a, 'b>(
         updated: 0,
         unchanged: 0,
     };
-    // Начало строки базы у записи текущей версии: `{"format_version":6,"record":`.
+    // Начало строки базы у записи текущей версии: `{"format_version":7,"record":`.
     let empty = wrap("");
     let prefix = &empty[..empty.len() - 1];
     for entry in incoming {

@@ -30,13 +30,18 @@
 //! нет, поэтому у выпущенного документа его можно указать и поправить
 //! ([`Document::set_rate`]): текст документа от этого не меняется.
 //!
+//! **Подпись акта** (задача 62) — день, когда клиент подписал акт и вернул
+//! экземпляр ИП ([`Document::sign`]): пока подпись не вернулась, услуга не
+//! принята. Налога она не меняет: доход по акту — по дате оказания услуги
+//! (Правило 2), а не по дню подписи.
+//!
 //! Меняется документ только командами ядра (CLAUDE.md, «Данные меняются
 //! одним путём»): [`Document::create`], `edit`, `issue`, `annul`,
 //! `unannul`, `delete`, `restore`, `add_payment`, `remove_payment`,
-//! `set_rate`.
+//! `set_rate`, `sign`, `unsign`.
 //!
 //! В данных: `{"meta":{…},"data":{…},"issued":{…},"annulled":null,
-//! "payments":[…]}`; образец — в тесте `data_shape_is_pinned`.
+//! "signed":null,"payments":[…]}`; образец — в тесте `data_shape_is_pinned`.
 
 use std::fmt;
 
@@ -240,6 +245,11 @@ pub enum DocError {
     Deleted,
     /// Оплата, акт и повтор — только у счёта.
     NotInvoice,
+    /// Подпись клиента — только у акта.
+    NotAct,
+    /// День подписи раньше даты акта: подписать акт до того, как его
+    /// выписали, нельзя.
+    SignedBeforeDate,
     /// Сумма оплаты не больше нуля.
     PaymentAmount,
     /// Оплат больше [`Document::MAX_PAYMENTS`].
@@ -451,8 +461,10 @@ pub struct Payment {
 pub enum Status {
     /// Черновик: номера ещё нет.
     Draft,
-    /// Выпущенный акт.
+    /// Выпущенный акт, подписи клиента ещё нет.
     Issued,
+    /// Акт подписан клиентом (задача 62).
+    Signed,
     /// Счёт выпущен, оплат нет, срок не прошёл.
     Unpaid,
     /// Счёт оплачен не целиком, срок не прошёл.
@@ -475,6 +487,10 @@ pub struct Document {
     /// День, когда документ аннулирован; `None` — действует. Только
     /// у выпущенного.
     annulled: Option<Date>,
+    /// День, когда клиент подписал акт; `None` — подписи нет. Только
+    /// у выпущенного акта; аннулирование её не снимает: подписанный акт
+    /// аннулируют, а не «отписывают».
+    signed: Option<Date>,
     /// Поступления оплаты — только у выпущенного счёта, по дням.
     payments: Vec<Payment>,
 }
@@ -487,6 +503,9 @@ struct DocumentFields {
     data: DocumentData,
     issued: Option<Issued>,
     annulled: Option<Date>,
+    /// С версии формата 7 (задача 62); у записей прежних — подписи нет.
+    #[serde(default)]
+    signed: Option<Date>,
     payments: Vec<Payment>,
 }
 
@@ -500,7 +519,7 @@ impl Stored for Document {
 
 /// Читается только то, что пишут команды: номер — того года, что дата
 /// документа; аннулирован и оплачен — только выпущенный, оплачен — только
-/// счёт; выпущенный не удалён; в копии реквизитов есть имя на языке
+/// счёт, подписан — только акт и не раньше своей даты; выпущенный не удалён; в копии реквизитов есть имя на языке
 /// документа; списки — в пределах (Правило 13).
 impl<'de> Deserialize<'de> for Document {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -509,16 +528,18 @@ impl<'de> Deserialize<'de> for Document {
             data,
             issued,
             annulled,
+            signed,
             payments,
         } = DocumentFields::deserialize(deserializer)?;
         let fits = match &issued {
-            None => annulled.is_none() && payments.is_empty(),
+            None => annulled.is_none() && signed.is_none() && payments.is_empty(),
             Some(issued) => {
                 issued.number.year == data.date.year()
                     && !meta.is_deleted()
                     && !issued.seller.name.get(data.lang).is_empty()
                     && issued.seller.accounts.len() <= ProfileData::MAX_ACCOUNTS
                     && (payments.is_empty() || data.kind == DocKind::Invoice)
+                    && signed.is_none_or(|day| data.kind == DocKind::Act && day >= data.date)
             }
         };
         let payments_fit = payments.len() <= Document::MAX_PAYMENTS
@@ -534,6 +555,7 @@ impl<'de> Deserialize<'de> for Document {
             data,
             issued,
             annulled,
+            signed,
             payments,
         };
         // Сумма оплат помещается, как и сумма строк.
@@ -556,6 +578,7 @@ impl Document {
             data,
             issued: None,
             annulled: None,
+            signed: None,
             payments: Vec::new(),
         })
     }
@@ -735,6 +758,39 @@ impl Document {
         Ok(Some(document))
     }
 
+    /// Команда «акт подписан клиентом» в день `day` — у выпущенного
+    /// действующего акта. Другой день — поправка прежней отметки.
+    /// `Ok(None)` — отмечен этим же днём.
+    pub fn sign(&self, day: Date, now: Timestamp) -> Result<Option<Self>, DocError> {
+        self.must_be_issued()?;
+        if self.data.kind != DocKind::Act {
+            return Err(DocError::NotAct);
+        }
+        if self.annulled.is_some() {
+            return Err(DocError::Annulled);
+        }
+        if day < self.data.date {
+            return Err(DocError::SignedBeforeDate);
+        }
+        if self.signed == Some(day) {
+            return Ok(None);
+        }
+        let mut document = self.clone();
+        document.signed = Some(day);
+        document.meta.touch(now);
+        Ok(Some(document))
+    }
+
+    /// Команда «снять отметку о подписи» — поставленную по ошибке. `None` —
+    /// отметки нет.
+    pub fn unsign(&self, now: Timestamp) -> Option<Self> {
+        self.signed?;
+        let mut document = self.clone();
+        document.signed = None;
+        document.meta.touch(now);
+        Some(document)
+    }
+
     /// Данные акта по этому счёту — «акт из счёта одним нажатием»: тот же
     /// клиент, язык, валюта, строки, дата оказания услуги и курс для неё,
     /// дата акта — `today`, основание — этот счёт.
@@ -826,6 +882,11 @@ impl Document {
         self.annulled
     }
 
+    /// День подписи акта клиентом; `None` — подписи нет.
+    pub const fn signed(&self) -> Option<Date> {
+        self.signed
+    }
+
     /// Поступления оплаты — по дням.
     pub fn payments(&self) -> &[Payment] {
         &self.payments
@@ -872,6 +933,7 @@ impl Document {
             return Status::Annulled;
         }
         match self.data.kind {
+            DocKind::Act if self.signed.is_some() => Status::Signed,
             DocKind::Act => Status::Issued,
             DocKind::Invoice => {
                 // Суммы помещаются: это проверено при записи и при чтении.

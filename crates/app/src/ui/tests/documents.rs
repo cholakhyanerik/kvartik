@@ -272,6 +272,7 @@ async fn invoice_flow(host: &HtmlElement, client: &Client, lang: Lang, today: Da
     if !host.text_content().unwrap_or_default().contains(&basis) {
         wrong.push("у акта не названо основание".to_owned());
     }
+    sign_flow(host, lang, today, &mut wrong).await;
     close(&mut wrong);
     sleep(100).await;
 
@@ -397,6 +398,87 @@ async fn invoice_flow(host: &HtmlElement, client: &Client, lang: Lang, today: Da
         wrong.push("у черновика удалённого клиента нет пометки".to_owned());
     }
     wrong
+}
+
+/// Подпись открытого выпущенного акта клиентом (задача 62): день раньше
+/// даты акта не проходит и говорит у поля; сегодняшний — статус «подписан»,
+/// событие в истории и день подписи в базе; «Снять отметку» возвращает
+/// «выпущен», и в базе подписи нет.
+async fn sign_flow(host: &HtmlElement, lang: Lang, today: Date, wrong: &mut Vec<String>) {
+    let status = || {
+        host.query_selector(".docs-detail .doc-card .status")
+            .ok()
+            .flatten()
+            .and_then(|status| status.text_content())
+            .unwrap_or_default()
+    };
+    let signed_in_base = || async {
+        let (documents, _) = stored().await;
+        documents
+            .iter()
+            .find(|d| d.data().kind == DocKind::Act && d.number().is_some_and(|n| n.seq() == 1))
+            .map(Document::signed)
+    };
+    if status() != t(lang, Key::StatusIssued) {
+        wrong.push(format!("выпущенный акт — не «выпущен»: «{}»", status()));
+    }
+    let Some(input) = field(host, t(lang, Key::SignDate), 0) else {
+        wrong.push("у выпущенного акта нет дня подписи".to_owned());
+        return;
+    };
+    if input.value() != today.iso() {
+        wrong.push(format!("день подписи — не сегодня: {}", input.value()));
+    }
+    let yesterday = today.add_days(-1).expect("дата есть");
+    type_into(&input, &yesterday.iso());
+    match button(host, &[t(lang, Key::SignMark)]) {
+        Some(mark) => mark.click(),
+        None => wrong.push("нет «Отметить, что подписан»".to_owned()),
+    }
+    sleep(100).await;
+    if !host.text_content().unwrap_or_default().contains(t(lang, Key::SignBeforeDate)) {
+        wrong.push("подпись раньше акта прошла без слова".to_owned());
+    }
+    if signed_in_base().await != Some(None) {
+        wrong.push(format!("подпись раньше акта легла в базу: {:?}", signed_in_base().await));
+    }
+
+    type_into(&input, &today.iso());
+    if let Some(mark) = button(host, &[t(lang, Key::SignMark)]) {
+        mark.click();
+    }
+    if !wait_for(host, t(lang, Key::SignSaved)).await {
+        wrong.push("подпись не подтвердилась".to_owned());
+        return;
+    }
+    let text = host.text_content().unwrap_or_default();
+    if status() != t(lang, Key::StatusSigned) {
+        wrong.push(format!("подписанный акт — не «подписан»: «{}»", status()));
+    }
+    if !text.contains(t(lang, Key::HistorySigned)) {
+        wrong.push("в истории нет подписи".to_owned());
+    }
+    if !text.contains(&fill(t(lang, Key::SignedOn), &[&i18n::date(lang, today)])) {
+        wrong.push("не назван день подписи".to_owned());
+    }
+    if signed_in_base().await != Some(Some(today)) {
+        wrong.push(format!("в базе подпись не та: {:?}", signed_in_base().await));
+    }
+
+    match button(host, &[t(lang, Key::SignRemove)]) {
+        Some(remove) => remove.click(),
+        None => wrong.push("нет «Снять отметку»".to_owned()),
+    }
+    if !wait_for(host, t(lang, Key::SignRemoved)).await {
+        wrong.push("отметка не снялась".to_owned());
+        return;
+    }
+    if status() != t(lang, Key::StatusIssued) {
+        wrong.push(format!("после снятия отметки — не «выпущен»: «{}»", status()));
+    }
+    if signed_in_base().await != Some(None) {
+        wrong.push(format!("после снятия отметки в базе подпись: {:?}", signed_in_base().await));
+    }
 }
 
 /// Восстановление из копии меняет базу в обход раздела, и раздел документов

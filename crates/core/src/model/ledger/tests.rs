@@ -367,6 +367,34 @@ fn quarter_follows_service_not_payment() {
     assert!(rows(&documents, &operations, quarter(2026, 4)).is_empty());
 }
 
+/// Подпись акта клиентом дохода не двигает (задача 62): акт от 1 октября
+/// за услугу 30 сентября, подписанный 5 января, — доход третьего квартала
+/// тем же днём и той же суммой, что и до подписи.
+#[test]
+fn signature_does_not_move_income() {
+    let client = client();
+    let act = issue(
+        document_data(DocKind::Act, &client, day(2026, 10, 1), day(2026, 9, 30), 100_000),
+        &client,
+        &[],
+    );
+    let signed = act
+        .sign(day(2027, 1, 5), at(4_000))
+        .expect("годно")
+        .expect("подписан");
+    let line = |document: &Document| {
+        let documents = [document.clone()];
+        rows(&documents, &[], quarter(2026, 3))
+            .iter()
+            .map(|row| (row.id(), row.date, row.amount))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(line(&act), [(act.id(), day(2026, 9, 30), usd(100_000))]);
+    assert_eq!(line(&signed), line(&act));
+    let documents = [signed];
+    assert!(rows(&documents, &[], quarter(2027, 1)).is_empty());
+}
+
 /// Удалённая операция в книгу не идёт; строки — свежие сверху, в один день
 /// доход выше расхода.
 #[test]

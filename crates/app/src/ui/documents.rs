@@ -273,6 +273,9 @@ enum Notice {
     Paid,
     /// Курс документа сохранён (задача 14).
     RateSaved,
+    /// Акт отмечен подписанным клиентом и отметка снята (задача 62).
+    Signed,
+    Unsigned,
 }
 
 /// Что не вышло: хранилище или команда ядра.
@@ -304,6 +307,7 @@ impl Problem {
             Self::Doc(DocError::ClientDeleted) => Key::IssueClientDeleted,
             Self::Doc(DocError::NumbersUnknown) => Key::IssueNumbersUnknown,
             Self::Doc(DocError::PaymentAmount) => Key::PaymentInvalid,
+            Self::Doc(DocError::SignedBeforeDate) => Key::SignBeforeDate,
             Self::Doc(DocError::TooLarge) => Key::DocTooLarge,
             Self::Doc(
                 DocError::NoItems
@@ -318,6 +322,7 @@ impl Problem {
                 | DocError::Annulled
                 | DocError::Deleted
                 | DocError::NotInvoice
+                | DocError::NotAct
                 | DocError::TooManyPayments
                 | DocError::WrongClient
                 | DocError::NumbersExhausted
@@ -528,6 +533,7 @@ const fn status_look(status: Status) -> (Key, &'static str) {
     match status {
         Status::Draft => (Key::StatusDraft, "status muted"),
         Status::Issued => (Key::StatusIssued, "status done"),
+        Status::Signed => (Key::StatusSigned, "status done"),
         Status::Unpaid => (Key::StatusUnpaid, "status waiting"),
         Status::PartlyPaid => (Key::StatusPartlyPaid, "status waiting"),
         Status::Paid => (Key::StatusPaid, "status done"),
@@ -921,6 +927,8 @@ fn NoticeLine(ctx: Ctx, busy: RwSignal<bool>, failure: RwSignal<Option<Problem>>
             Notice::Saved => view! { <p role="status">{tr(lang, Key::DocSaved)}</p> }.into_any(),
             Notice::Paid => view! { <p role="status">{tr(lang, Key::PaymentSaved)}</p> }.into_any(),
             Notice::RateSaved => view! { <p role="status">{tr(lang, Key::DocRateSaved)}</p> }.into_any(),
+            Notice::Signed => view! { <p role="status">{tr(lang, Key::SignSaved)}</p> }.into_any(),
+            Notice::Unsigned => view! { <p role="status">{tr(lang, Key::SignRemoved)}</p> }.into_any(),
             Notice::Restored => {
                 view! { <p role="status">{tr(lang, Key::DocRestoredNotice)}</p> }.into_any()
             }
@@ -988,6 +996,9 @@ enum Change {
     /// Курс выпущенного документа: драмы за единицу в десятитысячных,
     /// `None` — убрать (задача 14).
     SetRate(Option<i64>),
+    /// Акт подписан клиентом в этот день и отметка снята (задача 62).
+    Sign(Date),
+    Unsign,
 }
 
 /// Сделать `change` с документом `id` и, если записано, — `done` с ним.
@@ -1042,6 +1053,8 @@ async fn apply(store: &Store, id: RecordId, change: Change) -> Result<Option<Doc
         Change::AddPayment(payment) => Some(document.add_payment(payment, now)?),
         Change::RemovePayment(payment) => document.remove_payment(payment, now),
         Change::SetRate(per_unit_e4) => document.set_rate(per_unit_e4, now)?,
+        Change::Sign(day) => document.sign(day, now)?,
+        Change::Unsign => document.unsign(now),
     };
     let Some(changed) = changed else {
         return Ok(None);
@@ -2021,6 +2034,7 @@ fn DocView(ctx: Ctx, id: RecordId) -> impl IntoView {
             {move || failure.get().map(|problem| view! { <p role="alert">{tr(lang, problem.key())}</p> })}
             <DocItems ctx document=shown.clone() />
             {invoice.then(|| view! { <Payments ctx document=shown.clone() busy failure /> })}
+            {(!invoice).then(|| view! { <Signature ctx document=shown.clone() busy failure /> })}
             <History ctx document=shown.clone() />
             <DocActions ctx document=shown busy failure />
         }
@@ -2317,20 +2331,26 @@ fn DocItems(ctx: Ctx, document: Document) -> impl IntoView {
 enum Event {
     Issued,
     Paid(i64),
+    Signed,
     Annulled,
 }
 
 /// Что было с документом — свежее сверху (дизайн «Kvartik Design»): выпуск,
-/// поступления оплаты, аннулирование. Дата выпуска — дата документа: момент
-/// выпуска программа не хранит, а в документе написана она.
+/// поступления оплаты, подпись акта клиентом, аннулирование. Дата выпуска —
+/// дата документа: момент выпуска программа не хранит, а в документе
+/// написана она.
 #[component]
 fn History(ctx: Ctx, document: Document) -> impl IntoView {
     let lang = ctx.lang;
     let number = document.number().map(|number| number.to_string()).unwrap_or_default();
     let currency = document.data().currency;
-    // В один день: аннулирование — позже оплат, оплаты — позже выпуска.
+    // В один день: аннулирование — позже оплат и подписи, они — позже
+    // выпуска.
     let mut events = vec![(document.data().date, 0, Event::Issued)];
     events.extend(document.payments().iter().map(|payment| (payment.date, 1, Event::Paid(payment.amount))));
+    if let Some(day) = document.signed() {
+        events.push((day, 1, Event::Signed));
+    }
     if let Some(day) = document.annulled() {
         events.push((day, 2, Event::Annulled));
     }
@@ -2348,6 +2368,7 @@ fn History(ctx: Ctx, document: Document) -> impl IntoView {
                             t(lang, Key::HistoryPaid),
                             &[&i18n::money(lang, Money::new(amount, currency))],
                         ),
+                        Event::Signed => t(lang, Key::HistorySigned).to_owned(),
                         Event::Annulled => t(lang, Key::StatusAnnulled).to_owned(),
                     }
                 };
@@ -2479,6 +2500,72 @@ fn Payments(
             })}
         </fieldset>
     }
+}
+
+/// Подпись акта клиентом (задача 62): пока подписи нет — день подписи
+/// (сегодня) и «Отметить, что подписан»; у подписанного — его день
+/// и «Снять отметку». Аннулированный акт показывает подпись, если она была,
+/// а действий над ним нет.
+#[component]
+fn Signature(
+    ctx: Ctx,
+    document: Document,
+    busy: RwSignal<bool>,
+    failure: RwSignal<Option<Problem>>,
+) -> impl IntoView {
+    let Ctx { lang, notice, .. } = ctx;
+    let id = document.id();
+    let open = document.annulled().is_none();
+    let signed = document.signed();
+    if signed.is_none() && !open {
+        return None;
+    }
+    let act_date = document.data().date;
+    let date = RwSignal::new(ctx.today.map(Date::iso).unwrap_or_default());
+    let tried = RwSignal::new(false);
+    let mark = move |_| {
+        tried.set(true);
+        let Some(day) = Date::from_iso(&date.get_untracked()).filter(|day| *day >= act_date) else {
+            return;
+        };
+        act(ctx, busy, failure, id, Change::Sign(day), move |_| {
+            notice.set(Some(Notice::Signed));
+        });
+    };
+    let unsign = move |_| {
+        act(ctx, busy, failure, id, Change::Unsign, move |_| {
+            notice.set(Some(Notice::Unsigned));
+        });
+    };
+    Some(view! {
+        <fieldset class="signature">
+            <legend>{tr(lang, Key::SignTitle)}</legend>
+            {match signed {
+                Some(day) => view! {
+                    <p>{move || fill(t(lang.get(), Key::SignedOn), &[&i18n::date(lang.get(), day)])}</p>
+                    {open.then(|| view! {
+                        <button type="button" class="secondary" disabled=move || busy.get() on:click=unsign>
+                            {tr(lang, Key::SignRemove)}
+                        </button>
+                    })}
+                }
+                .into_any(),
+                None => view! {
+                    <p class="hint">{tr(lang, Key::SignAbout)}</p>
+                    <DateField lang label=Key::SignDate value=date tried />
+                    {shown_problem(tried, move || {
+                        date.with(|text| Date::from_iso(text))
+                            .filter(|day| *day < act_date)
+                            .map(|_| t(lang.get(), Key::SignBeforeDate).to_owned())
+                    })}
+                    <button type="button" disabled=move || busy.get() on:click=mark>
+                        {tr(lang, Key::SignMark)}
+                    </button>
+                }
+                .into_any(),
+            }}
+        </fieldset>
+    })
 }
 
 /// Редкие действия с выпущенным документом — внизу карточки, под «Ещё»:
