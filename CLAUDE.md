@@ -553,6 +553,11 @@ wasm-bindgen-cli 0.2.129, `headless.rs`). Окно Firefox «Разрешить 
 — `dom.storageManager.prompt.testing` и `.allow` (по исходникам Firefox,
 `nsContentPermissionHelper.cpp`, `CheckPromptPrefs`, 2026-10-16); раннер
 читает файл из каталога пакета, а chromedriver чужие настройки пропускает.
+Предел времени раннера — на весь прогон в странице, а не на тест: 20 с по
+умолчанию, а прогон в Chrome уже шёл 18–19 с, и Firefox в CI, рисующий
+без видеокарты, обрывался «Failed to detect test as having been run» без
+имени сломанного теста (2026-10-16). Поэтому предел — 120 с, в `[env]`
+`.cargo/config.toml`: один для машины и для CI.
 Машинные `tests/*.rs` окна под wasm32 выключены
 (`#![cfg(not(target_arch = "wasm32"))]`): там им нечего читать.
 
