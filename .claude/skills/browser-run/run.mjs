@@ -13,9 +13,9 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { Browser, Checks, sleep } from "./lib/cdp.mjs";
-import { REPO, own, start, wrangler } from "./lib/serve.mjs";
-import { samples, t } from "./lib/strings.mjs";
+import { Browser, Checks, sleep } from "../../../tools/browser/cdp.mjs";
+import { REPO, own, start, wrangler } from "../../../tools/browser/serve.mjs";
+import { samples, t } from "../../../tools/browser/strings.mjs";
 
 const { values: opt, positionals } = parseArgs({
   allowPositionals: true,

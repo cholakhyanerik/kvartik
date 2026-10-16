@@ -54,6 +54,10 @@
       "PowerShell(gh run *)",
       "Bash(node .claude/*)",
       "PowerShell(node .claude/*)",
+      "Bash(node tools/browser/check.mjs)",
+      "Bash(node tools/browser/check.mjs *)",
+      "PowerShell(node tools/browser/check.mjs)",
+      "PowerShell(node tools/browser/check.mjs *)",
       "Read(~/.cargo/registry/src/**)"
     ]
   },

@@ -172,6 +172,18 @@ jobs:
           grep -E "test result: ok\. [1-9][0-9]* passed" browser-tests-firefox.log
       - run: trunk build --release
         working-directory: crates/app
+      # Собранный сайт — в браузере (задача 60): части wasm рисуют экраны
+      # и формы, копия и PDF работают, без сети всё приходит из кэша service
+      # worker, а несгруженная часть — словами с «Отменой». Браузерные тесты
+      # выше идут на тестовом wasm, который никто не режет, и этого не видят:
+      # разрез держится за внутренности wasm-bindgen, и после обновления
+      # сборка прошла бы зелёной с неоткрывающимися экранами. Chrome и Node —
+      # из образа, скрипт — без зависимостей (шапка `tools/browser/check.mjs`).
+      - name: Собранный сайт в браузере
+        run: |
+          google-chrome --version
+          node --version
+          node tools/browser/check.mjs
       # Новая запись в базе RustSec краснит прогон и без нашего изменения —
       # так и задумано: что с ней делать, решает человек (`deny.toml`).
       - run: cargo deny check

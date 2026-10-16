@@ -1,6 +1,6 @@
 ---
 name: finish-task
-description: Конец задачи Kvartik — восемь проверок Правила 2, четыре вопроса Правила 5 (версия, формат, README, CLAUDE.md), запись CHANGELOG.md, реестр FEATURE_TASKS.md, коммит и git push origin main, ожидание CI, уборка временного и отчёт. Брать, когда код задачи готов и пора её закрывать или сводить пачку задач (Правила 2, 5, 7, 10, 11, 12 CLAUDE.md).
+description: Конец задачи Kvartik — девять проверок Правила 2, четыре вопроса Правила 5 (версия, формат, README, CLAUDE.md), запись CHANGELOG.md, реестр FEATURE_TASKS.md, коммит и git push origin main, ожидание CI, уборка временного и отчёт. Брать, когда код задачи готов и пора её закрывать или сводить пачку задач (Правила 2, 5, 7, 10, 11, 12 CLAUDE.md).
 ---
 
 # Конец задачи
@@ -22,11 +22,15 @@ cargo test --workspace
 cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app   # браузерные, Chrome
 GECKODRIVER=~/.cargo/drivers/geckodriver.exe cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app   # они же в Firefox
 trunk build --release          # в crates/app
+node tools/browser/check.mjs   # собранный сайт в браузере; на машине — с --work C:/tmp/k<номер>
 cargo deny check               # в CI всегда, на машине — по желанию
 ```
 
-- Все восемь — ровно то, что гоняет CI (`.github/workflows/ci.yml`). Новая
+- Все девять — ровно то, что гоняет CI (`.github/workflows/ci.yml`). Новая
   проверка — сюда и в `ci.yml` вместе.
+- `tools/browser/check.mjs` — на только что собранном `dist/`: части wasm,
+  формы, копия, PDF и работа без сети (задача 60). Около 10 секунд; провалы
+  — в конце списком, код выхода 1.
 - Браузерные тесты: число прошедших больше нуля — раннер при нуле тестов
   выходит с кодом 0 («no tests to run!»), — и браузер тот: строка
   «Running headless tests in Firefox» (или «in Chrome»). Упали с «session

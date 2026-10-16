@@ -1,6 +1,7 @@
 // headless Chrome через протокол DevTools: свой профиль, свой порт, одна
-// вкладка (skill browser-run). Только Node 24 без зависимостей: WebSocket
-// у него свой.
+// вкладка. Общее у глазного прогона (skill browser-run) и проверки
+// собранного сайта в CI (`check.mjs` рядом, задача 60). Node 22 и новее без
+// зависимостей: WebSocket у него свой. Windows — машина автора, Linux — CI.
 //
 // Почему так, а не иначе (CLAUDE.md, Правило 2, «глазной прогон»):
 // - ширина 360 и тема — только эмуляцией: окно уже ~500 точек headless Chrome
@@ -11,13 +12,18 @@
 // - выражение `Runtime.evaluate` — в своей функции: у консоли одна общая
 //   область, и второй `const f` бросает исключение (2026-10-15);
 // - гасится только свой Chrome — деревом своего процесса: браузер человека
-//   работает рядом (2026-10-15).
+//   работает рядом (2026-10-15);
+// - на Linux — `--no-sandbox` и `--disable-dev-shm-usage`, как у раннера
+//   браузерных тестов в том же CI (по исходникам wasm-bindgen-cli 0.2.129,
+//   `headless.rs`): машина CI одноразовая, а открывается только свой сайт.
 
 import { spawn, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-export const CHROME = process.env.CHROME ?? "C:/Program Files/Google/Chrome/Application/chrome.exe";
+const WINDOWS = process.platform === "win32";
+export const CHROME = process.env.CHROME
+  ?? (WINDOWS ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : "google-chrome");
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /// Эмуляции окна: телефон и компьютер (Правило 2: 360 и 1280).
@@ -26,8 +32,21 @@ export const DEVICES = {
   1280: { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false },
 };
 
+/// Запустить программу так, чтобы `kill` погасил её вместе с дочерними:
+/// на Linux — своей группой процессов.
+export function spawnTree(command, args, options = {}) {
+  return spawn(command, args, { ...options, detached: !WINDOWS });
+}
+
+/// Погасить процесс `spawnTree` с деревом дочерних.
 export function kill(pid) {
-  try { execSync(`taskkill /pid ${pid} /T /F`, { stdio: "ignore" }); } catch {}
+  if (WINDOWS) {
+    try { execSync(`taskkill /pid ${pid} /T /F`, { stdio: "ignore" }); } catch {}
+    return;
+  }
+  try { process.kill(-pid, "SIGKILL"); } catch {
+    try { process.kill(pid, "SIGKILL"); } catch {}
+  }
 }
 
 export class Browser {
@@ -36,13 +55,17 @@ export class Browser {
   static async launch({ work, name, port }) {
     const profile = path.join(work, `chrome-${name}`);
     fs.rmSync(profile, { recursive: true, force: true });
-    const child = spawn(CHROME, ["--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`,
-      "--no-first-run", "--no-default-browser-check", "about:blank"], { stdio: "ignore" });
+    const child = spawnTree(CHROME, ["--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`,
+      "--no-first-run", "--no-default-browser-check", ...(WINDOWS ? [] : ["--no-sandbox", "--disable-dev-shm-usage"]),
+      "about:blank"], { stdio: "ignore" });
+    let failed;
+    child.on("error", (e) => { failed = e; });
     let url;
-    for (let i = 0; i < 100 && !url; i++) {
+    for (let i = 0; i < 100 && !url && !failed; i++) {
       try { url = (await (await fetch(`http://127.0.0.1:${port}/json/version`)).json()).webSocketDebuggerUrl; }
       catch { await sleep(200); }
     }
+    if (failed) throw new Error(`Chrome не запустился (${CHROME}; путь — переменная CHROME): ${failed.message}`);
     if (!url) { kill(child.pid); throw new Error(`Chrome не открыл DevTools на порту ${port}`); }
     const browser = new Browser(child, new WebSocket(url));
     await new Promise((res, rej) => { browser.ws.onopen = res; browser.ws.onerror = rej; });

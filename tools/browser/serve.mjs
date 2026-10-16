@@ -1,4 +1,5 @@
-// Серверы `dist/` для прогона (skill browser-run).
+// Серверы `dist/` для глазного прогона (skill browser-run) и проверки
+// собранного сайта в CI (`check.mjs` рядом, задача 60).
 //
 // - `wrangler` — `wrangler pages dev` из `tools/deploy`: тот же разбор
 //   `_headers` (CSP, кэш), `_redirects` и `404.html`, что у Cloudflare Pages
@@ -9,16 +10,17 @@
 //   `404.html` с кодом 404. Для замера первого захода: сжимать файл при
 //   первом запросе нельзя — сжатие шрифтов держало шесть соединений HTTP/1.1,
 //   и части wasm выглядели на 650 мс медленнее (задача 58, 2026-10-13).
-//   Заголовков `_headers` он не ставит.
+//   Заголовков `_headers` он не ставит. Качество сжатия — параметр: замеру
+//   нужны байты, близкие к хостингу (11, весь сайт — 3,5 с на машине
+//   автора), а проверке CI — только сжатие, и 5 сжимает его за доли секунды.
 
 import http from "node:http";
 import zlib from "node:zlib";
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
-import { kill, sleep } from "./cdp.mjs";
+import { kill, sleep, spawnTree } from "./cdp.mjs";
 
-export const REPO = path.resolve(import.meta.dirname, "../../../..");
+export const REPO = path.resolve(import.meta.dirname, "../..");
 const WRANGLER = path.join(REPO, "tools/deploy/node_modules/wrangler/bin/wrangler.js");
 
 const TYPES = {
@@ -28,7 +30,7 @@ const TYPES = {
 };
 
 /// Свой сервер. Возвращает `{ port, stop() }`.
-export function own(dist, port) {
+export function own(dist, port, { quality = 11 } = {}) {
   const files = new Map();
   const walk = (dir, prefix) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -38,7 +40,7 @@ export function own(dist, port) {
       if (e.isDirectory()) { walk(full, `${prefix}${e.name}/`); continue; }
       const raw = fs.readFileSync(full);
       files.set(`/${prefix}${e.name}`, {
-        raw, br: zlib.brotliCompressSync(raw, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 } }),
+        raw, br: zlib.brotliCompressSync(raw, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: quality } }),
         type: TYPES[path.extname(e.name)] ?? "application/octet-stream",
       });
     }
@@ -81,7 +83,7 @@ export async function wrangler(dist, port, work) {
   // Правило 3) — сервер прогона так не делаем.
   const env = { ...process.env, WRANGLER_SEND_METRICS: "false" };
   delete env.CLAUDECODE;
-  const child = spawn(process.execPath, [WRANGLER, "pages", "dev", path.resolve(dist), "--port", String(port)],
+  const child = spawnTree(process.execPath, [WRANGLER, "pages", "dev", path.resolve(dist), "--port", String(port)],
     { cwd: work, env, stdio: ["ignore", log, log] });
   const stop = async () => {
     // У wrangler дочерние workerd: TaskStop оставил бы их держать порт.

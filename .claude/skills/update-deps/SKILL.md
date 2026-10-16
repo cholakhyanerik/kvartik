@@ -16,8 +16,9 @@ cargo update            # в рамках semver, из Cargo.lock
 cargo upgrade           # поднять сами требования версий в Cargo.toml
 ```
 
-Потом — восемь проверок Правила 2 (skill `finish-task`, шаг 1; `cargo deny
-check` здесь обязателен: новые лицензии, дубли и записи RustSec), потом —
+Потом — девять проверок Правила 2 (skill `finish-task`, шаг 1; `cargo deny
+check` здесь обязателен: новые лицензии, дубли и записи RustSec, а после
+wasm-bindgen и программы разреза — и `tools/browser/check.mjs`), потом —
 открыть приложение и пройти сценарии Правила 2 (skill `browser-run`),
 выпустить PDF образца. В отчёт — что обновилось и что пришлось адаптировать.
 
