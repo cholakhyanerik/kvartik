@@ -35,6 +35,12 @@
          программы. -->
     <link data-trunk rel="copy-file" href="public/manifest.webmanifest" />
     <link data-trunk rel="copy-dir" href="public/icons" />
+    <!-- «Что нового» (задача 67): заметки о версиях на трёх языках. Их
+         читает окно прежней версии из кэша новой, когда та пришла
+         (src/platform/pwa.rs, kvartik_core::release), а не эта страница:
+         ссылки на файл в ней нет, а в кэш его кладёт service worker вместе
+         со всем сайтом. -->
+    <link data-trunk rel="copy-file" href="public/notes.json" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="icons/icon-32.png" sizes="32x32" type="image/png" />
     <link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png" />

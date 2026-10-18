@@ -34,6 +34,7 @@ use crate::store::{self, Store};
 use backup::{BackupChip, BackupEntry, BackupSection, Backups};
 use clients::{Clients, ClientsSection};
 use documents::{Documents, DocumentsScreen};
+use form::Forms;
 use home::Home;
 use icon::{Icon, icon};
 use lang::{LangSwitch, WindowLang};
@@ -41,7 +42,7 @@ use ledger::LedgerScreen;
 use nav::Nav;
 use onboarding::Welcome;
 use profile::{ProfileSection, Profiles};
-use pwa::{Program, UpdateNotice};
+use pwa::{Program, UpdateDialog, UpdateNotice};
 use route::{Router, Screen};
 use storage::{Storage, StorageAlert, StorageSection};
 
@@ -114,9 +115,12 @@ impl Base {
 /// меняют и тогда, когда часть не загрузилась.
 ///
 /// Над экранами — то, о чём окно обязано сказать, где бы человек ни был:
-/// новая версия и беда с хранилищем. Напоминание о копии — карточкой на
-/// главном экране и меткой под заголовком остальных: напоминать обязано
-/// каждое открытие (Правило 2).
+/// беда с хранилищем и новая версия, пришедшая, пока открыта форма. Сама
+/// новая версия — окном поверх всего (задача 67): пока оно стоит, окно под
+/// ним — `inert`, ни нажать, ни встать фокусом. Формы окно считает
+/// ([`Forms`]): с открытой окно новой версии ждёт.
+/// Напоминание о копии — карточкой на главном экране и меткой под
+/// заголовком остальных: напоминать обязано каждое открытие (Правило 2).
 /// Установка — на главном экране, выше всего о данных: на iPhone программу
 /// ставят до того, как вводить данные (Правило 6).
 #[component]
@@ -130,6 +134,8 @@ pub fn App() -> impl IntoView {
     let welcome = RwSignal::new(onboarding::needed());
     // Service worker — до базы: работа без сети от неё не зависит.
     let program = Program::new();
+    let forms = Forms::new();
+    let blocked = Memo::new(move |_| program.blocks(forms));
     let storage = RwSignal::new(Storage::Opening);
     // Открытая база живёт, пока живо окно (её держит `Base`): брошенное
     // соединение браузер может закрыть, а с ним и обработчик
@@ -181,31 +187,38 @@ pub fn App() -> impl IntoView {
     Effect::watch(move || router.screen(), |screen, _, _| route::shown(*screen), false);
 
     let hidden = move |screen: Screen| move || !router.shows(screen);
+    // Первый запуск и окно под окном новой версии неактивны: ни нажать,
+    // ни встать фокусом.
+    let inert = move || blocked.get();
     view! {
-        {move || welcome.get().then(|| view! { <Welcome window_lang open=welcome router /> })}
-        <div class="app" hidden=move || welcome.get()>
+        {move || welcome.get().then(|| view! {
+            <div inert=inert>
+                <Welcome window_lang open=welcome router />
+            </div>
+        })}
+        <div class="app" hidden=move || welcome.get() inert=inert>
             <Nav lang router documents clients backups />
             <main>
-                <UpdateNotice lang program />
+                <UpdateNotice lang program forms />
                 <StorageAlert lang storage />
                 <section id=Screen::Home.id() class="screen" hidden=hidden(Screen::Home)>
                     <Home lang router program backups profiles documents clients />
                 </section>
                 <section id=Screen::Documents.id() class="screen" hidden=hidden(Screen::Documents)>
-                    <DocumentsScreen lang documents clients base backups router />
+                    <DocumentsScreen lang documents clients base backups router forms />
                 </section>
                 <section id=Screen::Ledger.id() class="screen" hidden=hidden(Screen::Ledger)>
-                    <LedgerScreen lang documents clients profiles base backups router />
+                    <LedgerScreen lang documents clients profiles base backups router forms />
                 </section>
                 <section id=Screen::Clients.id() class="screen" hidden=hidden(Screen::Clients)>
                     <h1 tabindex="-1">{tr(lang, Key::ClientsTitle)}</h1>
                     <BackupChip lang backups nudge=true />
-                    <ClientsSection lang clients documents base backups router />
+                    <ClientsSection lang clients documents base backups router forms />
                 </section>
                 <section id=Screen::Profile.id() class="screen" hidden=hidden(Screen::Profile)>
                     <h1 tabindex="-1">{tr(lang, Key::ProfileTitle)}</h1>
                     <BackupChip lang backups nudge=true />
-                    <ProfileSection lang profiles base backups router />
+                    <ProfileSection lang profiles base backups router forms />
                     <h2>{tr(lang, Key::ProfileApp)}</h2>
                     <ul class="list">
                         <li>
@@ -224,12 +237,13 @@ pub fn App() -> impl IntoView {
                         <span>{tr(lang, Key::NavProfile)}</span>
                     </a>
                     <h1 tabindex="-1">{tr(lang, Key::BackupTitle)}</h1>
-                    <BackupSection lang backups storage />
+                    <BackupSection lang backups storage forms />
                     <StorageSection lang storage />
                 </section>
             </main>
             {panic::debug_trigger()}
         </div>
+        <UpdateDialog lang program forms />
     }
 }
 

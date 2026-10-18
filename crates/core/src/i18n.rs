@@ -322,12 +322,28 @@ strings! {
         "Something went wrong. Your saved data is safe\u{A0}— reload the page.",
         "Ինչ-որ բան սխալ գնաց։ Պահված տվյալներն անվնաս են. վերաբեռնեք էջը։";
 
-    /// Новая версия скачана и ждёт согласия (задача 8, Правило 6):
-    /// обновление перезагрузит страницу, и несохранённый ввод пропадёт.
-    UpdateReady =
-        "Есть новая версия программы. Обновление перезагрузит страницу.",
-        "A new version of the app is available. Updating will reload the page.",
-        "Ծրագրի նոր տարբերակը պատրաստ է։ Թարմացումը կվերաբեռնի էջը։";
+    /// Окно новой версии (задача 67): она скачана и ждёт согласия
+    /// (задача 8, Правило 6). Окно обязательное — без «Позже»: программа
+    /// под ним неактивна, пока человек не обновит.
+    UpdateTitle = "Вышла новая версия", "A new version is out", "Թողարկվել է նոր տարբերակ";
+    /// Заголовок списка изменений в окне новой версии.
+    UpdateWhatsNew = "Что нового", "What's new", "Ինչ նոր կա";
+    /// Версия в списке изменений: номер и день выпуска (`i18n::date`).
+    UpdateVersion = "Версия {} · {}", "Version {} · {}", "Տարբերակ {} · {}";
+    /// Под кнопкой окна новой версии. Перезагрузка не трогает того, что
+    /// легло в базу, а открытую форму и восстановление из копии окно ждёт
+    /// (`UpdateAfterForm`).
+    UpdateKeepsData =
+        "Страница перезагрузится, а сохранённые данные останутся на месте.",
+        "The page will reload, and your saved data will stay where it is.",
+        "Էջը կվերաբեռնվի, իսկ պահված տվյալները կմնան տեղում։";
+    /// Новая версия пришла, пока открыта форма: обновление перезагрузило бы
+    /// страницу и стёрло начатое, и окно с ней встанет, когда форму сохранят
+    /// или закроют (решение человека 2026-10-18).
+    UpdateAfterForm =
+        "Есть новая версия программы. Она откроется, когда вы сохраните или закроете форму.",
+        "A new version of the app is ready. It will open once you save or close the form.",
+        "Ծրագրի նոր տարբերակը պատրաստ է։ Այն կբացվի, երբ պահպանեք կամ փակեք ձևը։";
     /// Кнопка: включить новую версию.
     UpdateApply = "Обновить", "Update", "Թարմացնել";
     /// Согласие дано, страница вот-вот перезагрузится.
@@ -1498,6 +1514,61 @@ pub const fn plural(lang: Lang, n: u64, one: Key, few: Key, many: Key) -> &'stat
     t(lang, key)
 }
 
+/// Что не так с записью текста на языке `lang`; `None` — всё так. Правила
+/// одни у таблицы строк (тест ниже) и у заметок «Что нового»
+/// (`crates/app/tests/notes.rs`, задача 67): их читает тот же человек, а
+/// пишут их так же — копированием русской строки. Открыта, как
+/// [`ALL_KEYS`], ради теста другого крейта; в wasm окна её нет, пока её
+/// никто не зовёт.
+///
+/// - Ни пробелов подряд, ни пробела по краям — признака потерянного
+///   переноса строки в исходнике (опыт Savio).
+/// - Тире не начинает строку: перед ним неразрывный пробел (U+00A0).
+///   С обычным перенос оставляет «— при его закрытии» в начале строки — на
+///   телефоне это видно сразу (глазной прогон задачи 6).
+/// - Кавычки принадлежат языку, а не строке (Правило 4): «ёлочки» —
+///   в русском и армянском, “лапки” — в английском. Кавычки внутри кавычек
+///   в русском — „немецкие“: открывает их U+201E, а закрывает U+201C — та
+///   же, что открывает английские. Поэтому пара „…“ своя, а “ без „ перед
+///   ней — английская.
+/// - Ни буквы кириллицы в английском и армянском: так выглядит скопированная
+///   и переведённая не целиком русская строка (опыт Arpa).
+pub fn flaw(lang: Lang, text: &str) -> Option<&'static str> {
+    if text.contains("  ") || text.starts_with(' ') || text.ends_with(' ') {
+        return Some("пробелы подряд или по краям");
+    }
+    if text.contains(" —") || text.starts_with('—') {
+        return Some("тире после обычного пробела");
+    }
+    let foreign_quotes = match lang {
+        Lang::En => text.contains(['«', '»', '„']),
+        Lang::Ru | Lang::Am => {
+            let mut nested = false;
+            let english = text.chars().any(|c| match c {
+                '„' if !nested => {
+                    nested = true;
+                    false
+                }
+                '“' if nested => {
+                    nested = false;
+                    false
+                }
+                '„' | '“' | '”' => true,
+                _ => false,
+            });
+            english || nested
+        }
+    };
+    if foreign_quotes {
+        return Some("кавычки не того языка");
+    }
+    let cyrillic = |c: char| ('\u{400}'..='\u{4FF}').contains(&c);
+    if matches!(lang, Lang::En | Lang::Am) && text.chars().any(cyrillic) {
+        return Some("кириллица в переводе");
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1517,92 +1588,52 @@ mod tests {
         assert!(empty.is_empty(), "пустые строки: {empty:?}");
     }
 
-    /// Ни в одной строке нет дыры из нескольких пробелов подряд и пробела по
-    /// краям — признака потерянного переноса строки в исходнике (опыт Savio).
+    /// Каждая строка таблицы записана по правилам своего языка ([`flaw`]):
+    /// пробелы, тире, кавычки, кириллица в переводе.
     #[test]
-    fn no_string_has_a_gap_in_it() {
-        let mut bad = Vec::new();
-        for (key, name) in ALL_KEYS {
-            for lang in Lang::ALL {
-                let text = t(lang, *key);
-                if text.contains("  ") || text.starts_with(' ') || text.ends_with(' ') {
-                    bad.push(format!("{name} ({lang:?}): «{text}»"));
-                }
-            }
-        }
-        assert!(bad.is_empty(), "дыры из пробелов: {bad:#?}");
-    }
-
-    /// Тире не начинает строку: перед ним неразрывный пробел (U+00A0).
-    /// С обычным пробелом перенос оставляет «— при его закрытии» в начале
-    /// строки — на телефоне это видно сразу (глазной прогон задачи 6).
-    #[test]
-    fn a_dash_never_starts_a_line() {
+    fn every_string_follows_its_language() {
         let mut wrong = Vec::new();
         for (key, name) in ALL_KEYS {
             for lang in Lang::ALL {
                 let text = t(lang, *key);
-                if text.contains(" —") || text.starts_with('—') {
-                    wrong.push(format!("{name} ({lang:?}): {text}"));
+                if let Some(flaw) = flaw(lang, text) {
+                    wrong.push(format!("{name} ({lang:?}): {flaw} — «{text}»"));
                 }
             }
         }
-        assert!(wrong.is_empty(), "тире после обычного пробела: {wrong:#?}");
+        assert!(wrong.is_empty(), "строки не по правилам языка: {wrong:#?}");
     }
 
-    /// Кавычки принадлежат языку, а не строке (Правило 4): «ёлочки» —
-    /// в русском и армянском, “лапки” — в английском. Перевод пишут
-    /// копированием русской строки, и «ёлочки» уезжают в английский текст.
-    /// Кавычки внутри кавычек в русском — „немецкие“: открывает их U+201E,
-    /// а закрывает U+201C — та же, что открывает английские. Поэтому пара
-    /// „…“ своя, а “ без „ перед ней — английская.
+    /// Сами правила [`flaw`] — на образцах: таблица сейчас чиста, и без
+    /// образцов сломанное правило прошло бы незамеченным.
     #[test]
-    fn each_language_uses_its_own_quotation_marks() {
+    fn flaw_knows_each_rule() {
         let mut wrong = Vec::new();
-        for (key, name) in ALL_KEYS {
-            let en = t(Lang::En, *key);
-            if en.contains(['«', '»', '„']) {
-                wrong.push(format!("{name} (En): {en}"));
-            }
-            for lang in [Lang::Ru, Lang::Am] {
-                let text = t(lang, *key);
-                let mut nested = false;
-                let english = text.chars().any(|c| match c {
-                    '„' if !nested => {
-                        nested = true;
-                        false
-                    }
-                    '“' if nested => {
-                        nested = false;
-                        false
-                    }
-                    '„' | '“' | '”' => true,
-                    _ => false,
-                });
-                if english || nested {
-                    wrong.push(format!("{name} ({lang:?}): {text}"));
-                }
+        for (lang, text, flawed) in [
+            (Lang::Ru, "Счёт сохранён.", false),
+            (Lang::Ru, "Счёт  сохранён.", true),
+            (Lang::Ru, " Счёт", true),
+            (Lang::En, "Saved ", true),
+            (Lang::Ru, "Целы\u{A0}— перезагрузите", false),
+            (Lang::Ru, "Целы — перезагрузите", true),
+            (Lang::Am, "— Ոչ", true),
+            (Lang::Ru, "Кнопка «Сохранить»", false),
+            (Lang::Ru, "Кнопка «Акт „по счёту“»", false),
+            (Lang::Ru, "Кнопка “Сохранить”", true),
+            (Lang::Ru, "Кнопка „Сохранить", true),
+            (Lang::Am, "Կոճակ «Պահպանել»", false),
+            (Lang::Am, "Կոճակ “Պահպանել”", true),
+            (Lang::En, "The “Save” button", false),
+            (Lang::En, "The «Save» button", true),
+            (Lang::En, "The „Save“ button", true),
+            (Lang::En, "Save счёт", true),
+            (Lang::Am, "Պահպանել счёт", true),
+        ] {
+            if flaw(lang, text).is_some() != flawed {
+                wrong.push(format!("{lang:?} «{text}»: {:?}", flaw(lang, text)));
             }
         }
-        assert!(wrong.is_empty(), "кавычки не того языка: {wrong:#?}");
-    }
-
-    /// Тот же путь «скопировали русскую строку и не перевели целиком»:
-    /// кириллица в английском или армянском переводе выглядит в окне как
-    /// «эту почему-то не перевели» (опыт Arpa).
-    #[test]
-    fn no_russian_left_in_other_languages() {
-        let cyrillic = |c: char| ('\u{400}'..='\u{4FF}').contains(&c);
-        let mut wrong = Vec::new();
-        for (key, name) in ALL_KEYS {
-            for lang in [Lang::En, Lang::Am] {
-                let text = t(lang, *key);
-                if text.chars().any(cyrillic) {
-                    wrong.push(format!("{name} ({lang:?}): {text}"));
-                }
-            }
-        }
-        assert!(wrong.is_empty(), "кириллица в переводе: {wrong:#?}");
+        assert!(wrong.is_empty(), "правила записи: {wrong:#?}");
     }
 
     /// У шаблона одинаковое число мест во всех трёх языках: потерянное `{}` —

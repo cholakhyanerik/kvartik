@@ -9,12 +9,11 @@
 // код выхода 1 — если хоть одна не прошла.
 
 import { parseArgs } from "node:util";
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { Browser, Checks, sleep } from "../../../tools/browser/cdp.mjs";
-import { REPO, own, start, wrangler } from "../../../tools/browser/serve.mjs";
+import { REPO, build, newVersion, own, start, wrangler } from "../../../tools/browser/serve.mjs";
 import { samples, t } from "../../../tools/browser/strings.mjs";
 
 const { values: opt, positionals } = parseArgs({
@@ -169,23 +168,18 @@ async function offline() {
   }
 }
 
-/// Новая версия: копия `dist/` с правкой файла корня и `sw.js`, переписанным
-/// `kvartik-sw`, на том же порту. Окно говорит «Есть новая версия»,
-/// «Обновить» открывает новую сборку, прежний кэш удалён.
+/// Новая версия: копия `dist/` новой версией (`newVersion` — заметка «Что
+/// нового» новее, правка файла корня, `sw.js`, переписанный `kvartik-sw`) на
+/// том же порту. Пока открыта форма — слова над экраном; закрыли — окно
+/// «Что нового» поверх неактивной программы, снимки окна — на `--langs` ×
+/// `--widths` × `--themes` (перезагрузка снова показывает окно: новая
+/// версия ждёт); «Обновить» открывает новую сборку, прежний кэш удалён.
 async function update() {
   const port = Number(opt.port ?? 8791);
-  const v2 = path.join(WORK, "v2");
-  fs.rmSync(v2, { recursive: true, force: true });
-  fs.cpSync(DIST, v2, { recursive: true });
-  fs.appendFileSync(path.join(v2, "404.html"), "\n<!-- новая версия для прогона -->\n");
-  const sw = spawnSync("cargo", ["run", "-q", "-p", "kvartik-sw", "--", "public/sw.js"], {
-    cwd: path.join(REPO, "crates/app"), encoding: "utf8",
-    env: { ...process.env, TRUNK_STAGING_DIR: v2, TRUNK_PUBLIC_URL: "/app/" },
-  });
-  if (sw.status !== 0) throw new Error(`kvartik-sw: ${sw.stderr}`);
-  const build = (dir) => /const BUILD = "(\w+)"/.exec(fs.readFileSync(path.join(dir, "app/sw.js"), "utf8"))[1];
-  const [one, two] = [build(DIST), build(v2)];
-  checks.check("копия — другая сборка", one !== two, `${one} → ${two}`);
+  const next = newVersion(DIST, path.join(WORK, "v2"));
+  const one = build(DIST);
+  checks.check("копия — другая сборка", one !== next.build, `${one} → ${next.build}`);
+  const DIALOG = `const d = document.querySelector("[role=dialog]"); return d && d.getClientRects().length > 0 ? d.innerText : null;`;
 
   let srv = await wrangler(DIST, port, WORK);
   const browser = await Browser.launch({ work: WORK, name: "update", port: 9332 });
@@ -199,17 +193,47 @@ async function update() {
     await page.reload();
     checks.check("прежняя сборка правит страницей", await page.waitFor(CONTROLLER));
     await srv.stop();
-    srv = await wrangler(v2, port, WORK);
-    await page.reload();
-    checks.check("«Есть новая версия»", await page.waitFor(hasText(t("UpdateReady", opt.lang)), 30000));
-    await page.shot(path.join(OUT, "update-ready.png"));
+    srv = await wrangler(next.dir, port, WORK);
+
+    // Новая версия пришла, пока открыта форма: слова над экраном, а не окно.
+    await page.eval(`location.hash = "#/clients"; return true;`);
+    await page.waitFor(hasText(t("ClientAdd", opt.lang)));
+    await page.click(t("ClientAdd", opt.lang));
+    await page.eval(`navigator.serviceWorker.getRegistration().then((r) => r.update()); return true;`);
+    checks.check("с открытой формой — слова над экраном, окна нет",
+      (await page.waitFor(hasText(t("UpdateAfterForm", opt.lang)), 30000)) && !(await page.eval(DIALOG)));
+    await page.eval(`scrollTo(0, 0); return true;`);
+    await page.shot(path.join(OUT, `update-form-${opt.lang}-360.png`));
+    await page.click(t("Back", opt.lang));
+    const shown = await page.waitFor(DIALOG, 10000);
+    checks.check(`форму закрыли — окно «Что нового» с заметкой ${next.version}`, shown?.includes(next.version), shown);
+    checks.check("программа под окном неактивна", await page.eval(`return document.querySelector(".app").inert ? true : null;`));
+
+    for (const lang of list(opt.langs)) {
+      await page.setLang(lang);
+      const text = await page.waitFor(DIALOG, 30000);
+      checks.check(`${lang}: окно новой версии после перезагрузки`, text?.includes(t("UpdateTitle", lang)), text);
+      for (const width of list(opt.widths).map(Number)) {
+        for (const theme of list(opt.themes)) {
+          await page.emulate(width, theme);
+          await sleep(300);
+          const { scroll, client } = await page.shot(path.join(OUT, `update-${lang}-${width}-${theme}.png`));
+          checks.check(`update-${lang}-${width}-${theme}: не шире экрана`, scroll <= client, `scrollWidth ${scroll}, clientWidth ${client}`);
+        }
+      }
+    }
+
+    await page.setLang(opt.lang);
+    await page.waitFor(DIALOG, 30000);
+    await page.emulate(360);
     await page.eval(`window.__old = 1; return true;`);
     await page.click(t("UpdateApply", opt.lang));
     const reloaded = await page.waitFor(`return window.__old === undefined && document.readyState === "complete" ? true : null;`, 30000);
     const cache = await page.waitFor(`const n = await caches.keys(); return n.length === 1 ? n[0] : null;`, 30000);
-    checks.check("после «Обновить» — новая сборка, прежний кэш удалён", reloaded && cache === `kvartik-${two}`, cache);
-    checks.check("рабочий экран новой сборки", await page.waitFor(BUILD_PAGE));
+    checks.check("после «Обновить» — новая сборка, прежний кэш удалён", reloaded && cache === `kvartik-${next.build}`, cache);
+    checks.check("рабочий экран новой сборки, окна нет", (await page.waitFor(BUILD_PAGE)) && !(await page.eval(DIALOG)));
     await page.shot(path.join(OUT, "update-after.png"));
+    reportErrors(page, "новая версия");
   } finally {
     browser.close();
     await srv.stop().catch(() => {});

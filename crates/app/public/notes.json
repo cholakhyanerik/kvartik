@@ -1,0 +1,20 @@
+{
+  "notes": [
+    {
+      "version": "0.0.45",
+      "date": "2026-10-18",
+      "hy": [
+        "Նոր տարբերակն այժմ բացվում է «Ինչ նոր կա» պատուհանով՝ ինչ է փոխվել, և մեկ կոճակ՝ «Թարմացնել»։ Մինչև թարմացնելը պատուհանի տակ ծրագիրը չի աշխատում. այդպես բոլորն աշխատում են վերջին տարբերակով և հարկի թարմ կանոններով։",
+        "Եթե այդ պահին բաց է ձև՝ նոր հաշիվ, հաճախորդ, մատյանի գրառում կամ պրոֆիլ, պատուհանը կսպասի, մինչև այն պահպանեք կամ փակեք, և սկսածը չի կորչի։"
+      ],
+      "ru": [
+        "Новая версия теперь открывается окном «Что нового»: что в ней изменилось и одна кнопка «Обновить». Пока вы не обновите, программа под окном не работает — так у всех последняя версия и свежие правила налога.",
+        "Если в этот момент открыта форма — новый счёт, клиент, запись книги или профиль, — окно подождёт, пока вы её сохраните или закроете, и начатое не пропадёт."
+      ],
+      "en": [
+        "A new version now opens in a “What's new” window: what has changed, and a single “Update” button. Until you update, the app under the window doesn't respond, so everyone is on the latest version with the latest tax rules.",
+        "If a form is open at that moment (a new invoice, a client, a ledger entry or the profile), the window waits until you save or close it, so nothing you've started is lost."
+      ]
+    }
+  ]
+}

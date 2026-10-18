@@ -26,6 +26,7 @@ use crate::store::{Store, StoreError, Writes};
 mod documents;
 mod ledger;
 mod share;
+mod update;
 
 wasm_bindgen_test_configure!(run_in_browser);
 

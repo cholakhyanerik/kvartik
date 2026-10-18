@@ -19,6 +19,7 @@ use kvartik_core::i18n::{self, ALL_KEYS, Key, Lang, t};
 use kvartik_core::model::country::Country;
 use kvartik_core::model::date::Date;
 use kvartik_core::model::money::{Currency, Money};
+use kvartik_core::release::Notes;
 
 fn app_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -251,14 +252,23 @@ impl Font {
 }
 
 /// Знаки, которые окно может показать: вся таблица строк на трёх языках,
-/// названия стран (`model::country`, задача 10), записи сумм, курсов и дат,
-/// знаки, которые Правило 4 называет поимённо, и целые алфавиты трёх
-/// языков — их человек вводит сам: имена, адреса, названия услуг.
+/// заметки «Что нового» (`public/notes.json`, задача 67), названия стран
+/// (`model::country`, задача 10), записи сумм, курсов и дат, знаки, которые
+/// Правило 4 называет поимённо, и целые алфавиты трёх языков — их человек
+/// вводит сам: имена, адреса, названия услуг.
 fn needed() -> BTreeSet<char> {
     let mut text = String::new();
     for (key, _) in ALL_KEYS {
         for lang in Lang::ALL {
             text += t(lang, *key);
+        }
+    }
+    let notes = fs::read_to_string(app_dir().join("public/notes.json")).expect("notes.json читается");
+    for note in Notes::parse(&notes).expect("notes.json разбирается").all() {
+        for lang in Lang::ALL {
+            for item in note.items(lang) {
+                text += item;
+            }
         }
     }
     for lang in Lang::ALL {

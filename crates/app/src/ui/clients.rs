@@ -33,7 +33,7 @@ use super::avatar::{Avatar, tone};
 use super::backup::Backups;
 use super::documents::Documents;
 use super::form::{
-    AreaField, CURRENCIES, FieldError, TextField, WizardHead, currency_code, currency_key,
+    AreaField, CURRENCIES, FieldError, Forms, TextField, WizardHead, currency_code, currency_key,
     optional,
 };
 use super::icon::{Icon, icon};
@@ -177,6 +177,8 @@ struct Ctx {
     backups: Backups,
     mode: RwSignal<Mode>,
     notice: RwSignal<Option<Notice>>,
+    /// Открытые формы окна: форма клиента отмечается в них, пока открыта.
+    forms: Forms,
 }
 
 /// Раздел на языке окна — под заголовком экрана, частью wasm с первого
@@ -189,6 +191,7 @@ pub fn ClientsSection(
     base: Base,
     backups: Backups,
     router: Router,
+    forms: Forms,
 ) -> impl IntoView {
     let ctx = Ctx {
         lang,
@@ -198,6 +201,7 @@ pub fn ClientsSection(
         backups,
         mode: RwSignal::new(Mode::List),
         notice: RwSignal::new(None),
+        forms,
     };
     // Копию восстановили — клиенты в базе могли стать другими. Здесь, а не
     // в части экрана: клиенты нужны и счетам на главном экране, а экран мог
@@ -687,8 +691,10 @@ fn ClientForm(ctx: Ctx, existing: Option<Client>) -> impl IntoView {
         backups,
         mode,
         notice,
+        forms,
         ..
     } = ctx;
+    forms.hold();
     let form = Form::new(existing.as_ref().map(Client::data));
     let id = existing.as_ref().map(Client::id);
     // Новый клиент — по шагам; у правки шаг всегда последний, и видны все

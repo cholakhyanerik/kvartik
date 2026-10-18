@@ -38,7 +38,7 @@ use web_sys::HtmlInputElement;
 use super::backup::{BackupChip, Backups};
 use super::clients::Clients;
 use super::documents::{DateField, Documents, kind_key, number_problem, retype, shown_problem};
-use super::form::{CURRENCIES, TextField, currency_code, currency_key, optional};
+use super::form::{CURRENCIES, Forms, TextField, currency_code, currency_key, optional};
 use super::icon::{Icon, icon};
 use super::profile::Profiles;
 use super::route::{Router, Screen};
@@ -74,6 +74,8 @@ pub(super) struct Ctx {
     profiles: Profiles,
     base: Base,
     backups: Backups,
+    /// Открытые формы окна: форма записи отмечается в них, пока открыта.
+    forms: Forms,
     /// Сегодня — один раз (Архитектура, «Время — параметр»).
     today: Option<Date>,
 }
@@ -89,6 +91,7 @@ pub fn LedgerScreen(
     base: Base,
     backups: Backups,
     router: Router,
+    forms: Forms,
 ) -> impl IntoView {
     let ctx = Ctx {
         lang,
@@ -97,6 +100,7 @@ pub fn LedgerScreen(
         profiles,
         base,
         backups,
+        forms,
         today: clock::today(),
     };
     view! {
@@ -1092,6 +1096,7 @@ pub(super) fn equivalent(lang: Lang, amount: Option<Money>, rate: &str, date: Op
 #[component]
 fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoView {
     let Ledger { ctx, mode, notice, .. } = ledger;
+    ctx.forms.hold();
     let lang = ctx.lang;
     let form = Form::new(flow, existing.as_ref().map(Operation::data), ctx.today, lang.get_untracked());
     let id = existing.as_ref().map(Operation::id);

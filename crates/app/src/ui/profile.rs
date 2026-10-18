@@ -32,7 +32,7 @@ use web_sys::HtmlInputElement;
 use super::avatar;
 use super::backup::Backups;
 use super::form::{
-    AreaField, CURRENCIES, FieldError, TextField, currency_code, currency_key, optional,
+    AreaField, CURRENCIES, FieldError, Forms, TextField, currency_code, currency_key, optional,
 };
 use super::icon::{Icon, icon};
 use super::route::{Router, Screen};
@@ -160,6 +160,8 @@ struct Ctx {
     saved: RwSignal<bool>,
     /// На какой группе полей открыть форму.
     focus: RwSignal<Option<Part>>,
+    /// Открытые формы окна: форма профиля отмечается в них, пока открыта.
+    forms: Forms,
     /// Сегодня — один раз (Архитектура, «Время — параметр»): по нему
     /// проверяется год рождения и берутся правила налога.
     today: Option<Date>,
@@ -174,6 +176,7 @@ pub fn ProfileSection(
     base: Base,
     backups: Backups,
     router: Router,
+    forms: Forms,
 ) -> impl IntoView {
     let ctx = Ctx {
         lang,
@@ -183,6 +186,7 @@ pub fn ProfileSection(
         editing: RwSignal::new(false),
         saved: RwSignal::new(false),
         focus: RwSignal::new(None),
+        forms,
         today: clock::today(),
     };
     // Копию восстановили — профиль в базе мог стать другим или появиться.
@@ -223,6 +227,7 @@ fn ProfileBody(ctx: Ctx) -> impl IntoView {
         editing,
         saved,
         focus,
+        forms,
         today,
     } = ctx;
     let open = move |part: Option<Part>| {
@@ -241,7 +246,7 @@ fn ProfileBody(ctx: Ctx) -> impl IntoView {
             State::Ready(profile) if editing.get() => {
                 let data = profile.map(|profile| profile.data().clone());
                 let focus = focus.get_untracked();
-                view! { <ProfileForm lang data profiles base backups editing saved today focus /> }
+                view! { <ProfileForm lang data profiles base backups editing saved forms today focus /> }
                     .into_any()
             }
             State::Ready(Some(profile)) => view! {
@@ -722,9 +727,11 @@ fn ProfileForm(
     backups: Backups,
     editing: RwSignal<bool>,
     saved: RwSignal<bool>,
+    forms: Forms,
     today: Option<Date>,
     focus: Option<Part>,
 ) -> impl IntoView {
+    forms.hold();
     let form = Form::new(data.as_ref(), profiles.picture);
     // Открыли по строке итога — к её группе полей; после кадра: к нему
     // форма уже в странице.

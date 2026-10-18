@@ -27,7 +27,8 @@ console_error_panic_hook = "0.1.7"
 # Привязки к браузеру для хранилища (`src/store/`) и платформы
 # (`src/platform/`): IndexedDB и `localStorage`, просьба о постоянном
 # хранении, шифр WebCrypto и файлы копии (задача 7), service worker
-# и установка (задача 8), консоль для причин ошибок, плашка сбоя прямо
+# и установка (задача 8), заметки новой версии из её кэша
+# (`CacheQueryOptions`; задача 67), консоль для причин ошибок, плашка сбоя прямо
 # в DOM (`src/ui/panic.rs`, задача 48), шрифты документа у своего сайта
 # (`fetch`, `Response`; задача 12), файл с именем для «Поделиться»
 # (`FilePropertyBag`; задача 13 — сам Web Share в `web-sys` нестабилен,
@@ -43,6 +44,7 @@ web-sys = { version = "0.3.106", features = [
     "AesGcmParams",
     "Blob",
     "BlobPropertyBag",
+    "CacheQueryOptions",
     "CacheStorage",
     "console",
     "Crypto",

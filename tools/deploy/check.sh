@@ -200,6 +200,9 @@ expected_type() {
     *.ttf) echo font/ttf ;;
     *.png) echo image/png ;;
     *.webmanifest) echo application/manifest+json ;;
+    # Заметки «Что нового» (задача 67): тип ставит wrangler при выкладке по
+    # таблице `mime` (по исходникам wrangler 4.149.0, 2026-10-18).
+    *.json) echo application/json ;;
     *.txt) echo text/plain ;;
     *) echo "?" ;;
   esac
@@ -233,8 +236,11 @@ while IFS= read -r path; do
       *immutable* | *max-age=[1-9]*) fail "$path: Cache-Control «$cache» — файл без хэша в имени" ;;
     esac
   fi
+  # `application/json` (заметки «Что нового») — в списке типов, которые
+  # Cloudflare сжимает (docs Cloudflare, «Content compression», обновлено
+  # 2026-04-17, сверено 2026-10-18); меньше 50 байт он не сжимает ничего.
   case "$path" in
-    *.wasm | *.js | *.css | *.ttf | *.webmanifest)
+    *.wasm | *.js | *.css | *.ttf | *.webmanifest | *.json)
       encoding="$(header content-encoding "$work/head")"
       [ -n "$encoding" ] || fail "$path: не сжат"
       ;;

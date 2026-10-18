@@ -13,11 +13,15 @@
 //   Заголовков `_headers` он не ставит. Качество сжатия — параметр: замеру
 //   нужны байты, близкие к хостингу (11, весь сайт — 3,5 с на машине
 //   автора), а проверке CI — только сжатие, и 5 сжимает его за доли секунды.
+//
+// И сайт, который им отдать новой версией, — `newVersion` (задача 67):
+// проверке собранного сайта и сценарию `update` skill browser-run.
 
 import http from "node:http";
 import zlib from "node:zlib";
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { kill, sleep, spawnTree } from "./cdp.mjs";
 
 export const REPO = path.resolve(import.meta.dirname, "../..");
@@ -104,4 +108,32 @@ export async function wrangler(dist, port, work) {
 
 export function start(kind, dist, port, work) {
   return kind === "own" ? own(dist, port) : wrangler(dist, port, work);
+}
+
+/// Хэш сборки из `sw.js` программы.
+export function build(dist) {
+  return /const BUILD = "(\w+)"/.exec(fs.readFileSync(path.join(dist, "app/sw.js"), "utf8"))[1];
+}
+
+/// Копия сайта `dist` новой версией — в папке `dir` (задача 67): сверху
+/// заметок «Что нового» — версия на одну новее, словами последней, файл
+/// корня правлен, а `sw.js` программы переписан `kvartik-sw`, как его пишет
+/// сборка. Новой версией считается и правка файла корня: хэш сборки — по
+/// всему сайту. Возвращает `{ dir, version, build }`.
+export function newVersion(dist, dir) {
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.cpSync(dist, dir, { recursive: true });
+  const file = path.join(dir, "app/notes.json");
+  const notes = JSON.parse(fs.readFileSync(file, "utf8"));
+  const [major, minor, patch] = notes.notes[0].version.split(".").map(Number);
+  const version = `${major}.${minor}.${patch + 1}`;
+  notes.notes.unshift({ ...notes.notes[0], version });
+  fs.writeFileSync(file, JSON.stringify(notes, null, 2));
+  fs.appendFileSync(path.join(dir, "404.html"), "\n<!-- новая версия для прогона -->\n");
+  const sw = spawnSync("cargo", ["run", "-q", "-p", "kvartik-sw", "--", "public/sw.js"], {
+    cwd: path.join(REPO, "crates/app"), encoding: "utf8",
+    env: { ...process.env, TRUNK_STAGING_DIR: dir, TRUNK_PUBLIC_URL: "/app/" },
+  });
+  if (sw.status !== 0) throw new Error(`kvartik-sw: ${sw.stderr || sw.error}`);
+  return { dir, version, build: build(dir) };
 }

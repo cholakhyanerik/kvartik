@@ -571,8 +571,9 @@ section > .button + p {
 .panic {
   position: fixed;
   inset: 0;
-  /* Выше меню разделов: его кнопки тоже больше не отвечают. */
-  z-index: 2;
+  /* Выше меню разделов и окна новой версии: их кнопки тоже больше не
+     отвечают. */
+  z-index: 3;
   overflow: auto;
   padding: var(--space-5);
   background: var(--surface);
@@ -589,6 +590,106 @@ section > .button + p {
 .panic .button {
   flex-wrap: wrap;
   column-gap: var(--space-3);
+}
+
+/* Окно новой версии (задача 67): карточка посреди экрана, а программа под
+   ней неактивна (`inert`) и приглушена. Приглушает фильтр, а не цвет:
+   прозрачных цветов в tokens.css нет — контраст под ними не посчитать, —
+   а текст окна лежит на его собственной карточке (--text на
+   --surface-raised — 15.1:1 и 12.4:1, --text-muted — 6.0:1 и 7.4:1).
+   Выше меню разделов, ниже плашки сбоя. */
+.update {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding: var(--space-4);
+  -webkit-backdrop-filter: brightness(0.45);
+  backdrop-filter: brightness(0.45);
+}
+
+/* Высота — не больше экрана: длинный список «Что нового» прокручивается
+   внутри, а кнопка остаётся на виду. */
+.update-card {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: min(30rem, 100%);
+  max-height: calc(100vh - 2 * var(--space-4));
+  max-height: calc(100dvh - 2 * var(--space-4));
+  padding: var(--space-6) var(--space-5) var(--space-5);
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.update h2 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--font-size-xl);
+  font-weight: var(--weight-heading);
+}
+
+/* Фокус на заголовок ставит окно, когда встаёт: это не элемент
+   управления. */
+.update h2:focus {
+  outline: none;
+}
+
+.update-news {
+  min-height: 0;
+  margin-top: var(--space-4);
+  overflow: auto;
+}
+
+.update h3 {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: var(--weight-strong);
+}
+
+/* Номер и день версии — тише пунктов под ними. */
+.update h4 {
+  margin: var(--space-3) 0 var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--weight-strong);
+}
+
+.update ul {
+  margin: 0;
+  padding-inline-start: var(--space-5);
+}
+
+.update li + li {
+  margin-top: var(--space-2);
+}
+
+.update-elsewhere {
+  margin-top: var(--space-4);
+}
+
+.update button.wide {
+  flex: none;
+  margin-top: var(--space-5);
+}
+
+/* «Обновляем…» — на месте кнопки и её высотой: окно не прыгает. */
+.update-applying {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control);
+  margin-top: var(--space-5);
+  font-weight: var(--weight-strong);
+}
+
+.update .hint {
+  margin-top: var(--space-3);
+  text-align: center;
 }
 
 /* Восстановление — своя часть раздела, отдельно от копии. */

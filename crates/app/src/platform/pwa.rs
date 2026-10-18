@@ -13,7 +13,9 @@
 //! а включает её только согласие человека ([`Pwa::update`]): service worker
 //! получает «skip-waiting», и когда новая версия заработала, страница
 //! перезагружается. Остальные открытые вкладки к этому времени уже под новой
-//! версией, но со старой страницей, — им [`Event::UpdatedElsewhere`].
+//! версией, но со старой страницей, — им [`Event::UpdatedElsewhere`]. Что
+//! в новой версии нового, окно читает из её кэша ([`cached_texts`],
+//! задача 67): он полон, как только она установилась.
 //!
 //! Браузер проверяет `sw.js` сам — при каждом открытии страницы. Окно,
 //! которое не закрывают неделями, проверяет ещё и при возвращении к нему,
@@ -37,8 +39,8 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{
-    ServiceWorker, ServiceWorkerContainer, ServiceWorkerRegistration, ServiceWorkerState,
-    VisibilityState,
+    CacheQueryOptions, Response, ServiceWorker, ServiceWorkerContainer, ServiceWorkerRegistration,
+    ServiceWorkerState, VisibilityState,
 };
 
 use super::reload;
@@ -57,6 +59,11 @@ const CACHE_PREFIX: &str = "kvartik-";
 
 /// Сообщение, по которому новая версия начинает работать (`sw.js`).
 const SKIP_WAITING: &str = "skip-waiting";
+
+/// Файл заметок «Что нового» (задача 67) — в папке программы, рядом со
+/// страницей: `crates/app/public/notes.json`; разбор —
+/// `kvartik_core::release`.
+pub const NOTES: &str = "notes.json";
 
 /// Как часто, не чаще, спрашивать сайт о новой версии при возвращении
 /// к окну: час. Проверка — один запрос `sw.js` в пару килобайт, но телефон
@@ -344,6 +351,47 @@ async fn unregister() {
             let _ = caches.delete(&name).await;
         }
     }
+}
+
+/// Тексты файла программы `file` из кэшей её service worker — каждой
+/// сборки, что лежит на устройстве: работающей и новой, которая ждёт
+/// согласия (задача 67). Какой новее, решает тот, кто читает: имя кэша —
+/// хэш сборки, а не версия. Кэш ищется по имени (`caches.match`
+/// с `cacheName`), а не открывается: `caches.open` завёл бы заново пустым
+/// кэш, который новая версия только что удалила (Правило 6), а `match`
+/// с именем ищет только среди тех, что есть (по спецификации Service
+/// Worker, `CacheStorage.match`, 2026-10-18). Файл — от адреса страницы,
+/// как его положил service worker от своего: оба в папке программы. Кэшей
+/// нет — нет и текстов: в отладочной сборке, по адресу без HTTPS.
+pub async fn cached_texts(file: &str) -> Vec<String> {
+    let mut texts = Vec::new();
+    let Some(caches) = web_sys::window().and_then(|window| window.caches().ok()) else {
+        return texts;
+    };
+    let Ok(names) = caches.keys().await else {
+        return texts;
+    };
+    for name in Array::from(&names).iter() {
+        let Some(name) = name.as_string().filter(|name| name.starts_with(CACHE_PREFIX)) else {
+            continue;
+        };
+        let options = CacheQueryOptions::new();
+        options.set_cache_name(&name);
+        // Файла в кэше нет — `undefined`, а не ответ.
+        let Ok(found) = caches.match_with_str_and_options(file, &options).await else {
+            continue;
+        };
+        let Ok(response) = found.dyn_into::<Response>() else {
+            continue;
+        };
+        if let Ok(text) = response.text()
+            && let Ok(text) = text.await
+            && let Some(text) = text.as_string()
+        {
+            texts.push(text);
+        }
+    }
+    texts
 }
 
 /// Вопрос браузера об установке и сама установка.

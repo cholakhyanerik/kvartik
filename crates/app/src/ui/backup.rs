@@ -22,6 +22,7 @@ use leptos::ev::{Event, MouseEvent, SubmitEvent};
 use leptos::prelude::*;
 use web_sys::HtmlInputElement;
 
+use super::form::Forms;
 use super::icon::{Icon, icon};
 use super::route::Screen;
 use super::split::{Task, split};
@@ -299,6 +300,7 @@ pub fn BackupSection(
     lang: ReadSignal<Lang>,
     backups: Backups,
     storage: RwSignal<Storage>,
+    forms: Forms,
 ) -> impl IntoView {
     let ready = move || matches!(storage.get(), Storage::Ready(_));
     // Дизайн «Kvartik Design»: щит в круге, зачем копия, когда была
@@ -325,12 +327,12 @@ pub fn BackupSection(
             {if backups.has_data.get_untracked() {
                 view! {
                     <MakeBackup lang backups />
-                    <RestoreBackup lang backups />
+                    <RestoreBackup lang backups forms />
                 }
                 .into_any()
             } else {
                 view! {
-                    <RestoreBackup lang backups />
+                    <RestoreBackup lang backups forms />
                     <MakeBackup lang backups />
                 }
                 .into_any()
@@ -582,8 +584,12 @@ async fn make(backups: Backups, typed: &str, repeat: Option<&str>) -> Result<Rea
 }
 
 /// Восстановить из копии: выбрать файл, ввести его пароль, слить.
+/// Пароль файла и само восстановление — открытая форма ([`Forms`]): окно
+/// новой версии их ждёт, а его «Обновить» оборвало бы восстановление —
+/// записано не было бы ничего, а человек мог бы решить, что было
+/// (задача 67).
 #[component]
-fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
+fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl IntoView {
     let restoring = RwSignal::new_local(Restoring::Idle);
     let password = RwSignal::new(String::new());
 
@@ -643,6 +649,7 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
         <p class="restore">{tr(lang, Key::BackupRestoreAbout)}</p>
         {move || match restoring.get() {
             Restoring::Password(sealed, problem) => {
+                forms.hold();
                 let header = sealed.header();
                 let version = header.app_version().to_owned();
                 let info = clock::local_date(header.created()).map(|day| move || {
@@ -676,10 +683,13 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
                 }
                 .into_any()
             }
-            Restoring::Busy => view! {
-                <p role="status">{tr(lang, Key::BackupRestoring)}</p>
+            Restoring::Busy => {
+                forms.hold();
+                view! {
+                    <p role="status">{tr(lang, Key::BackupRestoring)}</p>
+                }
+                .into_any()
             }
-            .into_any(),
             state => view! {
                 // Поле выбора файла спрятано под подписью-кнопкой: нажатие на
                 // подпись открывает выбор без кода, и на iPhone тоже

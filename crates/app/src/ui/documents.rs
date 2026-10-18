@@ -39,7 +39,7 @@ use leptos::prelude::*;
 use super::avatar::{Avatar, tone};
 use super::backup::{BackupChip, Backups};
 use super::clients::Clients;
-use super::form::{CURRENCIES, TextField, WizardHead, currency_code, currency_key};
+use super::form::{CURRENCIES, Forms, TextField, WizardHead, currency_code, currency_key};
 use super::icon::{Icon, icon};
 use super::ledger::{equivalent, rate_problem};
 use super::paper::{PaperPanel, Request};
@@ -353,6 +353,8 @@ struct Ctx {
     notice: RwSignal<Option<Notice>>,
     /// Открытый экран: выпущенный документ — по адресу.
     router: Router,
+    /// Открытые формы окна: форма документа отмечается в них, пока открыта.
+    forms: Forms,
     /// Сегодня — один раз (Архитектура, «Время — параметр»).
     today: Option<Date>,
 }
@@ -376,6 +378,7 @@ pub fn DocumentsScreen(
     base: Base,
     backups: Backups,
     router: Router,
+    forms: Forms,
 ) -> impl IntoView {
     let ctx = Ctx {
         lang,
@@ -386,6 +389,7 @@ pub fn DocumentsScreen(
         mode: documents.mode,
         notice: documents.notice,
         router,
+        forms,
         today: clock::today(),
     };
     let phase = Memo::new(move |_| {
@@ -1333,8 +1337,10 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
         clients,
         mode,
         notice,
+        forms,
         ..
     } = ctx;
+    forms.hold();
     let form = Form::new(&start, lang.get_untracked());
     let id = existing.as_ref().map(Document::id);
     // Новый — по шагам; у правки и акта по счёту шаг всегда последний,

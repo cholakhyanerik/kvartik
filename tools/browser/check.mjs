@@ -21,6 +21,11 @@
 //    и все части `dist/app/split_*.wasm` загружены.
 // 3. Сервер выключен: программа открывается из кэша service worker, и те же
 //    экраны, формы, карточка и PDF работают без сети.
+// 4. Новая версия (задача 67): на сервере — копия сборки новой версией. Пока
+//    открыта форма, над экраном только слова; форму закрыли — окно «Что
+//    нового» с заметкой новой версии поверх неактивной программы, а
+//    «Обновить» открывает новую сборку. Окно обязательное: сломанное, оно
+//    заперло бы программу у всех, кто получит следующую версию.
 // Везде — без плашки сбоя и без ошибок в консоли.
 //
 // Почему так:
@@ -42,7 +47,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Browser, Checks, sleep } from "./cdp.mjs";
-import { REPO, own } from "./serve.mjs";
+import { REPO, newVersion, own } from "./serve.mjs";
 import { samples, t } from "./strings.mjs";
 
 const { values: opt } = parseArgs({
@@ -197,6 +202,63 @@ async function backup(page, password) {
   checks.check("копия: файл готов", await page.waitFor(VISIBLE(`a[download$=".json"]`), 30000));
 }
 
+const NO_DIALOG = `return document.querySelector("[role=dialog]") ? null : true;`;
+
+/// Новая версия — на той же странице: сервер отдаёт копию сборки новой
+/// версией (`newVersion`), а проверку новой версии окно делает и само, при
+/// возвращении к нему (`platform/pwa.rs`) — здесь её зовёт проверка, пока
+/// открыта форма. Окно держит каждая форма сама: формы открываются по
+/// очереди, и следующая — раньше, чем закрыта прежняя, — так в каждый миг
+/// открыта одна, и окна быть не должно. Форма, которая окна не держит, —
+/// окно, вставшее над ней.
+async function update(page) {
+  const next = newVersion(DIST, path.join(WORK, "v2"));
+  const srv = own(next.dir, PORT, { quality: 5 });
+  const NOTICE = TEXT_IN("main", s("UpdateAfterForm"));
+  try {
+    page.errors.length = 0;
+    let open = null;
+    for (const f of FORMS) {
+      await go(page, f.hash);
+      await page.waitFor(`return ${BUTTON(f.scope, s(f.open))} ? true : null;`);
+      await press(page, f.scope, s(f.open));
+      checks.check(`новая версия: форма экрана «${f.name}» открыта`, await page.waitFor(f.shown));
+      if (open) {
+        await go(page, open.hash);
+        await press(page, open.scope, s(open.close));
+        checks.check(`новая версия: форма экрана «${open.name}» закрыта`, await page.waitFor(open.gone));
+      } else {
+        await page.eval(`navigator.serviceWorker.getRegistration().then((r) => r.update()); return true;`);
+      }
+      const waiting = await page.waitFor(NOTICE, open ? 5000 : 30000);
+      await sleep(300);
+      checks.check(`новая версия: открыта одна форма — «${f.name}»; над экраном слова, а не окно`,
+        waiting && (await page.eval(NO_DIALOG)));
+      open = f;
+    }
+    await go(page, open.hash);
+    await press(page, open.scope, s(open.close));
+    const dialog = await page.waitFor(`const d = document.querySelector("[role=dialog]");
+      return d && d.innerText.includes(${JSON.stringify(s("UpdateWhatsNew"))}) ? d.innerText : null;`, 10000);
+    checks.check(`новая версия: форму закрыли — окно «Что нового» с заметкой ${next.version}`,
+      dialog?.includes(next.version), dialog);
+    checks.check("новая версия: программа под окном неактивна",
+      await page.eval(`return document.querySelector(".app").inert ? true : null;`));
+    await page.eval(`window.__old = 1; return true;`);
+    checks.check("новая версия: «Обновить» в окне", await press(page, "[role=dialog]", s("UpdateApply")));
+    const reloaded = await page.waitFor(`return window.__old === undefined && document.readyState === "complete" ? true : null;`, 30000);
+    const cache = await page.waitFor(`const n = await caches.keys(); return n.length === 1 ? n[0] : null;`, 30000);
+    checks.check("новая версия: «Обновить» — новая сборка, прежний кэш удалён",
+      reloaded && cache === `kvartik-${next.build}`, cache);
+    checks.check("новая версия: рабочий экран, окна больше нет", (await page.waitFor(WORKING)) && (await page.eval(NO_DIALOG)));
+    checks.check("новая версия: без плашки сбоя", await page.eval(NO_PANIC));
+    const errors = [...new Set(page.errors)];
+    checks.check("новая версия: без ошибок в консоли", errors.length === 0, errors.slice(0, 8).join(" | "));
+  } finally {
+    await srv.stop();
+  }
+}
+
 async function main() {
   const parts = fs.readdirSync(path.join(DIST, "app")).filter((n) => /^split_\w+-\w+\.wasm$/.test(n));
   checks.check("в сборке есть части wasm", parts.length > 0, parts.join(", "));
@@ -233,6 +295,8 @@ async function main() {
     checks.check("без сети: без плашки сбоя", await page.eval(NO_PANIC));
     const offline = [...new Set(page.errors)];
     checks.check("без сети: без ошибок в консоли", offline.length === 0, offline.slice(0, 8).join(" | "));
+
+    await update(page);
   } finally {
     browser.close();
     if (srv) await srv.stop();
