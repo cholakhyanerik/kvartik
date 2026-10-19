@@ -180,7 +180,7 @@ where
 /// нажимают раньше, чем открывают форму.
 pub async fn preload() {
     let _ = super::documents::preload_screen().await;
-    let _ = super::ledger::preload_ledger().await;
+    let _ = super::ledger::preload_book().await;
     let _ = super::clients::preload_screen().await;
     let _ = super::profile::preload_screen().await;
     let _ = super::documents::preload_opened().await;

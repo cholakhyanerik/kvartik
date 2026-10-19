@@ -26,6 +26,7 @@ use crate::store::{Store, StoreError, Writes};
 mod documents;
 mod ledger;
 mod share;
+mod tax;
 mod update;
 
 wasm_bindgen_test_configure!(run_in_browser);
@@ -301,7 +302,7 @@ async fn choosing_a_language_translates_the_whole_window() {
     if !wait_for(&host, t(Lang::Am, Key::BackupChooseFile)).await {
         wrong.push("раздел копии не появился".to_owned());
     }
-    visit(&host, &[Screen::Documents, Screen::Clients, Screen::Profile]).await;
+    visit(&host, &[Screen::Documents, Screen::Clients, Screen::Tax, Screen::Profile]).await;
     match button(
         &host,
         &[t(Lang::Am, Key::ProfileFill), t(Lang::Am, Key::ProfileEdit)],
@@ -379,6 +380,10 @@ async fn choosing_a_language_translates_the_whole_window() {
             Key::RateHint,
             Key::ProofHint,
             Key::NatureHint,
+            Key::ActivityKindHint,
+            Key::TaxTurnover,
+            Key::TaxByMonth,
+            Key::TaxCheck,
         ] {
             if !text.contains(t(lang, key)) {
                 wrong.push(format!("{lang:?}: нет {key:?} на этом языке"));

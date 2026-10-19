@@ -31,7 +31,10 @@
 //!   прежней — день конца, у новой — следующий день начала;
 //! - значение программа умеет применить: коды записаны так, как их пишет
 //!   закон, и в той редакции классификатора, по которой программа читает
-//!   коды; граница по году рождения — 1 января;
+//!   коды; граница по году рождения — 1 января; у ставки вычет расходов
+//!   и нижний предел — вместе или никак, а предел ниже ставки; порог больше
+//!   нуля; платёж банка у расходов — в своём списке, а не среди документов;
+//!   проценты — числом закона: `4.5`, а не `4,5` и не `4.50`;
 //! - незнакомых полей нет: опечатка в имени поля — ошибка, а не молча
 //!   пропущенное правило.
 //!
@@ -56,11 +59,12 @@
 use std::fmt;
 use std::sync::LazyLock;
 
-use serde::Deserialize;
 use serde::de::{self, Deserializer, Visitor};
+use serde::{Deserialize, Serialize, Serializer};
 
-use crate::model::activity;
+use crate::model::activity::{self, ActivityCode, IncomeKind};
 use crate::model::date::Date;
+use crate::model::ledger::{Nature, Proof};
 
 /// Файл правил Армении — в сборке.
 const ARMENIA: &str = include_str!("../../rules/am.json");
@@ -130,8 +134,15 @@ impl fmt::Display for Version {
     }
 }
 
-/// В файле версия — строка `"2026.1"`, и читается она только через
-/// [`Version::parse`].
+/// В файле и в снимке закрытого квартала (`tax::closing`) версия — строка
+/// `"2026.1"`.
+impl Serialize for Version {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+/// Версия читается только через [`Version::parse`].
 impl<'de> Deserialize<'de> for Version {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct Text;
@@ -145,6 +156,97 @@ impl<'de> Deserialize<'de> for Version {
 
             fn visit_str<E: de::Error>(self, text: &str) -> Result<Version, E> {
                 Version::parse(text).ok_or_else(|| E::invalid_value(de::Unexpected::Str(text), &self))
+            }
+        }
+
+        deserializer.deserialize_str(Text)
+    }
+}
+
+/// Процент — сотыми долями процента: 4,5 % — 450. В файле правил
+/// и в снимке квартала — строкой, как пишет закон: `"4.5"`, `"10"`.
+///
+/// Целое, а не `f64`: процент умножает драмы, а деньги в `f64` запрещены
+/// (Правило 2) — 4,5 % от 1 234 567 ֏ в `f64` легли бы на последний драм
+/// по-разному в разных местах.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct Percent(u16);
+
+impl Percent {
+    /// Сто процентов.
+    pub const WHOLE: Self = Self(10_000);
+
+    /// Процент из записи `4.5`, `10`, `1.5`. `None` — не число от 0 до 100
+    /// с одним-двумя знаками после точки, ведущий ноль, ноль в конце дробной
+    /// части, знак, пробел или запятая: что пишет закон, то и читается,
+    /// а прочее угадывать нельзя.
+    pub fn parse(text: &str) -> Option<Self> {
+        let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
+        let digits = |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+        if !digits(whole) || (whole.len() > 1 && whole.starts_with('0')) || whole.len() > 3 {
+            return None;
+        }
+        if text.contains('.') && (!digits(fraction) || fraction.len() > 2 || fraction.ends_with('0')) {
+            return None;
+        }
+        let whole: u16 = whole.parse().ok()?;
+        let fraction: u16 = match fraction.len() {
+            0 => 0,
+            1 => fraction.parse::<u16>().ok()? * 10,
+            _ => fraction.parse().ok()?,
+        };
+        let hundredths = whole.checked_mul(100)?.checked_add(fraction)?;
+        (hundredths <= Self::WHOLE.0).then_some(Self(hundredths))
+    }
+
+    /// Сотые доли процента: 4,5 % — 450.
+    pub const fn hundredths(self) -> u16 {
+        self.0
+    }
+
+    /// Доля суммы в драмах — целыми драмами, лумы отброшены: строки формы
+    /// расчёта — целые драмы, «без лум» (приказ ՊԵԿ 299-Ն, прил. 1, п. 1;
+    /// НК, ст. 318, ч. 1; `model::money::Lumas::drams`). 10 % от
+    /// 1 234 567 ֏ — 123 456, а не 123 457 (вопрос 9.1 листа сверки).
+    pub fn of(self, drams: i64) -> i64 {
+        let share = i128::from(drams) * i128::from(self.0) / i128::from(Self::WHOLE.0);
+        // Доля не больше самой суммы: помещается.
+        i64::try_from(share).unwrap_or(i64::MAX)
+    }
+}
+
+/// `4.5` — запись закона: точка, без нулей в конце.
+impl fmt::Display for Percent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (whole, fraction) = (self.0 / 100, self.0 % 100);
+        match fraction {
+            0 => write!(f, "{whole}"),
+            _ if fraction % 10 == 0 => write!(f, "{whole}.{}", fraction / 10),
+            _ => write!(f, "{whole}.{fraction:02}"),
+        }
+    }
+}
+
+impl Serialize for Percent {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+/// Процент читается только через [`Percent::parse`].
+impl<'de> Deserialize<'de> for Percent {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Text;
+
+        impl Visitor<'_> for Text {
+            type Value = Percent;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("процент вида 4.5")
+            }
+
+            fn visit_str<E: de::Error>(self, text: &str) -> Result<Percent, E> {
+                Percent::parse(text).ok_or_else(|| E::invalid_value(de::Unexpected::Str(text), &self))
             }
         }
 
@@ -313,6 +415,196 @@ impl Rule for FundedPension {
     }
 }
 
+/// Ставка строки таблицы НК, ст. 258, ч. 1 — и, у строк с вычетом расходов
+/// (ч. 2–5), процент расходов и нижний предел (`tax::turnover`).
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Rate {
+    /// Строка таблицы — вид дохода.
+    pub kind: IncomeKind,
+    /// Ставка — процент дохода.
+    pub rate: Percent,
+    /// Сколько процентов расходов квартала уменьшает налог; `None` —
+    /// вычета нет, налог — ставка, умноженная на доход (ст. 260, ч. 1).
+    /// Ключ обязателен, как у [`Exclusion::until`].
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub deduction: Option<Percent>,
+    /// Нижний предел налога — процент дохода; есть ровно у строк с вычетом.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub floor: Option<Percent>,
+    pub from: Date,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub until: Option<Date>,
+    pub source: Source,
+}
+
+impl Rule for Rate {
+    fn period(&self) -> Period {
+        Period {
+            from: self.from,
+            until: self.until,
+        }
+    }
+
+    fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// Об одном — если о той же строке.
+    fn same_subject(&self, other: &Self) -> bool {
+        self.kind == other.kind
+    }
+
+    /// Ставка больше нуля; вычет и нижний предел — вместе или никак;
+    /// предел ниже ставки — иначе вычет не применялся бы никогда.
+    fn usable(&self) -> bool {
+        let rate = self.rate.hundredths() > 0;
+        match (self.deduction, self.floor) {
+            (None, None) => rate,
+            (Some(deduction), Some(floor)) => rate && deduction.hundredths() > 0 && floor < self.rate,
+            (Some(_), None) | (None, Some(_)) => false,
+        }
+    }
+}
+
+/// Список видов деятельности высоких технологий — строка 8 таблицы ст. 258,
+/// ч. 1 (`tax::turnover::kind_of`): по коду закон узнаёт только её.
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HighTech {
+    /// Коды, как их пишет список: подкласс `62.01.0`, без буквы раздела
+    /// (`model::activity::is_law_prefix`).
+    pub codes: Vec<String>,
+    /// Классификатор, в редакции которого список назвал коды (как
+    /// у [`Exclusion::classifier`]).
+    pub classifier: String,
+    pub from: Date,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub until: Option<Date>,
+    pub source: Source,
+}
+
+impl HighTech {
+    /// В списке ли код.
+    pub fn contains(&self, code: &ActivityCode) -> bool {
+        self.codes.iter().any(|prefix| code.starts_with(prefix))
+    }
+}
+
+impl Rule for HighTech {
+    fn period(&self) -> Period {
+        Period {
+            from: self.from,
+            until: self.until,
+        }
+    }
+
+    fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// Список один на всех: две записи — всегда об одном.
+    fn same_subject(&self, _: &Self) -> bool {
+        true
+    }
+
+    fn usable(&self) -> bool {
+        self.classifier == activity::CLASSIFIER
+            && !self.codes.is_empty()
+            && self.codes.iter().all(|code| activity::is_law_prefix(code))
+    }
+}
+
+/// Порог оборота всех видов за год (НК, ст. 254, ч. 2; ст. 255, ч. 1, п. 2;
+/// ст. 59, ч. 1, п. 5).
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Threshold {
+    /// Порог в драмах: оборот больше него — не плательщик налога с оборота.
+    pub amount: i64,
+    pub from: Date,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub until: Option<Date>,
+    pub source: Source,
+}
+
+impl Rule for Threshold {
+    fn period(&self) -> Period {
+        Period {
+            from: self.from,
+            until: self.until,
+        }
+    }
+
+    fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// Порог один на всех: две записи — всегда об одном.
+    fn same_subject(&self, _: &Self) -> bool {
+        true
+    }
+
+    fn usable(&self) -> bool {
+        self.amount > 0
+    }
+}
+
+/// Какой расход книги идёт в вычет (НК, ст. 258, ч. 6; ст. 55, ч. 2, 12 и 13;
+/// `tax::turnover`): документ продавца (`model::ledger::Proof`) и вид
+/// расхода (`Nature`).
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Expenses {
+    /// Документы, которыми подтверждается любой вычитаемый расход: расчётные
+    /// документы ст. 55, ч. 2, п. 1–5, и иные документы ч. 13.
+    pub proofs: Vec<Proof>,
+    /// Виды расхода, которым хватает одного платёжного документа банка
+    /// (`Proof::BankPayment`; ст. 55, ч. 12).
+    pub payment_only: Vec<Nature>,
+    /// Виды расхода, которые в вычет не идут ни с каким документом
+    /// (ст. 258, ч. 6, п. 2).
+    pub excluded: Vec<Nature>,
+    pub from: Date,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub until: Option<Date>,
+    pub source: Source,
+}
+
+impl Rule for Expenses {
+    fn period(&self) -> Period {
+        Period {
+            from: self.from,
+            until: self.until,
+        }
+    }
+
+    fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// Правило одно на всех: две записи — всегда об одном.
+    fn same_subject(&self, _: &Self) -> bool {
+        true
+    }
+
+    /// Документы есть; платёж банка и «документа нет» — не среди них:
+    /// платёжу отведён свой список, а без документа вычета нет; вид
+    /// расхода не стоит и среди тех, кому хватает платежа, и среди
+    /// исключённых; повторов нет.
+    fn usable(&self) -> bool {
+        let unique = |list: &[Nature]| list.iter().enumerate().all(|(i, a)| !list[..i].contains(a));
+        let proofs_unique = self.proofs.iter().enumerate().all(|(i, a)| !self.proofs[..i].contains(a));
+        !self.proofs.is_empty()
+            && proofs_unique
+            && !self.proofs.contains(&Proof::BankPayment)
+            && !self.proofs.contains(&Proof::None)
+            && unique(&self.payment_only)
+            && unique(&self.excluded)
+            && !self.payment_only.iter().any(|nature| self.excluded.contains(nature))
+    }
+}
+
 /// Правила страны — файл целиком.
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -320,6 +612,10 @@ pub struct Rules {
     version: Version,
     turnover_exclusions: Vec<Exclusion>,
     funded_pension: Vec<FundedPension>,
+    turnover_rates: Vec<Rate>,
+    high_tech: Vec<HighTech>,
+    turnover_threshold: Vec<Threshold>,
+    turnover_expenses: Vec<Expenses>,
 }
 
 /// Какая запись: список файла и номер в нём, с нуля.
@@ -358,6 +654,10 @@ impl Rules {
             serde_json::from_str(text).map_err(|error| RulesError::Malformed(error.to_string()))?;
         check("turnover_exclusions", &rules.turnover_exclusions)?;
         check("funded_pension", &rules.funded_pension)?;
+        check("turnover_rates", &rules.turnover_rates)?;
+        check("high_tech", &rules.high_tech)?;
+        check("turnover_threshold", &rules.turnover_threshold)?;
+        check("turnover_expenses", &rules.turnover_expenses)?;
         Ok(rules)
     }
 
@@ -376,6 +676,34 @@ impl Rules {
     pub fn funded_pension(&self) -> &[FundedPension] {
         &self.funded_pension
     }
+
+    /// Ставки строк налога с оборота.
+    pub fn turnover_rates(&self) -> &[Rate] {
+        &self.turnover_rates
+    }
+
+    /// Список видов деятельности высоких технологий.
+    pub fn high_tech(&self) -> &[HighTech] {
+        &self.high_tech
+    }
+
+    /// Порог оборота за год.
+    pub fn turnover_threshold(&self) -> &[Threshold] {
+        &self.turnover_threshold
+    }
+
+    /// Какие расходы идут в вычет.
+    pub fn turnover_expenses(&self) -> &[Expenses] {
+        &self.turnover_expenses
+    }
+}
+
+/// Запись вида с одним предметом на всех (список высоких технологий, порог,
+/// расходы для вычета), которая действует в день `on`: записи одного
+/// предмета в один день не действуют вдвоём (это держит разбор), и первая
+/// найденная — единственная. У ставок предмет — строка, и запись ищут по ней.
+pub fn on<R: Rule>(records: &[R], on: Date) -> Option<&R> {
+    records.iter().find(|record| record.period().contains(on))
 }
 
 /// Записи одного вида: каждая — с источником, днём конца не раньше начала

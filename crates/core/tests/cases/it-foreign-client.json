@@ -1,0 +1,19 @@
+{
+  "about": "IT-ИП (62.01.0), иностранный клиент платит в долларах; III квартал 2026 года — три акта по 1 % без вычета",
+  "checked": {
+    "by": "агент Kvartik вручную по НК, ст. 258, ч. 1, строка 8, и приказу ՊԵԿ 299-Ն, прил. 1, п. 1, 61–63: 3 000,00 $ × 384,20 = 1 152 600,00 ֏; 3 000,00 $ × 386,10 = 1 158 300,00 ֏; 3 250,00 $ × 385,25 = 1 252 062,50 ֏; всего 3 562 962,50 ֏ — в строке 3 562 962; 1 % — 35 629,62 — 35 629",
+    "on": "2026-10-19",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["62.01.0"]
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-07-31", "minor": 300000, "currency": "USD", "rate_e4": 3842000, "activity": null, "proof": null, "nature": null},
+    {"flow": "income", "date": "2026-08-31", "minor": 300000, "currency": "USD", "rate_e4": 3861000, "activity": null, "proof": null, "nature": null},
+    {"flow": "income", "date": "2026-09-30", "minor": 325000, "currency": "USD", "rate_e4": 3852500, "activity": null, "proof": null, "nature": null}
+  ],
+  "expected": [
+    {"quarter": "2026-3", "tax": 35629, "lines": [{"kind": "high_tech", "income": 3562962, "tax": 35629}]}
+  ]
+}

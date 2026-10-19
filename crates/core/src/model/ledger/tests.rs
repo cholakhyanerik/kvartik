@@ -100,7 +100,7 @@ fn data_rejects_what_commands_never_write() {
         income(r#""per_unit_e4":3880000"#, r#""per_unit_e4":0"#),
         income(r#""proof":null"#, r#""proof":"tax_invoice""#),
         income(r#""supplier":"""#, r#""supplier":"Кто-то""#),
-        income(r#""activity":null"#, r#""activity":"62.01.0""#),
+        income(r#""nature":null"#, r#""nature":"ordinary""#),
         income(
             attachment,
             &format!("{attachment},{attachment}"),
@@ -121,6 +121,20 @@ fn data_rejects_what_commands_never_write() {
         }
     }
     assert!(wrong.is_empty(), "прочитано испорченное: {wrong:#?}");
+}
+
+/// С версии формата 8 у дохода — вид деятельности, а у расхода — вид
+/// «зарплата, налог, пошлина, услуга банка» (`levy`).
+#[test]
+fn income_names_its_activity_and_levy_is_a_nature() {
+    let income = INCOME.replacen(r#""activity":null"#, r#""activity":"62.01.0""#, 1);
+    let read: Operation = serde_json::from_str(&income).expect("доход с видом читается");
+    assert_eq!(read.data().activity, ActivityCode::parse("62.01.0").ok());
+    assert_eq!(serde_json::to_string(&read).ok().as_deref(), Some(income.as_str()));
+    let levy = EXPENSE.replacen(r#""nature":"ordinary""#, r#""nature":"levy""#, 1);
+    let read: Operation = serde_json::from_str(&levy).expect("расход levy читается");
+    assert_eq!(read.data().nature, Some(Nature::Levy));
+    assert_eq!(serde_json::to_string(&read).ok().as_deref(), Some(levy.as_str()));
 }
 
 fn income_data(date: Date, amount: Money) -> OperationData {
@@ -290,6 +304,7 @@ fn document_data(kind: DocKind, client: &Client, date: Date, service: Date, pric
         basis: None,
         recurring: None,
         rate: None,
+        activity: None,
     }
 }
 
@@ -411,10 +426,10 @@ fn rows_are_live_and_newest_first() {
     assert_eq!(ids, [earned.id(), spent.id(), first.id()]);
 }
 
-/// Итог в драмах — сумма переведённых строк. Три поступления по 10,00 $
-/// по 361,93: каждое — 3 619,3 → 3 619 ֏, доход — 10 857 ֏ (перевод итога
-/// 30,00 $ дал бы 10 858). Строка в евро без курса в итог не идёт, а
-/// считается; расход в драмах — как есть.
+/// Итог в драмах — сумма переведённых строк с лумами. Три поступления по
+/// 10,00 $ по 361,93: каждое — 3 619,30 ֏, доход — 10 857,90 ֏; до драма
+/// его доводит строка расчёта налога, а не книга. Строка в евро без курса
+/// в итог не идёт, а считается; расход в драмах — как есть.
 #[test]
 fn totals_add_converted_lines_and_count_unrated() {
     let ten = |date| {
@@ -437,16 +452,16 @@ fn totals_add_converted_lines_and_count_unrated() {
     assert_eq!(
         totals(&rows),
         Ok(Totals {
-            income: amd(10_857),
-            expense: amd(4_500),
+            income: Lumas::new(1_085_790),
+            expense: Lumas::new(450_000),
             unrated: 1,
         })
     );
     assert_eq!(
         totals(&[]),
         Ok(Totals {
-            income: amd(0),
-            expense: amd(0),
+            income: Lumas::ZERO,
+            expense: Lumas::ZERO,
             unrated: 0,
         })
     );
@@ -464,12 +479,12 @@ fn document_income_uses_the_document_rate() {
     let unrated = issue(document_data(DocKind::Invoice, &client, day(2026, 10, 2), service, 100_000), &client, &[]);
     let documents = [rated, unrated];
     let rows = rows(&documents, &[], quarter(2026, 3));
-    // 2 400,00 $ × 388,00 = 931 200 ֏ — как в дизайне «Kvartik Design».
+    // 2 400,00 $ × 388,00 = 931 200,00 ֏ — как в дизайне «Kvartik Design».
     assert_eq!(
         totals(&rows),
         Ok(Totals {
-            income: amd(931_200),
-            expense: amd(0),
+            income: Lumas::new(93_120_000),
+            expense: Lumas::ZERO,
             unrated: 1,
         })
     );

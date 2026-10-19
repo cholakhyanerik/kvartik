@@ -27,6 +27,8 @@ pub enum Screen {
     /// Книга доходов и расходов (задача 14).
     Ledger,
     Clients,
+    /// Налог с оборота за квартал (задача 19).
+    Tax,
     Profile,
     /// Резервная копия и хранение данных — экран внутри профиля.
     Backup,
@@ -37,11 +39,12 @@ const DOCUMENT: &str = "#/documents/";
 
 impl Screen {
     /// Экраны без параметров — в порядке разделов.
-    pub const PLAIN: [Screen; 6] = [
+    pub const PLAIN: [Screen; 7] = [
         Screen::Home,
         Screen::Documents,
         Screen::Ledger,
         Screen::Clients,
+        Screen::Tax,
         Screen::Profile,
         Screen::Backup,
     ];
@@ -55,6 +58,7 @@ impl Screen {
             Screen::Document(id) => format!("{DOCUMENT}{id}"),
             Screen::Ledger => "#/ledger".to_owned(),
             Screen::Clients => "#/clients".to_owned(),
+            Screen::Tax => "#/tax".to_owned(),
             Screen::Profile => "#/profile".to_owned(),
             Screen::Backup => "#/backup".to_owned(),
         }
@@ -99,6 +103,7 @@ impl Screen {
             Screen::Documents | Screen::Document(_) => "documents",
             Screen::Ledger => "ledger",
             Screen::Clients => "clients",
+            Screen::Tax => "tax",
             Screen::Profile => "profile",
             Screen::Backup => "backup",
         }
@@ -207,7 +212,7 @@ mod tests {
         assert_eq!(document.page(), Screen::Documents);
         assert_eq!(document.id(), "documents");
         assert_eq!(Screen::Backup.page(), Screen::Backup);
-        for screen in [Screen::Home, Screen::Documents, Screen::Ledger, Screen::Clients, Screen::Profile] {
+        for screen in [Screen::Home, Screen::Documents, Screen::Ledger, Screen::Clients, Screen::Tax, Screen::Profile] {
             assert_eq!(screen.section(), screen);
             assert_eq!(screen.page(), screen);
         }

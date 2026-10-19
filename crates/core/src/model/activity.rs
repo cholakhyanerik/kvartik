@@ -158,6 +158,79 @@ impl ActivityCode {
     }
 }
 
+/// Вид дохода для налога с оборота — строка таблицы Налогового кодекса,
+/// ст. 258, ч. 1 (задача 19). Ставку, вычет расходов и нижний предел строки
+/// берёт файл правил (`tax::rules`) на нужный день; здесь — только какая
+/// это строка.
+///
+/// Строку определяет вид дохода, а не записанный код (ответ бухгалтера
+/// 2026-10-19, вопросы 1.3 и 1.6 листа сверки): по коду закон узнаёт только
+/// высокие технологии — список правительства 142-Ն. Поэтому у кода профиля
+/// строка по умолчанию — по правилам, а человек может её сменить (решение
+/// человека 2026-10-19; `model::profile::ProfileData::kinds`).
+///
+/// Расширяется, а смысл существующих вариантов не меняется (Правило 2);
+/// `match` — без `_`. В данных — `"trade"`, `"recyclables"`,
+/// `"newspapers"`, `"production"`, `"rent"`, `"catering"`,
+/// `"catering_other"`, `"high_tech"`, `"assets"`, `"other"`.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IncomeKind {
+    /// 1 — торговля (купля-продажа), кроме строк 2 и 9.
+    Trade,
+    /// 2 — торговля вторсырьём из списка правительства.
+    Recyclables,
+    /// 3 — продажа газет их редакциями.
+    Newspapers,
+    /// 4 — производство.
+    Production,
+    /// 5 — арендная плата, процент, роялти.
+    Rent,
+    /// 6 — общепит.
+    Catering,
+    /// 7 — прочие доходы того, кто подал заявление о налоге с оборота для
+    /// общепита (ст. 254, ч. 6 и 7; ст. 258, ч. 8).
+    CateringOther,
+    /// 8 — высокие технологии из списка правительства.
+    HighTech,
+    /// 9 — отчуждение прочих активов, в том числе недвижимости.
+    Assets,
+    /// 10 — прочая деятельность: всё, что не названо строками выше.
+    Other,
+}
+
+impl IncomeKind {
+    /// Все строки — в порядке таблицы закона.
+    pub const ALL: [IncomeKind; 10] = [
+        IncomeKind::Trade,
+        IncomeKind::Recyclables,
+        IncomeKind::Newspapers,
+        IncomeKind::Production,
+        IncomeKind::Rent,
+        IncomeKind::Catering,
+        IncomeKind::CateringOther,
+        IncomeKind::HighTech,
+        IncomeKind::Assets,
+        IncomeKind::Other,
+    ];
+
+    /// Номер строки в таблице ст. 258, ч. 1: так её называет закон и бухгалтер.
+    pub const fn row(self) -> u8 {
+        match self {
+            IncomeKind::Trade => 1,
+            IncomeKind::Recyclables => 2,
+            IncomeKind::Newspapers => 3,
+            IncomeKind::Production => 4,
+            IncomeKind::Rent => 5,
+            IncomeKind::Catering => 6,
+            IncomeKind::CateringOther => 7,
+            IncomeKind::HighTech => 8,
+            IncomeKind::Assets => 9,
+            IncomeKind::Other => 10,
+        }
+    }
+}
+
 /// Запись классификатора: `62.01.0`. Это код, а не текст для перевода:
 /// на всех языках он пишется одинаково.
 impl fmt::Display for ActivityCode {
@@ -299,6 +372,37 @@ mod tests {
             }
         }
         assert!(wrong.is_empty(), "записи закона: {wrong:#?}");
+    }
+
+    /// Строки вида дохода — по порядку таблицы ст. 258, ч. 1, с первой по
+    /// десятую, а в данных — имена, выписанные человеком: имя — часть
+    /// формата, и поменять его можно только миграцией (Правило 2).
+    #[test]
+    fn income_kinds_follow_the_table() {
+        let rows: Vec<u8> = IncomeKind::ALL.iter().map(|kind| kind.row()).collect();
+        assert_eq!(rows, (1..=10).collect::<Vec<u8>>());
+        let names = [
+            "trade",
+            "recyclables",
+            "newspapers",
+            "production",
+            "rent",
+            "catering",
+            "catering_other",
+            "high_tech",
+            "assets",
+            "other",
+        ];
+        let mut wrong = Vec::new();
+        for (kind, name) in IncomeKind::ALL.into_iter().zip(names) {
+            let json = format!("\"{name}\"");
+            if serde_json::to_string(&kind).ok().as_deref() != Some(json.as_str())
+                || serde_json::from_str::<IncomeKind>(&json).ok() != Some(kind)
+            {
+                wrong.push(name);
+            }
+        }
+        assert!(wrong.is_empty(), "имена строк в данных: {wrong:?}");
     }
 
     /// В данных — `"62.01.0"`; запись с буквой или без точек — порча.

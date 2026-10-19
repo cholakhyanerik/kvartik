@@ -26,7 +26,7 @@
 
 use super::Lang;
 use crate::model::date::{Date, Quarter};
-use crate::model::money::{Currency, Money, RATE_DIGITS};
+use crate::model::money::{Currency, Lumas, Money, RATE_DIGITS};
 
 /// Неразрывный пробел: между разрядами в армянском и русском и перед знаком
 /// валюты.
@@ -108,6 +108,48 @@ pub fn money(lang: Lang, sum: Money) -> String {
 pub fn amount(lang: Lang, sum: Money) -> String {
     let mut out = String::new();
     push_signed(&mut out, lang, sum.minor(), sum.currency().minor_digits());
+    out
+}
+
+/// Драмы с лумами (`model::money::Lumas`) — сумма в драмах по курсу и итоги
+/// книги: с двумя знаками, только когда лумы есть, — `18 096,50 ֏`,
+/// `AMD 18,096.50`, — а целые — как драмы, `361 930 ֏`: лумы в суммах
+/// человек видит редко, и `,00` у каждой суммы в драмах только мешало бы.
+pub fn lumas(lang: Lang, sum: Lumas) -> String {
+    if sum.get() % Lumas::PER_DRAM == 0 {
+        return money(lang, Money::new(sum.drams(), Currency::Amd));
+    }
+    let mut out = String::new();
+    match lang {
+        Lang::Am | Lang::Ru => {
+            push_signed(&mut out, lang, sum.get(), 2);
+            out.push(NBSP);
+            out.push('֏');
+        }
+        Lang::En => {
+            if sum.get() < 0 {
+                out.push('-');
+            }
+            out.push_str("AMD\u{A0}");
+            push_unsigned(&mut out, lang, sum.get().unsigned_abs(), 2);
+        }
+    }
+    out
+}
+
+/// Процент — сотыми долями, `hundredths`: ставка налога `10 %`, `4,5 %`
+/// по-русски — с неразрывным пробелом, как в CLDR (`#,##0 %`), — а по-армянски
+/// и по-английски без пробела: `4,5%`, `4.5%` (CLDR `#,##0%`). Число, а не
+/// тип налога: язык знает из домена только суммы и даты (таблица слоёв).
+pub fn percent(lang: Lang, hundredths: i64) -> String {
+    let mut out = decimal(lang, hundredths, 2);
+    match lang {
+        Lang::Ru => {
+            out.push(NBSP);
+            out.push('%');
+        }
+        Lang::Am | Lang::En => out.push('%'),
+    }
     out
 }
 
@@ -1162,5 +1204,32 @@ mod tests {
             }
         }
         assert!(lost.is_empty(), "записанное не читается обратно: {lost:#?}");
+    }
+
+    /// Драмы с лумами — с двумя знаками, только когда лумы есть; процент —
+    /// по CLDR своего языка. Ожидаемое выписано человеком.
+    #[test]
+    fn lumas_and_percents_follow_each_language() {
+        let cases = [
+            (Lang::Ru, lumas(Lang::Ru, Lumas::new(1_809_650)), "18\u{A0}096,50\u{A0}֏"),
+            (Lang::Am, lumas(Lang::Am, Lumas::new(1_809_650)), "18\u{A0}096,50\u{A0}֏"),
+            (Lang::En, lumas(Lang::En, Lumas::new(1_809_650)), "AMD\u{A0}18,096.50"),
+            (Lang::Ru, lumas(Lang::Ru, Lumas::new(36_193_000)), "361\u{A0}930\u{A0}֏"),
+            (Lang::En, lumas(Lang::En, Lumas::new(36_193_000)), "AMD\u{A0}361,930"),
+            (Lang::Am, lumas(Lang::Am, Lumas::new(362)), "3,62\u{A0}֏"),
+            (Lang::En, lumas(Lang::En, Lumas::new(-362)), "-AMD\u{A0}3.62"),
+            (Lang::Ru, percent(Lang::Ru, 1_000), "10\u{A0}%"),
+            (Lang::Ru, percent(Lang::Ru, 450), "4,5\u{A0}%"),
+            (Lang::Am, percent(Lang::Am, 450), "4,5%"),
+            (Lang::En, percent(Lang::En, 450), "4.5%"),
+            (Lang::En, percent(Lang::En, 100), "1%"),
+        ];
+        let mut wrong = Vec::new();
+        for (lang, got, expected) in cases {
+            if got != expected {
+                wrong.push(format!("{lang:?}: «{got}», а не «{expected}»"));
+            }
+        }
+        assert!(wrong.is_empty(), "запись: {wrong:#?}");
     }
 }

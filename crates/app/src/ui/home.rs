@@ -1,10 +1,6 @@
 //! Главный экран (дизайн «Kvartik Design»): какой сегодня день и что ждёт
-//! внимания — копия, установка, незаполненный профиль, неоплаченные
-//! счета, — и главное действие, «Новый счёт».
-//!
-//! Карточки налога квартала из дизайна здесь нет: расчёта налога ещё нет
-//! (строка плана 0.2), а сумма налога без расчёта выглядела бы расчётом
-//! (Правило 2, «Образец назван образцом»).
+//! внимания — копия, установка, налог квартала, незаполненный профиль,
+//! неоплаченные счета, — и главное действие, «Новый счёт».
 
 use kvartik_core::i18n::{self, Key, Lang};
 use leptos::prelude::*;
@@ -16,6 +12,7 @@ use super::icon::{Icon, icon};
 use super::profile::Profiles;
 use super::pwa::{InstallSection, Program};
 use super::route::{Router, Screen};
+use super::tax::{self, TaxCard};
 use super::tr;
 use crate::platform::clock;
 
@@ -29,6 +26,7 @@ pub fn Home(
     profiles: Profiles,
     documents: Documents,
     clients: Clients,
+    tax: tax::Ctx,
 ) -> impl IntoView {
     // Сегодня — один раз (Архитектура, «Время — параметр»).
     let today = clock::today();
@@ -47,6 +45,7 @@ pub fn Home(
         // Установка — выше всего о данных: на iPhone программу ставят до
         // того, как вводить данные (Правило 6).
         <InstallSection lang program />
+        <TaxCard ctx=tax />
         <Show when=move || profiles.missing()>
             <div class="notice">
                 <p>{tr(lang, Key::HomeProfileMissing)}</p>

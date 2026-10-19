@@ -1,0 +1,24 @@
+{
+  "about": "Консультант не по управлению (74.90.0) превысил 115 млн ֏ 10 августа 2026 года: из сделки этого дня налогом с оборота облагаются 5 млн до порога, дальше — общий режим, к бухгалтеру",
+  "checked": {
+    "by": "агент Kvartik вручную по НК, ст. 254, ч. 2, ст. 255, ч. 1, п. 2, ст. 59, ч. 1, п. 5, и ответу бухгалтера-агента 2026-10-19 на вопрос 7.3 листа сверки. До 10 августа — 60 000 000 + 50 000 000 = 110 000 000; из 10 000 000 этого дня до порога — 5 000 000; 10 % — 500 000 при пределе 225 000; доход 5 сентября и IV квартал — уже не налог с оборота",
+    "on": "2026-10-19",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["74.90.0"]
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-02-10", "minor": 60000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "income", "date": "2026-05-10", "minor": 50000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "income", "date": "2026-08-10", "minor": 10000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "income", "date": "2026-09-05", "minor": 3000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "income", "date": "2026-11-05", "minor": 2000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null}
+  ],
+  "expected": [
+    {"quarter": "2026-1", "tax": 6000000, "lines": [{"kind": "other", "income": 60000000, "tax": 6000000, "carry_out": 0}]},
+    {"quarter": "2026-2", "tax": 5000000, "lines": [{"kind": "other", "income": 50000000, "tax": 5000000, "carry_out": 0}]},
+    {"quarter": "2026-3", "tax": 500000, "lines": [{"kind": "other", "income": 5000000, "tax": 500000, "carry_out": 0}]},
+    {"quarter": "2026-4", "tax": 0, "lines": []}
+  ]
+}

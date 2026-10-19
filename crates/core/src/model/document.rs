@@ -36,10 +36,15 @@
 //! принята. Налога она не меняет: доход по акту — по дате оказания услуги
 //! (Правило 2), а не по дню подписи.
 //!
+//! **Вид деятельности** (задача 19) — код из профиля, по которому получен
+//! доход: от него зависит строка налога, когда коды ИП облагаются по-разному.
+//! В PDF его нет, и у выпущенного документа его можно указать
+//! ([`Document::set_activity`]), как курс.
+//!
 //! Меняется документ только командами ядра (CLAUDE.md, «Данные меняются
 //! одним путём»): [`Document::create`], `edit`, `issue`, `annul`,
 //! `unannul`, `delete`, `restore`, `add_payment`, `remove_payment`,
-//! `set_rate`, `sign`, `unsign`.
+//! `set_rate`, `set_activity`, `sign`, `unsign`.
 //!
 //! В данных: `{"meta":{…},"data":{…},"issued":{…},"annulled":null,
 //! "signed":null,"payments":[…]}`; образец — в тесте `data_shape_is_pinned`.
@@ -49,11 +54,13 @@ use std::fmt;
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 
+use super::activity::ActivityCode;
 use super::bank::BankAccount;
 use super::client::{Client, ClientData};
 use super::date::Date;
 use super::money::{
-    Currency, ExchangeRate, Money, MoneyError, RateError, RateSource, div_round_half_away_from_zero,
+    Currency, ExchangeRate, Lumas, Money, MoneyError, RateError, RateSource,
+    div_round_half_away_from_zero,
 };
 use super::profile::{Email, Localized, ProfileData};
 use super::record::{RecordId, RecordMeta, Timestamp};
@@ -191,6 +198,11 @@ pub struct DocumentData {
     /// в драмах и пока курс не указан — `None`. Дата курса — день оказания
     /// услуги: курс, который человек указал для него ([`Self::rate_for`]).
     pub rate: Option<ExchangeRate>,
+    /// Вид деятельности ИП, по которому получен доход, — код из профиля
+    /// (задача 19). Нужен, когда коды профиля облагаются по разным строкам
+    /// налога; `None` — не указан, и строку берут коды профиля
+    /// (`tax::turnover`). В PDF его нет, как и курса.
+    pub activity: Option<ActivityCode>,
 }
 
 /// Поля документа, как они лежат в данных, — до проверки.
@@ -210,6 +222,10 @@ struct DocumentDataFields {
     /// С версии формата 6 (0.0.27): у документа прошлых версий курса нет.
     #[serde(default)]
     rate: Option<ExchangeRate>,
+    /// С версии формата 8 (задача 19): у документа прошлых версий вид
+    /// деятельности не указан.
+    #[serde(default)]
+    activity: Option<ActivityCode>,
 }
 
 /// Почему документ или команда над ним не приняты.
@@ -324,10 +340,11 @@ impl DocumentData {
         Money::total(self.currency, lines)
     }
 
-    /// Итог в драмах — по курсу документа (`Money::to_amd`): документ — одна
-    /// поставка и один курс. Валюта без курса — `RateUnknown`, а не ноль.
-    pub fn total_amd(&self) -> Result<Money, MoneyError> {
-        self.total()?.to_amd(self.rate)
+    /// Итог в драмах с лумами — по курсу документа (`Money::to_lumas`):
+    /// документ — одна поставка и один курс. Валюта без курса —
+    /// `RateUnknown`, а не ноль.
+    pub fn total_lumas(&self) -> Result<Lumas, MoneyError> {
+        self.total()?.to_lumas(self.rate)
     }
 
     /// Курс валюты документа для дня оказания услуги: `per_unit_e4` — драмы
@@ -360,6 +377,7 @@ impl<'de> Deserialize<'de> for DocumentData {
             basis,
             recurring,
             rate,
+            activity,
         } = DocumentDataFields::deserialize(deserializer)?;
         let data = Self {
             kind,
@@ -373,6 +391,7 @@ impl<'de> Deserialize<'de> for DocumentData {
             basis,
             recurring,
             rate,
+            activity,
         };
         data.check()
             .map_err(|error| de::Error::custom(format!("документ не годится: {error:?}")))?;
@@ -755,6 +774,29 @@ impl Document {
         }
         let mut document = self.clone();
         document.data.rate = rate;
+        document.meta.touch(now);
+        Ok(Some(document))
+    }
+
+    /// Команда «указать вид деятельности» выпущенного действующего
+    /// документа: код из профиля, `None` — убрать. Вида в тексте документа
+    /// и в PDF нет, поэтому выпущенный документ от этого не меняется —
+    /// меняется строка налога, по которой идёт его доход (`tax::turnover`).
+    /// Черновик получает вид из своей формы (`edit`). `Ok(None)` — вид тот же.
+    pub fn set_activity(
+        &self,
+        activity: Option<ActivityCode>,
+        now: Timestamp,
+    ) -> Result<Option<Self>, DocError> {
+        self.must_be_issued()?;
+        if self.annulled.is_some() {
+            return Err(DocError::Annulled);
+        }
+        if activity == self.data.activity {
+            return Ok(None);
+        }
+        let mut document = self.clone();
+        document.data.activity = activity;
         document.meta.touch(now);
         Ok(Some(document))
     }

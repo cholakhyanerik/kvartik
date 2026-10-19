@@ -583,6 +583,7 @@ async fn a_repeating_invoice_appears_when_the_app_opens() {
         basis: None,
         recurring: None,
         rate: None,
+        activity: None,
     };
     let source = Document::create(data, now)
         .expect("черновик")
@@ -738,6 +739,7 @@ async fn documents_are_found_opened_and_marked_paid() {
         basis: None,
         recurring: None,
         rate: None,
+        activity: None,
     };
     let issue = |kind: DocKind, price: i64, before: &[Document]| {
         Document::create(data(kind, price), now)
@@ -954,6 +956,7 @@ pub(super) fn invoice_data(client: &Client) -> DocumentData {
         basis: None,
         recurring: None,
         rate: None,
+        activity: None,
     }
 }
 

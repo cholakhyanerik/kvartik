@@ -50,15 +50,73 @@ fn pension(from: &str, until: Option<&str>) -> Value {
     })
 }
 
-/// Файл правил с этими записями.
+/// Файл правил с этими записями; записей остальных видов нет.
 fn file(exclusions: &[Value], pensions: &[Value]) -> String {
     json!({
         "version": "2026.1",
         "turnover_exclusions": exclusions,
-        "funded_pension": pensions
+        "funded_pension": pensions,
+        "turnover_rates": [],
+        "high_tech": [],
+        "turnover_threshold": [],
+        "turnover_expenses": []
     })
     .to_string()
 }
+
+/// Файл правил с записями одного из видов налога с оборота: `kind` — имя
+/// списка, `records` — его записи.
+fn file_of(kind: &str, records: &[Value]) -> String {
+    let mut file: Value = serde_json::from_str(&file(&[], &[])).expect("JSON");
+    file[kind] = json!(records);
+    file.to_string()
+}
+
+/// Ставка строки `kind` с вычетом и пределом или без них.
+fn rate(kind: &str, rate: &str, deduction: Option<&str>, floor: Option<&str>, from: &str, until: Option<&str>) -> Value {
+    json!({
+        "kind": kind,
+        "rate": rate,
+        "deduction": deduction,
+        "floor": floor,
+        "from": from,
+        "until": until,
+        "source": source()
+    })
+}
+
+/// Список высоких технологий.
+fn high_tech(codes: &[&str], from: &str, until: Option<&str>) -> Value {
+    json!({
+        "codes": codes,
+        "classifier": "ՀԴ-011-2013",
+        "from": from,
+        "until": until,
+        "source": source()
+    })
+}
+
+/// Порог оборота.
+fn threshold(amount: i64, from: &str, until: Option<&str>) -> Value {
+    json!({"amount": amount, "from": from, "until": until, "source": source()})
+}
+
+/// Какие расходы идут в вычет.
+fn expenses(proofs: &[&str], payment_only: &[&str], excluded: &[&str]) -> Value {
+    json!({
+        "proofs": proofs,
+        "payment_only": payment_only,
+        "excluded": excluded,
+        "from": "2025-01-01",
+        "until": null,
+        "source": source()
+    })
+}
+
+const RATES: &str = "turnover_rates";
+const HIGH_TECH: &str = "high_tech";
+const THRESHOLD: &str = "turnover_threshold";
+const EXPENSES: &str = "turnover_expenses";
 
 /// Запись `record`, у которой поле `key` — `value`.
 fn with(mut record: Value, key: &str, value: Value) -> Value {
@@ -86,6 +144,10 @@ fn the_built_in_file_is_sound() {
     let rules = Rules::parse(ARMENIA).unwrap_or_else(|error| panic!("rules/am.json: {error:?}"));
     assert!(!rules.turnover_exclusions().is_empty());
     assert!(!rules.funded_pension().is_empty());
+    assert_eq!(rules.turnover_rates().len(), IncomeKind::ALL.len());
+    assert!(!rules.high_tech().is_empty());
+    assert!(!rules.turnover_threshold().is_empty());
+    assert!(!rules.turnover_expenses().is_empty());
     assert_eq!(armenia(), &rules);
 }
 
@@ -428,7 +490,7 @@ fn version_parse_is_strict() {
 
 /// Отпечаток значений текущей версии правил: её запись и FNV-1a значений
 /// файла ([`values`]).
-const PINNED: (&str, u64) = ("2026.1", 0x73e2_79b5_8246_6515);
+const PINNED: (&str, u64) = ("2026.2", 0x6e90_fe06_b284_40ed);
 
 /// Значения файла правил одной строкой: всё, кроме версии и источников, —
 /// JSON с ключами по алфавиту. Источник — когда сверили и где лежит
@@ -521,7 +583,8 @@ fn values_see_rules_not_sources() {
     let spaced = serde_json::to_string_pretty(&bumped).expect("JSON пишется");
     assert_eq!(print(&base), print(&spaced), "пробелы — не новое правило");
     let reordered = format!(
-        r#"{{"funded_pension": [{}], "turnover_exclusions": [{}], "version": "2026.1"}}"#,
+        r#"{{"funded_pension": [{}], "high_tech": [], "turnover_exclusions": [{}], "turnover_expenses": [],
+            "turnover_rates": [], "turnover_threshold": [], "version": "2026.1"}}"#,
         pension("2014-01-01", None),
         exclusion(&["69"], "2025-07-01", None),
     );
@@ -539,4 +602,97 @@ fn values_see_rules_not_sources() {
     for text in changed {
         assert_ne!(print(&base), print(&text), "не видна правка: {text}");
     }
+}
+
+/// Ставка: вычет и предел — вместе или никак, предел ниже ставки, ставка
+/// больше нуля; две записи об одной строке не действуют в один день, а о
+/// разных — действуют.
+#[test]
+fn rates_are_checked() {
+    let mut wrong = Vec::new();
+    let sound = [
+        rate("other", "10", Some("6"), Some("4.5"), "2025-01-01", None),
+        rate("high_tech", "1", None, None, "2025-01-01", Some("2031-12-31")),
+    ];
+    if let Err(error) = Rules::parse(&file_of(RATES, &sound)) {
+        wrong.push(format!("годные ставки: {error:?}"));
+    }
+    for (case, record) in [
+        ("вычет без предела", rate("other", "10", Some("6"), None, "2025-01-01", None)),
+        ("предел без вычета", rate("other", "10", None, Some("4.5"), "2025-01-01", None)),
+        ("предел не ниже ставки", rate("trade", "10", Some("9.5"), Some("10"), "2025-01-01", None)),
+        ("нулевая ставка", rate("assets", "0", None, None, "2025-01-01", None)),
+        ("нулевой вычет", rate("other", "10", Some("0"), Some("4.5"), "2025-01-01", None)),
+    ] {
+        let got = Rules::parse(&file_of(RATES, &[record]));
+        if got != Err(RulesError::Unusable(at(RATES, 0))) {
+            wrong.push(format!("{case}: {got:?}"));
+        }
+    }
+    let twice = [
+        rate("other", "10", Some("6"), Some("4.5"), "2025-01-01", None),
+        rate("other", "12", Some("6"), Some("4.5"), "2026-01-01", None),
+    ];
+    let got = Rules::parse(&file_of(RATES, &twice));
+    let expected = Err(RulesError::Overlap {
+        kind: RATES,
+        first: 0,
+        second: 1,
+    });
+    if got != expected {
+        wrong.push(format!("одна строка внахлёст: {got:?}"));
+    }
+    for (case, text) in [
+        ("процент с запятой", file_of(RATES, &[rate("other", "4,5", None, None, "2025-01-01", None)])),
+        ("незнакомая строка", file_of(RATES, &[rate("luxury", "10", None, None, "2025-01-01", None)])),
+    ] {
+        if !matches!(Rules::parse(&text), Err(RulesError::Malformed(_))) {
+            wrong.push(format!("{case}: принято"));
+        }
+    }
+    assert!(wrong.is_empty(), "ставки: {wrong:#?}");
+}
+
+/// Список высоких технологий, порог и расходы: значения, которые программа
+/// применит, и один список на всех.
+#[test]
+fn turnover_lists_are_checked() {
+    let mut wrong = Vec::new();
+    let unusable = [
+        (HIGH_TECH, high_tech(&[], "2025-01-01", None)),
+        (HIGH_TECH, high_tech(&["J62.01.0"], "2025-01-01", None)),
+        (HIGH_TECH, with(high_tech(&["62.01.0"], "2025-01-01", None), "classifier", json!("ՀԴ-011-2026"))),
+        (THRESHOLD, threshold(0, "2025-01-01", None)),
+        (EXPENSES, expenses(&[], &["levy"], &["asset"])),
+        (EXPENSES, expenses(&["tax_invoice", "bank_payment"], &["levy"], &["asset"])),
+        (EXPENSES, expenses(&["tax_invoice", "none"], &["levy"], &["asset"])),
+        (EXPENSES, expenses(&["tax_invoice", "tax_invoice"], &["levy"], &["asset"])),
+        (EXPENSES, expenses(&["tax_invoice"], &["levy"], &["levy"])),
+        (EXPENSES, expenses(&["tax_invoice"], &["levy", "levy"], &[])),
+    ];
+    for (kind, record) in unusable {
+        let got = Rules::parse(&file_of(kind, std::slice::from_ref(&record)));
+        if got != Err(RulesError::Unusable(at(kind, 0))) {
+            wrong.push(format!("{kind} {record}: {got:?}"));
+        }
+    }
+    for (kind, first, second) in [
+        (HIGH_TECH, high_tech(&["62.01.0"], "2025-01-01", None), high_tech(&["72.20.0"], "2026-01-01", None)),
+        (THRESHOLD, threshold(115_000_000, "2025-01-01", None), threshold(120_000_000, "2026-01-01", None)),
+    ] {
+        let got = Rules::parse(&file_of(kind, &[first, second]));
+        let expected = Err(RulesError::Overlap {
+            kind,
+            first: 0,
+            second: 1,
+        });
+        if got != expected {
+            wrong.push(format!("{kind} внахлёст: {got:?}"));
+        }
+    }
+    let sound = expenses(&["tax_invoice", "settlement_invoice"], &["levy"], &["asset", "travel"]);
+    if let Err(error) = Rules::parse(&file_of(EXPENSES, &[sound])) {
+        wrong.push(format!("годные расходы: {error:?}"));
+    }
+    assert!(wrong.is_empty(), "списки налога с оборота: {wrong:#?}");
 }

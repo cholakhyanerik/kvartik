@@ -23,6 +23,7 @@ mod pwa;
 mod route;
 mod split;
 mod storage;
+mod tax;
 
 use std::rc::Rc;
 
@@ -38,13 +39,14 @@ use form::Forms;
 use home::Home;
 use icon::{Icon, icon};
 use lang::{LangSwitch, WindowLang};
-use ledger::LedgerScreen;
+use ledger::{LedgerScreen, Operations};
 use nav::Nav;
 use onboarding::Welcome;
 use profile::{ProfileSection, Profiles};
 use pwa::{Program, UpdateDialog, UpdateNotice};
 use route::{Router, Screen};
 use storage::{Storage, StorageAlert, StorageSection};
+use tax::{Closings, Sources, TaxScreen};
 
 /// Строка окна на его языке — производное от сигнала языка, а не значение,
 /// вычисленное один раз: при смене языка она пересобирается сама
@@ -59,8 +61,9 @@ fn tr(lang: ReadSignal<Lang>, key: Key) -> impl Fn() -> &'static str + Copy + Se
 #[derive(Clone, Copy)]
 pub struct Base {
     store: StoredValue<Option<Rc<Store>>, LocalStorage>,
-    /// Открылась ли база — отслеживаемое: раздел, который рисуется позже
-    /// окна (книга, `ui/ledger.rs`), читает своё, когда она открыта.
+    /// Открылась ли база — отслеживаемое: части, которые читают своё сами
+    /// (книга и налог, `Operations::watch`, `Closings::watch`), читают,
+    /// когда она открыта.
     open: RwSignal<bool>,
     /// Растёт, когда данные в базе заменило не действие раздела, а
     /// восстановление из копии: разделы с данными перечитывают своё.
@@ -105,12 +108,14 @@ impl Base {
 }
 
 /// Корень окна (дизайн «Kvartik Design»): меню разделов и экраны —
-/// главный, счета и акты, книга, клиенты, профиль и копия внутри него
-/// (`ui/route.rs`). Все экраны — в странице, открытый виден, остальные
+/// главный, счета и акты, книга, клиенты, налог, профиль и копия внутри
+/// него (`ui/route.rs`). Все экраны — в странице, открытый виден, остальные
 /// спрятаны: начатое в форме не пропадает при переходе. Содержимое
-/// счетов, книги, клиентов и профиля — частями wasm с первого показа
-/// (`split::screen`, задача 61); данные разделов окно читает всё равно при
-/// открытии базы: документы, клиенты и профиль нужны главному экрану.
+/// счетов, книги, клиентов, налога и профиля — частями wasm с первого
+/// показа (`split::screen`, задача 61); документы, клиентов и профиль окно
+/// читает всё равно при открытии базы: они нужны главному экрану. Книгу
+/// и закрытые кварталы читают части, которым они нужны, — книга и налог
+/// (его карточка на главном экране — тоже из части, задача 19).
 /// «Программа» на экране профиля — копия и язык окна — не в части: язык
 /// меняют и тогда, когда часть не загрузилась.
 ///
@@ -145,6 +150,15 @@ pub fn App() -> impl IntoView {
     let profiles = Profiles::new();
     let clients = Clients::new();
     let documents = Documents::new();
+    let operations = Operations::new();
+    let closings = Closings::new();
+    let sources = Sources {
+        documents,
+        operations,
+        profiles,
+        closings,
+    };
+    let tax = tax::Ctx::new(lang, sources, base, backups);
     leptos::task::spawn_local(async move {
         match Store::open(move |event| storage.update(|state| state.apply(event))).await {
             Ok(store) => {
@@ -202,18 +216,21 @@ pub fn App() -> impl IntoView {
                 <UpdateNotice lang program forms />
                 <StorageAlert lang storage />
                 <section id=Screen::Home.id() class="screen" hidden=hidden(Screen::Home)>
-                    <Home lang router program backups profiles documents clients />
+                    <Home lang router program backups profiles documents clients tax />
                 </section>
                 <section id=Screen::Documents.id() class="screen" hidden=hidden(Screen::Documents)>
-                    <DocumentsScreen lang documents clients base backups router forms />
+                    <DocumentsScreen lang documents clients profiles base backups router forms />
                 </section>
                 <section id=Screen::Ledger.id() class="screen" hidden=hidden(Screen::Ledger)>
-                    <LedgerScreen lang documents clients profiles base backups router forms />
+                    <LedgerScreen lang documents clients profiles operations base backups router forms />
                 </section>
                 <section id=Screen::Clients.id() class="screen" hidden=hidden(Screen::Clients)>
                     <h1 tabindex="-1">{tr(lang, Key::ClientsTitle)}</h1>
                     <BackupChip lang backups nudge=true />
                     <ClientsSection lang clients documents base backups router forms />
+                </section>
+                <section id=Screen::Tax.id() class="screen" hidden=hidden(Screen::Tax)>
+                    <TaxScreen ctx=tax router />
                 </section>
                 <section id=Screen::Profile.id() class="screen" hidden=hidden(Screen::Profile)>
                     <h1 tabindex="-1">{tr(lang, Key::ProfileTitle)}</h1>

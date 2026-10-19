@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.47",
+      "date": "2026-10-20",
+      "hy": [
+        "Շրջանառության հարկը եռամսյակի համար. գլխավոր էկրանին՝ հարկի քարտը, իսկ «Հարկ» բաժնում՝ եկամուտն ըստ ամիսների, հաշվարկն ըստ ՊԵԿ ձևի տողերի, նվազեցման փոխանցումը և 115 մլն ֏ շեմի բաժինը։ Դրույքաչափը կախված է գործունեության տեսակից. պրոֆիլում յուրաքանչյուր կոդի համար նշված է հարկի տողը։",
+        "Հաշվարկը ներկայացրե՞լ եք՝ սեղմեք «Փակել եռամսյակը». թվերը կպահպանվեն, և հաջորդ եռամսյակ փոխանցումը կվերցվի դրանցից։ Մատյանում նոր ծախսի տեսակ կա՝ «Աշխատավարձ, հարկ, տուրք, բանկի ծառայություն»։"
+      ],
+      "ru": [
+        "Налог с оборота за квартал: карточка на главном экране, а во вкладке «Налог» — доход по месяцам, расчёт по строкам формы ՊԵԿ, перенос вычета и доля порога 115 млн ֏. Ставка зависит от вида деятельности: у каждого кода в профиле — своя строка налога.",
+        "Подали расчёт — нажмите «Закрыть квартал»: его числа сохранятся, и перенос в следующий квартал возьмётся из них. В книге — новый вид расхода «Зарплата, налог, пошлина, услуга банка»."
+      ],
+      "en": [
+        "Turnover tax for the quarter: a card on the home screen, and in the new “Tax” tab, income by month, the calculation line by line, as in the tax return, the deduction carried forward and your share of the 115 million ֏ threshold. The rate depends on the activity: each code in your profile has its own tax row.",
+        "Filed the return? Press “Close the quarter”: its numbers are kept, and the carry-forward to the next quarter comes from them. The ledger has a new expense kind, “Salary, tax, duty, bank service”."
+      ]
+    },
+    {
       "version": "0.0.46",
       "date": "2026-10-19",
       "hy": [

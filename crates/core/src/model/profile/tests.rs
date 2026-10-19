@@ -31,7 +31,7 @@ const SAMPLE: &str = concat!(
     r#""phone":"+374 91 123456","email":"aram@example.com","#,
     r#""accounts":[{"currency":"USD","number":"127027482877","bank":"Ameriabank CJSC","#,
     r#""swift":"ARMIAM22","correspondent":"Citibank N.A., New York\nSWIFT: CITIUS33"}],"#,
-    r#""activities":["62.01.0","70.22.0"],"regime":"turnover","#,
+    r#""activities":["62.01.0","70.22.0"],"kinds":{"70.22.0":"other"},"regime":"turnover","#,
     r#""person":{"birth_year":1970,"pension_joined":true,"residency":"foreign_with_status","#,
     r#""stops":[{"from":"2026-03-01","until":"2026-06-01"},{"from":"2026-09-15","until":null}]}"#,
     r#"}}"#
@@ -42,7 +42,7 @@ const EMPTY: &str = concat!(
     r#"{"meta":{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":1760000000000,"deleted":null},"#,
     r#""data":{"name":{"hy":"","ru":"","en":""},"tin":null,"registration":"","#,
     r#""address":{"hy":"","ru":"","en":""},"phone":"","email":null,"accounts":[],"#,
-    r#""activities":[],"regime":null,"#,
+    r#""activities":[],"kinds":{},"regime":null,"#,
     r#""person":{"birth_year":null,"pension_joined":null,"residency":null,"stops":[]}}}"#
 );
 
@@ -62,6 +62,10 @@ fn data_shape_is_pinned() {
     assert_eq!(data.accounts[0].currency(), Currency::Usd);
     let codes: Vec<String> = data.activities.iter().map(ToString::to_string).collect();
     assert_eq!(codes, ["62.01.0", "70.22.0"]);
+    assert_eq!(
+        data.kinds,
+        BTreeMap::from([(data.activities[1], IncomeKind::Other)])
+    );
     assert_eq!(data.regime, Some(Regime::Turnover));
     assert_eq!(data.person.birth_year, Some(1970));
     assert_eq!(data.person.pension_joined, Some(true));
@@ -78,6 +82,31 @@ fn data_shape_is_pinned() {
     let empty: Profile = serde_json::from_str(EMPTY).expect("пустой читается");
     assert_eq!(empty.data(), &ProfileData::default());
     assert_eq!(serde_json::to_string(&empty).ok().as_deref(), Some(EMPTY));
+}
+
+/// Профиль версии формата 7 — без строк налога у кодов — читается с пустым
+/// выбором: строки решают правила (Правило 2).
+#[test]
+fn profiles_without_kinds_still_read() {
+    let old = SAMPLE.replacen(r#""kinds":{"70.22.0":"other"},"#, "", 1);
+    assert!(!old.contains("kinds"), "{old}");
+    let profile: Profile = serde_json::from_str(&old).expect("профиль версии 7 читается");
+    assert!(profile.data().kinds.is_empty());
+}
+
+/// Строка налога выбирается только коду из профиля: у кода, которого нет,
+/// — порча, и команда её не сохранит.
+#[test]
+fn kinds_belong_to_listed_codes() {
+    let stray = SAMPLE.replacen(r#""kinds":{"70.22.0":"other"}"#, r#""kinds":{"74.10.0":"other"}"#, 1);
+    assert!(serde_json::from_str::<Profile>(&stray).is_err());
+    let unknown = SAMPLE.replacen(r#""70.22.0":"other""#, r#""70.22.0":"luxury""#, 1);
+    assert!(serde_json::from_str::<Profile>(&unknown).is_err());
+    let mut data = ProfileData::default();
+    data.kinds.insert(ActivityCode::parse("47.91.0").expect("код"), IncomeKind::Trade);
+    assert_eq!(Profile::save(None, data.clone(), at(1_000)), Err(ProfileError::StrayKind));
+    data.activities.push(ActivityCode::parse("47.91.0").expect("код"));
+    assert!(Profile::save(None, data, at(1_000)).is_ok());
 }
 
 /// Испорченное не читается: незнакомое поле, запретное значение в любом

@@ -1,0 +1,26 @@
+{
+  "about": "ИП с программированием (62.01.0) и дизайном (74.10.0): две строки расчёта, общие расходы делятся по весу дохода в обороте всех видов, IT тоже",
+  "checked": {
+    "by": "агент Kvartik вручную по НК, ст. 258, ч. 1, строки 8 и 10, ст. 260, ч. 1–3, и ответу бухгалтера-агента 2026-10-19 на вопрос 1.4 листа сверки. Оборот 3 000 000 + 1 000 000 = 4 000 000; дизайну — 400 000 × 1 000 000 / 4 000 000 = 100 000 расходов. IT: 1 % от 3 000 000 = 30 000. Дизайн: 100 000 − 6 000 = 94 000 ≥ 45 000. Всего 124 000",
+    "on": "2026-10-19",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["62.01.0", "74.10.0"]
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-07-10", "minor": 3000000, "currency": "AMD", "rate_e4": null, "activity": "62.01.0", "proof": null, "nature": null},
+    {"flow": "income", "date": "2026-08-10", "minor": 1000000, "currency": "AMD", "rate_e4": null, "activity": "74.10.0", "proof": null, "nature": null},
+    {"flow": "expense", "date": "2026-09-01", "minor": 400000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"}
+  ],
+  "expected": [
+    {
+      "quarter": "2026-3",
+      "tax": 124000,
+      "lines": [
+        {"kind": "high_tech", "income": 3000000, "tax": 30000},
+        {"kind": "other", "income": 1000000, "tax": 94000, "carry_out": 0}
+      ]
+    }
+  ]
+}

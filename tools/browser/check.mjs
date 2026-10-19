@@ -37,9 +37,9 @@
 //   и мимо service worker (`Network.setBypassServiceWorker`): он при первом
 //   заходе сам скачивает весь сайт и забирает страницу (`clients.claim`
 //   в `sw.js`), и часть пришла бы из его кэша мимо блокировки. Загрузчик
-//   частей (`wasm_split_cli_support` 0.2.3) оставляет на заблокированной
-//   части необработанный отказ `Failed to fetch` — это его код, человеку он
-//   не мешает, и провалом здесь не считается.
+//   частей (`wasm_split_cli_support` 0.2.4) пишет отказ заблокированной
+//   части в консоль (`console.error` в `wrapAsyncCb`) — это его код,
+//   человеку он не мешает, и провалом здесь не считается.
 // - «Без сети» — выключенный сервер, а не эмуляция (Правило 2).
 
 import { parseArgs } from "node:util";
@@ -113,6 +113,18 @@ const FORMS = [
     shown: VISIBLE("#profile-accounts"), gone: HIDDEN("#profile-accounts") },
 ];
 
+/// Экраны без формы: их содержимое рисует часть экрана — налог (задача 19).
+const SCREENS = [
+  { name: "Налог", hash: "#/tax", shown: TEXT_IN("#tax", s("TaxTurnover")) },
+];
+
+async function screens(page, when) {
+  for (const screen of SCREENS) {
+    await go(page, screen.hash);
+    checks.check(`${when}: экран «${screen.name}»`, await page.waitFor(screen.shown));
+  }
+}
+
 async function forms(page, when) {
   for (const f of FORMS) {
     await go(page, f.hash);
@@ -145,7 +157,7 @@ async function blocked(browser) {
   try {
     await page.send("Network.enable");
     await page.send("Network.setBypassServiceWorker", { bypass: true });
-    await page.send("Network.setBlockedURLs", { urls: ["*split_ledger_screen-*"] });
+    await page.send("Network.setBlockedURLs", { urls: ["*split_book_part-*"] });
     await page.emulate(360);
     await page.go(`${ORIGIN}/app/`);
     await page.setLang(opt.lang);
@@ -162,7 +174,7 @@ async function blocked(browser) {
     checks.check("блокировка снята: книга открылась",
       await page.waitFor(`return ${BUTTON("#ledger", s("LedgerAddIncome"))} ? true : null;`));
     checks.check("блокировка: без плашки сбоя", await page.eval(NO_PANIC));
-    const errors = [...new Set(page.errors)].filter((e) => !/split_ledger_screen|Failed to fetch/.test(e));
+    const errors = [...new Set(page.errors)].filter((e) => !/split_book_part|Failed to fetch/.test(e));
     checks.check("блокировка: других ошибок в консоли нет", errors.length === 0, errors.slice(0, 8).join(" | "));
   } finally {
     await page.close();
@@ -275,6 +287,7 @@ async function main() {
     const sample = await restore(page);
     checks.check("с сетью: страницей правит service worker", (await page.waitFor(CONTROLLER)) === `${ORIGIN}/app/sw.js`);
     await forms(page, "с сетью");
+    await screens(page, "с сетью");
     await card(page, "с сетью");
     await backup(page, sample.password);
     const loaded = await page.eval(`return performance.getEntriesByType("resource").map((e) => e.name);`);
@@ -291,6 +304,7 @@ async function main() {
     checks.check("без сети: рабочий экран из кэша",
       (await page.waitFor(WORKING)) && (await page.eval(CONTROLLER)) === `${ORIGIN}/app/sw.js`);
     await forms(page, "без сети");
+    await screens(page, "без сети");
     await card(page, "без сети");
     checks.check("без сети: без плашки сбоя", await page.eval(NO_PANIC));
     const offline = [...new Set(page.errors)];

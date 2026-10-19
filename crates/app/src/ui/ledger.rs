@@ -10,8 +10,9 @@
 //! Экран — своей частью wasm (`ui/split.rs`) и рисуется с первого показа,
 //! а не при открытии окна: первому заходу он не нужен, а каждый экран
 //! в главном wasm — около 45 КБ после brotli и четверть секунды рабочего
-//! экрана на телефоне (CLAUDE.md, Правило 1; задача 61). Записи книги он
-//! читает сам, когда база открыта: главному экрану они пока не нужны.
+//! экрана на телефоне (CLAUDE.md, Правило 1; задача 61). В той же части —
+//! налог (`ui/tax.rs`, задача 19): он считается из книги. Записи книги
+//! читает часть, а не главный wasm ([`Operations::watch`]).
 //!
 //! Суммы и курс человек вводит по правилам языка окна, и окно сразу
 //! показывает, что поняло (Правило 6, «Ввод суммы не угадывается»).
@@ -28,11 +29,13 @@ use kvartik_core::model::document::DocKind;
 use kvartik_core::model::ledger::{
     self, Flow, Nature, Operation, OperationData, OperationError, Proof, Source,
 };
-use kvartik_core::model::money::{Currency, ExchangeRate, Money, RateSource};
+use kvartik_core::model::money::{Currency, ExchangeRate, Lumas, Money, RateSource};
 use kvartik_core::model::record::RecordId;
 use kvartik_core::model::text::Line;
+use kvartik_core::tax::turnover;
 use leptos::ev::{Event, SubmitEvent};
 use leptos::prelude::*;
+use leptos::wasm_split::SplitLoaderError;
 use web_sys::HtmlInputElement;
 
 use super::backup::{BackupChip, Backups};
@@ -44,6 +47,7 @@ use super::profile::Profiles;
 use super::route::{Router, Screen};
 use super::split::{screen, split};
 use super::storage::error_key;
+use super::tax;
 use super::{Base, tr};
 use crate::platform::{clock, file, image};
 use crate::platform::file::Download;
@@ -72,6 +76,7 @@ pub(super) struct Ctx {
     documents: Documents,
     clients: Clients,
     profiles: Profiles,
+    operations: Operations,
     base: Base,
     backups: Backups,
     /// Открытые формы окна: форма записи отмечается в них, пока открыта.
@@ -88,6 +93,7 @@ pub fn LedgerScreen(
     documents: Documents,
     clients: Clients,
     profiles: Profiles,
+    operations: Operations,
     base: Base,
     backups: Backups,
     router: Router,
@@ -98,6 +104,7 @@ pub fn LedgerScreen(
         documents,
         clients,
         profiles,
+        operations,
         base,
         backups,
         forms,
@@ -106,15 +113,36 @@ pub fn LedgerScreen(
     view! {
         <h1 tabindex="-1">{tr(lang, Key::LedgerTitle)}</h1>
         <BackupChip lang backups nudge=true />
-        {screen(lang, router, Screen::Ledger, move || ledger_screen(ctx))}
+        {screen(lang, router, Screen::Ledger, move || book_part(BookView::Ledger(ctx)))}
     }
 }
 
+/// Что рисует часть книги.
+#[derive(Clone, Copy)]
+pub(super) enum BookView {
+    /// Содержимое экрана книги.
+    Ledger(Ctx),
+    /// Карточка налога на главном экране или содержимое экрана налога.
+    Tax(tax::Ctx, tax::Part),
+}
+
 split! {
-    /// Содержимое экрана книги — своей частью wasm (`ui/split.rs`).
-    pub(super) fn ledger_screen(ctx: Ctx) -> AnyView, preload preload_ledger {
-        view! { <LedgerBody ctx /> }.into_any()
+    /// Экран книги и налог — одной частью wasm (`ui/split.rs`). Налог
+    /// считается из книги, а своей частью он делил общий код почти со всеми
+    /// частями: правила — с формами, книгу — с копией, — и программа разреза
+    /// завела бы 28 лишних кусков (замер 0.0.47; CLAUDE.md, Правило 6).
+    pub(super) fn book_part(view: BookView) -> AnyView, preload preload_book {
+        match view {
+            BookView::Ledger(ctx) => view! { <LedgerBody ctx /> }.into_any(),
+            BookView::Tax(ctx, part) => tax::content(ctx, part),
+        }
     }
+}
+
+/// Налог — карточку или экран — из части книги (`ui/tax.rs`). В тестах
+/// функция части видна только своему модулю (`split!`).
+pub(super) async fn tax_part(ctx: tax::Ctx, part: tax::Part) -> Result<AnyView, SplitLoaderError> {
+    book_part(BookView::Tax(ctx, part)).await
 }
 
 /// Где записи книги.
@@ -183,18 +211,49 @@ impl Problem {
     }
 }
 
-/// Состояние экрана — у его частей общее.
+/// Записи книги — одни на окно (задача 19): их показывает экран книги,
+/// а налог из них считают карточка главного экрана и экран налога.
 #[derive(Clone, Copy)]
-struct Ledger {
-    ctx: Ctx,
+pub struct Operations {
     book: RwSignal<Book>,
-    mode: RwSignal<Mode>,
-    notice: RwSignal<Option<Notice>>,
+    /// Следит ли уже кто-то за базой (`watch`).
+    watched: StoredValue<bool>,
 }
 
-impl Ledger {
-    /// Прочитать записи книги — когда база открылась и когда её заменило
-    /// восстановление из копии. Вложения не читаются: их читает форма.
+impl Operations {
+    pub fn new() -> Self {
+        Self {
+            book: RwSignal::new(Book::Loading),
+            watched: StoredValue::new(false),
+        }
+    }
+
+    /// Читать записи книги, когда база открылась и когда её заменило
+    /// восстановление из копии. Зовут части, которым нужна книга, — экран
+    /// книги и налог (`ui/tax.rs`), — а следит та, что позвала первой: она
+    /// живёт до конца окна. В главном wasm чтения книги нет — ни байтов, ни
+    /// работы до рабочего экрана (замер 0.0.47, docs/measurements.md).
+    pub(super) fn watch(&self, base: Base) {
+        if self.watched.get_value() {
+            return;
+        }
+        self.watched.set_value(true);
+        let operations = *self;
+        Effect::watch(
+            move || (base.is_open(), base.replacements()),
+            move |(open, _), _, _| {
+                if !*open {
+                    return;
+                }
+                if let Some(store) = base.get() {
+                    leptos::task::spawn_local(async move { operations.load(&store).await });
+                }
+            },
+            true,
+        );
+    }
+
+    /// Прочитать записи книги. Вложения не читаются: их читает форма.
     async fn load(&self, store: &Store) {
         let read = async { store.read()?.list::<Operation>().await };
         self.book.set(match read.await {
@@ -229,7 +288,7 @@ impl Ledger {
 
     /// Что-то, посчитанное по записям; пока их нет — значение по
     /// умолчанию. Отслеживаемое.
-    fn with<T: Default>(&self, read: impl FnOnce(&[Operation], usize) -> T) -> T {
+    pub(super) fn with<T: Default>(&self, read: impl FnOnce(&[Operation], usize) -> T) -> T {
         self.book.with(|book| match book {
             Book::Ready {
                 operations,
@@ -237,6 +296,49 @@ impl Ledger {
             } => read(operations, *unreadable),
             Book::Loading | Book::Failed(_) => T::default(),
         })
+    }
+
+    /// Почему записи не прочитались — отслеживаемое.
+    pub(super) fn failure(&self) -> Option<StoreError> {
+        self.book.with(|book| match book {
+            Book::Failed(error) => Some(*error),
+            Book::Loading | Book::Ready { .. } => None,
+        })
+    }
+
+    /// Стадия чтения — отслеживаемое.
+    fn phase(&self) -> Phase {
+        self.book.with(|book| match book {
+            Book::Loading => Phase::Loading,
+            Book::Ready { .. } => Phase::Ready,
+            Book::Failed(error) => Phase::Failed(*error),
+        })
+    }
+}
+
+/// Состояние экрана — у его частей общее.
+#[derive(Clone, Copy)]
+struct Ledger {
+    ctx: Ctx,
+    mode: RwSignal<Mode>,
+    notice: RwSignal<Option<Notice>>,
+}
+
+impl Ledger {
+    async fn load(&self, store: &Store) {
+        self.ctx.operations.load(store).await;
+    }
+
+    fn put(&self, operation: Operation) {
+        self.ctx.operations.put(operation);
+    }
+
+    fn get(&self, id: RecordId) -> Option<Operation> {
+        self.ctx.operations.get(id)
+    }
+
+    fn with<T: Default>(&self, read: impl FnOnce(&[Operation], usize) -> T) -> T {
+        self.ctx.operations.with(read)
     }
 }
 
@@ -254,33 +356,21 @@ enum Phase {
 fn LedgerBody(ctx: Ctx) -> impl IntoView {
     let ledger = Ledger {
         ctx,
-        book: RwSignal::new(Book::Loading),
         mode: RwSignal::new(Mode::List),
         notice: RwSignal::new(None),
     };
-    // База открылась или её заменило восстановление из копии — записи
-    // перечитываются.
+    ctx.operations.watch(ctx.base);
+    // Копию восстановили — открытая форма показала бы прежнюю запись:
+    // экран возвращается к списку, а записи перечитывает `Operations::watch`.
     Effect::watch(
-        move || (ctx.base.is_open(), ctx.base.replacements()),
-        move |(open, _), _, _| {
-            if !*open {
-                return;
-            }
-            if let Some(store) = ctx.base.get() {
-                ledger.mode.set(Mode::List);
-                ledger.notice.set(None);
-                leptos::task::spawn_local(async move { ledger.load(&store).await });
-            }
+        move || ctx.base.replacements(),
+        move |_, _, _| {
+            ledger.mode.set(Mode::List);
+            ledger.notice.set(None);
         },
-        true,
+        false,
     );
-    let phase = Memo::new(move |_| {
-        ledger.book.with(|book| match book {
-            Book::Loading => Phase::Loading,
-            Book::Ready { .. } => Phase::Ready,
-            Book::Failed(error) => Phase::Failed(*error),
-        })
-    });
+    let phase = Memo::new(move |_| ctx.operations.phase());
     move || match (phase.get(), ledger.mode.get()) {
         (Phase::Loading, _) => None,
         (Phase::Failed(error), _) => Some(
@@ -307,8 +397,8 @@ struct Shown {
     flow: Flow,
     date: Date,
     amount: Money,
-    /// Сумма в драмах; `None` — валюта без курса.
-    amd: Option<Money>,
+    /// Сумма в драмах с лумами; `None` — валюта без курса.
+    amd: Option<Lumas>,
 }
 
 /// Откуда строка.
@@ -359,7 +449,7 @@ impl Shown {
             flow: row.flow,
             date: row.date,
             amount: row.amount,
-            amd: row.amd().ok(),
+            amd: row.lumas().ok(),
         }
     }
 }
@@ -517,14 +607,14 @@ fn LedgerList(ledger: Ledger) -> impl IntoView {
                     <dt>{tr(lang, Key::LedgerIncome)}</dt>
                     <dd class="ledger-sum">{move || {
                         let lang = lang.get();
-                        quarterly.with(|q| q.totals.map(|totals| i18n::money(lang, totals.income)))
+                        quarterly.with(|q| q.totals.map(|totals| i18n::lumas(lang, totals.income)))
                     }}</dd>
                 </div>
                 <div>
                     <dt>{tr(lang, Key::LedgerExpenses)}</dt>
                     <dd class="ledger-sum">{move || {
                         let lang = lang.get();
-                        quarterly.with(|q| q.totals.map(|totals| i18n::money(lang, totals.expense)))
+                        quarterly.with(|q| q.totals.map(|totals| i18n::lumas(lang, totals.expense)))
                     }}</dd>
                 </div>
             </dl>
@@ -653,6 +743,7 @@ const fn proof_key(proof: Proof) -> Key {
 const fn nature_key(nature: Nature) -> Key {
     match nature {
         Nature::Ordinary => Key::NatureOrdinary,
+        Nature::Levy => Key::NatureLevy,
         Nature::Asset => Key::NatureAsset,
         Nature::Travel => Key::NatureTravel,
         Nature::Hospitality => Key::NatureHospitality,
@@ -682,7 +773,7 @@ fn LineEntry(ledger: Ledger, line: Shown) -> impl IntoView {
             {match (foreign, amd) {
                 (false, _) => None,
                 (true, Some(amd)) => Some(view! {
-                    <span class="hint">{move || i18n::money(lang.get(), amd)}</span>
+                    <span class="hint">{move || i18n::lumas(lang.get(), amd)}</span>
                 }
                 .into_any()),
                 (true, None) => Some(view! {
@@ -1004,8 +1095,9 @@ impl Form {
     }
 
     /// Данные из полей и новые файлы; `None` — где-то ошибка, и её видно
-    /// у поля.
-    fn data(&self, window: Lang) -> Option<(OperationData, Vec<(String, FileBytes)>)> {
+    /// у поля. `needed` — нужен ли доходу вид деятельности
+    /// (`turnover::activity_needed`).
+    fn data(&self, window: Lang, needed: bool) -> Option<(OperationData, Vec<(String, FileBytes)>)> {
         let text = Line::new(&self.text.get_untracked()).ok().filter(|text| !text.is_empty())?;
         let amount = self.amount(window).filter(|amount| amount.minor() > 0)?;
         let paid = optional(&self.paid.get_untracked(), |text| Date::from_iso(text).ok_or(()))?;
@@ -1025,7 +1117,13 @@ impl Form {
             attachments: rows.iter().filter_map(|row| row.saved.clone()).collect(),
         };
         match self.flow {
-            Flow::Income => data.client = self.client.get_untracked(),
+            Flow::Income => {
+                data.client = self.client.get_untracked();
+                data.activity = self.activity.get_untracked();
+                if needed && data.activity.is_none() {
+                    return None;
+                }
+            }
             Flow::Expense => {
                 data.supplier = Line::new(&self.supplier.get_untracked()).ok()?;
                 data.proof = Some(self.proof.get_untracked()?);
@@ -1082,11 +1180,11 @@ pub(super) fn equivalent(lang: Lang, amount: Option<Money>, rate: &str, date: Op
     let amount = amount?;
     let per_unit_e4 = i18n::parse_rate(lang, rate).ok()?;
     let rate = ExchangeRate::new(amount.currency(), per_unit_e4, date?, RateSource::Manual).ok()?;
-    let amd = amount.to_amd(Some(rate)).ok()?;
+    let amd = amount.to_lumas(Some(rate)).ok()?;
     Some(fill(
         t(lang, Key::RateEquivalent),
         &[
-            &i18n::money(lang, amd),
+            &i18n::lumas(lang, amd),
             &i18n::rate_pair(lang, amount.currency(), per_unit_e4),
         ],
     ))
@@ -1110,6 +1208,11 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
     let links = RwSignal::new_local(Vec::<(u32, Rc<Download>)>::new());
     let alive = Memo::new(move |_| ctx.clients.alive());
     let activities = Memo::new(move |_| ctx.profiles.activities());
+    // Нужен ли доходу вид деятельности на день записи (задача 19).
+    let needed = Memo::new(move |_| {
+        let day = form.date.with(|text| Date::from_iso(text)).or(ctx.today);
+        day.is_some_and(|day| ctx.profiles.with(|profile| turnover::activity_needed(profile, day)))
+    });
 
     // Прежние вложения — прочитать и дать на них ссылки. Не прочиталось —
     // файл в списке без ссылки: убрать его можно и так.
@@ -1186,7 +1289,7 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
             return;
         }
         form.tried.set(true);
-        let Some((data, fresh)) = form.data(lang.get_untracked()) else {
+        let Some((data, fresh)) = form.data(lang.get_untracked(), needed.get_untracked()) else {
             invalid.set(true);
             return;
         };
@@ -1292,6 +1395,18 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
                             }).collect_view()}
                         </select>
                     </label>
+                    // Вид деятельности дохода — когда без него не узнать
+                    // строку налога или режим (задача 19).
+                    {move || (needed.get() || form.activity.get().is_some()).then(|| view! {
+                        <IncomeActivity
+                            lang
+                            activities
+                            chosen=form.activity
+                            date=form.date
+                            tried
+                            required=needed
+                        />
+                    })}
                 }
                 .into_any(),
                 Flow::Expense => view! {
@@ -1483,6 +1598,64 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
     }
 }
 
+/// Вид деятельности дохода — код из профиля (задача 19): у ИП, чьи коды
+/// облагаются по разным строкам налога. Выбор обязателен, а доход по коду,
+/// который закрывает налог с оборота, — предупреждением сразу (решение
+/// человека 2026-10-19). Общее у записи дохода и формы документа.
+#[component]
+pub(super) fn IncomeActivity(
+    lang: ReadSignal<Lang>,
+    activities: Memo<Vec<ActivityCode>>,
+    chosen: RwSignal<Option<ActivityCode>>,
+    /// День дохода — записью ISO: по нему правило о кодах.
+    date: RwSignal<String>,
+    tried: RwSignal<bool>,
+    /// Обязателен ли вид (`turnover::activity_needed`): нет — его можно не
+    /// выбирать.
+    required: Memo<bool>,
+) -> impl IntoView {
+    view! {
+        <label>
+            {tr(lang, Key::OpActivity)}
+            <select on:change=move |event| {
+                let picked = event_target_value(&event);
+                chosen.set(ActivityCode::parse(&picked).ok());
+            }>
+                <option value="" prop:selected=move || chosen.get().is_none()>
+                    {tr(lang, Key::NotChosen)}
+                </option>
+                {move || {
+                    let mut codes = activities.get();
+                    if let Some(own) = chosen.get_untracked()
+                        && !codes.contains(&own)
+                    {
+                        codes.push(own);
+                    }
+                    codes.into_iter().map(|code| view! {
+                        <option value=code.to_string() prop:selected=move || chosen.get() == Some(code)>
+                            {code.to_string()}
+                        </option>
+                    }).collect_view()
+                }}
+            </select>
+        </label>
+        <p class="hint">{tr(lang, Key::IncomeActivityHint)}</p>
+        {shown_problem(tried, move || {
+            (required.get() && chosen.get().is_none()).then(|| t(lang.get(), Key::IncomeActivityMissing).to_owned())
+        })}
+        {move || {
+            let code = chosen.get()?;
+            let day = date.with(|text| Date::from_iso(text))?;
+            turnover::excluded(&code, day)?;
+            Some(view! {
+                <p class="warning" role="alert">{move || {
+                    fill(t(lang.get(), Key::IncomeExcluded), &[&code.to_string()])
+                }}</p>
+            })
+        }}
+    }
+}
+
 /// Файл в форме: картинка — миниатюрой, имя — ссылкой на сам файл, размер
 /// и «Убрать».
 #[component]
@@ -1551,6 +1724,7 @@ const fn proof_code(proof: Proof) -> &'static str {
 const fn nature_code(nature: Nature) -> &'static str {
     match nature {
         Nature::Ordinary => "ordinary",
+        Nature::Levy => "levy",
         Nature::Asset => "asset",
         Nature::Travel => "travel",
         Nature::Hospitality => "hospitality",

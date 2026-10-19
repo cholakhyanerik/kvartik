@@ -1,0 +1,22 @@
+{
+  "about": "Дизайнер (74.10.0) с расходами почти во весь доход: налог упирается в нижний предел, остаток вычета переносится в IV квартал; комиссия банка по платёжке — в вычете, командировка — нет",
+  "checked": {
+    "by": "агент Kvartik вручную по НК, ст. 258, ч. 1, строка 10, ч. 5–7, ст. 55, ч. 12, и приказу ՊԵԿ 299-Ն, прил. 1, п. 49–60. III квартал: в вычет 900 000 + 50 000 = 950 000 (командировка 30 000 — нет); 9.3 = 100 000; 9.6 = 57 000; 9.9 = 45 000; 100 000 − 57 000 = 43 000 < 45 000 — 9.10 = 45 000, 9.11 = 57 000 − (100 000 − 45 000) = 2 000. IV квартал: 9.7 = 2 000; 100 000 − 2 000 = 98 000",
+    "on": "2026-10-19",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["74.10.0"]
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-07-15", "minor": 1000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "expense", "date": "2026-08-01", "minor": 900000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"},
+    {"flow": "expense", "date": "2026-08-15", "minor": 50000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "bank_payment", "nature": "levy"},
+    {"flow": "expense", "date": "2026-09-01", "minor": 30000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "travel"},
+    {"flow": "income", "date": "2026-10-15", "minor": 1000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null}
+  ],
+  "expected": [
+    {"quarter": "2026-3", "tax": 45000, "lines": [{"kind": "other", "income": 1000000, "tax": 45000, "carry_out": 2000}]},
+    {"quarter": "2026-4", "tax": 98000, "lines": [{"kind": "other", "income": 1000000, "tax": 98000, "carry_out": 0}]}
+  ]
+}

@@ -22,17 +22,20 @@ use std::sync::Arc;
 
 use kvartik_core::format::Stored;
 use kvartik_core::i18n::{self, Key, Lang, ParseError, fill, t};
+use kvartik_core::model::activity::ActivityCode;
 use kvartik_core::model::client::Client;
 use kvartik_core::model::country::Country;
 use kvartik_core::model::date::Date;
 use kvartik_core::model::document::{
     DocError, DocKind, Document, DocumentData, Item, Payment, QUANTITY_DIGITS, Status,
 };
+use kvartik_core::model::ledger;
 use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::model::profile::Profile;
 use kvartik_core::model::record::RecordId;
 use kvartik_core::model::recurring::Recurring;
 use kvartik_core::model::text::Line;
+use kvartik_core::tax::turnover;
 use leptos::ev::SubmitEvent;
 use leptos::prelude::*;
 
@@ -41,8 +44,9 @@ use super::backup::{BackupChip, Backups};
 use super::clients::Clients;
 use super::form::{CURRENCIES, Forms, TextField, WizardHead, currency_code, currency_key};
 use super::icon::{Icon, icon};
-use super::ledger::{equivalent, rate_problem};
+use super::ledger::{IncomeActivity, equivalent, rate_problem};
 use super::paper::{PaperPanel, Request};
+use super::profile::Profiles;
 use super::route::{Router, Screen};
 use super::split::{part, screen, split};
 use super::storage::error_key;
@@ -200,6 +204,14 @@ impl Documents {
         })
     }
 
+    /// Почему документы не прочитались — отслеживаемое.
+    pub(super) fn failure(&self) -> Option<StoreError> {
+        self.state.with(|state| match state {
+            State::Failed(error) => Some(*error),
+            State::Loading | State::Ready { .. } => None,
+        })
+    }
+
     /// Сколько живых документов у клиента — их число называет сообщение об
     /// удалении клиента: документы остаются.
     pub fn count_for_client(&self, client: RecordId) -> usize {
@@ -273,6 +285,8 @@ enum Notice {
     Paid,
     /// Курс документа сохранён (задача 14).
     RateSaved,
+    /// Вид деятельности документа сохранён (задача 19).
+    ActivitySaved,
     /// Акт отмечен подписанным клиентом и отметка снята (задача 62).
     Signed,
     Unsigned,
@@ -347,6 +361,8 @@ struct Ctx {
     lang: ReadSignal<Lang>,
     documents: Documents,
     clients: Clients,
+    /// Профиль — его коды: вид деятельности дохода (задача 19).
+    profiles: Profiles,
     base: Base,
     backups: Backups,
     mode: RwSignal<Mode>,
@@ -375,6 +391,7 @@ pub fn DocumentsScreen(
     lang: ReadSignal<Lang>,
     documents: Documents,
     clients: Clients,
+    profiles: Profiles,
     base: Base,
     backups: Backups,
     router: Router,
@@ -384,6 +401,7 @@ pub fn DocumentsScreen(
         lang,
         documents,
         clients,
+        profiles,
         base,
         backups,
         mode: documents.mode,
@@ -931,6 +949,7 @@ fn NoticeLine(ctx: Ctx, busy: RwSignal<bool>, failure: RwSignal<Option<Problem>>
             Notice::Saved => view! { <p role="status">{tr(lang, Key::DocSaved)}</p> }.into_any(),
             Notice::Paid => view! { <p role="status">{tr(lang, Key::PaymentSaved)}</p> }.into_any(),
             Notice::RateSaved => view! { <p role="status">{tr(lang, Key::DocRateSaved)}</p> }.into_any(),
+            Notice::ActivitySaved => view! { <p role="status">{tr(lang, Key::DocActivitySaved)}</p> }.into_any(),
             Notice::Signed => view! { <p role="status">{tr(lang, Key::SignSaved)}</p> }.into_any(),
             Notice::Unsigned => view! { <p role="status">{tr(lang, Key::SignRemoved)}</p> }.into_any(),
             Notice::Restored => {
@@ -1000,6 +1019,8 @@ enum Change {
     /// Курс выпущенного документа: драмы за единицу в десятитысячных,
     /// `None` — убрать (задача 14).
     SetRate(Option<i64>),
+    /// Вид деятельности выпущенного документа, `None` — убрать (задача 19).
+    SetActivity(Option<ActivityCode>),
     /// Акт подписан клиентом в этот день и отметка снята (задача 62).
     Sign(Date),
     Unsign,
@@ -1057,6 +1078,7 @@ async fn apply(store: &Store, id: RecordId, change: Change) -> Result<Option<Doc
         Change::AddPayment(payment) => Some(document.add_payment(payment, now)?),
         Change::RemovePayment(payment) => document.remove_payment(payment, now),
         Change::SetRate(per_unit_e4) => document.set_rate(per_unit_e4, now)?,
+        Change::SetActivity(activity) => document.set_activity(activity, now)?,
         Change::Sign(day) => document.sign(day, now)?,
         Change::Unsign => document.unsign(now),
     };
@@ -1102,6 +1124,8 @@ struct Form {
     /// Курс ЦБ для дня оказания услуги — строкой языка окна; пусто — курса
     /// ещё нет (задача 14).
     rate: RwSignal<String>,
+    /// Вид деятельности дохода — код профиля (задача 19).
+    activity: RwSignal<Option<ActivityCode>>,
     items: RwSignal<Vec<ItemRow>>,
     basis: Option<RecordId>,
     recurring: Option<RecordId>,
@@ -1140,6 +1164,7 @@ impl Form {
                     .map(|rate| i18n::rate(window, rate.per_unit_e4()))
                     .unwrap_or_default(),
             ),
+            activity: RwSignal::new(data.and_then(|d| d.activity)),
             items: RwSignal::new(Vec::new()),
             basis: data.and_then(|d| d.basis),
             recurring: data.and_then(|d| d.recurring),
@@ -1207,8 +1232,10 @@ impl Form {
         }
     }
 
-    /// Данные из полей; `None` — где-то ошибка, и её видно у поля.
-    fn data(&self, window: Lang) -> Option<DocumentData> {
+    /// Данные из полей; `None` — где-то ошибка, и её видно у поля. `needed`
+    /// — нужен ли доходу вид деятельности (`turnover::activity_needed`,
+    /// задача 19).
+    fn data(&self, window: Lang, needed: bool) -> Option<DocumentData> {
         let currency = self.currency.get_untracked()?;
         let items = self
             .items
@@ -1235,7 +1262,11 @@ impl Form {
             basis: self.basis,
             recurring: self.recurring,
             rate: None,
+            activity: self.activity.get_untracked(),
         };
+        if needed && data.activity.is_none() {
+            return None;
+        }
         // Курс — только у валюты и для дня оказания услуги: поменяли день
         // или валюту — курс в данных следует за ними (`rate_for`).
         let typed = self.rate.get_untracked();
@@ -1352,6 +1383,13 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
     let invalid = RwSignal::new(false);
     let tried = form.tried;
     let alive = Memo::new(move |_| clients.alive());
+    // Коды профиля и нужен ли доходу вид деятельности на день услуги
+    // (задача 19).
+    let activities = Memo::new(move |_| ctx.profiles.activities());
+    let needed = Memo::new(move |_| {
+        let day = form.service_date.with(|text| Date::from_iso(text)).or(ctx.today);
+        day.is_some_and(|day| ctx.profiles.with(|profile| turnover::activity_needed(profile, day)))
+    });
     // Выбранный клиент — из живых.
     let chosen = move || {
         let chosen = form.client.get()?;
@@ -1405,7 +1443,7 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
             return;
         }
         form.tried.set(true);
-        let Some(data) = form.data(lang.get_untracked()) else {
+        let Some(data) = form.data(lang.get_untracked(), needed.get_untracked()) else {
             invalid.set(true);
             return;
         };
@@ -1456,7 +1494,7 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
     let preview = RwSignal::new(None::<Request>);
     let show_preview = move |_| {
         form.tried.set(true);
-        let Some(data) = form.data(lang.get_untracked()) else {
+        let Some(data) = form.data(lang.get_untracked(), needed.get_untracked()) else {
             invalid.set(true);
             return;
         };
@@ -1820,6 +1858,18 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                 <button type="button" class="secondary" on:click=last_day>
                     {tr(lang, Key::DocLastDay)}
                 </button>
+                // Вид деятельности дохода — когда без него не узнать строку
+                // налога или режим (задача 19).
+                {move || (needed.get() || form.activity.get().is_some()).then(|| view! {
+                    <IncomeActivity
+                        lang
+                        activities
+                        chosen=form.activity
+                        date=form.service_date
+                        tried
+                        required=needed
+                    />
+                })}
                 <Show when=foreign>
                     <label>
                         {move || {
@@ -2036,6 +2086,7 @@ fn DocView(ctx: Ctx, id: RecordId) -> impl IntoView {
             {back}
             <DocCard ctx document=shown.clone() busy failure />
             {foreign.then(|| view! { <DocRate ctx document=shown.clone() busy failure /> })}
+            {shown.annulled().is_none().then(|| view! { <DocActivity ctx document=shown.clone() busy failure /> })}
             <NoticeLine ctx busy failure />
             {move || failure.get().map(|problem| view! { <p role="alert">{tr(lang, problem.key())}</p> })}
             <DocItems ctx document=shown.clone() />
@@ -2117,7 +2168,7 @@ fn DocCard(
             // Итог в драмах по курсу ЦБ — под итогом, как в дизайне «Kvartik
             // Design» (экран 05); у действующего документа в валюте.
             {(data.currency != Currency::Amd && open).then(|| {
-                let amd = data.total_amd().ok();
+                let amd = data.total_lumas().ok();
                 let (currency, rate) = (data.currency, data.rate);
                 view! {
                     <p class="hint">{move || {
@@ -2125,7 +2176,7 @@ fn DocCard(
                         match (amd, rate) {
                             (Some(amd), Some(rate)) => format!(
                                 "{} ({})",
-                                fill(t(lang, Key::LedgerInDrams), &[&i18n::money(lang, amd)]),
+                                fill(t(lang, Key::LedgerInDrams), &[&i18n::lumas(lang, amd)]),
                                 i18n::rate_pair(lang, currency, rate.per_unit_e4())
                             ),
                             _ => t(lang, Key::DocRateMissing).to_owned(),
@@ -2280,6 +2331,64 @@ fn DocRate(
                 .into_any()
             }}
         </div>
+    }
+}
+
+/// Вид деятельности выпущенного документа (задача 19): у ИП, которому он
+/// нужен (`turnover::activity_needed`), — выбором и «Сохранить», как курс.
+/// В PDF его нет: выпущенный документ от него не меняется
+/// (`Document::set_activity`). У счёта с действующим актом доход — по акту
+/// (`ledger::income_documents`): вид указывают у акта, а здесь говорят это,
+/// иначе выбор у счёта ни на что бы не влиял.
+#[component]
+fn DocActivity(
+    ctx: Ctx,
+    document: Document,
+    busy: RwSignal<bool>,
+    failure: RwSignal<Option<Problem>>,
+) -> impl IntoView {
+    let Ctx { lang, notice, .. } = ctx;
+    let id = document.id();
+    let saved = document.data().activity;
+    let service = document.data().service_date;
+    let chosen = RwSignal::new(saved);
+    let date = RwSignal::new(service.iso());
+    let tried = RwSignal::new(false);
+    let activities = Memo::new(move |_| ctx.profiles.activities());
+    let needed = Memo::new(move |_| ctx.profiles.with(|profile| turnover::activity_needed(profile, service)));
+    let income = Memo::new(move |_| {
+        ctx.documents
+            .with(|documents, _, _| ledger::income_documents(documents).iter().any(|document| document.id() == id))
+    });
+    let save = move |_| {
+        tried.set(true);
+        let activity = chosen.get_untracked();
+        if activity.is_none() {
+            return;
+        }
+        act(ctx, busy, failure, id, Change::SetActivity(activity), move |_| {
+            notice.set(Some(Notice::ActivitySaved));
+        });
+    };
+    move || {
+        if !income.get() {
+            return needed
+                .get()
+                .then(|| view! { <p class="hint">{tr(lang, Key::DocActivityByAct)}</p> }.into_any());
+        }
+        (needed.get() || saved.is_some()).then(|| {
+            view! {
+                <div class="rate-box">
+                    <IncomeActivity lang activities chosen date tried required=needed />
+                    {move || (chosen.get() != saved).then(|| view! {
+                        <button type="button" disabled=move || busy.get() on:click=save>
+                            {tr(lang, Key::DocActivitySave)}
+                        </button>
+                    })}
+                </div>
+            }
+            .into_any()
+        })
     }
 }
 

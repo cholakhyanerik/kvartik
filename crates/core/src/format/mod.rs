@@ -63,7 +63,13 @@ use crate::model::record::RecordMeta;
 /// - 7 (0.0.40) — у документа поле `signed` (день подписи акта клиентом,
 ///   `#[serde(default)]`), задача 62. Записи версий 1–6 читаются как есть:
 ///   документ без поля не подписан.
-pub const FORMAT_VERSION: u32 = 7;
+/// - 8 (0.0.47) — налог квартала, задача 19: вид `closing` (закрытый
+///   квартал), у документа поле `activity` (вид деятельности дохода),
+///   у профиля — `kinds` (строка налога, выбранная коду; оба
+///   `#[serde(default)]`), у дохода книги — вид деятельности, у расхода —
+///   вид `levy` (зарплата, налог, пошлина, услуга банка). Записи версий 1–7
+///   читаются как есть: без полей — не указано.
+pub const FORMAT_VERSION: u32 = 8;
 
 /// Первая версия формата: старше не бывает.
 pub(crate) const FIRST_VERSION: u32 = 1;
@@ -308,11 +314,24 @@ mod tests {
         r#"}}"#
     );
 
-    /// Та же запись в версии 7 — так её пишет эта программа. Выписана
+    /// Та же запись в версии 7 — так её писала 0.0.40. Выписана
     /// человеком: версия 7 прибавила поле документу, а у пробы его нет,
     /// и запись отличается только номером.
     const SAMPLE_V7: &str = concat!(
         r#"{"format_version":7,"record":{"#,
+        r#""meta":{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":1760000000000,"deleted":null},"#,
+        r#""day":"2026-10-12","#,
+        r#""sum":{"minor":150000,"currency":"USD"},"#,
+        r#""rate":{"currency":"USD","per_unit_e4":3619300,"date":"2026-10-09","source":"central_bank"}"#,
+        r#"}}"#
+    );
+
+    /// Та же запись в версии 8 — так её пишет эта программа. Выписана
+    /// человеком: версия 8 прибавила вид записей и поля документу,
+    /// профилю и книге, а у пробы их нет, и запись отличается только
+    /// номером.
+    const SAMPLE_V8: &str = concat!(
+        r#"{"format_version":8,"record":{"#,
         r#""meta":{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":1760000000000,"deleted":null},"#,
         r#""day":"2026-10-12","#,
         r#""sum":{"minor":150000,"currency":"USD"},"#,
@@ -336,8 +355,8 @@ mod tests {
     /// значений — слово в слово образец. Поменялась запись — это новая
     /// версия формата с миграцией (Правило 5), а не правка образца.
     #[test]
-    fn sample_v7_is_pinned() {
-        let record: Probe = decode(SAMPLE_V7).expect("образец версии 7 читается");
+    fn sample_v8_is_pinned() {
+        let record: Probe = decode(SAMPLE_V8).expect("образец версии 8 читается");
         assert_eq!(
             record.meta.id().to_string(),
             "0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a"
@@ -350,14 +369,14 @@ mod tests {
         assert_eq!(record.day, day(2026, 10, 12));
         assert_eq!(record.sum, Money::new(150_000, Currency::Usd));
         assert_eq!(record.rate, probe().rate);
-        assert_eq!(encode(&record), SAMPLE_V7);
+        assert_eq!(encode(&record), SAMPLE_V8);
     }
 
-    /// Записи версий 1–6 читаются той же записью, а пишутся уже версией 7:
+    /// Записи версий 1–7 читаются той же записью, а пишутся уже версией 8:
     /// данные прошлых версий не теряются (Правило 2).
     #[test]
     fn older_samples_still_read() {
-        let current: Probe = decode(SAMPLE_V7).expect("образец версии 7 читается");
+        let current: Probe = decode(SAMPLE_V8).expect("образец версии 8 читается");
         let older = [
             (1, SAMPLE_V1),
             (2, SAMPLE_V2),
@@ -365,12 +384,13 @@ mod tests {
             (4, SAMPLE_V4),
             (5, SAMPLE_V5),
             (6, SAMPLE_V6),
+            (7, SAMPLE_V7),
         ];
         for (version, sample) in older {
             let old: Probe = decode(sample)
                 .unwrap_or_else(|error| panic!("образец версии {version}: {error:?}"));
             assert_eq!(old, current, "версия {version}");
-            assert_eq!(encode(&old), SAMPLE_V7, "версия {version}");
+            assert_eq!(encode(&old), SAMPLE_V8, "версия {version}");
         }
     }
 
@@ -384,7 +404,7 @@ mod tests {
                 format!(r#"{{"format_version":{next},"record":{{"meta":"что угодно","wings":2}}}}"#),
                 next,
             ),
-            (r#"{"record":null,"format_version":8}"#.to_owned(), 8),
+            (r#"{"record":null,"format_version":9}"#.to_owned(), 9),
             (
                 r#"{"format_version":4294967295,"record":{}}"#.to_owned(),
                 u32::MAX,

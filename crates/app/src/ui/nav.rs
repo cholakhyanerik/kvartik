@@ -19,13 +19,14 @@ use super::route::{Router, Screen};
 use super::tr;
 
 /// Разделы меню: экран, значок и подпись. Книга — пятой вкладкой (решение
-/// человека 2026-10-15, задача 14). «Налог» появится с расчётом налога
-/// (строка плана 0.2): пустой вкладки, которая обещает расчёт, нет.
-const TABS: [(Screen, Icon, Key); 5] = [
+/// человека 2026-10-15, задача 14), налог — перед профилем, как в дизайне
+/// «Kvartik Design» (экран 10; задача 19).
+const TABS: [(Screen, Icon, Key); 6] = [
     (Screen::Home, Icon::Home, Key::NavHome),
     (Screen::Documents, Icon::Document, Key::NavDocuments),
     (Screen::Ledger, Icon::Book, Key::NavLedger),
     (Screen::Clients, Icon::Clients, Key::ClientsTitle),
+    (Screen::Tax, Icon::Percent, Key::TaxTitle),
     (Screen::Profile, Icon::Person, Key::NavProfile),
 ];
 

@@ -38,6 +38,8 @@ pub enum Icon {
     /// Отправить файл — стрелка вверх из лотка, как «Поделиться» у
     /// телефона.
     Share,
+    /// Налог — знак процента, как в дизайне «Kvartik Design» (задача 19).
+    Percent,
 }
 
 /// Значок для разметки. Он только украшает: что делает кнопка или ссылка,
@@ -85,6 +87,12 @@ pub fn icon(icon: Icon) -> impl IntoView {
         Icon::Check => view! { <path d="M20 6 9 17l-5-5" /> }.into_any(),
         Icon::Download => view! { <path d="M12 4v11M7 10l5 5 5-5M5 20h14" /> }.into_any(),
         Icon::Share => view! { <path d="M12 15V4M7 9l5-5 5 5M5 13v7h14v-7" /> }.into_any(),
+        Icon::Percent => view! {
+            <path d="M19 5 5 19" />
+            <circle cx="6.5" cy="6.5" r="2.5" />
+            <circle cx="17.5" cy="17.5" r="2.5" />
+        }
+        .into_any(),
     };
     view! {
         <svg

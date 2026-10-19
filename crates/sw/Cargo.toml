@@ -18,12 +18,14 @@ publish.workspace = true
 # CLI задать не даёт. Владельцы — WorldSEnder и gbj (автор Leptos), MIT OR
 # Apache-2.0, `build.rs` нет (разбор задачи 57, 2026-10-13). В 0.2.x и держится
 # за внутренности wasm-bindgen: после каждого обновления wasm-bindgen —
-# проверка разреза (CLAUDE.md, Правило 3).
-wasm_split_cli_support = "0.2.3"
+# проверка разреза (CLAUDE.md, Правило 3). С 0.2.4 части собирает
+# параллельно (`rayon`, только на машине сборки): порядок частей тот же,
+# а повторяемость сборки держит проверка `sw.js` двух сборок подряд.
+wasm_split_cli_support = "0.2.4"
 # Импорты и экспорты частей и главного модуля для проверки, что они
 # сходятся (`src/wasm.rs`). Уже в дереве через `wasm_split_cli_support` —
 # той же версии.
-wasmparser = "0.258.3"
+wasmparser = "0.261.0"
 # Путь к собранному wasm — из сообщений `cargo build --message-format=json`.
 # Уже в дереве через ядро.
 serde_json = "1.0.154"
@@ -35,4 +37,4 @@ base64 = "0.22.1"
 [dev-dependencies]
 # Модуль wasm для теста чтения импортов и экспортов. Уже в дереве через
 # `wasm_split_cli_support` — той же версии.
-wasm-encoder = "0.258.3"
+wasm-encoder = "0.261.0"

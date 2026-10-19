@@ -21,15 +21,17 @@
 //! **Курс** вводит человек; неизвестный курс — `None`, а не ноль
 //! (Правило 6). Операция в валюте без курса в итог квартала не идёт молча:
 //! итог её не считает и называет их число ([`Totals::unrated`]). Итог
-//! в драмах — `Money::total` переведённых строк, а не перевод итога
-//! в валюте: у каждой строки свой курс.
+//! в драмах — сумма переведённых строк с лумами (`Lumas::total`), а не
+//! перевод итога в валюте: у каждой строки свой курс, а до драма итог
+//! доводит строка расчёта налога (`model::money`).
 //!
-//! **Расход** помнит факты, из которых задача 19 посчитает вычет: каким
-//! документом продавца он подтверждён ([`Proof`]), что это за расход
-//! ([`Nature`]) и к какому виду деятельности ИП относится. Сам вычет здесь
-//! не считается: его правила — проценты, нижний предел, перенос — данные
-//! с источником в файле правил (`tax::rules`, задача 19; ответы бухгалтера
-//! 2026-10-19 — FEATURE_TASKS.md, «PDF против текста закона»).
+//! **Расход** помнит факты, из которых расчёт налога (`tax::turnover`,
+//! задача 19) считает вычет: каким документом продавца он подтверждён
+//! ([`Proof`]), что это за расход ([`Nature`]) и к какому виду деятельности
+//! ИП относится. Какие из них дают вычет, решают правила с источником
+//! в файле правил (`tax::rules`), а не этот модуль. **Доход** без документа
+//! в программе тоже помнит вид деятельности — у ИП, чьи коды облагаются по
+//! разным строкам (решение человека 2026-10-19).
 //!
 //! Меняется операция только командами ядра (CLAUDE.md, «Данные меняются
 //! одним путём»): [`Operation::create`], `edit`, `save` — с новыми файлами,
@@ -47,7 +49,7 @@ use super::activity::ActivityCode;
 use super::attachment::{Attachment, AttachmentRef, FileBytes};
 use super::date::{Date, Quarter};
 use super::document::{DocKind, Document};
-use super::money::{Currency, ExchangeRate, Money, MoneyError, RateError, RateSource};
+use super::money::{Currency, ExchangeRate, Lumas, Money, MoneyError, RateError, RateSource};
 use super::record::{RecordId, RecordMeta, Timestamp};
 use super::text::Line;
 use crate::format::Stored;
@@ -114,13 +116,19 @@ impl Proof {
 /// по закону: https://www.arlis.am/hy/acts/230455, сверено 2026-10-15).
 ///
 /// Расширяется, а смысл существующих вариантов не меняется (Правило 2);
-/// `match` — без `_`. В данных — `"ordinary"`, `"asset"`, `"travel"`,
-/// `"hospitality"`.
+/// `match` — без `_`. В данных — `"ordinary"`, `"levy"`, `"asset"`,
+/// `"travel"`, `"hospitality"`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Nature {
     /// Обычный расход: товар, материалы, услуга.
     Ordinary,
+    /// Не покупка: зарплата, налог, пошлина, сбор — или услуга банка.
+    /// Такому расходу хватает платёжного документа (НК, ст. 55, ч. 12; по
+    /// закону, сверено по arlis 230455 2026-10-19). С версии формата 8
+    /// (задача 19, решение человека 2026-10-19): прежде книга не отличала
+    /// его от обычного, а обычному одного платежа мало.
+    Levy,
     /// Основное средство или нематериальный актив — покупка и расходы на
     /// него.
     Asset,
@@ -132,8 +140,9 @@ pub enum Nature {
 
 impl Nature {
     /// Все виды — в порядке списка выбора.
-    pub const ALL: [Nature; 4] = [
+    pub const ALL: [Nature; 5] = [
         Nature::Ordinary,
+        Nature::Levy,
         Nature::Asset,
         Nature::Travel,
         Nature::Hospitality,
@@ -168,10 +177,11 @@ pub struct OperationData {
     pub proof: Option<Proof>,
     /// Что это за расход — у расхода; у дохода — `None`.
     pub nature: Option<Nature>,
-    /// Вид деятельности ИП, к которому относится расход; `None` — общий:
-    /// административные и сбытовые расходы делятся по долям оборота
-    /// (НК, ст. 260, ч. 3), а у ИП с одним видом это он и есть. У дохода —
-    /// `None`.
+    /// Вид деятельности ИП, к которому относится операция. У расхода
+    /// `None` — общий: административные и сбытовые расходы делятся по долям
+    /// оборота (НК, ст. 260, ч. 3), а у ИП с одним видом это он и есть.
+    /// У дохода `None` — по кодам профиля, если они облагаются по одной
+    /// строке (`tax::turnover`); код у дохода — с версии формата 8.
     pub activity: Option<ActivityCode>,
     /// Вложения — не больше [`OperationData::MAX_ATTACHMENTS`], без
     /// повторов.
@@ -205,9 +215,9 @@ pub enum OperationError {
     Amount,
     /// Курс не годится: не больше нуля, у суммы в драмах или другой валюты.
     Rate,
-    /// Поле не того вида операции: клиент у расхода, документ продавца
-    /// у дохода, нет документа или вида у расхода. Форма такого не пишет —
-    /// это порча.
+    /// Поле не того вида операции: клиент у расхода, документ продавца или
+    /// вид расхода у дохода, нет документа или вида у расхода. Форма такого
+    /// не пишет — это порча.
     WrongFlow,
     /// Вложений больше [`OperationData::MAX_ATTACHMENTS`] или одно дважды.
     Attachments,
@@ -232,12 +242,7 @@ impl OperationData {
             return Err(OperationError::Rate);
         }
         let fits = match self.flow {
-            Flow::Income => {
-                self.supplier.is_empty()
-                    && self.proof.is_none()
-                    && self.nature.is_none()
-                    && self.activity.is_none()
-            }
+            Flow::Income => self.supplier.is_empty() && self.proof.is_none() && self.nature.is_none(),
             Flow::Expense => self.client.is_none() && self.proof.is_some() && self.nature.is_some(),
         };
         if !fits {
@@ -482,12 +487,26 @@ pub struct Row<'a> {
     pub amount: Money,
     /// Курс к драму; `None` — у драмов или курс не указан.
     pub rate: Option<ExchangeRate>,
+    /// Вид деятельности ИП, к которому относится строка; `None` — не указан
+    /// (у расхода — общий).
+    pub activity: Option<ActivityCode>,
 }
 
 impl Row<'_> {
-    /// Сумма в драмах. Валюта без курса — `RateUnknown`, а не ноль.
-    pub fn amd(&self) -> Result<Money, MoneyError> {
-        self.amount.to_amd(self.rate)
+    /// Сумма в драмах с лумами. Валюта без курса — `RateUnknown`, а не ноль.
+    pub fn lumas(&self) -> Result<Lumas, MoneyError> {
+        self.amount.to_lumas(self.rate)
+    }
+
+    /// Документ продавца и вид расхода — у расхода; у дохода — `None`.
+    pub fn expense(&self) -> Option<(Proof, Nature)> {
+        match self.source {
+            Source::Document(_) => None,
+            Source::Operation(operation) => {
+                let data = operation.data();
+                data.proof.zip(data.nature)
+            }
+        }
     }
 
     /// Не хватает ли курса: валюта без курса в драмы не переводится.
@@ -507,6 +526,19 @@ impl Row<'_> {
 /// Строки книги за квартал: доход из документов и живые операции, свежие
 /// сверху; в один день — доходы выше расходов.
 pub fn rows<'a>(documents: &'a [Document], operations: &'a [Operation], quarter: Quarter) -> Vec<Row<'a>> {
+    let mut rows = between(documents, operations, quarter.first_day(), quarter.last_day());
+    rows.sort_by(|a, b| (b.date, a.flow, b.id()).cmp(&(a.date, b.flow, a.id())));
+    rows
+}
+
+/// Строки книги с дня `from` по день `until` включительно — в порядке
+/// записей: расчёт налога (`tax::turnover`) раскладывает их сам.
+pub fn between<'a>(
+    documents: &'a [Document],
+    operations: &'a [Operation],
+    from: Date,
+    until: Date,
+) -> Vec<Row<'a>> {
     let from_documents = income_documents(documents).into_iter().filter_map(|document| {
         let data = document.data();
         // Итог помещается: это проверено при записи и при чтении.
@@ -517,6 +549,7 @@ pub fn rows<'a>(documents: &'a [Document], operations: &'a [Operation], quarter:
             date: data.service_date,
             amount,
             rate: data.rate,
+            activity: data.activity,
         })
     });
     let from_operations = operations
@@ -530,47 +563,46 @@ pub fn rows<'a>(documents: &'a [Document], operations: &'a [Operation], quarter:
                 date: data.date,
                 amount: data.amount,
                 rate: data.rate,
+                activity: data.activity,
             }
         });
-    let mut rows: Vec<Row<'a>> = from_documents
+    from_documents
         .chain(from_operations)
-        .filter(|row| row.date.quarter() == quarter)
-        .collect();
-    rows.sort_by(|a, b| (b.date, a.flow, b.id()).cmp(&(a.date, b.flow, a.id())));
-    rows
+        .filter(|row| from <= row.date && row.date <= until)
+        .collect()
 }
 
-/// Итог квартала в драмах.
+/// Итог квартала в драмах с лумами.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Totals {
     /// Доход — сумма переведённых строк дохода.
-    pub income: Money,
+    pub income: Lumas,
     /// Расходы — сумма переведённых строк расхода.
-    pub expense: Money,
+    pub expense: Lumas,
     /// Строк в валюте без курса: в итог они не вошли.
     pub unrated: usize,
 }
 
-/// Итог строк в драмах: каждая строка переводится своим курсом, и итог —
-/// сумма переведённых (`Money::total`). Строки без курса в итог не идут,
-/// а считаются ([`Totals::unrated`]): итог без них занижен, и окно говорит
-/// это словами. Ошибка — только переполнение от испорченных данных.
+/// Итог строк в драмах: каждая строка переводится своим курсом до лумы,
+/// и итог — сумма переведённых (`Lumas::total`). Строки без курса в итог не
+/// идут, а считаются ([`Totals::unrated`]): итог без них занижен, и окно
+/// говорит это словами. Ошибка — только переполнение от испорченных данных.
 pub fn totals(rows: &[Row<'_>]) -> Result<Totals, MoneyError> {
     let mut unrated = 0;
     let (mut income, mut expense) = (Vec::new(), Vec::new());
     for row in rows {
-        match row.amd() {
-            Ok(amd) => match row.flow {
-                Flow::Income => income.push(amd),
-                Flow::Expense => expense.push(amd),
+        match row.lumas() {
+            Ok(lumas) => match row.flow {
+                Flow::Income => income.push(lumas),
+                Flow::Expense => expense.push(lumas),
             },
             Err(MoneyError::RateUnknown) => unrated += 1,
             Err(error) => return Err(error),
         }
     }
     Ok(Totals {
-        income: Money::total(Currency::Amd, income)?,
-        expense: Money::total(Currency::Amd, expense)?,
+        income: Lumas::total(income)?,
+        expense: Lumas::total(expense)?,
         unrated,
     })
 }

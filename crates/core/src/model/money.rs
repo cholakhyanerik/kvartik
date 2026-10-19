@@ -8,7 +8,12 @@
 //! Курс — тоже целое, с датой и источником. Неизвестный курс — `None`, а не 0
 //! и не 1 (Правило 6): с нулём доход в драмах стал бы нулём, и налог
 //! занизился бы молча. Перевод в драмы с округлением написан один раз —
-//! `Money::to_amd`.
+//! `Money::to_lumas`.
+//!
+//! Драмовый эквивалент суммы в валюте — с лумами ([`Lumas`], сотые доли
+//! драма), а до целого драма его доводит только строка расчёта налога
+//! (`tax::turnover`): так итог квартала сходится с формой ՊԵԿ, а не
+//! расходится на драм с каждой строкой (задача 19).
 //!
 //! В данных: сумма — `{"minor":150000,"currency":"USD"}`, курс —
 //! `{"currency":"USD","per_unit_e4":3619300,"date":"2026-10-09",
@@ -125,19 +130,27 @@ impl Money {
             .map_err(|_| MoneyError::Overflow)
     }
 
-    /// Сумма в драмах по курсу — единственное место, где валюта переводится
-    /// в драмы и округляется.
+    /// Сумма в драмах с лумами по курсу — единственное место, где валюта
+    /// переводится в драмы и округляется.
+    ///
+    /// Округляется до лумы, обычным образом — половина от нуля: сумма
+    /// расчётного документа в драмах — с двумя знаками, «округляется до
+    /// сотых» (ответ бухгалтера 2026-10-19, вопрос 9.6 листа сверки: схема
+    /// ՊԵԿ и её вопросы-ответы). До целого драма доводит строка расчёта, один
+    /// раз ([`Lumas::drams`]).
     ///
     /// Драмы переводить не нужно, и курс к ним — ошибка `CurrencyMismatch`,
     /// как и курс чужой валюты. Валюта без курса — `RateUnknown`: такую
     /// операцию окно помечает, и в налог она молча не идёт (задача 14).
     ///
-    /// Итог в драмах — `Money::total` переведённых строк, а не перевод итога
-    /// в валюте: у каждой операции свой курс, а строки, которые человек видит
-    /// в книге, обязаны сойтись с итогом.
-    pub fn to_amd(self, rate: Option<ExchangeRate>) -> Result<Self, MoneyError> {
+    /// Итог в драмах — [`Lumas::total`] переведённых строк, а не перевод
+    /// итога в валюте: у каждой операции свой курс, а строки, которые
+    /// человек видит в книге, обязаны сойтись с итогом.
+    pub fn to_lumas(self, rate: Option<ExchangeRate>) -> Result<Lumas, MoneyError> {
         let rate = match (self.currency, rate) {
-            (Currency::Amd, None) => return Ok(self),
+            (Currency::Amd, None) => {
+                return Lumas::from_drams(self.minor).ok_or(MoneyError::Overflow);
+            }
             (Currency::Amd, Some(_)) => return Err(MoneyError::CurrencyMismatch),
             (Currency::Usd | Currency::Eur, None) => return Err(MoneyError::RateUnknown),
             (Currency::Usd | Currency::Eur, Some(rate)) => rate,
@@ -145,15 +158,77 @@ impl Money {
         if rate.currency != self.currency {
             return Err(MoneyError::CurrencyMismatch);
         }
-        // В i128: центы, умноженные на курс в десятитысячных, переполняют i64
-        // уже на сумме около 25 миллиардов долларов, а частное — нет.
-        // Переполнение самих драмов — ошибка, а не тихий перенос через ноль.
-        let numerator = i128::from(self.minor) * i128::from(rate.per_unit_e4);
+        // В i128: центы, умноженные на курс в десятитысячных и на лумы,
+        // переполняют i64 уже на сумме около 250 миллионов долларов, а частное
+        // — нет. Переполнение самих лум — ошибка, а не тихий перенос через
+        // ноль.
+        let numerator =
+            i128::from(self.minor) * i128::from(rate.per_unit_e4) * i128::from(Lumas::PER_DRAM);
         let denominator = 10_i128.pow(self.currency.minor_digits()) * i128::from(RATE_SCALE);
-        let drams = div_round_half_away_from_zero(numerator, denominator);
-        i64::try_from(drams)
-            .map(|drams| Self::new(drams, Currency::Amd))
-            .map_err(|_| MoneyError::Overflow)
+        let lumas = div_round_half_away_from_zero(numerator, denominator);
+        i64::try_from(lumas).map(Lumas).map_err(|_| MoneyError::Overflow)
+    }
+}
+
+/// Драмы с лумами — сотыми долями драма: драмовый эквивалент суммы
+/// (`Money::to_lumas`) и итоги книги в драмах.
+///
+/// Лумы, а не целые драмы, — потому что так считает ՊԵԿ: сумма документа
+/// в драмах — с лумами (18 096,50 ֏), а до драма доводится один раз,
+/// в строке расчёта налога, и три таких документа дают 54 289 ֏, а не
+/// 54 291 — сумму трёх округлённых (ответ бухгалтера 2026-10-19, вопрос 9.5
+/// листа сверки; решение человека 2026-10-19 — пока черновик в file-online
+/// не показал иное, в код идёт это прочтение).
+///
+/// Сравнение выведено: лумы — одна единица, у них нет валют, которые
+/// нельзя сравнивать.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+pub struct Lumas(i64);
+
+impl Lumas {
+    /// Лум в драме.
+    pub const PER_DRAM: i64 = 100;
+
+    /// Ноль драмов.
+    pub const ZERO: Self = Self(0);
+
+    /// Лумы как есть: 18 096,50 ֏ — 1 809 650.
+    pub const fn new(lumas: i64) -> Self {
+        Self(lumas)
+    }
+
+    /// Целые драмы — лумами. `None` — не помещается.
+    pub const fn from_drams(drams: i64) -> Option<Self> {
+        match drams.checked_mul(Self::PER_DRAM) {
+            Some(lumas) => Some(Self(lumas)),
+            None => None,
+        }
+    }
+
+    /// Сколько лум.
+    pub const fn get(self) -> i64 {
+        self.0
+    }
+
+    /// Целые драмы без лум: «լումաներն անտեսվում են» — лумы не учитываются
+    /// (НК, ст. 318, ч. 1), расчёт налога с оборота — «в драмах (без лум)»
+    /// (приказ ՊԵԿ 299-Ն, прил. 1, п. 1). Лумы отбрасываются, а не
+    /// округляются: так читается «не учитываются» (ответ бухгалтера
+    /// 2026-10-19, вопросы 9.1 и 9.4 листа сверки; способ сверят черновиком
+    /// в file-online — решение человека 2026-10-19). У отрицательных — тоже
+    /// к нулю, но отрицательных итогов программа не считает.
+    pub const fn drams(self) -> i64 {
+        self.0 / Self::PER_DRAM
+    }
+
+    /// Итог строк — ровно до лумы. Складывает в `i128` и проверяет только
+    /// итог, как [`Money::total`]: ответ не зависит от порядка строк.
+    pub fn total(items: impl IntoIterator<Item = Self>) -> Result<Self, MoneyError> {
+        let mut sum: i128 = 0;
+        for item in items {
+            sum = sum.checked_add(i128::from(item.0)).ok_or(MoneyError::Overflow)?;
+        }
+        i64::try_from(sum).map(Self).map_err(|_| MoneyError::Overflow)
     }
 }
 
@@ -285,17 +360,15 @@ pub enum RateError {
 }
 
 /// Деление с округлением половины от нуля: 18 096,5 → 18 097,
-/// −18 096,5 → −18 097, 3 619,3 → 3 619. Им же округляется сумма строки
-/// счёта — цена, умноженная на дробное количество (`model::document`).
+/// −18 096,5 → −18 097, 3 619,3 → 3 619. Им округляется перевод в драмы до
+/// лумы (`Money::to_lumas`) и сумма строки счёта — цена, умноженная на
+/// дробное количество (`model::document`).
 ///
-/// TODO(задача 19): правило округления по закону — решение человека. Ответ
-/// бухгалтера 2026-10-19 (FEATURE_TASKS.md, «PDF против текста закона»,
-/// «Округление»): способа в законе нет; «лумы не учитываются» (НК 318(1))
-/// читается как «отбросить», и доводить до драма надо один раз — в строке
-/// расчёта квартала, а сумма документа в драмах по курсу — с лумами (схема
-/// ՊԵԿ — два знака). Пока — обычное арифметическое, и тест
-/// `rounding_is_half_away_from_zero_until_task_19` держит его: смена
-/// правила должна быть решением, а не случайностью.
+/// До целого драма так не округляется ничто: лумы в строке расчёта налога
+/// отбрасываются ([`Lumas::drams`]). Оба правила — прочтение бухгалтера
+/// 2026-10-19 (FEATURE_TASKS.md, «PDF против текста закона», «Округление»;
+/// способа в законе нет), и тест `rounding_rules_are_decided` держит их:
+/// смена правила должна быть решением, а не случайностью.
 pub(crate) fn div_round_half_away_from_zero(numerator: i128, denominator: i128) -> i128 {
     debug_assert!(denominator > 0, "знаменатель курса всегда положителен");
     let quotient = numerator / denominator;
@@ -338,22 +411,28 @@ mod tests {
         rate(Currency::Eur, 4_055_800)
     }
 
+    fn lumas(lumas: i64) -> Lumas {
+        Lumas::new(lumas)
+    }
+
     /// Перевод в драмы — числами, которые посчитал человек, а не код.
     #[test]
-    fn converts_to_amd() {
+    fn converts_to_lumas() {
         let cases = [
-            // 1 000,00 $ × 361,93 = 361 930 ֏ ровно.
-            (usd(100_000), usd_rate(), amd(361_930)),
-            // 2 500,50 € × 405,58 = 1 014 152,79 ֏ → 1 014 153.
-            (eur(250_050), eur_rate(), amd(1_014_153)),
-            // 0,01 $ × 361,93 = 3,6193 ֏ → 4.
-            (usd(1), usd_rate(), amd(4)),
-            // Курс с четырьмя знаками: 1 000,00 $ × 361,9349 = 361 934,9 → 361 935.
-            (usd(100_000), rate(Currency::Usd, 3_619_349), amd(361_935)),
+            // 1 000,00 $ × 361,93 = 361 930,00 ֏ ровно.
+            (usd(100_000), usd_rate(), lumas(36_193_000)),
+            // 2 500,50 € × 405,58 = 1 014 152,79 ֏ ровно.
+            (eur(250_050), eur_rate(), lumas(101_415_279)),
+            // 0,01 $ × 361,93 = 3,6193 ֏ → 3,62.
+            (usd(1), usd_rate(), lumas(362)),
+            // Курс с четырьмя знаками: 1 000,00 $ × 361,9349 = 361 934,90 ֏.
+            (usd(100_000), rate(Currency::Usd, 3_619_349), lumas(36_193_490)),
+            // 50,00 $ × 361,93 = 18 096,50 ֏ — пример вопроса 9.5 листа сверки.
+            (usd(5_000), usd_rate(), lumas(1_809_650)),
         ];
         let mut wrong = Vec::new();
         for (money, rate, expected) in cases {
-            let got = money.to_amd(Some(rate));
+            let got = money.to_lumas(Some(rate));
             if got != Ok(expected) {
                 wrong.push(format!("{money:?} по {rate:?}: {got:?}, а не {expected:?}"));
             }
@@ -361,28 +440,33 @@ mod tests {
         assert!(wrong.is_empty(), "перевод в драмы ошибся: {wrong:#?}");
     }
 
-    /// TODO(задача 19): правило округления по закону. Пока — половина от нуля.
-    /// 50,00 $ × 361,93 = 18 096,5 ֏: здесь 18 097, а банковское округление
-    /// (половина к чётному) дало бы 18 096. Тест держит текущее правило,
-    /// чтобы его смена была решением, а не случайностью.
+    /// Два правила округления — решение, а не случайность (шапка
+    /// `div_round_half_away_from_zero`): перевод в драмы — до лумы, половина
+    /// от нуля; до драма — отбросом лум, один раз, в строке расчёта.
     #[test]
-    fn rounding_is_half_away_from_zero_until_task_19() {
+    fn rounding_rules_are_decided() {
+        // 0,02 $ × 361,25 = 7,225 ֏: ровно половина лумы — от нуля, 7,23 ֏;
+        // банковское округление (к чётному) дало бы 7,22.
+        let half = rate(Currency::Usd, 3_612_500);
         let cases = [
-            // Ровно половина — от нуля.
-            (usd(5_000), amd(18_097)),
-            (usd(-5_000), amd(-18_097)),
-            // Меньше половины — вниз по модулю: 10,00 $ → 3 619,3 ֏.
-            (usd(1_000), amd(3_619)),
-            (usd(-1_000), amd(-3_619)),
-            // Больше половины — вверх по модулю: 0,01 $ → 3,6193 ֏.
-            (usd(1), amd(4)),
-            (usd(-1), amd(-4)),
+            (usd(2), lumas(723)),
+            (usd(-2), lumas(-723)),
+            // Меньше половины — вниз по модулю: 0,01 $ → 3,6125 ֏ → 3,61.
+            (usd(1), lumas(361)),
+            (usd(-1), lumas(-361)),
         ];
         let mut wrong = Vec::new();
         for (money, expected) in cases {
-            let got = money.to_amd(Some(usd_rate()));
+            let got = money.to_lumas(Some(half));
             if got != Ok(expected) {
                 wrong.push(format!("{money:?}: {got:?}, а не {expected:?}"));
+            }
+        }
+        // До драма — отброс: 18 096,50 ֏ — 18 096, а не 18 097; 18 096,99 —
+        // тоже 18 096.
+        for (sum, drams) in [(1_809_650, 18_096), (1_809_699, 18_096), (1_809_600, 18_096), (99, 0)] {
+            if lumas(sum).drams() != drams {
+                wrong.push(format!("{sum} лум: {} ֏, а не {drams}", lumas(sum).drams()));
             }
         }
         assert!(wrong.is_empty(), "округление изменилось: {wrong:#?}");
@@ -391,20 +475,20 @@ mod tests {
     /// Неизвестный курс — отдельное состояние, а не ноль и не единица.
     #[test]
     fn unknown_rate_is_not_zero() {
-        assert_eq!(usd(10_000).to_amd(None), Err(MoneyError::RateUnknown));
-        assert_eq!(eur(10_000).to_amd(None), Err(MoneyError::RateUnknown));
+        assert_eq!(usd(10_000).to_lumas(None), Err(MoneyError::RateUnknown));
+        assert_eq!(eur(10_000).to_lumas(None), Err(MoneyError::RateUnknown));
     }
 
     /// Драмам курс не нужен, а курс годится только для своей валюты.
     #[test]
     fn rate_must_match_currency() {
-        assert_eq!(amd(5_000).to_amd(None), Ok(amd(5_000)));
+        assert_eq!(amd(5_000).to_lumas(None), Ok(lumas(500_000)));
         assert_eq!(
-            amd(5_000).to_amd(Some(usd_rate())),
+            amd(5_000).to_lumas(Some(usd_rate())),
             Err(MoneyError::CurrencyMismatch)
         );
         assert_eq!(
-            eur(5_000).to_amd(Some(usd_rate())),
+            eur(5_000).to_lumas(Some(usd_rate())),
             Err(MoneyError::CurrencyMismatch)
         );
     }
@@ -456,48 +540,61 @@ mod tests {
         );
     }
 
-    /// Итог книги в драмах — сумма переведённых строк. Три поступления по
-    /// 10,00 $ по 361,93: каждое — 3 619,3 ֏ → 3 619, итог — 10 857 ֏.
-    /// Перевод итога в долларах (30,00 $ → 10 857,9 → 10 858) разошёлся бы
-    /// со строками, которые человек сложит сам.
+    /// Итог книги в драмах — сумма переведённых строк с лумами, и до драма
+    /// он доводится один раз. Три услуги по 50,00 $ по 361,93: каждая —
+    /// 18 096,50 ֏, итог — 54 289,50 ֏, в строке расчёта — 54 289. Округлив
+    /// каждую до драма (18 097), программа насчитала бы 54 291 — на два драма
+    /// больше формы ՊԵԿ (вопрос 9.5 листа сверки).
     #[test]
     fn amd_total_is_the_sum_of_converted_lines() {
-        let lines: Vec<Money> = [usd(1_000); 3]
+        let lines: Vec<Lumas> = [usd(5_000); 3]
             .into_iter()
-            .map(|line| line.to_amd(Some(usd_rate())).expect("курс есть"))
+            .map(|line| line.to_lumas(Some(usd_rate())).expect("курс есть"))
             .collect();
-        assert_eq!(lines, [amd(3_619); 3]);
-        assert_eq!(Money::total(Currency::Amd, lines), Ok(amd(10_857)));
-        assert_eq!(usd(3_000).to_amd(Some(usd_rate())), Ok(amd(10_858)));
+        assert_eq!(lines, [lumas(1_809_650); 3]);
+        let total = Lumas::total(lines).expect("помещается");
+        assert_eq!(total, lumas(5_428_950));
+        assert_eq!(total.drams(), 54_289);
     }
 
     /// Переполнение — ошибка, а не тихий перенос через ноль.
     #[test]
     fn overflow_is_an_error() {
         assert_eq!(
-            usd(i64::MAX).to_amd(Some(usd_rate())),
+            usd(i64::MAX).to_lumas(Some(usd_rate())),
             Err(MoneyError::Overflow)
         );
         assert_eq!(
-            usd(i64::MIN).to_amd(Some(usd_rate())),
+            usd(i64::MIN).to_lumas(Some(usd_rate())),
             Err(MoneyError::Overflow)
         );
+        // Драмы — тоже лумами: сотня лум на драм.
+        assert_eq!(amd(i64::MAX).to_lumas(None), Err(MoneyError::Overflow));
+        assert_eq!(Lumas::from_drams(i64::MAX / 100 + 1), None);
         assert_eq!(
             Money::total(Currency::Amd, [amd(i64::MAX), amd(1)]),
+            Err(MoneyError::Overflow)
+        );
+        assert_eq!(
+            Lumas::total([lumas(i64::MAX), lumas(1)]),
             Err(MoneyError::Overflow)
         );
         assert_eq!(amd(i64::MAX).try_add(amd(1)), Err(MoneyError::Overflow));
     }
 
     /// Ошибкой бывает только то, что не помещается в ответ. 30 млрд $
-    /// × 361,93 = 10 857 900 000 000 ֏: центы на курс в десятитысячных
-    /// переполняют `i64`, а драмы помещаются. И итог не зависит от порядка
-    /// строк: `MAX + 1 − 1` — это `MAX`, как и `MAX − 1 + 1`.
+    /// × 361,93 = 10 857 900 000 000,00 ֏: центы на курс в десятитысячных
+    /// и на лумы переполняют `i64`, а лумы помещаются. И итог не зависит от
+    /// порядка строк: `MAX + 1 − 1` — это `MAX`, как и `MAX − 1 + 1`.
     #[test]
     fn overflow_only_when_the_answer_does_not_fit() {
         assert_eq!(
-            usd(3_000_000_000_000).to_amd(Some(usd_rate())),
-            Ok(amd(10_857_900_000_000))
+            usd(3_000_000_000_000).to_lumas(Some(usd_rate())),
+            Ok(lumas(1_085_790_000_000_000))
+        );
+        assert_eq!(
+            Lumas::total([lumas(i64::MAX), lumas(1), lumas(-1)]),
+            Ok(lumas(i64::MAX))
         );
         assert_eq!(
             Money::total(Currency::Amd, [amd(i64::MAX), amd(1), amd(-1)]),

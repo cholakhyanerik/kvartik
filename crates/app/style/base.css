@@ -94,8 +94,11 @@ h1[tabindex="-1"]:focus {
 
 /* Вкладка: значок над подписью. Подпись — в строку и мелко, как в дизайне:
    «Հաճախորդներ» иначе ломается посреди слова, а длинная подпись забирает
-   себе места больше коротких (`flex: auto`). Открытая — цветом акцента
-   и жирнее: не одним цветом (Правило 4). */
+   себе места больше коротких (`flex: auto`). Поля по бокам — по 2 точки:
+   шесть армянских подписей (с «Налогом», задача 19) — 304 точки, и с прежними
+   4 точками последняя вкладка на 360 точках выходила за край на 9 (замер
+   2026-10-20). Открытая — цветом акцента и жирнее: не одним цветом
+   (Правило 4). */
 .tabs li {
   flex: auto;
 }
@@ -106,7 +109,7 @@ h1[tabindex="-1"]:focus {
   align-items: center;
   gap: 0.125rem;
   min-height: var(--touch);
-  padding: var(--space-2) var(--space-1) 0;
+  padding: var(--space-2) 0.125rem 0;
   color: var(--text-muted);
   font-size: 0.6875rem;
   line-height: var(--leading-tight);
@@ -1938,4 +1941,109 @@ ul.file-list {
 /* Подсказка книги — не вплотную к кнопкам над ней. */
 .ledger-add + .hint {
   margin-top: var(--space-4);
+}
+
+/* Налог (`ui/tax.rs`, задача 19): главная карточка — оливковая, с кругом-
+   украшением в углу, как в дизайне «Kvartik Design» (экраны 02 и 10).
+   На главном экране вся карточка — ссылка на экран налога. */
+.hero-card {
+  position: relative;
+  display: grid;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+  padding: var(--space-5);
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  background: var(--fill-hero);
+  color: var(--on-fill-hero);
+  text-decoration: none;
+}
+
+.hero-card::before {
+  position: absolute;
+  top: -3.75rem;
+  right: -3rem;
+  width: 10rem;
+  height: 10rem;
+  border-radius: var(--radius-round);
+  background: var(--decor-hero);
+  content: "";
+}
+
+/* Текст — над кругом: круг только украшает. */
+.hero-card > * {
+  position: relative;
+}
+
+.hero-meta,
+.hero-note {
+  font-size: var(--font-size-sm);
+}
+
+.hero-label {
+  font-weight: var(--weight-strong);
+}
+
+/* Сумма налога — крупно и табличными цифрами (Правило 4). */
+.hero-sum {
+  font-family: var(--font-display);
+  font-size: var(--font-size-hero);
+  line-height: var(--leading-tight);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* Доход по месяцам и строки расчёта — суммы табличными цифрами. */
+dl.months dd,
+.tax-line dd {
+  font-variant-numeric: tabular-nums;
+}
+
+/* «Как посчитано» — раскрывается; строка расчёта — своей карточкой. */
+.tax-how {
+  margin-top: var(--space-5);
+}
+
+.tax-how > summary {
+  min-height: var(--touch);
+  color: var(--accent-text);
+  font-weight: var(--weight-strong);
+  cursor: pointer;
+}
+
+.tax-line {
+  margin-top: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
+}
+
+.tax-line > h3 {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: var(--weight-strong);
+}
+
+.tax-line > .hint {
+  margin: var(--space-1) 0 0;
+}
+
+/* Закрыть квартал — кнопкой с подсказкой под ней. */
+/* Закрытый квартал и «Открыть снова» — над карточкой налога: у строки
+   поле только сверху, и кнопка легла бы вплотную к карточке (глазной
+   прогон задачи 19). */
+.tax-closed {
+  margin-bottom: var(--space-4);
+}
+
+.tax-close {
+  margin-top: var(--space-5);
+}
+
+/* «Сверьте расчёт с бухгалтером» — внизу экрана, как в дизайне. */
+.tax-check {
+  margin: var(--space-6) 0 var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  text-align: center;
 }

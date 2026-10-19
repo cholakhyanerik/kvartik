@@ -11,10 +11,11 @@
 //! узнать об этом в конце квартала поздно. Так же — о номере счёта с
 //! несходящейся контрольной цифрой: опечатку видно, пока номер перед глазами.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
-use kvartik_core::model::activity::{ActivityCode, CodeError};
+use kvartik_core::model::activity::{ActivityCode, CodeError, IncomeKind};
 use kvartik_core::model::bank::{BankAccount, Swift};
 use kvartik_core::model::date::Date;
 use kvartik_core::model::logo::{self, Image, ImageError, Logo};
@@ -38,6 +39,7 @@ use super::icon::{Icon, icon};
 use super::route::{Router, Screen};
 use super::split::{screen, split};
 use super::storage::error_key;
+use super::tax;
 use super::{Base, tr};
 use crate::platform::clock;
 use crate::platform::file::{self, FileError, Picture};
@@ -83,6 +85,24 @@ impl Profiles {
         self.state.with(|state| match state {
             State::Ready(Some(profile)) => profile.data().activities.clone(),
             State::Ready(None) | State::Loading | State::Failed(_) => Vec::new(),
+        })
+    }
+
+    /// Что-то, посчитанное по профилю; пока он читается или не прочитан —
+    /// значение по умолчанию. Профиля нет — `None`. Отслеживаемое: по кодам
+    /// профиля считается налог (задача 19).
+    pub(super) fn with<T: Default>(&self, read: impl FnOnce(Option<&ProfileData>) -> T) -> T {
+        self.state.with(|state| match state {
+            State::Ready(profile) => read(profile.as_deref().map(Profile::data)),
+            State::Loading | State::Failed(_) => T::default(),
+        })
+    }
+
+    /// Почему профиль не прочитался — отслеживаемое.
+    pub(super) fn failure(&self) -> Option<StoreError> {
+        self.state.with(|state| match state {
+            State::Failed(error) => Some(*error),
+            State::Loading | State::Ready(_) => None,
         })
     }
 
@@ -441,6 +461,8 @@ struct AccountRow {
 struct CodeRow {
     key: u32,
     text: RwSignal<String>,
+    /// Строка налога, выбранная коду; `None` — по закону (задача 19).
+    kind: RwSignal<Option<IncomeKind>>,
 }
 
 /// Строка периода остановки в форме: даты — записью ISO, как их отдаёт
@@ -550,7 +572,10 @@ impl Form {
             row
         });
         form.accounts.set(accounts.collect());
-        let codes = data.activities.iter().map(|code| form.code_row(code.to_string()));
+        let codes = data
+            .activities
+            .iter()
+            .map(|code| form.code_row(code.to_string(), data.kinds.get(code).copied()));
         form.activities.set(codes.collect());
         let stops = data.person.stops.iter().map(|stop| {
             let row = form.stop_row();
@@ -579,10 +604,11 @@ impl Form {
         }
     }
 
-    fn code_row(&self, text: String) -> CodeRow {
+    fn code_row(&self, text: String, kind: Option<IncomeKind>) -> CodeRow {
         CodeRow {
             key: self.key(),
             text: RwSignal::new(text),
+            kind: RwSignal::new(kind),
         }
     }
 
@@ -605,13 +631,21 @@ impl Form {
             .filter(|row| !row.is_blank())
             .map(AccountRow::account)
             .collect::<Option<Vec<_>>>()?;
-        let activities = self
+        let rows: Vec<CodeRow> = self
             .activities
             .get_untracked()
-            .iter()
+            .into_iter()
             .filter(|row| !row.text.get_untracked().trim().is_empty())
+            .collect();
+        let activities = rows
+            .iter()
             .map(|row| ActivityCode::parse(&row.text.get_untracked()).ok())
             .collect::<Option<Vec<_>>>()?;
+        let kinds: BTreeMap<ActivityCode, IncomeKind> = activities
+            .iter()
+            .zip(&rows)
+            .filter_map(|(code, row)| Some((*code, row.kind.get_untracked()?)))
+            .collect();
         let stops = self
             .stops
             .get_untracked()
@@ -641,6 +675,7 @@ impl Form {
             email,
             accounts,
             activities,
+            kinds,
             regime: self.regime.get_untracked(),
             person: Person {
                 birth_year,
@@ -1145,6 +1180,36 @@ fn Activities(lang: ReadSignal<Lang>, form: Form, today: Option<Date>) -> impl I
                             }
                         }
                     />
+                    // Строка налога: по коду закон узнаёт только высокие
+                    // технологии, остальное человек выбирает сам (задача 19).
+                    <label>
+                        {tr(lang, Key::ActivityKind)}
+                        <select on:change=move |event| {
+                            let chosen = event_target_value(&event);
+                            row.kind.set(IncomeKind::ALL.into_iter().find(|kind| tax::kind_code(*kind) == chosen));
+                        }>
+                            <option value="" prop:selected=move || row.kind.get().is_none()>
+                                {move || {
+                                    let lang = lang.get();
+                                    match (ActivityCode::parse(&row.text.get()).ok(), today) {
+                                        (Some(code), Some(day)) => {
+                                            let default = turnover::default_kind(&code, day);
+                                            fill(t(lang, Key::ActivityKindDefault), &[&tax::kind_label(lang, default, today)])
+                                        }
+                                        _ => t(lang, Key::NotChosen).to_owned(),
+                                    }
+                                }}
+                            </option>
+                            {IncomeKind::ALL
+                                .into_iter()
+                                .map(|kind| view! {
+                                    <option value=tax::kind_code(kind) prop:selected=move || row.kind.get() == Some(kind)>
+                                        {move || tax::kind_label(lang.get(), kind, today)}
+                                    </option>
+                                })
+                                .collect_view()}
+                        </select>
+                    </label>
                     // Сразу, ещё до сохранения (задача 9).
                     {move || {
                         let code = ActivityCode::parse(&row.text.get()).ok()?;
@@ -1164,12 +1229,13 @@ fn Activities(lang: ReadSignal<Lang>, form: Form, today: Option<Date>) -> impl I
                 class="secondary"
                 disabled=full
                 on:click=move |_| {
-                    let row = form.code_row(String::new());
+                    let row = form.code_row(String::new(), None);
                     form.activities.update(|rows| rows.push(row));
                 }
             >
                 {tr(lang, Key::ActivityAdd)}
             </button>
+            <p class="hint">{tr(lang, Key::ActivityKindHint)}</p>
             <fieldset class="group">
                 <legend>{tr(lang, Key::ProfileRegime)}</legend>
                 <Choice lang name="regime" label=Key::RegimeTurnover value=Regime::Turnover chosen=form.regime />

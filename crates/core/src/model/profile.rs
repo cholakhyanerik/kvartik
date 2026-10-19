@@ -15,10 +15,12 @@
 //! нужную дату (`tax`), а правило, поменявшееся завтра, не должно сделать
 //! вчерашний профиль «испорченным».
 
+use std::collections::BTreeMap;
+
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 
-use super::activity::ActivityCode;
+use super::activity::{ActivityCode, IncomeKind};
 use super::bank::BankAccount;
 use super::date::Date;
 use super::record::{RecordId, RecordMeta, Timestamp};
@@ -245,6 +247,12 @@ pub struct ProfileData {
     pub accounts: Vec<BankAccount>,
     /// Коды видов деятельности — не больше [`ProfileData::MAX_ACTIVITIES`].
     pub activities: Vec<ActivityCode>,
+    /// Строка налога, которую человек выбрал коду сам (решение человека
+    /// 2026-10-19, задача 19): торговля, производство, аренда… Кода здесь
+    /// нет — строку решают правила на нужный день (`tax::turnover`): по
+    /// списку высоких технологий — 1 %, иначе — прочая деятельность. Ключи —
+    /// только коды из [`Self::activities`]. С версии формата 8.
+    pub kinds: BTreeMap<ActivityCode, IncomeKind>,
     /// Режим налогообложения; `None` — не выбран.
     pub regime: Option<Regime>,
     pub person: Person,
@@ -262,6 +270,10 @@ struct ProfileDataFields {
     email: Option<Email>,
     accounts: Vec<BankAccount>,
     activities: Vec<ActivityCode>,
+    /// С версии формата 8 (задача 19): у профиля прежних версий строки
+    /// выбирают правила.
+    #[serde(default)]
+    kinds: BTreeMap<ActivityCode, IncomeKind>,
     regime: Option<Regime>,
     person: Person,
 }
@@ -272,6 +284,9 @@ pub enum ProfileError {
     /// Список длиннее предела. Форма до него не даёт дойти — значит, это
     /// порча.
     TooMany,
+    /// Строка налога выбрана коду, которого в профиле нет. Форма такого не
+    /// пишет — это порча.
+    StrayKind,
 }
 
 impl ProfileData {
@@ -283,16 +298,19 @@ impl ProfileData {
     pub const MAX_STOPS: usize = 100;
 
     /// Не длиннее ли списки пределов. Списки ограничены, чтобы испорченная
-    /// копия не положила в окно миллион строк (Правило 13).
+    /// копия не положила в окно миллион строк (Правило 13). И строки налога
+    /// выбраны только кодам профиля.
     pub fn check(&self) -> Result<(), ProfileError> {
         let fits = self.accounts.len() <= Self::MAX_ACCOUNTS
             && self.activities.len() <= Self::MAX_ACTIVITIES
             && self.person.stops.len() <= Self::MAX_STOPS;
-        if fits {
-            Ok(())
-        } else {
-            Err(ProfileError::TooMany)
+        if !fits {
+            return Err(ProfileError::TooMany);
         }
+        if self.kinds.keys().any(|code| !self.activities.contains(code)) {
+            return Err(ProfileError::StrayKind);
+        }
+        Ok(())
     }
 }
 
@@ -307,6 +325,7 @@ impl<'de> Deserialize<'de> for ProfileData {
             email,
             accounts,
             activities,
+            kinds,
             regime,
             person,
         } = ProfileDataFields::deserialize(deserializer)?;
@@ -319,11 +338,14 @@ impl<'de> Deserialize<'de> for ProfileData {
             email,
             accounts,
             activities,
+            kinds,
             regime,
             person,
         };
-        data.check()
-            .map_err(|_| de::Error::custom("список в профиле длиннее предела"))?;
+        data.check().map_err(|error| match error {
+            ProfileError::TooMany => de::Error::custom("список в профиле длиннее предела"),
+            ProfileError::StrayKind => de::Error::custom("строка налога у кода, которого в профиле нет"),
+        })?;
         Ok(data)
     }
 }

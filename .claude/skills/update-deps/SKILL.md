@@ -57,7 +57,7 @@ wasm-bindgen и программы разреза — и `tools/browser/check.mj
   Раннер соседней версии может пройти молча: сверяется только номер схемы
   (по исходникам wasm-bindgen-cli-support 0.2.129).
 - **Разрез wasm на части держится за внутренности wasm-bindgen**
-  (`wasm_split_cli_support` 0.2.3; на wasm-bindgen 0.2.128 он уже ломался —
+  (`wasm_split_cli_support` 0.2.4; на wasm-bindgen 0.2.128 он уже ломался —
   leptos#4870). После обновления wasm-bindgen, Leptos или этого крейта —
   `trunk build --release` и формы в браузере: хук сверяет части с главным
   модулем и упадёт, если они не сходятся, но то, что часть делает после

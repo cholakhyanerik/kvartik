@@ -28,7 +28,8 @@ const INVOICE: &str = concat!(
     r#""items":[{"text":"Software development services, September 2026","quantity_e3":1000,"price":500000},"#,
     r#"{"text":"Code review","quantity_e3":12500,"price":4000}],"#,
     r#""basis":null,"recurring":null,"#,
-    r#""rate":{"currency":"USD","per_unit_e4":3880000,"date":"2026-09-30","source":"manual"}},"#,
+    r#""rate":{"currency":"USD","per_unit_e4":3880000,"date":"2026-09-30","source":"manual"},"#,
+    r#""activity":"62.01.0"},"#,
     r#""issued":{"number":{"year":2026,"seq":7},"#,
     r#""seller":{"name":{"hy":"ԱՁ Արամ Պետրոսյան","ru":"ИП Арам Петросян","en":"IE Aram Petrosyan"},"#,
     r#""tin":"07654321","registration":"271.1234567","#,
@@ -48,7 +49,7 @@ const ACT: &str = concat!(
     r#""data":{"kind":"act","client":"5b0e8f9a-3c2d-4e1f-8a7b-9c6d5e4f3a2b","lang":"hy","currency":"AMD","#,
     r#""date":"2026-10-13","service_date":"2026-10-13","due":null,"#,
     r#""items":[{"text":"Ծրագրային ապահովման մշակում","quantity_e3":1000,"price":1500000}],"#,
-    r#""basis":"7c9e6679-7425-40de-944b-e07fc1f90ae7","recurring":null,"rate":null},"#,
+    r#""basis":"7c9e6679-7425-40de-944b-e07fc1f90ae7","recurring":null,"rate":null,"activity":null},"#,
     r#""issued":null,"annulled":null,"signed":null,"payments":[]}"#
 );
 
@@ -75,8 +76,9 @@ fn data_shape_is_pinned() {
     assert_eq!(issued.buyer().country, Country::from_code("DE"));
     assert_eq!(invoice.total(), Ok(Money::new(550_000, Currency::Usd)));
     assert_eq!(invoice.paid(), Ok(Money::new(550_000, Currency::Usd)));
-    // 5 500,00 $ × 388,00 = 2 134 000 ֏.
-    assert_eq!(invoice.data().total_amd(), Ok(Money::new(2_134_000, Currency::Amd)));
+    // 5 500,00 $ × 388,00 = 2 134 000,00 ֏.
+    assert_eq!(invoice.data().total_lumas(), Ok(Lumas::new(213_400_000)));
+    assert_eq!(data.activity, ActivityCode::parse("62.01.0").ok());
     assert_eq!(invoice.status(day(2026, 10, 30)), Status::Paid);
     assert_eq!(serde_json::to_string(&invoice).ok().as_deref(), Some(INVOICE));
 
@@ -87,7 +89,8 @@ fn data_shape_is_pinned() {
     assert_eq!(act.total(), Ok(Money::new(1_500_000, Currency::Amd)));
     assert_eq!(act.status(day(2026, 10, 13)), Status::Draft);
     assert_eq!(act.data().rate, None);
-    assert_eq!(act.data().total_amd(), Ok(Money::new(1_500_000, Currency::Amd)));
+    assert_eq!(act.data().total_lumas(), Ok(Lumas::new(150_000_000)));
+    assert_eq!(act.data().activity, None);
     assert_eq!(serde_json::to_string(&act).ok().as_deref(), Some(ACT));
 }
 
@@ -96,17 +99,53 @@ fn data_shape_is_pinned() {
 /// теряются.
 #[test]
 fn documents_without_rate_still_read() {
-    let old = INVOICE.replacen(
-        r#","rate":{"currency":"USD","per_unit_e4":3880000,"date":"2026-09-30","source":"manual"}"#,
-        "",
-        1,
-    );
-    assert_ne!(old, INVOICE);
+    let old = INVOICE
+        .replacen(
+            r#","rate":{"currency":"USD","per_unit_e4":3880000,"date":"2026-09-30","source":"manual"}"#,
+            "",
+            1,
+        )
+        .replacen(r#","activity":"62.01.0""#, "", 1);
+    assert!(!old.contains("rate") && !old.contains("activity"), "{old}");
     let invoice: Document = serde_json::from_str(&old).expect("счёт без курса читается");
     assert_eq!(invoice.data().rate, None);
-    assert_eq!(invoice.data().total_amd(), Err(MoneyError::RateUnknown));
+    assert_eq!(invoice.data().total_lumas(), Err(MoneyError::RateUnknown));
     let written = serde_json::to_string(&invoice).expect("записывается");
-    assert!(written.contains(r#""recurring":null,"rate":null}"#), "{written}");
+    assert!(written.contains(r#""recurring":null,"rate":null,"activity":null}"#), "{written}");
+}
+
+/// Документ версии формата 7 — без вида деятельности — читается без него
+/// и пишется уже с полем (Правило 2).
+#[test]
+fn documents_without_activity_still_read() {
+    let old = INVOICE.replacen(r#","activity":"62.01.0""#, "", 1);
+    assert!(!old.contains("activity"), "{old}");
+    let invoice: Document = serde_json::from_str(&old).expect("счёт версии 7 читается");
+    assert_eq!(invoice.data().activity, None);
+    let written = serde_json::to_string(&invoice).expect("записывается");
+    assert!(written.contains(r#""source":"manual"},"activity":null}"#), "{written}");
+}
+
+/// Вид деятельности выпущенного документа указывают и правят: в PDF его
+/// нет, и текст документа не меняется. Тот же вид — нечего писать;
+/// у аннулированного и у черновика — нельзя.
+#[test]
+fn activity_is_set_on_an_issued_document() {
+    let client = client();
+    let invoice = dollar_invoice(&client);
+    let code = ActivityCode::parse("74.10.0").ok();
+    let set = invoice.set_activity(code, at(4_000)).expect("годен").expect("указан");
+    assert_eq!(set.data().activity, code);
+    assert_eq!(set.meta().modified(), at(4_000));
+    assert_eq!((set.number(), set.issued()), (invoice.number(), invoice.issued()));
+    assert_eq!(set.data().items, invoice.data().items);
+    assert_eq!(set.set_activity(code, at(5_000)), Ok(None));
+    let cleared = set.set_activity(None, at(5_000)).expect("годен").expect("убран");
+    assert_eq!(cleared.data().activity, None);
+    let annulled = set.annul(day(2026, 10, 20), at(6_000)).expect("годен").expect("аннулирован");
+    assert_eq!(annulled.set_activity(None, at(7_000)), Err(DocError::Annulled));
+    let draft = Document::create(data(DocKind::Invoice, &client, day(2026, 10, 1)), at(1_000)).expect("черновик");
+    assert_eq!(draft.set_activity(code, at(2_000)), Err(DocError::NotIssued));
 }
 
 /// Документ версии формата 6 — без поля подписи — читается неподписанным,
@@ -306,6 +345,7 @@ fn data(kind: DocKind, client: &Client, date: Date) -> DocumentData {
         basis: None,
         recurring: None,
         rate: None,
+        activity: None,
     }
 }
 
@@ -588,15 +628,15 @@ fn dollar_invoice(client: &Client) -> Document {
 fn rate_is_set_on_an_issued_document() {
     let client = client();
     let invoice = dollar_invoice(&client);
-    assert_eq!(invoice.data().total_amd(), Err(MoneyError::RateUnknown));
+    assert_eq!(invoice.data().total_lumas(), Err(MoneyError::RateUnknown));
     let rated = invoice.set_rate(Some(3_880_000), at(4_000)).expect("годен").expect("указан");
     let rate = rated.data().rate.expect("курс есть");
     assert_eq!(
         (rate.currency(), rate.per_unit_e4(), rate.date(), rate.source()),
         (Currency::Usd, 3_880_000, day(2026, 9, 30), RateSource::Manual)
     );
-    // Строка — 100 000 центов: 1 000,00 $ × 388,00 = 388 000 ֏.
-    assert_eq!(rated.data().total_amd(), Ok(Money::new(388_000, Currency::Amd)));
+    // Строка — 100 000 центов: 1 000,00 $ × 388,00 = 388 000,00 ֏.
+    assert_eq!(rated.data().total_lumas(), Ok(Lumas::new(38_800_000)));
     assert_eq!(rated.meta().modified(), at(4_000));
     assert_eq!((rated.number(), rated.issued()), (invoice.number(), invoice.issued()));
     assert_eq!(rated.data().items, invoice.data().items);
