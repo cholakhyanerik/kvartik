@@ -798,8 +798,8 @@ async fn stored_profile() -> Result<Option<Profile>, StoreError> {
 /// Профиль сохраняется одной командой и читается обратно: ошибочный ՀՎՀՀ
 /// не даёт сохранить и говорит об этом у поля, код, закрывающий налог
 /// с оборота, и опечатка в номере счёта предупреждают сразу при вводе,
-/// но сохранить не мешают, а сохранённое лежит в базе и видно в окне после
-/// нового открытия.
+/// но сохранить не мешают, о пенсии спрашивают по году рождения,
+/// а сохранённое лежит в базе и видно в окне после нового открытия.
 #[wasm_bindgen_test]
 async fn profile_is_saved_and_read_back() {
     // С пустой базы: профиль, оставленный другим тестом, принёс бы свои
@@ -873,6 +873,25 @@ async fn profile_is_saved_and_read_back() {
             }
         }
         None => wrong.push("нет поля номера счёта".to_owned()),
+    }
+    // О накопительной пенсии спрашивают только родившихся до 1974 года —
+    // по правилу файла правил на сегодня (`tax::annual`).
+    let pension = t(lang, Key::PensionJoined);
+    match field(&host, t(lang, Key::BirthYear), 0) {
+        Some(input) => {
+            type_into(&input, "1990");
+            sleep(50).await;
+            if host.text_content().is_some_and(|text| text.contains(pension)) {
+                wrong.push("родившегося в 1990 году спрашивают о пенсии".to_owned());
+            }
+            type_into(&input, "1960");
+            sleep(50).await;
+            if !host.text_content().is_some_and(|text| text.contains(pension)) {
+                wrong.push("родившегося в 1960 году не спрашивают о пенсии".to_owned());
+            }
+            type_into(&input, "");
+        }
+        None => wrong.push("нет поля года рождения".to_owned()),
     }
 
     let save = button(&host, &[t(lang, Key::ProfileSave)]);

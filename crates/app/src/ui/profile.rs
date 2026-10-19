@@ -1211,11 +1211,12 @@ fn PersonFields(lang: ReadSignal<Lang>, form: Form, today: Option<Date>) -> impl
     let tried = form.tried;
     // Вопрос о накопительной пенсии — только тем, для кого она по выбору
     // (`tax::annual`): родившимся раньше, чем начинается обязательное
-    // участие.
+    // участие по правилу на сегодня.
     let asks_pension = move || {
         form.birth_year
             .with(|text| birth_year(text, today))
-            .is_some_and(annual::pension_is_a_choice)
+            .zip(today)
+            .is_some_and(|(year, today)| annual::pension_is_a_choice(year, today))
     };
     let full = move || form.stops.with(|rows| rows.len() >= ProfileData::MAX_STOPS);
     view! {
