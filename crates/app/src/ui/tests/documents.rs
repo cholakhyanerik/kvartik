@@ -1207,3 +1207,50 @@ async fn issued_document_is_sent_by_the_share_menu() {
     forget_device();
     assert!(wrong.is_empty(), "«Отправить PDF»: {wrong:#?}");
 }
+
+/// Курс и вид деятельности у счёта, закрытого действующим актом, ни на что
+/// не влияют: доход книги — по акту (`ledger::income_documents`). Карточка
+/// такого счёта не предлагает курс, а говорит, что он у акта; у самого
+/// акта — «Указать курс ЦБ» (дефект 0.0.27–0.0.47, найден ревью задачи 19).
+#[wasm_bindgen_test]
+async fn an_invoice_with_an_act_leaves_the_rate_to_the_act() {
+    let client = fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let now = clock::now();
+    let today = clock::today().expect("часы с датой");
+    let invoice = Document::create(invoice_data(&client), now)
+        .expect("черновик счёта")
+        .issue(&[], 0, Some(&profile()), &client, now)
+        .expect("счёт выпущен");
+    let act = Document::create(invoice.act_data(today).expect("акт по счёту"), now)
+        .expect("черновик акта")
+        .issue(&[], 0, Some(&profile()), &client, now)
+        .expect("акт выпущен");
+    let mut writes = Writes::default();
+    writes.insert(&invoice);
+    writes.insert(&act);
+    commit(writes).await;
+
+    let address = format!("#/documents/{}", invoice.id());
+    let (host, mounted) = mount_at(&address);
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::DocIncomeByAct)).await {
+        wrong.push("у счёта с актом нет слов, что курс — у акта".to_owned());
+    }
+    if button(&host, &[t(lang, Key::DocRateSet)]).is_some() {
+        wrong.push("у счёта с актом — «Указать курс ЦБ»".to_owned());
+    }
+    if host.text_content().unwrap_or_default().contains(t(lang, Key::DocRateMissing)) {
+        wrong.push("у счёта с актом — «в книге этот доход без суммы в драмах»".to_owned());
+    }
+    crate::platform::set_hash(&format!("#/documents/{}", act.id()));
+    if !wait_for(&host, t(lang, Key::DocRateSet)).await {
+        wrong.push("у акта нет «Указать курс ЦБ»".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "курс у счёта с актом: {wrong:#?}");
+}

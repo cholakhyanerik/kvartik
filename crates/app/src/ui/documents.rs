@@ -2081,12 +2081,10 @@ fn DocView(ctx: Ctx, id: RecordId) -> impl IntoView {
             .into_any();
         };
         let invoice = shown.data().kind == DocKind::Invoice;
-        let foreign = shown.data().currency != Currency::Amd && shown.annulled().is_none();
         view! {
             {back}
             <DocCard ctx document=shown.clone() busy failure />
-            {foreign.then(|| view! { <DocRate ctx document=shown.clone() busy failure /> })}
-            {shown.annulled().is_none().then(|| view! { <DocActivity ctx document=shown.clone() busy failure /> })}
+            <ForBook ctx document=shown.clone() busy failure />
             <NoticeLine ctx busy failure />
             {move || failure.get().map(|problem| view! { <p role="alert">{tr(lang, problem.key())}</p> })}
             <DocItems ctx document=shown.clone() />
@@ -2142,6 +2140,7 @@ fn DocCard(
     let awaiting = matches!(status, Status::Unpaid | Status::PartlyPaid | Status::Overdue);
     let invoice = data.kind == DocKind::Invoice;
     let open = document.annulled().is_none();
+    let covered = covered_by_act(ctx, &document);
     // Сколько дней до срока — у счёта, который ждёт оплаты и ещё не
     // просрочен: о просроченном говорит статус.
     let days_left = match (ctx.today, data.due) {
@@ -2166,11 +2165,13 @@ fn DocCard(
             <span class=format!("{status_class} dot")>{tr(lang, status_key)}</span>
             <p class="amount">{move || money_text(lang.get(), total)}</p>
             // Итог в драмах по курсу ЦБ — под итогом, как в дизайне «Kvartik
-            // Design» (экран 05); у действующего документа в валюте.
+            // Design» (экран 05); у действующего документа в валюте. У счёта
+            // с действующим актом без курса — ничего: книга берёт акт, и о нём
+            // говорит `ForBook`.
             {(data.currency != Currency::Amd && open).then(|| {
                 let amd = data.total_lumas().ok();
                 let (currency, rate) = (data.currency, data.rate);
-                view! {
+                move || (rate.is_some() || !covered.get()).then(|| view! {
                     <p class="hint">{move || {
                         let lang = lang.get();
                         match (amd, rate) {
@@ -2182,7 +2183,7 @@ fn DocCard(
                             _ => t(lang, Key::DocRateMissing).to_owned(),
                         }
                     }}</p>
-                }
+                })
             })}
             <p class="doc-client">{move || client_label(lang.get(), &client, clients)}</p>
             <dl class="pairs">
@@ -2247,6 +2248,61 @@ fn DocCard(
             <PaperPanel lang base=ctx.base request=request.clone() close=move || paper.set(false) />
         })}
     }
+}
+
+/// Курс ЦБ и вид деятельности выпущенного документа — для книги и налога.
+/// У счёта с действующим актом доход — по акту (`ledger::income_documents`):
+/// курс и вид у такого счёта ни на что не влияют, и карточка говорит, что
+/// они у акта, а не предлагает их (дефект 0.0.27–0.0.47: «Указать курс ЦБ»
+/// был и у такого счёта, и курс молча не доходил до книги).
+#[component]
+fn ForBook(
+    ctx: Ctx,
+    document: Document,
+    busy: RwSignal<bool>,
+    failure: RwSignal<Option<Problem>>,
+) -> impl IntoView {
+    let lang = ctx.lang;
+    let data = document.data();
+    let live = document.annulled().is_none();
+    let foreign = data.currency != Currency::Amd && live;
+    let service = data.service_date;
+    let covered = covered_by_act(ctx, &document);
+    let needed = Memo::new(move |_| ctx.profiles.with(|profile| turnover::activity_needed(profile, service)));
+    move || {
+        if covered.get() {
+            view! {
+                {move || (foreign || needed.get()).then(|| view! {
+                    <div class="rate-box">
+                        <p class="hint">{tr(lang, Key::DocIncomeByAct)}</p>
+                    </div>
+                })}
+            }
+            .into_any()
+        } else {
+            view! {
+                {foreign.then(|| view! { <DocRate ctx document=document.clone() busy failure /> })}
+                {live.then(|| view! { <DocActivity ctx document=document.clone() busy failure /> })}
+            }
+            .into_any()
+        }
+    }
+}
+
+/// Закрыт ли счёт действующим актом: доход тогда — по акту
+/// (`ledger::income_documents`), и курс с видом деятельности у счёта ни на
+/// что не влияют. Пока документы читаются — нет. Отслеживаемое.
+fn covered_by_act(ctx: Ctx, document: &Document) -> Memo<bool> {
+    let id = document.id();
+    let invoice = document.data().kind == DocKind::Invoice;
+    let live = document.issued().is_some() && document.annulled().is_none() && !document.is_deleted();
+    Memo::new(move |_| {
+        invoice
+            && live
+            && ctx.documents.with(|documents, _, _| {
+                Some(ledger::income_documents(documents).iter().any(|document| document.id() == id))
+            }) == Some(false)
+    })
 }
 
 /// Курс документа в валюте для книги (задача 14): «Указать курс ЦБ» или
@@ -2337,9 +2393,8 @@ fn DocRate(
 /// Вид деятельности выпущенного документа (задача 19): у ИП, которому он
 /// нужен (`turnover::activity_needed`), — выбором и «Сохранить», как курс.
 /// В PDF его нет: выпущенный документ от него не меняется
-/// (`Document::set_activity`). У счёта с действующим актом доход — по акту
-/// (`ledger::income_documents`): вид указывают у акта, а здесь говорят это,
-/// иначе выбор у счёта ни на что бы не влиял.
+/// (`Document::set_activity`). У счёта с действующим актом его нет вовсе
+/// (`ForBook`).
 #[component]
 fn DocActivity(
     ctx: Ctx,
@@ -2356,10 +2411,6 @@ fn DocActivity(
     let tried = RwSignal::new(false);
     let activities = Memo::new(move |_| ctx.profiles.activities());
     let needed = Memo::new(move |_| ctx.profiles.with(|profile| turnover::activity_needed(profile, service)));
-    let income = Memo::new(move |_| {
-        ctx.documents
-            .with(|documents, _, _| ledger::income_documents(documents).iter().any(|document| document.id() == id))
-    });
     let save = move |_| {
         tried.set(true);
         let activity = chosen.get_untracked();
@@ -2371,11 +2422,6 @@ fn DocActivity(
         });
     };
     move || {
-        if !income.get() {
-            return needed
-                .get()
-                .then(|| view! { <p class="hint">{tr(lang, Key::DocActivityByAct)}</p> }.into_any());
-        }
         (needed.get() || saved.is_some()).then(|| {
             view! {
                 <div class="rate-box">
@@ -2387,7 +2433,6 @@ fn DocActivity(
                     })}
                 </div>
             }
-            .into_any()
         })
     }
 }
