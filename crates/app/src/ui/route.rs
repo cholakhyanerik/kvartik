@@ -29,6 +29,8 @@ pub enum Screen {
     Clients,
     /// Налог с оборота за квартал (задача 19).
     Tax,
+    /// Годовые платежи — экран внутри раздела налога (задача 20).
+    Annual,
     Profile,
     /// Резервная копия и хранение данных — экран внутри профиля.
     Backup,
@@ -39,12 +41,13 @@ const DOCUMENT: &str = "#/documents/";
 
 impl Screen {
     /// Экраны без параметров — в порядке разделов.
-    pub const PLAIN: [Screen; 7] = [
+    pub const PLAIN: [Screen; 8] = [
         Screen::Home,
         Screen::Documents,
         Screen::Ledger,
         Screen::Clients,
         Screen::Tax,
+        Screen::Annual,
         Screen::Profile,
         Screen::Backup,
     ];
@@ -59,6 +62,7 @@ impl Screen {
             Screen::Ledger => "#/ledger".to_owned(),
             Screen::Clients => "#/clients".to_owned(),
             Screen::Tax => "#/tax".to_owned(),
+            Screen::Annual => "#/annual".to_owned(),
             Screen::Profile => "#/profile".to_owned(),
             Screen::Backup => "#/backup".to_owned(),
         }
@@ -87,10 +91,11 @@ impl Screen {
     }
 
     /// Раздел, который подсвечен в меню на этом экране: копия — часть
-    /// профиля, документ — раздела документов.
+    /// профиля, годовые платежи — налога, документ — раздела документов.
     pub const fn section(self) -> Screen {
         match self {
             Screen::Backup => Screen::Profile,
+            Screen::Annual => Screen::Tax,
             Screen::Document(_) => Screen::Documents,
             other => other,
         }
@@ -104,6 +109,7 @@ impl Screen {
             Screen::Ledger => "ledger",
             Screen::Clients => "clients",
             Screen::Tax => "tax",
+            Screen::Annual => "annual",
             Screen::Profile => "profile",
             Screen::Backup => "backup",
         }
@@ -202,12 +208,15 @@ mod tests {
         assert!(wrong.is_empty(), "адреса экранов: {wrong:#?}");
     }
 
-    /// В меню подсвечен раздел экрана: у копии — профиль, у документа —
-    /// документы; документ показан на странице документов.
+    /// В меню подсвечен раздел экрана: у копии — профиль, у годовых
+    /// платежей — налог, у документа — документы; документ показан на
+    /// странице документов.
     #[test]
     fn screens_live_in_their_sections() {
         let document = Screen::Document(RecordId::random());
         assert_eq!(Screen::Backup.section(), Screen::Profile);
+        assert_eq!(Screen::Annual.section(), Screen::Tax);
+        assert_eq!(Screen::Annual.page(), Screen::Annual);
         assert_eq!(document.section(), Screen::Documents);
         assert_eq!(document.page(), Screen::Documents);
         assert_eq!(document.id(), "documents");

@@ -113,9 +113,12 @@ const FORMS = [
     shown: VISIBLE("#profile-accounts"), gone: HIDDEN("#profile-accounts") },
 ];
 
-/// Экраны без формы: их содержимое рисует часть экрана — налог (задача 19).
+/// Экраны без формы: их содержимое рисует часть экрана — налог (задача 19)
+/// и годовые платежи (задача 20). «Сверьте расчёт с бухгалтером» часть
+/// годовых платежей рисует всегда, и с профилем, и без него.
 const SCREENS = [
   { name: "Налог", hash: "#/tax", shown: TEXT_IN("#tax", s("TaxTurnover")) },
+  { name: "Годовые платежи", hash: "#/annual", shown: TEXT_IN("#annual", s("TaxCheck")) },
 ];
 
 async function screens(page, when) {

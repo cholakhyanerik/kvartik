@@ -34,7 +34,12 @@
 //!   коды; граница по году рождения — 1 января; у ставки вычет расходов
 //!   и нижний предел — вместе или никак, а предел ниже ставки; порог больше
 //!   нуля; платёж банка у расходов — в своём списке, а не среди документов;
-//!   проценты — числом закона: `4.5`, а не `4,5` и не `4.50`;
+//!   проценты — числом закона: `4.5`, а не `4,5` и не `4.50`; у годовых
+//!   платежей суммы больше нуля, срок есть в каждом году (не 29 февраля),
+//!   границы ступеней гербового сбора растут, а без границы — только
+//!   последняя; у медстраховки возраст больше нуля, порог оборота не
+//!   отрицательный, а число месяца у помесячного срока есть в каждом
+//!   месяце (не позже 28-го);
 //! - незнакомых полей нет: опечатка в имени поля — ошибка, а не молча
 //!   пропущенное правило.
 //!
@@ -605,6 +610,207 @@ impl Rule for Expenses {
     }
 }
 
+/// День года, следующего за годом платежа, — срок годового платежа: «до
+/// 20 апреля следующего года» — `{"month":4,"day":20}`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NextYearDay {
+    pub month: u8,
+    pub day: u8,
+}
+
+impl NextYearDay {
+    /// Этот день в году после `year`; `None` — календарь кончился.
+    pub fn after(self, year: u16) -> Option<Date> {
+        Date::new(year.checked_add(1)?, self.month, self.day)
+    }
+
+    /// Есть ли такой день в каждом году: 29 февраля — не в каждом,
+    /// а 2023-й — не високосный.
+    fn usable(self) -> bool {
+        Date::new(2023, self.month, self.day).is_some()
+    }
+}
+
+/// Фиксированный платёж ИП на налоге с оборота за каждый месяц года
+/// (`tax::annual`): налог на прибыль и соцплатёж. Платится за год одной
+/// суммой — до дня `due` следующего года.
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Monthly {
+    /// Сумма за месяц, драмы.
+    pub monthly: i64,
+    /// Срок уплаты за год.
+    pub due: NextYearDay,
+    pub from: Date,
+    /// Ключ обязателен, как у [`Exclusion::until`].
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub until: Option<Date>,
+    pub source: Source,
+}
+
+impl Rule for Monthly {
+    fn period(&self) -> Period {
+        Period {
+            from: self.from,
+            until: self.until,
+        }
+    }
+
+    fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// Сумма одна на всех: две записи — всегда об одном.
+    fn same_subject(&self, _: &Self) -> bool {
+        true
+    }
+
+    fn usable(&self) -> bool {
+        self.monthly > 0 && self.due.usable()
+    }
+}
+
+/// Ступень шкалы гербового сбора: база до `up_to` драмов включительно —
+/// `amount` драмов.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Step {
+    /// Верхняя граница базы, включительно; `None` — без границы: последняя
+    /// ступень. Ключ обязателен, как у [`Exclusion::until`].
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub up_to: Option<i64>,
+    /// Сбор, драмы.
+    pub amount: i64,
+}
+
+/// Гербовый сбор ИП на налоге с оборота за год (`tax::annual`): ступени
+/// по обороту года — так, как их пишет закон, — и срок уплаты.
+///
+/// Запись — об отчётном годе: её период — годы, к обязательствам которых
+/// она применяется, а не дни, когда действовала редакция закона. Новая
+/// шкала для ИП вступила 2026-01-01, хотя в сводной редакции стоит
+/// с 25.12.2025 — с этого дня она действует только для работников (закон
+/// ՀՕ-477-Ն, ст. 2).
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StampDuty {
+    /// Ступени по возрастанию границы; у последней границы нет.
+    pub steps: Vec<Step>,
+    /// Срок уплаты за год.
+    pub due: NextYearDay,
+    pub from: Date,
+    /// Ключ обязателен, как у [`Exclusion::until`].
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub until: Option<Date>,
+    pub source: Source,
+}
+
+impl StampDuty {
+    /// Номер ступени для базы `base` драмов.
+    pub fn step(&self, base: i64) -> Option<usize> {
+        self.steps
+            .iter()
+            .position(|step| step.up_to.is_none_or(|up_to| base <= up_to))
+    }
+}
+
+impl Rule for StampDuty {
+    fn period(&self) -> Period {
+        Period {
+            from: self.from,
+            until: self.until,
+        }
+    }
+
+    fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// Шкала одна на всех: две записи — всегда об одном.
+    fn same_subject(&self, _: &Self) -> bool {
+        true
+    }
+
+    /// Ступени есть; границы растут, а без границы — только последняя;
+    /// сборы больше нуля; срок есть в каждом году.
+    fn usable(&self) -> bool {
+        let Some((last, rest)) = self.steps.split_last() else {
+            return false;
+        };
+        let bounds: Option<Vec<i64>> = rest.iter().map(|step| step.up_to).collect();
+        let rising = bounds.is_some_and(|bounds| {
+            bounds.first().is_none_or(|first| *first >= 0) && bounds.windows(2).all(|pair| pair[0] < pair[1])
+        });
+        rising && last.up_to.is_none() && self.steps.iter().all(|step| step.amount > 0) && self.due.usable()
+    }
+}
+
+/// Как платится взнос медстраховки за год (`HealthInsurance::by`). В файле —
+/// `{"year":{"income_over":2400000,"due":"2026-07-20"}}` или
+/// `{"month":{"due_day":20}}`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum HealthBy {
+    /// За год одной суммой — годовая ставка, двенадцать месячных, — до дня
+    /// `due`; платит ИП, у которого оборот прошлого года по расчётам налога
+    /// с оборота больше `income_over` драмов.
+    Year { income_over: i64, due: Date },
+    /// Помесячно — до числа `due_day` месяца, следующего за месяцем.
+    Month { due_day: u8 },
+}
+
+/// Взнос всеобщей медстраховки ИП за год (`tax::annual`).
+///
+/// Закон вступает для ИП по частям (ст. 45, ч. 1, п. 5 и 6): с дня
+/// `starts`, а у того, чья деятельность в этот день остановлена, — с месяца
+/// после возобновления. Запись, как и у гербового сбора, — об отчётном
+/// годе.
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HealthInsurance {
+    /// Взнос за месяц, драмы.
+    pub monthly: i64,
+    /// С какого возраста взнос за гражданина-резидента платит государство.
+    pub state_pays_from_age: u8,
+    /// С какого дня закон действует для ИП этой записи.
+    pub starts: Date,
+    pub by: HealthBy,
+    pub from: Date,
+    /// Ключ обязателен, как у [`Exclusion::until`].
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub until: Option<Date>,
+    pub source: Source,
+}
+
+impl Rule for HealthInsurance {
+    fn period(&self) -> Period {
+        Period {
+            from: self.from,
+            until: self.until,
+        }
+    }
+
+    fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// Взнос один на всех: две записи — всегда об одном.
+    fn same_subject(&self, _: &Self) -> bool {
+        true
+    }
+
+    /// Взнос и возраст больше нуля; порог не отрицательный; число месяца
+    /// есть в каждом месяце.
+    fn usable(&self) -> bool {
+        let by = match self.by {
+            HealthBy::Year { income_over, .. } => income_over >= 0,
+            HealthBy::Month { due_day } => (1..=28).contains(&due_day),
+        };
+        self.monthly > 0 && self.state_pays_from_age > 0 && by
+    }
+}
+
 /// Правила страны — файл целиком.
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -616,6 +822,10 @@ pub struct Rules {
     high_tech: Vec<HighTech>,
     turnover_threshold: Vec<Threshold>,
     turnover_expenses: Vec<Expenses>,
+    profit_tax: Vec<Monthly>,
+    social_payment: Vec<Monthly>,
+    stamp_duty: Vec<StampDuty>,
+    health_insurance: Vec<HealthInsurance>,
 }
 
 /// Какая запись: список файла и номер в нём, с нуля.
@@ -658,6 +868,10 @@ impl Rules {
         check("high_tech", &rules.high_tech)?;
         check("turnover_threshold", &rules.turnover_threshold)?;
         check("turnover_expenses", &rules.turnover_expenses)?;
+        check("profit_tax", &rules.profit_tax)?;
+        check("social_payment", &rules.social_payment)?;
+        check("stamp_duty", &rules.stamp_duty)?;
+        check("health_insurance", &rules.health_insurance)?;
         Ok(rules)
     }
 
@@ -696,6 +910,27 @@ impl Rules {
     pub fn turnover_expenses(&self) -> &[Expenses] {
         &self.turnover_expenses
     }
+
+    /// Налог на прибыль ИП на налоге с оборота — за месяц (НК, ст. 125,
+    /// ч. 3).
+    pub fn profit_tax(&self) -> &[Monthly] {
+        &self.profit_tax
+    }
+
+    /// Соцплатёж ИП на налоге с оборота — за месяц.
+    pub fn social_payment(&self) -> &[Monthly] {
+        &self.social_payment
+    }
+
+    /// Гербовый сбор ИП — шкала за отчётный год.
+    pub fn stamp_duty(&self) -> &[StampDuty] {
+        &self.stamp_duty
+    }
+
+    /// Взнос медстраховки ИП за отчётный год.
+    pub fn health_insurance(&self) -> &[HealthInsurance] {
+        &self.health_insurance
+    }
 }
 
 /// Запись вида с одним предметом на всех (список высоких технологий, порог,
@@ -704,6 +939,16 @@ impl Rules {
 /// найденная — единственная. У ставок предмет — строка, и запись ищут по ней.
 pub fn on<R: Rule>(records: &[R], on: Date) -> Option<&R> {
     records.iter().find(|record| record.period().contains(on))
+}
+
+/// Запись вида с одним предметом на всех, которая действует весь год
+/// `year` — одна и та же 1 января и 31 декабря. `None` — правила нет или
+/// оно сменилось посреди года: годовой платёж считается по одному правилу
+/// на год (`tax::annual`), а год со сменой — к бухгалтеру.
+pub fn for_year<R: Rule>(records: &[R], year: u16) -> Option<&R> {
+    let first = on(records, Date::new(year, 1, 1)?)?;
+    let last = on(records, Date::new(year, 12, 31)?)?;
+    std::ptr::eq(first, last).then_some(first)
 }
 
 /// Записи одного вида: каждая — с источником, днём конца не раньше начала

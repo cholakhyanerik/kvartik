@@ -33,6 +33,7 @@ const SAMPLE: &str = concat!(
     r#""swift":"ARMIAM22","correspondent":"Citibank N.A., New York\nSWIFT: CITIUS33"}],"#,
     r#""activities":["62.01.0","70.22.0"],"kinds":{"70.22.0":"other"},"regime":"turnover","#,
     r#""person":{"birth_year":1970,"pension_joined":true,"residency":"foreign_with_status","#,
+    r#""registered":"2022-05-12","#,
     r#""stops":[{"from":"2026-03-01","until":"2026-06-01"},{"from":"2026-09-15","until":null}]}"#,
     r#"}}"#
 );
@@ -43,7 +44,7 @@ const EMPTY: &str = concat!(
     r#""data":{"name":{"hy":"","ru":"","en":""},"tin":null,"registration":"","#,
     r#""address":{"hy":"","ru":"","en":""},"phone":"","email":null,"accounts":[],"#,
     r#""activities":[],"kinds":{},"regime":null,"#,
-    r#""person":{"birth_year":null,"pension_joined":null,"residency":null,"stops":[]}}}"#
+    r#""person":{"birth_year":null,"pension_joined":null,"residency":null,"registered":null,"stops":[]}}}"#
 );
 
 /// Образцы читаются в ожидаемые значения, а их запись — слово в слово
@@ -70,6 +71,7 @@ fn data_shape_is_pinned() {
     assert_eq!(data.person.birth_year, Some(1970));
     assert_eq!(data.person.pension_joined, Some(true));
     assert_eq!(data.person.residency, Some(Residency::ForeignWithStatus));
+    assert_eq!(data.person.registered, Some(day(2022, 5, 12)));
     assert_eq!(
         data.person.stops,
         [
@@ -92,6 +94,17 @@ fn profiles_without_kinds_still_read() {
     assert!(!old.contains("kinds"), "{old}");
     let profile: Profile = serde_json::from_str(&old).expect("профиль версии 7 читается");
     assert!(profile.data().kinds.is_empty());
+}
+
+/// Профиль версии формата 8 — без дня регистрации ИП — читается с днём «не
+/// указан» (Правило 2): годовые платежи тогда считаются с января и окно
+/// говорит это словами (`tax::annual`).
+#[test]
+fn profiles_without_registration_day_still_read() {
+    let old = SAMPLE.replacen(r#""registered":"2022-05-12","#, "", 1);
+    assert!(!old.contains("registered"), "{old}");
+    let profile: Profile = serde_json::from_str(&old).expect("профиль версии 8 читается");
+    assert_eq!(profile.data().person.registered, None);
 }
 
 /// Строка налога выбирается только коду из профиля: у кода, которого нет,
@@ -133,6 +146,8 @@ fn data_rejects_what_the_types_forbid() {
         SAMPLE.replace(r#""turnover""#, r#""micro""#),
         SAMPLE.replace(r#""foreign_with_status""#, r#""resident""#),
         SAMPLE.replace(r#""birth_year":1970"#, r#""birth_year":"1970""#),
+        SAMPLE.replace(r#""registered":"2022-05-12""#, r#""registered":"2022-02-30""#),
+        SAMPLE.replace(r#""registered":"2022-05-12""#, r#""registered":"12.05.2022""#),
         SAMPLE.replace(r#""swift":"ARMIAM22""#, r#""swift":"armiam22""#),
         SAMPLE.replace(r#""accounts":[{"currency":"USD","number":"127027482877","bank":"Ameriabank CJSC","swift":"ARMIAM22","correspondent":"Citibank N.A., New York\nSWIFT: CITIUS33"}]"#, &accounts),
         SAMPLE.replace(r#""deleted":null},"data""#, r#""deleted":null},"extra":1,"data""#),

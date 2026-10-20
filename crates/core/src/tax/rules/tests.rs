@@ -59,7 +59,11 @@ fn file(exclusions: &[Value], pensions: &[Value]) -> String {
         "turnover_rates": [],
         "high_tech": [],
         "turnover_threshold": [],
-        "turnover_expenses": []
+        "turnover_expenses": [],
+        "profit_tax": [],
+        "social_payment": [],
+        "stamp_duty": [],
+        "health_insurance": []
     })
     .to_string()
 }
@@ -148,6 +152,10 @@ fn the_built_in_file_is_sound() {
     assert!(!rules.high_tech().is_empty());
     assert!(!rules.turnover_threshold().is_empty());
     assert!(!rules.turnover_expenses().is_empty());
+    assert!(!rules.profit_tax().is_empty());
+    assert!(!rules.social_payment().is_empty());
+    assert!(!rules.stamp_duty().is_empty());
+    assert!(!rules.health_insurance().is_empty());
     assert_eq!(armenia(), &rules);
 }
 
@@ -490,7 +498,7 @@ fn version_parse_is_strict() {
 
 /// Отпечаток значений текущей версии правил: её запись и FNV-1a значений
 /// файла ([`values`]).
-const PINNED: (&str, u64) = ("2026.2", 0x6e90_fe06_b284_40ed);
+const PINNED: (&str, u64) = ("2026.3", 0xd897_5a8f_05da_b471);
 
 /// Значения файла правил одной строкой: всё, кроме версии и источников, —
 /// JSON с ключами по алфавиту. Источник — когда сверили и где лежит
@@ -583,8 +591,9 @@ fn values_see_rules_not_sources() {
     let spaced = serde_json::to_string_pretty(&bumped).expect("JSON пишется");
     assert_eq!(print(&base), print(&spaced), "пробелы — не новое правило");
     let reordered = format!(
-        r#"{{"funded_pension": [{}], "high_tech": [], "turnover_exclusions": [{}], "turnover_expenses": [],
-            "turnover_rates": [], "turnover_threshold": [], "version": "2026.1"}}"#,
+        r#"{{"funded_pension": [{}], "health_insurance": [], "high_tech": [], "profit_tax": [], "social_payment": [],
+            "stamp_duty": [], "turnover_exclusions": [{}], "turnover_expenses": [], "turnover_rates": [],
+            "turnover_threshold": [], "version": "2026.1"}}"#,
         pension("2014-01-01", None),
         exclusion(&["69"], "2025-07-01", None),
     );
@@ -695,4 +704,228 @@ fn turnover_lists_are_checked() {
         wrong.push(format!("годные расходы: {error:?}"));
     }
     assert!(wrong.is_empty(), "списки налога с оборота: {wrong:#?}");
+}
+
+const PROFIT: &str = "profit_tax";
+const SOCIAL: &str = "social_payment";
+
+/// Фиксированный платёж за месяц: сумма и срок «в следующем году».
+fn monthly(amount: i64, due: (u8, u8), from: &str, until: Option<&str>) -> Value {
+    json!({
+        "monthly": amount,
+        "due": {"month": due.0, "day": due.1},
+        "from": from,
+        "until": until,
+        "source": source()
+    })
+}
+
+/// Фиксированный платёж за месяц: сумма больше нуля и срок, который есть
+/// в каждом году; одна сумма на всех — две записи не действуют в один
+/// день; срок — день следующего года.
+#[test]
+fn monthly_payments_are_checked() {
+    let mut wrong = Vec::new();
+    for kind in [PROFIT, SOCIAL] {
+        let sound = [monthly(5000, (4, 20), "2025-01-01", Some("2026-12-31")), monthly(6000, (4, 20), "2027-01-01", None)];
+        match Rules::parse(&file_of(kind, &sound)) {
+            Ok(rules) => {
+                let records = if kind == PROFIT { rules.profit_tax() } else { rules.social_payment() };
+                if records[0].due.after(2026) != Some(day(2027, 4, 20)) {
+                    wrong.push(format!("{kind}: срок за 2026 год — {:?}", records[0].due.after(2026)));
+                }
+            }
+            Err(error) => wrong.push(format!("{kind} годные: {error:?}")),
+        }
+        for (case, record) in [
+            ("нулевая сумма", monthly(0, (4, 20), "2025-01-01", None)),
+            ("отрицательная сумма", monthly(-5000, (4, 20), "2025-01-01", None)),
+            ("29 февраля", monthly(5000, (2, 29), "2025-01-01", None)),
+            ("31 апреля", monthly(5000, (4, 31), "2025-01-01", None)),
+            ("тринадцатый месяц", monthly(5000, (13, 1), "2025-01-01", None)),
+        ] {
+            let got = Rules::parse(&file_of(kind, &[record]));
+            if got != Err(RulesError::Unusable(at(kind, 0))) {
+                wrong.push(format!("{kind} {case}: {got:?}"));
+            }
+        }
+        let twice = [monthly(5000, (4, 20), "2025-01-01", None), monthly(6000, (4, 20), "2027-01-01", None)];
+        let expected = Err(RulesError::Overlap {
+            kind,
+            first: 0,
+            second: 1,
+        });
+        if Rules::parse(&file_of(kind, &twice)) != expected {
+            wrong.push(format!("{kind} внахлёст принят"));
+        }
+        let typo = with(monthly(5000, (4, 20), "2025-01-01", None), "due", json!({"month": 4, "dya": 20}));
+        if !matches!(Rules::parse(&file_of(kind, &[typo])), Err(RulesError::Malformed(_))) {
+            wrong.push(format!("{kind} с опечаткой в сроке принят"));
+        }
+    }
+    assert!(wrong.is_empty(), "фиксированные платежи: {wrong:#?}");
+}
+
+/// Запись на весь год — та же 1 января и 31 декабря; правило, сменившееся
+/// посреди года, на этот год не годится, а года без правила нет.
+#[test]
+fn a_rule_for_the_whole_year() {
+    let records = [
+        monthly(5000, (4, 20), "2025-01-01", Some("2026-06-30")),
+        monthly(6000, (4, 20), "2026-07-01", Some("2027-12-31")),
+    ];
+    let rules = Rules::parse(&file_of(PROFIT, &records)).expect("годные записи");
+    let list = rules.profit_tax();
+    let mut wrong = Vec::new();
+    if for_year(list, 2025).map(|rule| rule.monthly) != Some(5000) {
+        wrong.push("2025 — первая запись".to_owned());
+    }
+    if for_year(list, 2026).is_some() {
+        wrong.push("2026 — смена посреди года, а запись нашлась".to_owned());
+    }
+    if for_year(list, 2027).map(|rule| rule.monthly) != Some(6000) {
+        wrong.push("2027 — вторая запись".to_owned());
+    }
+    if for_year(list, 2024).is_some() || for_year(list, 2028).is_some() {
+        wrong.push("год без правила нашёл запись".to_owned());
+    }
+    assert!(wrong.is_empty(), "запись на год: {wrong:#?}");
+}
+
+const STAMP: &str = "stamp_duty";
+const HEALTH: &str = "health_insurance";
+
+/// Шкала гербового сбора: ступени `(граница, сбор)`.
+fn stamp(steps: &[(Option<i64>, i64)], from: &str, until: Option<&str>) -> Value {
+    let steps: Vec<Value> = steps
+        .iter()
+        .map(|(up_to, amount)| json!({"up_to": up_to, "amount": amount}))
+        .collect();
+    json!({
+        "steps": steps,
+        "due": {"month": 4, "day": 20},
+        "from": from,
+        "until": until,
+        "source": source()
+    })
+}
+
+/// Взнос медстраховки: как платится — `by`.
+fn health(by: Value, from: &str, until: Option<&str>) -> Value {
+    json!({
+        "monthly": 10800,
+        "state_pays_from_age": 65,
+        "starts": from,
+        "by": by,
+        "from": from,
+        "until": until,
+        "source": source()
+    })
+}
+
+/// Шкала гербового сбора: границы растут, без границы — только последняя,
+/// сборы больше нуля; ступень по базе — первая, чья граница не меньше её,
+/// включительно.
+#[test]
+fn stamp_duty_scales_are_checked() {
+    let mut wrong = Vec::new();
+    let sound = stamp(&[(Some(12_000_000), 12_000), (None, 120_000)], "2026-01-01", None);
+    match Rules::parse(&file_of(STAMP, std::slice::from_ref(&sound))) {
+        Ok(rules) => {
+            let scale = &rules.stamp_duty()[0];
+            for (base, step) in [(0, 0), (12_000_000, 0), (12_000_001, 1), (i64::MAX, 1)] {
+                if scale.step(base) != Some(step) {
+                    wrong.push(format!("база {base}: ступень {:?}, а не {step}", scale.step(base)));
+                }
+            }
+        }
+        Err(error) => wrong.push(format!("годная шкала: {error:?}")),
+    }
+    for (case, record) in [
+        ("без ступеней", stamp(&[], "2026-01-01", None)),
+        ("последняя с границей", stamp(&[(Some(12_000_000), 12_000)], "2026-01-01", None)),
+        ("без границы не последняя", stamp(&[(None, 12_000), (None, 120_000)], "2026-01-01", None)),
+        (
+            "границы не растут",
+            stamp(&[(Some(6_000_000), 12_000), (Some(6_000_000), 24_000), (None, 120_000)], "2026-01-01", None),
+        ),
+        ("нулевой сбор", stamp(&[(Some(12_000_000), 0), (None, 120_000)], "2026-01-01", None)),
+        ("отрицательная граница", stamp(&[(Some(-1), 12_000), (None, 120_000)], "2026-01-01", None)),
+        (
+            "срок 30 февраля",
+            with(sound.clone(), "due", json!({"month": 2, "day": 30})),
+        ),
+    ] {
+        let got = Rules::parse(&file_of(STAMP, &[record]));
+        if got != Err(RulesError::Unusable(at(STAMP, 0))) {
+            wrong.push(format!("{case}: {got:?}"));
+        }
+    }
+    let twice = [sound.clone(), stamp(&[(None, 12_000)], "2025-01-01", None)];
+    let expected = Err(RulesError::Overlap {
+        kind: STAMP,
+        first: 0,
+        second: 1,
+    });
+    if Rules::parse(&file_of(STAMP, &twice)) != expected {
+        wrong.push("две шкалы внахлёст приняты".to_owned());
+    }
+    let no_bound_key = json!({"steps": [{"amount": 12_000}], "due": {"month": 4, "day": 20},
+        "from": "2026-01-01", "until": null, "source": source()});
+    if !matches!(Rules::parse(&file_of(STAMP, &[no_bound_key])), Err(RulesError::Malformed(_))) {
+        wrong.push("ступень без ключа границы принята".to_owned());
+    }
+    assert!(wrong.is_empty(), "гербовый сбор: {wrong:#?}");
+}
+
+/// Взнос медстраховки: за год — с порогом и днём срока, помесячно — с числом
+/// месяца, которое есть в каждом месяце; взнос и возраст больше нуля.
+#[test]
+fn health_insurance_is_checked() {
+    let mut wrong = Vec::new();
+    let year = json!({"year": {"income_over": 2_400_000, "due": "2026-07-20"}});
+    let month = json!({"month": {"due_day": 20}});
+    let sound = [health(year.clone(), "2026-01-01", Some("2026-12-31")), health(month.clone(), "2027-01-01", None)];
+    match Rules::parse(&file_of(HEALTH, &sound)) {
+        Ok(rules) => {
+            let records = rules.health_insurance();
+            let expected = [
+                HealthBy::Year {
+                    income_over: 2_400_000,
+                    due: day(2026, 7, 20),
+                },
+                HealthBy::Month { due_day: 20 },
+            ];
+            if records.iter().map(|record| record.by).collect::<Vec<_>>() != expected {
+                wrong.push(format!("прочитано не то: {records:?}"));
+            }
+        }
+        Err(error) => wrong.push(format!("годные записи: {error:?}")),
+    }
+    for (case, record) in [
+        ("нулевой взнос", with(health(month.clone(), "2027-01-01", None), "monthly", json!(0))),
+        ("нулевой возраст", with(health(month.clone(), "2027-01-01", None), "state_pays_from_age", json!(0))),
+        ("29-е число", health(json!({"month": {"due_day": 29}}), "2027-01-01", None)),
+        ("нулевое число", health(json!({"month": {"due_day": 0}}), "2027-01-01", None)),
+        (
+            "отрицательный порог",
+            health(json!({"year": {"income_over": -1, "due": "2026-07-20"}}), "2026-01-01", None),
+        ),
+    ] {
+        let got = Rules::parse(&file_of(HEALTH, &[record]));
+        if got != Err(RulesError::Unusable(at(HEALTH, 0))) {
+            wrong.push(format!("{case}: {got:?}"));
+        }
+    }
+    for (case, by) in [
+        ("незнакомый способ", json!({"quarter": {"due_day": 20}})),
+        ("опечатка в поле", json!({"month": {"due_dya": 20}})),
+        ("два способа", json!({"year": {"income_over": 1, "due": "2026-07-20"}, "month": {"due_day": 20}})),
+    ] {
+        let got = Rules::parse(&file_of(HEALTH, &[health(by, "2027-01-01", None)]));
+        if !matches!(got, Err(RulesError::Malformed(_))) {
+            wrong.push(format!("{case}: {got:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "медстраховка: {wrong:#?}");
 }

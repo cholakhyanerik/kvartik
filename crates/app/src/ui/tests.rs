@@ -12,7 +12,7 @@ use kvartik_core::i18n::{ALL_KEYS, Key, Lang, fill, t};
 use kvartik_core::model::client::{Client, ClientData};
 use kvartik_core::model::country::Country;
 use kvartik_core::model::money::Currency;
-use kvartik_core::model::profile::Profile;
+use kvartik_core::model::profile::{Person, Profile, Residency};
 use kvartik_core::model::text::{Line, Lines};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
@@ -23,6 +23,7 @@ use super::route::Screen;
 use crate::store::device::Device;
 use crate::store::{Store, StoreError, Writes};
 
+mod annual;
 mod documents;
 mod ledger;
 mod share;
@@ -284,8 +285,22 @@ async fn choosing_a_language_translates_the_whole_window() {
         crate::platform::clock::now(),
     )
     .expect("годный клиент");
+    // Профиль с данными человека: на экране годовых платежей — карточки
+    // платежей со всеми их словами (задача 20).
+    let mut data = documents::profile();
+    data.person = Person {
+        birth_year: Some(1990),
+        pension_joined: None,
+        residency: Some(Residency::ForeignWithStatus),
+        registered: None,
+        stops: Vec::new(),
+    };
+    let profile = Profile::save(None, data, crate::platform::clock::now())
+        .expect("годный профиль")
+        .expect("новый");
     let mut writes = Writes::default();
     writes.insert(&client);
+    writes.insert(&profile);
     Store::open(|_| {})
         .await
         .expect("база открыта")
@@ -302,7 +317,10 @@ async fn choosing_a_language_translates_the_whole_window() {
     if !wait_for(&host, t(Lang::Am, Key::BackupChooseFile)).await {
         wrong.push("раздел копии не появился".to_owned());
     }
-    visit(&host, &[Screen::Documents, Screen::Clients, Screen::Tax, Screen::Profile]).await;
+    visit(&host, &[Screen::Documents, Screen::Clients, Screen::Tax, Screen::Annual, Screen::Profile]).await;
+    if !wait_for(&host, t(Lang::Am, Key::AnnualSumOf)).await {
+        wrong.push("экран годовых платежей не показал платежей".to_owned());
+    }
     match button(
         &host,
         &[t(Lang::Am, Key::ProfileFill), t(Lang::Am, Key::ProfileEdit)],
@@ -384,6 +402,9 @@ async fn choosing_a_language_translates_the_whole_window() {
             Key::TaxTurnover,
             Key::TaxByMonth,
             Key::TaxCheck,
+            Key::AnnualSumOf,
+            Key::AnnualProfitLaw,
+            Key::AnnualHealth,
         ] {
             if !text.contains(t(lang, key)) {
                 wrong.push(format!("{lang:?}: нет {key:?} на этом языке"));
@@ -898,6 +919,12 @@ async fn profile_is_saved_and_read_back() {
         }
         None => wrong.push("нет поля года рождения".to_owned()),
     }
+    // День регистрации ИП — полем даты; с его месяца годовые платежи
+    // (задача 20).
+    match field(&host, t(lang, Key::RegisteredDay), 0) {
+        Some(input) => type_into(&input, "2022-05-12"),
+        None => wrong.push("нет поля даты регистрации".to_owned()),
+    }
 
     let save = button(&host, &[t(lang, Key::ProfileSave)]);
     if let Some(save) = &save {
@@ -945,11 +972,18 @@ async fn profile_is_saved_and_read_back() {
     {
         wrong.push("строка итога не открыла форму".to_owned());
     }
-    match button(&host, &[t(lang, Key::Cancel)]) {
-        Some(cancel) => cancel.click(),
-        None => wrong.push("в форме нет «Отмены»".to_owned()),
+    if button(&host, &[t(lang, Key::Cancel)]).is_none() {
+        wrong.push("в форме нет «Отмены»".to_owned());
     }
-    sleep(50).await;
+    // Сохранить открытую снова форму: что сохранено раньше — день
+    // регистрации тоже, — форма приносит обратно, а не стирает.
+    match button(&host, &[t(lang, Key::ProfileSave)]) {
+        Some(save) => save.click(),
+        None => wrong.push("в открытой снова форме нет «Сохранить»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::ProfileSaved)).await {
+        wrong.push("повторное сохранение не подтвердилось".to_owned());
+    }
 
     match stored_profile().await {
         Ok(Some(profile)) => {
@@ -960,6 +994,7 @@ async fn profile_is_saved_and_read_back() {
                     != ["70.22.0"]
                 || data.accounts.iter().map(|account| account.number().as_str()).collect::<Vec<_>>()
                     != ["127027482878"]
+                || data.person.registered.map(|day| day.iso()).as_deref() != Some("2022-05-12")
             {
                 wrong.push(format!("в базе не то: {data:?}"));
             }

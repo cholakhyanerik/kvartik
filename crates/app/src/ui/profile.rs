@@ -490,6 +490,8 @@ struct Form {
     birth_year: RwSignal<String>,
     pension_joined: RwSignal<Option<bool>>,
     residency: RwSignal<Option<Residency>>,
+    /// День регистрации ИП — записью ISO, как его отдаёт `<input type="date">`.
+    registered: RwSignal<String>,
     stops: RwSignal<Vec<StopRow>>,
     logo: RwSignal<LogoChoice>,
     logo_problem: RwSignal<Option<LogoProblem>>,
@@ -555,6 +557,7 @@ impl Form {
             ),
             pension_joined: RwSignal::new(data.person.pension_joined),
             residency: RwSignal::new(data.person.residency),
+            registered: RwSignal::new(data.person.registered.map(Date::iso).unwrap_or_default()),
             stops: RwSignal::new(Vec::new()),
             logo: RwSignal::new(LogoChoice::Keep),
             logo_problem: RwSignal::new(None),
@@ -658,6 +661,9 @@ impl Form {
         let birth_year = optional(&self.birth_year.get_untracked(), |text| {
             birth_year(text, today).ok_or(())
         })?;
+        let registered = optional(&self.registered.get_untracked(), |text| {
+            registered(text, today).ok_or(())
+        })?;
         Some(ProfileData {
             name: Localized {
                 hy: line(self.name.hy)?,
@@ -681,6 +687,7 @@ impl Form {
                 birth_year,
                 pension_joined: self.pension_joined.get_untracked(),
                 residency: self.residency.get_untracked(),
+                registered,
                 stops,
             },
         })
@@ -701,6 +708,12 @@ fn birth_year(text: &str, today: Option<Date>) -> Option<u16> {
     let year: u16 = text.parse().ok()?;
     let last = today.map_or(Date::MAX_YEAR, Date::year);
     (FIRST_BIRTH_YEAR..=last).contains(&year).then_some(year)
+}
+
+/// День регистрации ИП из поля даты: не позже сегодняшнего дня. Часы без
+/// даты — без верхней границы.
+fn registered(text: &str, today: Option<Date>) -> Option<Date> {
+    Date::from_iso(text.trim()).filter(|day| today.is_none_or(|today| *day <= today))
 }
 
 impl AccountRow {
@@ -1305,6 +1318,19 @@ fn PersonFields(lang: ReadSignal<Lang>, form: Form, today: Option<Date>) -> impl
                 error=move || form.birth_year.with(|text| {
                     (!text.trim().is_empty() && birth_year(text, today).is_none())
                         .then_some(Key::BirthYearInvalid)
+                })
+            />
+            <label>
+                {tr(lang, Key::RegisteredDay)}
+                <input type="date" bind:value=form.registered />
+            </label>
+            <p class="hint">{tr(lang, Key::RegisteredDayHint)}</p>
+            <FieldError
+                lang
+                tried
+                error=move || form.registered.with(|text| {
+                    (!text.trim().is_empty() && registered(text, today).is_none())
+                        .then_some(Key::RegisteredDayInvalid)
                 })
             />
             <Show when=asks_pension>

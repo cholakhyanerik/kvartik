@@ -25,11 +25,13 @@ use kvartik_core::model::activity::IncomeKind;
 use kvartik_core::model::date::{Date, Quarter};
 use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::model::record::RecordId;
+use kvartik_core::tax::annual::{self, Annual};
 use kvartik_core::tax::closing::Closing;
 use kvartik_core::tax::rules::{self, Percent};
 use kvartik_core::tax::turnover::{self, Books, Leaving, Line, QuarterTax, Regime};
 use leptos::prelude::*;
 
+use super::annual::{AnnualCard, AnnualEntry, AnnualPage};
 use super::backup::{BackupChip, Backups};
 use super::documents::Documents;
 use super::icon::{Icon, icon};
@@ -153,14 +155,14 @@ pub struct Sources {
 
 impl Sources {
     /// Книгу и снимки — читать (`Operations::watch`, `Closings::watch`).
-    fn watch(&self, base: Base) {
+    pub(super) fn watch(&self, base: Base) {
         self.operations.watch(base);
         self.closings.watch(base);
     }
 
     /// Почему расчёта не будет: документы, профиль, книга или снимки не
     /// прочитались. Отслеживаемое.
-    fn failure(&self) -> Option<StoreError> {
+    pub(super) fn failure(&self) -> Option<StoreError> {
         self.documents
             .failure()
             .or_else(|| self.profiles.failure())
@@ -200,6 +202,35 @@ impl Sources {
     /// Снимок квартала, если он закрыт. Отслеживаемое.
     fn closing(&self, quarter: Quarter) -> Option<Closing> {
         self.closings.with(|closings, _| Closing::current(closings, quarter).cloned())
+    }
+
+    /// Годовые платежи года — отслеживаемое; `None` — что-то ещё читается
+    /// или не прочиталось, как у [`Self::quarter`].
+    pub(super) fn annual(&self, year: u16) -> Option<Annual> {
+        let Self {
+            documents,
+            operations,
+            profiles,
+            closings,
+        } = *self;
+        documents.with(|documents, _, documents_unreadable| {
+            operations.with(|operations, operations_unreadable| {
+                profiles.with(|profile| {
+                    closings.with(|closings, _| {
+                        Some(annual::year(
+                            Books {
+                                documents,
+                                operations,
+                                profile,
+                                closings,
+                                unreadable: documents_unreadable + operations_unreadable,
+                            },
+                            year,
+                        ))
+                    })
+                })
+            })
+        })
     }
 }
 
@@ -251,7 +282,7 @@ fn percent(lang: Lang, value: Percent) -> String {
 }
 
 /// Сумма налога — драмы.
-fn drams(lang: Lang, drams: i64) -> String {
+pub(super) fn drams(lang: Lang, drams: i64) -> String {
     i18n::money(lang, Money::new(drams, Currency::Amd))
 }
 
@@ -308,10 +339,11 @@ impl Note {
     }
 }
 
-/// Карточка налога на главном экране (дизайн «Kvartik Design», экран 02)
-/// — из части налога. Часть грузится, когда в базе есть данные: на пустой
+/// Карточки налога квартала (дизайн «Kvartik Design», экран 02) и годовых
+/// платежей (`ui/annual.rs`) на главном экране — из части книги, где
+/// считается налог. Часть грузится, когда в базе есть данные: на пустой
 /// карточке сказать нечего, и первый заход её не качает. Пока часть
-/// грузится или если не загрузилась — карточки нет: о сбое скажет экран
+/// грузится или если не загрузилась — карточек нет: о сбое скажет экран
 /// налога, а налог открывается и вкладкой.
 #[component]
 pub fn TaxCard(ctx: Ctx) -> impl IntoView {
@@ -355,15 +387,16 @@ fn Card(ctx: Ctx) -> impl IntoView {
     }
 }
 
-/// Что нужно карточке и экрану налога из окна — одно на окно.
+/// Что нужно карточке и экранам налога и годовых платежей из окна — одно
+/// на окно.
 #[derive(Clone, Copy)]
 pub struct Ctx {
-    lang: ReadSignal<Lang>,
-    sources: Sources,
-    base: Base,
-    backups: Backups,
+    pub(super) lang: ReadSignal<Lang>,
+    pub(super) sources: Sources,
+    pub(super) base: Base,
+    pub(super) backups: Backups,
     /// Сегодня — один раз (Архитектура, «Время — параметр»).
-    today: Option<Date>,
+    pub(super) today: Option<Date>,
 }
 
 impl Ctx {
@@ -393,17 +426,26 @@ pub fn TaxScreen(ctx: Ctx, router: Router) -> impl IntoView {
 /// Что рисует налог в части книги.
 #[derive(Clone, Copy)]
 pub(super) enum Part {
-    /// Карточка главного экрана.
+    /// Карточки главного экрана: налог квартала и годовые платежи.
     Card,
     /// Содержимое экрана налога.
     Screen,
+    /// Содержимое экрана годовых платежей (`ui/annual.rs`, задача 20).
+    Annual,
 }
 
-/// Карточка или экран — зовёт часть книги (`ledger::book_part`).
+/// Карточки или экран — зовёт часть книги (`ledger::book_part`). Годовые
+/// платежи — в той же части: они считаются из книги и профиля, а своя
+/// часть делила бы с налогом почти весь код (CLAUDE.md, Правило 6).
 pub(super) fn content(ctx: Ctx, part: Part) -> AnyView {
     match part {
-        Part::Card => view! { <Card ctx /> }.into_any(),
+        Part::Card => view! {
+            <Card ctx />
+            <AnnualCard ctx />
+        }
+        .into_any(),
         Part::Screen => view! { <TaxBody ctx /> }.into_any(),
+        Part::Annual => view! { <AnnualPage ctx /> }.into_any(),
     }
 }
 
@@ -612,6 +654,7 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
                 </div>
             }
         })}
+        <AnnualEntry ctx />
         <p class="tax-check">{tr(lang, Key::TaxCheck)}</p>
         <p class="hint">{move || fill(t(lang.get(), Key::TaxRulesVersion), &[&rules_version])}</p>
     }

@@ -443,26 +443,45 @@ pub fn quarter(books: Books<'_>, quarter: Quarter) -> QuarterTax {
     tax
 }
 
+/// Режим года `year` к его концу — для годовых платежей (`tax::annual`):
+/// ушёл ли ИП с налога с оборота и с какого дня. Считается так же, как
+/// у квартала ([`quarter`]): по порогу прошлого и этого года и по доходу
+/// с кодом, закрывающим налог с оборота. `span` — строки книги с начала
+/// прошлого года по конец этого. Ошибка — только переполнение от
+/// испорченных данных.
+pub(crate) fn year_regime(span: &Span<'_>, profile: Option<&ProfileData>, year: u16) -> Result<Regime, MoneyError> {
+    match Quarter::new(year, 4) {
+        Some(quarter) => Ok(self::year(span, profile, quarter)?.regime),
+        None => Ok(Regime::Turnover),
+    }
+}
+
 /// Строки книги на всю цепочку: один проход по документам и операциям,
 /// а годы и кварталы берут свои куски по дню. Три прохода на квартал по всем
 /// записям за все годы стоили цепочке в пять лет без закрытых кварталов
 /// 19,5 мс на компьютере (замер задачи 19, тест `chain_timing`), а карточка
 /// и экран считают две-три цепочки на каждое изменение данных — на телефоне
-/// это не кадр, а четверть секунды (Правило 1).
-struct Span<'a> {
+/// это не кадр, а четверть секунды (Правило 1). Годовые платежи берут его
+/// же (`tax::annual`).
+pub(crate) struct Span<'a> {
     /// По дню, в день — по идентификатору: так порог делит строки (`year`).
     rows: Vec<Row<'a>>,
 }
 
 impl<'a> Span<'a> {
-    fn new(books: Books<'a>, from: Date, until: Date) -> Self {
+    pub(crate) fn new(books: Books<'a>, from: Date, until: Date) -> Self {
         let mut rows = ledger::between(books.documents, books.operations, from, until);
         rows.sort_by_key(|row| (row.date, row.id()));
         Self { rows }
     }
 
+    /// Пустой кусок: дней за пределами календаря `Date` в книге нет.
+    pub(crate) const fn empty() -> Self {
+        Self { rows: Vec::new() }
+    }
+
     /// Строки с дня `from` по день `until` включительно.
-    fn between(&self, from: Date, until: Date) -> &[Row<'a>] {
+    pub(crate) fn between(&self, from: Date, until: Date) -> &[Row<'a>] {
         let start = self.rows.partition_point(|row| row.date < from);
         let end = self.rows.partition_point(|row| row.date <= until).max(start);
         &self.rows[start..end]
@@ -487,6 +506,23 @@ fn profile_kinds(profile: Option<&ProfileData>, on: Date) -> BTreeSet<IncomeKind
     profile
         .map(|data| data.activities.iter().map(|code| kind_of(Some(data), code, on)).collect())
         .unwrap_or_default()
+}
+
+/// Строка налога дохода `row`: по виду деятельности у дохода, а без него —
+/// единственная строка кодов профиля, как в расчёте квартала (`compute`);
+/// `None` — не узнать. Для базы гербового сбора (`tax::annual`): оборот
+/// в расчёте — строками, каждая целыми драмами.
+pub(crate) fn income_kind(profile: Option<&ProfileData>, row: &Row<'_>) -> Option<IncomeKind> {
+    match row.activity {
+        Some(code) => Some(kind_of(profile, &code, row.date)),
+        None => {
+            let mut kinds = profile_kinds(profile, row.date).into_iter();
+            match (kinds.next(), kinds.next()) {
+                (Some(only), None) => Some(only),
+                _ => None,
+            }
+        }
+    }
 }
 
 /// Код дохода: указанный у дохода, а без него — единственный код профиля.

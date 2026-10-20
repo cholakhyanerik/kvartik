@@ -745,14 +745,28 @@ strings! {
         "About you\u{A0}— for annual payments",
         "Ձեր մասին՝ տարեկան վճարների համար";
     ProfilePersonAbout =
-        "От этих данных зависят соцплатёж, гербовый сбор и взнос медстраховки.",
-        "Your social payment, stamp duty and health insurance contribution depend on these details.",
-        "Այս տվյալներից են կախված սոցիալական վճարը, դրոշմանիշային վճարը և առողջության ապահովագրության վճարը։";
+        "От этих данных зависят годовые платежи: налог на прибыль, соцплатёж, гербовый сбор и взнос медстраховки.",
+        "Your annual payments depend on these details: profit tax, the social payment, stamp duty and the health insurance premium.",
+        "Այս տվյալներից են կախված տարեկան վճարները՝ շահութահարկը, սոցիալական վճարը, դրոշմանիշային վճարը և առողջության ապահովագրավճարը։";
     BirthYear = "Год рождения", "Year of birth", "Ծննդյան տարեթիվ";
     BirthYearInvalid =
         "Год рождения\u{A0}— четыре цифры, не позже этого года.",
         "Year of birth: four digits, not later than this year.",
         "Ծննդյան տարեթիվը՝ չորս թվանշան, ոչ ուշ, քան այս տարին։";
+    /// День государственной регистрации ИП (`model::profile::Person`): с его
+    /// месяца платятся налог на прибыль и соцплатёж (`tax::annual`).
+    RegisteredDay =
+        "Дата государственной регистрации ИП",
+        "Date of state registration as an IE",
+        "ԱՁ-ի պետական գրանցման ամսաթիվը";
+    RegisteredDayHint =
+        "Как в выписке из государственного реестра: налог на прибыль и соцплатёж платятся с месяца регистрации.",
+        "As in your state register extract: profit tax and the social payment are due from the month of registration.",
+        "Ինչպես պետական ռեգիստրի քաղվածքում. շահութահարկը և սոցիալական վճարը վճարվում են գրանցման ամսից։";
+    RegisteredDayInvalid =
+        "Дата регистрации\u{A0}— не позже сегодняшнего дня.",
+        "The registration date can't be later than today.",
+        "Գրանցման ամսաթիվը չի կարող ավելի ուշ լինել, քան այսօրը։";
     /// Вопрос только тем, для кого накопительная пенсия — по выбору
     /// (`tax::annual::pension_is_a_choice`).
     PensionJoined =
@@ -1659,6 +1673,308 @@ strings! {
         "Правила налога\u{A0}— версия {}: Налоговый кодекс, ст.\u{A0}254–262.",
         "Tax rules version {}: Tax Code, Art.\u{A0}254–262.",
         "Հարկային կանոններ՝ տարբերակ {}. Հարկային օրենսգիրք, հոդվածներ\u{A0}254–262։";
+
+    /// Годовые платежи (задача 20): экран внутри раздела налога, карточка
+    /// на главном экране и строка на экране налога (`tax::annual`). Суммы,
+    /// ступени и годы — из файла правил, в строках их нет.
+    AnnualTitle = "Годовые платежи", "Annual payments", "Տարեկան վճարներ";
+    /// Шаблон: год — между стрелками.
+    AnnualYear = "{} год", "{}", "{} թվական";
+    AnnualPrevYear = "Прошлый год", "Previous year", "Նախորդ տարի";
+    AnnualNextYear = "Следующий год", "Next year", "Հաջորդ տարի";
+    /// Шаблон: год — заголовок карточки и строки к экрану.
+    AnnualFor = "Годовые платежи за {} год", "Annual payments for {}", "Տարեկան վճարներ՝ {} թվականի համար";
+    /// Шаблоны: срок уплаты — день.
+    AnnualDue = "До {}", "By {}", "Մինչև {}";
+    AnnualDuePassed = "Срок был {}", "The deadline was {}", "Ժամկետը {} էր";
+    AnnualDueLabel = "Срок", "Deadline", "Ժամկետ";
+    /// Под суммой к сроку: что в неё вошло.
+    AnnualSumOf =
+        "Налог на прибыль, соцплатёж и гербовый сбор",
+        "Profit tax, social payment and stamp duty",
+        "Շահութահարկ, սոցիալական վճար և դրոշմանիշային վճար";
+    /// Шаблон: сколько откладывать в месяц к сроку (`annual::Saving`).
+    AnnualSave =
+        "Отложите {} в месяц\u{A0}— к сроку наберётся вся сумма.",
+        "Set aside {} a month to have the full amount by the deadline.",
+        "Ամսական մի կողմ դրեք {}՝ ժամկետին կհավաքվի ամբողջ գումարը։";
+    /// Шаблон: то же, когда посчитано не всё (`annual::Total::complete`).
+    AnnualSavePartial =
+        "Отложите {} в месяц\u{A0}— к сроку наберётся то, что посчитано.",
+        "Set aside {} a month to have what's counted so far by the deadline.",
+        "Ամսական մի կողմ դրեք {}՝ ժամկետին կհավաքվի հաշվարկված գումարը։";
+    AnnualSaveLast =
+        "Срок в этом месяце: нужна вся сумма.",
+        "The deadline is this month: you need the full amount.",
+        "Ժամկետն այս ամիս է. անհրաժեշտ է ամբողջ գումարը։";
+    AnnualPartial =
+        "Посчитано не всё\u{A0}— что не так, сказано ниже.",
+        "Not everything is counted yet\u{A0}— see what's missing below.",
+        "Հաշվարկված է ոչ ամեն ինչ. ինչն է պակասում՝ ստորև։";
+    AnnualPartialCard =
+        "Посчитано не всё\u{A0}— подробности на экране годовых платежей.",
+        "Not everything is counted yet\u{A0}— see the Annual payments screen.",
+        "Հաշվարկված է ոչ ամեն ինչ. մանրամասները՝ տարեկան վճարների էկրանին։";
+    /// Рядом со сроком в строке на экране налога.
+    AnnualPartialShort = "Посчитано не всё", "Not everything is counted", "Հաշվարկված է ոչ ամեն ինչ";
+    /// Вместо суммы к сроку: не известен ни один платёж.
+    AnnualSumUnknown =
+        "Сумма не посчитана\u{A0}— чего не хватает, сказано ниже.",
+        "The amount isn't counted\u{A0}— see what's missing below.",
+        "Գումարը հաշվարկված չէ. ինչն է պակասում՝ ստորև։";
+    AnnualNoProfile =
+        "Заполните профиль: годовые платежи зависят от данных о вас.",
+        "Fill in your profile: your annual payments depend on your details.",
+        "Լրացրեք պրոֆիլը. տարեկան վճարները կախված են ձեր տվյալներից։";
+    /// Шаблон: год, в котором человек ещё не был ИП.
+    AnnualNotYet =
+        "В {} году вы ещё не были ИП\u{A0}— годовых платежей за него нет.",
+        "You weren't an IE yet in {}\u{A0}— there are no annual payments for it.",
+        "{} թվականին դուք դեռ ԱՁ չէիք. դրա համար տարեկան վճարներ չկան։";
+    /// Весь год — общий режим (`annual::Status::General`).
+    AnnualGeneral =
+        "Весь этот год\u{A0}— общий режим: оборот прошлого года больше порога налога с оборота. Налог на прибыль, соцплатёж и гербовый сбор считайте с бухгалтером.",
+        "This whole year is under the general regime: last year's turnover is over the turnover tax threshold. Calculate profit tax, the social payment and stamp duty with your accountant.",
+        "Այս ամբողջ տարին՝ հարկման ընդհանուր համակարգ. նախորդ տարվա շրջանառությունը գերազանցում է շրջանառության հարկի շեմը։ Շահութահարկը, սոցիալական վճարը և դրոշմանիշային վճարը հաշվարկեք հաշվապահի հետ։";
+    /// Шаблон: 1 января — доход по коду, закрывающему налог с оборота, и код.
+    AnnualGeneralCode =
+        "С {}\u{A0}— доход по коду {}: весь этот год вы не на налоге с оборота, а на общем режиме (НК, ст.\u{A0}255, ч.\u{A0}1, п.\u{A0}3). Налог на прибыль, соцплатёж и гербовый сбор считайте с бухгалтером.",
+        "From {}, income under code {}: this whole year you're not on turnover tax but under the general regime (Tax Code, Art.\u{A0}255(1)(3)). Calculate profit tax, the social payment and stamp duty with your accountant.",
+        "{}-ից՝ եկամուտ {} կոդով. այս ամբողջ տարի դուք շրջանառության հարկ վճարող չեք, այլ հարկման ընդհանուր համակարգում եք (Հարկային օրենսգիրք, հոդված\u{A0}255, մաս\u{A0}1, կետ\u{A0}3)։ Շահութահարկը, սոցիալական վճարը և դրոշմանիշային վճարը հաշվարկեք հաշվապահի հետ։";
+    /// Вместо суммы платежа.
+    AnnualNone = "Не платите", "Not due", "Չեք վճարում";
+    AnnualUnknown = "Не посчитан", "Not calculated", "Հաշվարկված չէ";
+    /// Шаблон: месяцы и сумма за месяц — «12 месяцев × 5 000 ֏».
+    AnnualTimes = "{} × {}", "{} × {}", "{} × {}";
+    MonthsOne = "{}\u{A0}месяц", "{}\u{A0}month", "{}\u{A0}ամիս";
+    MonthsFew = "{}\u{A0}месяца", "{}\u{A0}months", "{}\u{A0}ամիս";
+    MonthsMany = "{}\u{A0}месяцев", "{}\u{A0}months", "{}\u{A0}ամիս";
+    AnnualNoRule =
+        "Правила на этот год у программы нет\u{A0}— посчитайте с бухгалтером.",
+        "The app has no rule for this year\u{A0}— calculate it with your accountant.",
+        "Այս տարվա համար ծրագիրը կանոն չունի. հաշվարկեք հաշվապահի հետ։";
+    /// Суммы записей переполнились (`annual::Annual::broken`).
+    AnnualBroken =
+        "Часть записей испорчена: суммы в них слишком велики, и годовые платежи посчитаны не все. Восстановите данные из резервной копии.",
+        "Some records are damaged: their amounts are too large, so not all annual payments are counted. Restore your data from a backup.",
+        "Որոշ գրառումներ վնասված են. դրանց գումարները չափազանց մեծ են, և տարեկան վճարները հաշվարկված են ոչ բոլորը։ Վերականգնեք տվյալները պահուստային պատճենից։";
+    /// Шаблон: прошлый год, этот год и строк дохода без курса
+    /// (`annual::Annual::regime_unrated`).
+    AnnualRegimeUnrated =
+        "Доходов в валюте без курса ЦБ за {} и {} годы: {}. Без курса не узнать, не перешёл ли оборот порог налога с оборота,\u{A0}— укажите курс.",
+        "Foreign-currency income without a CBA rate for {} and {}: {}. Without the rate the app can't tell whether your turnover crossed the turnover tax threshold\u{A0}— enter the rate.",
+        "{} և {} թվականների արժույթով եկամուտներ առանց ԿԲ փոխարժեքի՝ {}։ Առանց փոխարժեքի հնարավոր չէ իմանալ՝ շրջանառությունը գերազանցե՞լ է շրջանառության հարկի շեմը. նշեք փոխարժեքը։";
+    /// Шаблон: версия файла правил (`tax::rules::Version`).
+    AnnualRulesVersion =
+        "Правила годовых платежей\u{A0}— версия {}: Налоговый кодекс, ст.\u{A0}125 и\u{A0}136; законы ՀՕ-244-Ն, ՀՕ-245-Ն и\u{A0}ՀՕ-459-Ն.",
+        "Annual payment rules version {}: Tax Code, Art.\u{A0}125 and\u{A0}136; laws ՀՕ-244-Ն, ՀՕ-245-Ն and\u{A0}ՀՕ-459-Ն.",
+        "Տարեկան վճարների կանոններ՝ տարբերակ {}. Հարկային օրենսգիրք, հոդվածներ\u{A0}125 և\u{A0}136, ՀՕ-244-Ն, ՀՕ-245-Ն և\u{A0}ՀՕ-459-Ն օրենքներ։";
+    /// Налог на прибыль (`annual::Fixed`).
+    AnnualProfit = "Налог на прибыль", "Profit tax", "Շահութահարկ";
+    AnnualProfitLaw =
+        "Окончательный налог ИП на налоге с оборота\u{A0}— при любом обороте, даже нулевом (НК, ст.\u{A0}125, ч.\u{A0}3; ст.\u{A0}136, ч.\u{A0}4).",
+        "The final tax of an IE on turnover tax, whatever the turnover, even zero (Tax Code, Art.\u{A0}125(3); Art.\u{A0}136(4)).",
+        "Շրջանառության հարկ վճարող ԱՁ-ի վերջնական հարկը՝ ցանկացած, նույնիսկ զրոյական շրջանառության դեպքում (Հարկային օրենսգիրք, հոդված\u{A0}125, մաս\u{A0}3, հոդված\u{A0}136, մաս\u{A0}4)։";
+    /// Шаблон: день регистрации ИП в этом году (`annual::Months`).
+    AnnualRegistered =
+        "Месяцы\u{A0}— с месяца регистрации ({}), и он считается целиком: так делают на практике, неполный месяц закон не разбирает.",
+        "Months count from the month of registration ({}), in full: that's the practice; the law doesn't cover a partial month.",
+        "Ամիսները՝ գրանցման ամսից ({}), և այն հաշվվում է ամբողջությամբ. այդպես է ընդունված, թերի ամիսը օրենքը չի քննարկում։";
+    /// Шаблон: год, месяцы которого посчитаны с января.
+    AnnualRegistrationUnknown =
+        "Месяцы\u{A0}— с января: в профиле нет даты регистрации ИП. Если вас зарегистрировали в {} году или позже, месяцев меньше или платежей за этот год нет\u{A0}— укажите дату в профиле.",
+        "Months count from January: your profile has no IE registration date. If you registered in {} or later, there are fewer months or no payments for this year\u{A0}— add the date to the profile.",
+        "Ամիսները՝ հունվարից. պրոֆիլում ԱՁ-ի գրանցման ամսաթիվը նշված չէ։ Եթե գրանցվել եք {} թվականին կամ ավելի ուշ, ամիսներն ավելի քիչ են կամ այս տարվա համար վճարներ չկան. նշեք ամսաթիվը պրոֆիլում։";
+    /// Шаблон: сколько целых месяцев остановки не платится.
+    AnnualStopped =
+        "Без целых месяцев остановки деятельности: {}. Остановка освобождает с дня в заявлении, но не раньше дня его подачи (НК, ст.\u{A0}125, ч.\u{A0}3).",
+        "Whole months of stopped activity left out: {}. A stop counts from the day in your declaration, but not before the day you filed it (Tax Code, Art.\u{A0}125(3)).",
+        "Առանց գործունեության դադարեցման ամբողջական ամիսների՝ {}։ Դադարեցումն ազատում է հայտարարության մեջ նշված օրվանից, բայց ոչ շուտ, քան այն ներկայացնելու օրը (Հարկային օրենսգիրք, հոդված\u{A0}125, մաս\u{A0}3)։";
+    /// Шаблон: первый день дохода в целом месяце остановки
+    /// (`annual::Annual::stop_income`).
+    AnnualStopIncome =
+        "В книге доход за {}, а этот месяц\u{A0}— внутри остановки деятельности. Если вы возобновили работу, остановка кончилась в тот день (НК, ст.\u{A0}53, ч.\u{A0}8), и месяцев больше\u{A0}— сверьте с бухгалтером.",
+        "The ledger has income for {}, but that month is inside a stop of your activity. If you resumed work, the stop ended that day (Tax Code, Art.\u{A0}53(8)), and there are more months\u{A0}— check with your accountant.",
+        "Մատյանում կա եկամուտ {}-ի համար, իսկ այդ ամիսը գործունեության դադարեցման մեջ է։ Եթե վերսկսել եք աշխատանքը, դադարեցումն ավարտվել է այդ օրը (Հարկային օրենսգիրք, հոդված\u{A0}53, մաս\u{A0}8), և ամիսներն ավելի շատ են. ճշտեք հաշվապահի հետ։";
+    /// Шаблон: день ухода с налога с оборота.
+    AnnualLeft =
+        "С {} вы не на налоге с оборота: месяц ухода посчитан целиком, а налоги за месяцы после него считайте с бухгалтером.",
+        "From {}, you're not on turnover tax: the month you left is counted in full, and taxes for the months after it are for your accountant.",
+        "{}-ից դուք շրջանառության հարկ վճարող չեք. դուրս գալու ամիսը հաշվված է ամբողջությամբ, իսկ դրանից հետո ամիսների հարկերը հաշվարկեք հաշվապահի հետ։";
+    /// Соцплатёж (`annual::Social`).
+    AnnualSocial = "Соцплатёж", "Social payment", "Սոցիալական վճար";
+    /// Шаблон: год, с которого участие обязательно.
+    AnnualSocialLaw =
+        "Накопительная пенсия: родившиеся с {} года участвуют обязательно (закон ՀՕ-244-Ն, ст.\u{A0}5 и\u{A0}6).",
+        "Funded pension: people born in {} or later take part by law (Law ՀՕ-244-Ն, Art.\u{A0}5 and\u{A0}6).",
+        "Կուտակային կենսաթոշակ. {} թվականին և դրանից հետո ծնվածները մասնակցում են պարտադիր (ՀՕ-244-Ն օրենք, հոդվածներ\u{A0}5 և\u{A0}6)։";
+    AnnualSocialVoluntary =
+        "Вы вступили сами: соцплатёж\u{A0}— с месяца после заявления. Если вы подали его в этом году, месяцев меньше\u{A0}— сверьте с бухгалтером.",
+        "You joined yourself: the social payment starts the month after your application. If you applied this year, there are fewer months\u{A0}— check with your accountant.",
+        "Դուք միացել եք ինքներդ. սոցիալական վճարը՝ դիմումին հաջորդող ամսից։ Եթե դիմել եք այս տարի, ամիսներն ավելի քիչ են. ճշտեք հաշվապահի հետ։";
+    /// Шаблон: год границы обязательного участия.
+    AnnualSocialNotJoined =
+        "Вы родились до {} года и не вступали в накопительную пенсию сами.",
+        "You were born before {} and didn't join the funded pension yourself.",
+        "Դուք ծնվել եք մինչև {} թվականը և ինքներդ չեք միացել կուտակային կենսաթոշակային համակարգին։";
+    AnnualSocialNoStatus =
+        "Без вида на жительство иностранец в накопительной пенсии не участвует (закон ՀՕ-244-Ն, ст.\u{A0}5, ч.\u{A0}3).",
+        "Without residence status, a foreigner doesn't take part in the funded pension (Law ՀՕ-244-Ն, Art.\u{A0}5(3)).",
+        "Առանց կացության կարգավիճակի օտարերկրացին կուտակային կենսաթոշակային համակարգին չի մասնակցում (ՀՕ-244-Ն օրենք, հոդված\u{A0}5, մաս\u{A0}3)։";
+    AnnualSocialStops =
+        "За месяцы остановки соцплатёж в расчёте для налоговой не указывают: так делают на практике, нормы в законе нет.",
+        "Months of stopped activity are left out of the social payment return: that's the practice; the law has no rule on it.",
+        "Դադարեցման ամիսների համար սոցիալական վճարը հարկային մարմնին ներկայացվող հաշվարկում չի նշվում. այդպես է ընդունված, օրենքում նորմ չկա։";
+    /// Чего не хватает в профиле (`annual::Missing`, `annual::Months`).
+    AnnualAskRegistered =
+        "Укажите в профиле дату государственной регистрации ИП.",
+        "Add the date of your state registration as an IE to the profile.",
+        "Պրոֆիլում նշեք ԱՁ-ի պետական գրանցման ամսաթիվը։";
+    AnnualAskBirthYear = "Укажите в профиле год рождения.", "Add your year of birth to the profile.", "Պրոֆիլում նշեք ծննդյան տարեթիվը։";
+    AnnualAskPension =
+        "Ответьте в профиле, вступали ли вы в накопительную пенсию сами.",
+        "Answer in the profile whether you joined the funded pension yourself.",
+        "Պրոֆիլում պատասխանեք՝ ինքներդ միացե՞լ եք կուտակային կենսաթոշակային համակարգին։";
+    AnnualAskResidency =
+        "Укажите в профиле гражданство и проживание.",
+        "Add your citizenship and residence to the profile.",
+        "Պրոֆիլում նշեք քաղաքացիությունը և կացությունը։";
+    /// Гербовый сбор (`annual::Stamp`).
+    AnnualStamp = "Гербовый сбор", "Stamp duty", "Դրոշմանիշային վճար";
+    /// Шаблон: год оборота — подпись к нему; ниже — сам сбор.
+    AnnualStampTurnover = "Оборот за {} год", "Turnover for {}", "{} թվականի շրջանառությունը";
+    AnnualStampSum = "Сбор", "Duty", "Վճար";
+    /// Шаблон: шкала года — ступени через запятую.
+    AnnualStampScale =
+        "Сбор\u{A0}— по обороту года из расчётов налога с оборота, без пропорции за неполный год: {} (закон ՀՕ-245-Ն, ст.\u{A0}9 и\u{A0}12).",
+        "The duty depends on the year's turnover in your turnover tax returns, with no proration for a partial year: {} (Law ՀՕ-245-Ն, Art.\u{A0}9 and\u{A0}12).",
+        "Վճարը՝ ըստ շրջանառության հարկի հաշվարկներում արտացոլված տարվա շրջանառության, առանց թերի տարվա համամասնության. {} (ՀՕ-245-Ն օրենք, հոդվածներ\u{A0}9 և\u{A0}12)։";
+    /// Шаблоны: ступень шкалы — граница и сбор.
+    AnnualStampStep = "до {}\u{A0}— {}", "up to {}\u{A0}— {}", "մինչև {}՝ {}";
+    AnnualStampTop = "больше {}\u{A0}— {}", "over {}\u{A0}— {}", "{}-ից ավելի՝ {}";
+    /// Шаблон: граница ступени и сбор следующей — пока год идёт.
+    AnnualStampMayGrow =
+        "Год ещё идёт: если оборот превысит {}, сбор\u{A0}— {}.",
+        "The year isn't over: if your turnover goes over {}, the duty is {}.",
+        "Տարին դեռ չի ավարտվել. եթե շրջանառությունը գերազանցի {}-ը, վճարը կլինի {}։";
+    /// Шаблон: строк без курса, граница ступени и сбор следующей.
+    AnnualStampUnrated =
+        "Доходов в валюте без курса ЦБ: {}. С ними оборот может быть больше {}, и тогда сбор\u{A0}— {}: укажите курс.",
+        "Foreign-currency income without a CBA rate: {}. With it your turnover may be over {}, and then the duty is {}: enter the rate.",
+        "Արժույթով եկամուտներ առանց ԿԲ փոխարժեքի՝ {}։ Դրանցով շրջանառությունը կարող է գերազանցել {}-ը, և այդ դեպքում վճարը կլինի {}. նշեք փոխարժեքը։";
+    /// Вместо подписи суммы: осторожная нижняя ступень.
+    AnnualStampCautious = "Осторожно\u{A0}— нижняя ступень", "To be safe, the lowest step", "Զգուշությամբ՝ ամենացածր աստիճանը";
+    /// Шаблон: год без дохода (вопрос 4.2 листа сверки).
+    AnnualStampNoTurnover =
+        "Дохода за {} год в книге нет. Закон читается двояко: «базы нет»\u{A0}— и сбора нет, или база ноль\u{A0}— и это нижняя ступень. Осторожно отложите нижнюю и сверьте с бухгалтером.",
+        "Your ledger has no income for {}. The law can be read two ways: “no base” means no duty, or a zero base means the lowest step. To be safe, set aside the lowest step and check with your accountant.",
+        "{} թվականի եկամուտ մատյանում չկա։ Օրենքը կարդացվում է երկու կերպ. «բազա չկա»՝ և վճար չկա, կամ բազան զրո է՝ և դա ամենացածր աստիճանն է։ Զգուշությամբ մի կողմ դրեք ամենացածրը և ճշտեք հաշվապահի հետ։";
+    AnnualStampStopped =
+        "Весь год деятельность была остановлена: расчётов за год нет, и сбора нет.",
+        "Your activity was stopped all year: there are no returns for the year, and no duty.",
+        "Ամբողջ տարի գործունեությունը դադարեցված էր. տարվա հաշվարկներ չկան, և վճար չկա։";
+    AnnualStampExempt =
+        "Без вида на жительство иностранец гербовый сбор не платит (закон ՀՕ-245-Ն, ст.\u{A0}11, ч.\u{A0}2).",
+        "Without residence status, a foreigner doesn't pay stamp duty (Law ՀՕ-245-Ն, Art.\u{A0}11(2)).",
+        "Առանց կացության կարգավիճակի օտարերկրացին դրոշմանիշային վճար չի վճարում (ՀՕ-245-Ն օրենք, հոդված\u{A0}11, մաս\u{A0}2)։";
+    AnnualStampLeft =
+        "Вы уходили с налога с оборота: база сбора\u{A0}— сумма баз обоих режимов, сверьте её с бухгалтером.",
+        "You left turnover tax: the duty base is the sum of the bases of both regimes\u{A0}— check it with your accountant.",
+        "Դուք դուրս եք եկել շրջանառության հարկից. վճարի բազան երկու համակարգերի բազաների գումարն է, ճշտեք այն հաշվապահի հետ։";
+    /// Взнос медстраховки (`annual::Health`).
+    AnnualHealth = "Взнос медстраховки", "Health insurance premium", "Առողջության ապահովագրավճար";
+    AnnualHealthYearRate = "Годовая ставка одной суммой", "Annual rate in one payment", "Տարեկան դրույքաչափը՝ միանվագ";
+    /// Шаблон: прошлый год, его оборот по книге и порог.
+    AnnualHealthYearWhy =
+        "Оборот за {} год по книге\u{A0}— {}, больше {}: за этот год\u{A0}— годовая ставка одной суммой (закон ՀՕ-459-Ն, ст.\u{A0}45 и\u{A0}46).",
+        "Your turnover for {} in the ledger is {}, over {}: for this year it's the annual rate in one payment (Law ՀՕ-459-Ն, Art.\u{A0}45 and\u{A0}46).",
+        "{} թվականի շրջանառությունը մատյանում՝ {}, գերազանցում է {}-ը. այս տարվա համար՝ տարեկան դրույքաչափը միանվագ (ՀՕ-459-Ն օրենք, հոդվածներ\u{A0}45 և\u{A0}46)։";
+    /// Шаблон: число месяца — срок помесячного взноса.
+    AnnualHealthMonthDue = "до {}-го числа следующего месяца", "by day {} of the next month", "մինչև հաջորդ ամսվա {}-ը";
+    AnnualHealthMonthLaw =
+        "Помесячно, у всех ИП при любом обороте (закон ՀՕ-459-Ն, ст.\u{A0}14, ч.\u{A0}4).",
+        "Monthly, for every IE whatever the turnover (Law ՀՕ-459-Ն, Art.\u{A0}14(4)).",
+        "Ամսական, բոլոր ԱՁ-ների համար՝ ցանկացած շրջանառության դեպքում (ՀՕ-459-Ն օրենք, հոդված\u{A0}14, մաս\u{A0}4)։";
+    AnnualHealthAfterYear =
+        "Если вы платили годовую ставку за прошлый год, вы застрахованы 12\u{A0}месяцев с месяца после оплаты: с какого месяца платить помесячно, закон прямо не говорит\u{A0}— сверьте с бухгалтером.",
+        "If you paid the annual rate for last year, you're insured for 12\u{A0}months from the month after paying: the law doesn't say outright from which month to pay monthly\u{A0}— check with your accountant.",
+        "Եթե նախորդ տարվա համար վճարել եք տարեկան դրույքաչափը, դուք ապահովագրված եք վճարմանը հաջորդող ամսից 12\u{A0}ամիս. որ ամսից վճարել ամսական, օրենքն ուղիղ չի ասում. ճշտեք հաշվապահի հետ։";
+    AnnualHealthEmployed =
+        "Если вы работаете и по найму, общий взнос за месяц\u{A0}— не больше месячной ставки: переплату Фонд возвращает по заявлению (закон ՀՕ-459-Ն, ст.\u{A0}14, ч.\u{A0}7 и\u{A0}8).",
+        "If you're also employed, your total premium for a month can't exceed the monthly rate: the Fund refunds any overpayment on request (Law ՀՕ-459-Ն, Art.\u{A0}14(7) and\u{A0}(8)).",
+        "Եթե աշխատում եք նաև վարձու, ամսվա ընդհանուր ապահովագրավճարը չի կարող գերազանցել ամսական դրույքաչափը. ավելցուկը Հիմնադրամը վերադարձնում է դիմումով (ՀՕ-459-Ն օրենք, հոդված\u{A0}14, մասեր\u{A0}7 և\u{A0}8)։";
+    AnnualHealthStateless =
+        "Лицо без гражданства закон о медстраховке не называет: если у вас нет гражданства, сверьте с бухгалтером.",
+        "The health insurance law doesn't mention stateless persons: if you have no citizenship, check with your accountant.",
+        "Առողջության ապահովագրության մասին օրենքը քաղաքացիություն չունեցող անձանց չի նշում. եթե քաղաքացիություն չունեք, ճշտեք հաշվապահի հետ։";
+    /// Шаблон: прошлый год, его оборот по книге и порог.
+    AnnualHealthBelow =
+        "Оборот за {} год по книге\u{A0}— {}, не больше {}: за этот год взнос не платится. Если в книге не весь доход того года, сверьте с бухгалтером.",
+        "Your turnover for {} in the ledger is {}, not over {}: no premium for this year. If the ledger doesn't have all that year's income, check with your accountant.",
+        "{} թվականի շրջանառությունը մատյանում՝ {}, չի գերազանցում {}-ը. այս տարվա համար ապահովագրավճար չի վճարվում։ Եթե մատյանում այդ տարվա ամբողջ եկամուտը չէ, ճշտեք հաշվապահի հետ։";
+    /// Шаблон: год регистрации — год годовой ставки (вопрос 5.2 листа
+    /// сверки: «нет значения», а не 0).
+    AnnualHealthNewIe =
+        "ИП зарегистрирован в {} году: оборота за прошлый год нет. По прочтению закона за этот год взнос не платится, но по его букве возможен и помесячный взнос, а разъяснения налоговой нет\u{A0}— сверьте с бухгалтером.",
+        "You registered as an IE in {}: there's no turnover for the year before. As the law reads, there's no premium for this year, but its letter also allows a monthly premium, and the tax authority hasn't clarified it\u{A0}— check with your accountant.",
+        "ԱՁ-ն գրանցվել է {} թվականին. նախորդ տարվա շրջանառություն չկա։ Օրենքի ընթերցմամբ այս տարվա համար ապահովագրավճար չի վճարվում, բայց տառացի ընթերցմամբ հնարավոր է նաև ամսական ապահովագրավճար, իսկ հարկային մարմնի պարզաբանում չկա. ճշտեք հաշվապահի հետ։";
+    /// Шаблон: день, когда закон начал действовать для ИП.
+    AnnualHealthStopped =
+        "На {} деятельность была остановлена и в этом году не возобновлена: взнос\u{A0}— с месяца после возобновления (закон ՀՕ-459-Ն, ст.\u{A0}45 и\u{A0}46). Остановка считается, если заявление о ней подано не позже этого дня.",
+        "On {}, your activity was stopped, and it wasn't resumed this year: the premium starts the month after you resume (Law ՀՕ-459-Ն, Art.\u{A0}45 and\u{A0}46). The stop counts if you filed for it no later than that day.",
+        "{}-ի դրությամբ գործունեությունը դադարեցված էր և այս տարի չի վերսկսվել. ապահովագրավճարը՝ վերսկսելուն հաջորդող ամսից (ՀՕ-459-Ն օրենք, հոդվածներ\u{A0}45 և\u{A0}46)։ Դադարեցումը հաշվվում է, եթե դրա մասին հայտարարությունը ներկայացվել է ոչ ուշ, քան այդ օրը։";
+    /// Шаблон: день, когда закон начал действовать для ИП, и день
+    /// возобновления (`annual::Health::Month`, `after`).
+    AnnualHealthResumedMonthly =
+        "На {} деятельность была остановлена и возобновлена {}: взнос\u{A0}— с месяца после возобновления (закон ՀՕ-459-Ն, ст.\u{A0}45 и\u{A0}46). Остановка считается, если заявление о ней подано не позже первого из этих дней.",
+        "On {}, your activity was stopped; you resumed on {}: the premium starts the month after (Law ՀՕ-459-Ն, Art.\u{A0}45 and\u{A0}46). The stop counts if you filed for it no later than the first of these days.",
+        "{}-ի դրությամբ գործունեությունը դադարեցված էր և վերսկսվել է {}. ապահովագրավճարը՝ վերսկսելուն հաջորդող ամսից (ՀՕ-459-Ն օրենք, հոդվածներ\u{A0}45 և\u{A0}46)։ Դադարեցումը հաշվվում է, եթե դրա մասին հայտարարությունը ներկայացվել է ոչ ուշ, քան այս օրերից առաջինը։";
+    /// Шаблон: день среза остановки, когда закон для ИП уже действовал
+    /// (`annual::HealthUnclear::StoppedInForce`, `known`).
+    AnnualHealthStoppedInForce =
+        "На {} деятельность была остановлена, но закон о медстраховке действовал для вас и раньше: снимает ли такая остановка взнос, закон прямо не говорит\u{A0}— сверьте с бухгалтером.",
+        "On {}, your activity was stopped, but the health insurance law already applied to you before then: the law doesn't say outright whether such a stop removes the premium\u{A0}— check with your accountant.",
+        "{}-ի դրությամբ գործունեությունը դադարեցված էր, բայց առողջության ապահովագրության մասին օրենքը ձեզ համար գործում էր դրանից առաջ էլ. արդյոք նման դադարեցումն ազատում է ապահովագրավճարից, օրենքն ուղիղ չի ասում. ճշտեք հաշվապահի հետ։";
+    /// Шаблон: то же, когда по книге не узнать, действовал ли закон раньше.
+    AnnualHealthStoppedMaybe =
+        "На {} деятельность была остановлена. Если закон о медстраховке не действовал для вас раньше, взнос\u{A0}— с месяца после возобновления, а если действовал, снимает ли остановка взнос, закон прямо не говорит. По книге этого не узнать: в ней нет оборота нужного года\u{A0}— сверьте с бухгалтером.",
+        "On {}, your activity was stopped. If the health insurance law didn't apply to you before then, the premium starts the month after you resume; if it did, the law doesn't say outright whether the stop removes the premium. The ledger can't tell: it lacks the turnover for the year that decides it\u{A0}— check with your accountant.",
+        "{}-ի դրությամբ գործունեությունը դադարեցված էր։ Եթե առողջության ապահովագրության մասին օրենքը ձեզ համար դրանից առաջ չէր գործում, ապահովագրավճարը՝ վերսկսելուն հաջորդող ամսից, իսկ եթե գործում էր, արդյոք դադարեցումն ազատում է ապահովագրավճարից, օրենքն ուղիղ չի ասում։ Մատյանով դա հնարավոր չէ իմանալ. դրանում չկա անհրաժեշտ տարվա շրջանառությունը. ճշտեք հաշվապահի հետ։";
+    /// Шаблон: возраст, с которого платит государство, — уже исполнился.
+    AnnualHealthElderly =
+        "Вам уже исполнилось {}: если вы резидент Армении\u{A0}— провели в ней 183\u{A0}дня и больше за 12\u{A0}месяцев,\u{A0}— взнос за вас платит государство, а если нет\u{A0}— вы сами. Программа этого не знает\u{A0}— сверьте с бухгалтером.",
+        "You've already turned {}: if you're an Armenian resident (183\u{A0}days or more in Armenia in 12\u{A0}months), the state pays the premium for you; if not, you pay it yourself. The app can't tell\u{A0}— check with your accountant.",
+        "Դուք արդեն դարձել եք {} տարեկան. եթե Հայաստանի ռեզիդենտ եք՝ 12\u{A0}ամսում այստեղ եք անցկացրել 183\u{A0}օր և ավելի, ապահովագրավճարը ձեր փոխարեն վճարում է պետությունը, իսկ եթե ոչ՝ վճարում եք ինքներդ։ Ծրագիրը դա չգիտի. ճշտեք հաշվապահի հետ։";
+    AnnualHealthNoStatus =
+        "Без вида на жительство иностранец медстрахованию не подлежит (закон ՀՕ-459-Ն, ст.\u{A0}11, ч.\u{A0}1).",
+        "Without residence status, a foreigner isn't covered by health insurance (Law ՀՕ-459-Ն, Art.\u{A0}11(1)).",
+        "Առանց կացության կարգավիճակի օտարերկրացին առողջության ապահովագրության ենթակա չէ (ՀՕ-459-Ն օրենք, հոդված\u{A0}11, մաս\u{A0}1)։";
+    /// Шаблон: прошлый год, порог, сумма и срок.
+    AnnualHealthNoPrevious =
+        "Оборота за {} год в книге нет. Если он больше {}, за этот год\u{A0}— {} до {}; если нет\u{A0}— за этот год взнос не платится.",
+        "Your ledger has no turnover for {}. If it was over {}, for this year it's {} by {}; if not, there's no premium for this year.",
+        "{} թվականի շրջանառություն մատյանում չկա։ Եթե այն գերազանցում է {}-ը, այս տարվա համար՝ {} մինչև {}, եթե ոչ՝ այս տարվա համար ապահովագրավճար չի վճարվում։";
+    /// Шаблон: прошлый год, строк без курса, оборот без них, порог, сумма
+    /// и срок.
+    AnnualHealthPreviousUnrated =
+        "Доходов {} года в валюте без курса ЦБ: {}. Без них оборот\u{A0}— {}, не больше {}; с ними может быть больше\u{A0}— и тогда за этот год {} до {}. Укажите курс.",
+        "Income for {} in foreign currency without a CBA rate: {}. Without it your turnover is {}, not over {}; with it it may be more\u{A0}— and then for this year it's {} by {}. Enter the rate.",
+        "{} թվականի արժույթով եկամուտներ առանց ԿԲ փոխարժեքի՝ {}։ Առանց դրանց շրջանառությունը՝ {}, չի գերազանցում {}-ը, դրանցով կարող է ավելի լինել, և այդ դեպքում այս տարվա համար՝ {} մինչև {}։ Նշեք փոխարժեքը։";
+    /// Шаблон: возраст, с которого платит государство.
+    AnnualHealthTurnsAge =
+        "В этом году вам исполняется {}: с какого месяца взнос за вас платит государство, зависит от дня рождения\u{A0}— сверьте с бухгалтером.",
+        "You turn {} this year: from which month the state pays the premium for you depends on your birthday\u{A0}— check with your accountant.",
+        "Այս տարի դառնում եք {} տարեկան. որ ամսից ձեր փոխարեն ապահովագրավճարը կվճարի պետությունը, կախված է ծննդյան օրից. ճշտեք հաշվապահի հետ։";
+    /// Шаблон: день возобновления.
+    AnnualHealthResumed =
+        "Деятельность была остановлена и возобновлена {}: взнос\u{A0}— с месяца после возобновления, а сколько за этот год, закон не говорит. Сверьте с бухгалтером.",
+        "Your activity was stopped and resumed on {}: the premium starts the month after, but the law doesn't say how much for this year. Check with your accountant.",
+        "Գործունեությունը դադարեցված էր և վերսկսվել է {}. ապահովագրավճարը՝ վերսկսելուն հաջորդող ամսից, իսկ որքան այս տարվա համար, օրենքը չի ասում։ Ճշտեք հաշվապահի հետ։";
+    /// Шаблон: первый год правил медстраховки.
+    AnnualHealthBefore =
+        "Взнос медстраховки ИП платят с {} года.",
+        "IEs pay the health insurance premium from {}.",
+        "ԱՁ-ները առողջության ապահովագրավճար վճարում են {} թվականից։";
 
     /// Курс документа в валюте — в карточке выпущенного (задача 14).
     DocRateSet = "Указать курс ЦБ", "Enter the CBA rate", "Նշել ԿԲ փոխարժեքը";

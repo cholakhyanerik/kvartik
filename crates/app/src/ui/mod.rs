@@ -5,6 +5,7 @@
 //! `style/`, а не атрибутом `style` (Правило 4). Цвет литералом и опечатку
 //! в `var(--…)` ловит тест `crates/app/tests/tokens.rs`.
 
+mod annual;
 mod avatar;
 mod backup;
 mod clients;
@@ -32,6 +33,7 @@ use leptos::prelude::*;
 
 use crate::platform::clock;
 use crate::store::{self, Store};
+use annual::AnnualScreen;
 use backup::{BackupChip, BackupEntry, BackupSection, Backups};
 use clients::{Clients, ClientsSection};
 use documents::{Documents, DocumentsScreen};
@@ -108,14 +110,16 @@ impl Base {
 }
 
 /// Корень окна (дизайн «Kvartik Design»): меню разделов и экраны —
-/// главный, счета и акты, книга, клиенты, налог, профиль и копия внутри
-/// него (`ui/route.rs`). Все экраны — в странице, открытый виден, остальные
-/// спрятаны: начатое в форме не пропадает при переходе. Содержимое
-/// счетов, книги, клиентов, налога и профиля — частями wasm с первого
-/// показа (`split::screen`, задача 61); документы, клиентов и профиль окно
-/// читает всё равно при открытии базы: они нужны главному экрану. Книгу
-/// и закрытые кварталы читают части, которым они нужны, — книга и налог
-/// (его карточка на главном экране — тоже из части, задача 19).
+/// главный, счета и акты, книга, клиенты, налог и годовые платежи внутри
+/// него, профиль и копия внутри него (`ui/route.rs`). Все экраны —
+/// в странице, открытый виден, остальные спрятаны: начатое в форме не
+/// пропадает при переходе. Содержимое счетов, книги, клиентов, налога,
+/// годовых платежей и профиля — частями wasm с первого показа
+/// (`split::screen`, задача 61); документы, клиентов и профиль окно читает
+/// всё равно при открытии базы: они нужны главному экрану. Книгу и закрытые
+/// кварталы читают части, которым они нужны, — книга и налог с годовыми
+/// платежами (их карточки на главном экране — тоже из части, задачи 19
+/// и 20).
 /// «Программа» на экране профиля — копия и язык окна — не в части: язык
 /// меняют и тогда, когда часть не загрузилась.
 ///
@@ -231,6 +235,9 @@ pub fn App() -> impl IntoView {
                 </section>
                 <section id=Screen::Tax.id() class="screen" hidden=hidden(Screen::Tax)>
                     <TaxScreen ctx=tax router />
+                </section>
+                <section id=Screen::Annual.id() class="screen" hidden=hidden(Screen::Annual)>
+                    <AnnualScreen ctx=tax router />
                 </section>
                 <section id=Screen::Profile.id() class="screen" hidden=hidden(Screen::Profile)>
                     <h1 tabindex="-1">{tr(lang, Key::ProfileTitle)}</h1>
