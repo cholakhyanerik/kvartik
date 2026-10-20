@@ -106,11 +106,10 @@ Kvartik открывается в браузере, на компьютере и
 
 ```
 rustup target add wasm32-unknown-unknown
-cargo install trunk --locked --version 0.22.0-rc.3
+cargo install trunk --locked --version 0.22.0
 ```
 
-Trunk нужен именно 0.22: без `--version` cargo ставит 0.21.14, и сборка
-с ней откажется работать.
+Trunk нужен 0.22: с 0.21 сборка откажется работать.
 
 Ещё нужны две программы в PATH: `wasm-bindgen` **0.2.129** (та же версия,
 что крейт `wasm-bindgen` в `Cargo.lock`) и `wasm-opt` из binaryen

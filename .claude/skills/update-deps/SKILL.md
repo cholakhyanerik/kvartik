@@ -89,11 +89,13 @@ wasm-bindgen и программы разреза — и `tools/browser/check.mj
   документация 1.28.0).
 - **ed25519-dalek:** 3.0.0 вышла 2026-07-06 (crates.io); примеры под 2.x
   могут не собраться.
-- **Trunk — 0.22.0-rc.3** (2026-10-16), а не стабильная 0.21.14
-  (2025-05-08); выбор по исходникам 0.21 и rc.2, 2026-10-10. В `src/` rc.3
-  от rc.2 отличается только флагом `-C` и подпротоколами WebSocket у прокси
-  `trunk serve` (по исходникам обеих, 2026-10-16): записи «по исходникам
-  rc.2» здесь и в коде верны и для неё. Формат `Trunk.toml`
+- **Trunk — 0.22.0** (2026-10-20), а не 0.21.14 (2025-05-08); выбор 0.22
+  по исходникам 0.21 и rc.2, 2026-10-10. В `src/` rc.3 от rc.2 отличается
+  только флагом `-C` и подпротоколами WebSocket у прокси `trunk serve`
+  (2026-10-16), а 0.22.0 от rc.3 — только ключами TLS у `trunk serve`
+  и патч-версиями зависимостей (по сравнению выпусков на GitHub,
+  2026-10-20): записи «по исходникам rc.2» здесь и в коде верны и для неё.
+  Формат `Trunk.toml`
   у них один, а в 0.22 имена файлов с хэшем считаются от выходных байтов
   и не расходятся с SRI (trunk-rs/trunk#1028) — на этом держится кэш service
   worker; wasm-opt по умолчанию version_131 вместо version_123 (её же
@@ -103,9 +105,9 @@ wasm-bindgen и программы разреза — и `tools/browser/check.mj
   рядом со страницей и собрал бы свой, неразрезанный (по исходникам
   0.22.0-rc.2, `src/pipelines/html.rs`). Версия записана в трёх местах:
   `trunk-version` в `crates/app/Trunk.toml`, `TRUNK_VERSION` и сумма архива
-  в `.github/workflows/ci.yml`. Выйдет 0.22.0 — перейти на неё. Ставится
-  `cargo install trunk --locked --version 0.22.0-rc.3`: без `--version`
-  cargo берёт стабильную 0.21.14, а с ней `Trunk.toml` собирать откажется.
+  в `.github/workflows/ci.yml`. Ставится
+  `cargo install trunk --locked --version 0.22.0`: без `--version` cargo
+  взял бы последнюю, и машина разошлась бы с CI.
 - **Раскладку сайта, wasm окна и `sw.js` делает хук Trunk `post_build`**
   (`cargo run -p kvartik-sw -- --root public/root --wasm kvartik-app
   public/sw.js`): он идёт из папки `Trunk.toml`, когда `index.html` уже
@@ -141,7 +143,7 @@ wasm-bindgen и программы разреза — и `tools/browser/check.mj
 ## Программы на машине
 
 Инструменты: `cargo-outdated`, `cargo-edit` (даёт `cargo upgrade`), цель
-`wasm32-unknown-unknown`, Trunk 0.22.0-rc.3 (с 2026-10-16) и cargo-deny
+`wasm32-unknown-unknown`, Trunk 0.22.0 (с 2026-10-20) и cargo-deny
 0.20.2 (тот же выпуск, что в `ci.yml`) на машине есть (на 2026-10-10). Базу RustSec
 cargo-deny с этой машины скачивает: беды Trunk с DNS у него нет (проверено
 2026-10-10, 0.20.2).
