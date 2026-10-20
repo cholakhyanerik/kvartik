@@ -390,31 +390,36 @@ pub fn UpdateNotice(lang: ReadSignal<Lang>, program: Program, forms: Forms) -> i
     }
 }
 
-/// Раздел «Установка» на языке окна. Пусто, когда предложить нечего.
+/// Раздел «Установка» на языке окна — блоком, как карточки под ним (стиль
+/// `.install`). Пусто, когда предложить нечего.
 #[component]
 pub fn InstallSection(lang: ReadSignal<Lang>, program: Program) -> impl IntoView {
     move || match program.install.get() {
         Install::Installed | Install::Nothing => None,
         state @ (Install::Button | Install::Asking) => Some(
             view! {
-                <h2>{tr(lang, Key::InstallTitle)}</h2>
-                <p>{tr(lang, Key::InstallAbout)}</p>
-                <button
-                    type="button"
-                    disabled=state == Install::Asking
-                    on:click=move |_| program.ask_install()
-                >
-                    {tr(lang, Key::InstallButton)}
-                </button>
+                <section class="install">
+                    <h2>{tr(lang, Key::InstallTitle)}</h2>
+                    <p>{tr(lang, Key::InstallAbout)}</p>
+                    <button
+                        type="button"
+                        disabled=state == Install::Asking
+                        on:click=move |_| program.ask_install()
+                    >
+                        {tr(lang, Key::InstallButton)}
+                    </button>
+                </section>
             }
             .into_any(),
         ),
         Install::Manual => Some(
             view! {
-                <h2>{tr(lang, Key::InstallTitle)}</h2>
-                <p>{tr(lang, Key::InstallFirst)}</p>
-                <p>{tr(lang, Key::InstallSteps)}</p>
-                <p class="hint">{tr(lang, Key::InstallMoveData)}</p>
+                <section class="install">
+                    <h2>{tr(lang, Key::InstallTitle)}</h2>
+                    <p>{tr(lang, Key::InstallFirst)}</p>
+                    <p>{tr(lang, Key::InstallSteps)}</p>
+                    <p class="hint">{tr(lang, Key::InstallMoveData)}</p>
+                </section>
             }
             .into_any(),
         ),

@@ -18,7 +18,9 @@
 //    нажатию — частями wasm»).
 // 2. С сетью: восстановление образца копии, экраны и их формы, карточка
 //    выпущенного документа, PDF, новая копия — каждая из девяти частей;
-//    и все части `dist/app/split_*.wasm` загружены.
+//    и все части `dist/app/split_*.wasm` загружены. И раскладка, которую
+//    видно только с настоящим CSS: «Установить» на главном экране не
+//    вплотную к карточке налога под ним.
 // 3. Сервер выключен: программа открывается из кэша service worker, и те же
 //    экраны, формы, карточка и PDF работают без сети.
 // 4. Новая версия (задача 67): на сервере — копия сборки новой версией. Пока
@@ -126,6 +128,22 @@ async function screens(page, when) {
     await go(page, screen.hash);
     checks.check(`${when}: экран «${screen.name}»`, await page.waitFor(screen.shown));
   }
+}
+
+/// Главный экран: раздел «Установка» — блоком с отступом, как карточки под
+/// ним, а не кнопкой вплотную к карточке налога (найдено глазным прогоном
+/// задачи 20). Вопрос об установке проверка подаёт сама: Chrome в CI может
+/// его и не прислать, а окно берёт событие как есть (`listen_install`
+/// в `crates/app/src/platform/pwa.rs`). Отступ блоков — `--space-4`, 16 точек.
+async function home(page) {
+  await go(page, "#/");
+  await page.eval(`window.dispatchEvent(new Event("beforeinstallprompt", { cancelable: true })); return true;`);
+  const gap = await page.waitFor(`const button = ${BUTTON("#home", s("InstallButton"))};
+    const card = [...document.querySelectorAll("#home .hero-card")].find((c) => c.getClientRects().length > 0);
+    if (!button || !card) return null;
+    return { gap: card.getBoundingClientRect().top - button.getBoundingClientRect().bottom };`);
+  checks.check("главная: «Установить» не вплотную к карточке налога", gap !== null && gap.gap >= 12,
+    gap === null ? "нет кнопки «Установить» или карточки налога" : `зазор ${gap.gap} точек`);
 }
 
 async function forms(page, when) {
@@ -289,6 +307,7 @@ async function main() {
     checks.check("с сетью: рабочий экран", await page.waitFor(WORKING));
     const sample = await restore(page);
     checks.check("с сетью: страницей правит service worker", (await page.waitFor(CONTROLLER)) === `${ORIGIN}/app/sw.js`);
+    await home(page);
     await forms(page, "с сетью");
     await screens(page, "с сетью");
     await card(page, "с сетью");
