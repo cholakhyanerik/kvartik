@@ -383,21 +383,138 @@ strings! {
         "На iPhone и iPad установите программу на экран «Домой» до того, как вводить данные: установленная программа не видит данных, введённых в браузере, а браузер\u{A0}— её данных.",
         "On iPhone and iPad, add the app to your Home Screen before entering any data: the installed app doesn't see data entered in the browser, and the browser doesn't see the app's data.",
         "iPhone-ում և iPad-ում ծրագիրը տեղադրեք հիմնական էկրանին (Home Screen) նախքան տվյալներ մուտքագրելը. տեղադրված ծրագիրը չի տեսնում դիտարկիչում մուտքագրված տվյալները, իսկ դիտարկիչը՝ նրա տվյալները։";
-    /// Как установить на iPhone и iPad руками. Названия кнопок — как их пишет
-    /// сама iOS (Apple, «iPhone User Guide», iOS 18 и 26, на английском
-    /// и русском; сверено 2026-10-12): в iOS 26 «Поделиться» ушла в меню
-    /// «Ещё» с тремя точками. Армянского языка в iOS нет, и человек с
-    /// армянским окном видит iOS по-английски или по-русски: армянская строка
-    /// называет кнопки по-английски и описывает значок.
+    /// Как установить в Safari на iPhone и iPad руками. Названия кнопок — как
+    /// их пишет сама iOS (Apple, «iPhone User Guide» и «iPad User Guide»,
+    /// iOS 18, 26 и 27, на английском и русском; сверено 2026-10-20): на
+    /// iPhone в iOS 26 «Поделиться» ушла в меню «Еще» с тремя точками, а в
+    /// iOS 27 — в «Меню страницы» с тремя чертами; на iPad «На экран
+    /// „Домой“» — после «Еще» (iPadOS 26) или «Показать больше» (27).
+    /// «Открыть как веб-приложение» с iOS 26 включено само
+    /// (webkit.org/blog/17333, 2025-09-15): выключенное, оно добавит
+    /// закладку Safari. Армянского языка в iOS нет, и человек с армянским
+    /// окном видит iOS по-английски или по-русски: армянская строка называет
+    /// кнопки по-английски и описывает значок.
     InstallSteps =
-        "Как: в Safari нажмите «Поделиться» (квадрат со стрелкой вверх; в iOS 26 и новее эта кнопка в меню с тремя точками), затем «На экран „Домой“» и «Добавить». Открывайте программу её значком.",
-        "How: in Safari, tap “Share” (a square with an arrow pointing up; on iOS 26 and later it's in the menu with three dots), then “Add to Home Screen” and “Add”. Open the app from its icon.",
-        "Ինչպես. Safari-ում սեղմեք «Share» կոճակը (քառակուսի՝ դեպի վեր սլաքով, iOS 26-ում և ավելի նորերում այն երեք կետով ցանկում է), ապա «Add to Home Screen» և «Add»։ Բացեք ծրագիրը նրա պատկերակով։";
+        "Как: в Safari нажмите кнопку «Поделиться» (квадрат со стрелкой вверх; если её нет на панели, она в меню у адресной строки: с тремя точками в iOS 26, с тремя чертами в iOS 27), затем «На экран „Домой“» (на iPad он после «Еще» или «Показать больше») и «Добавить», не выключая «Открыть как веб-приложение». Открывайте программу её значком.",
+        "How: in Safari, tap “Share” (a square with an arrow pointing up; if it isn't on the toolbar, it's in the menu next to the address bar: three dots on iOS 26, three lines on iOS 27), then “Add to Home Screen” (on iPad, after “More” or “View More”) and “Add”, keeping “Open as Web App” on. Open the app from its icon.",
+        "Ինչպես. Safari-ում սեղմեք «Share» կոճակը (քառակուսի՝ դեպի վեր սլաքով. եթե այն վահանակում չկա, այն հասցեի տողի կողքի ցանկում է՝ iOS 26-ում երեք կետով, iOS 27-ում՝ երեք գծով), ապա «Add to Home Screen» (iPad-ում՝ «More» կամ «View More» կոճակից հետո) և «Add»՝ միացված թողնելով «Open as Web App»-ը։ Բացեք ծրագիրը նրա պատկերակով։";
+    /// Как установить на iPhone и iPad из Chrome, Edge или Firefox: с iOS
+    /// 16.4 они ставят на экран «Домой» из своего меню «Поделиться», и
+    /// программа оттуда — такая же отдельная, как из Safari
+    /// (webkit.org/blog/13878, 2023-02-16; WebKit bug 181849; сверено
+    /// 2026-10-20).
+    /// «На экран „Домой“» — пункт системного меню «Поделиться», а не
+    /// браузера.
+    InstallStepsIosOther =
+        "Как: нажмите кнопку «Поделиться» (квадрат со стрелкой вверх) у адресной строки или в меню браузера, затем «На экран „Домой“» и «Добавить». Открывайте программу её значком.",
+        "How: tap “Share” (a square with an arrow pointing up) next to the address bar or in the browser menu, then “Add to Home Screen” and “Add”. Open the app from its icon.",
+        "Ինչպես. սեղմեք «Share» կոճակը (քառակուսի՝ դեպի վեր սլաքով) հասցեի տողի կողքին կամ դիտարկիչի ցանկում, ապա «Add to Home Screen» և «Add»։ Բացեք ծրագիրը նրա պատկերակով։";
+    /// Mac: программа из Dock не видит данных Safari (webkit.org/blog/14445,
+    /// 2023-09-18: Safari копирует ей только cookies; Apple, статья 104996;
+    /// сверено 2026-10-20) — поэтому, как на iPhone, установка до данных.
+    InstallFirstMac =
+        "На Mac добавьте программу в Dock до того, как вводить данные: программа из Dock не видит данных, введённых в Safari, а Safari\u{A0}— её данных.",
+        "On a Mac, add the app to the Dock before entering any data: the app in the Dock doesn't see data entered in Safari, and Safari doesn't see the app's data.",
+        "Mac-ում ծրագիրն ավելացրեք Dock-ում նախքան տվյալներ մուտքագրելը. Dock-ի ծրագիրը չի տեսնում Safari-ում մուտքագրված տվյալները, իսկ Safari-ն՝ նրա տվյալները։";
+    /// Как установить в Safari на Mac (Safari 17 и macOS Sonoma 14 и новее;
+    /// Apple, статья 104996 и «Safari User Guide», на английском и русском;
+    /// сверено 2026-10-20). Версию macOS страница не узнает: WebKit пишет
+    /// в `User-Agent` всегда 10_15_7, — поэтому слова называют её сами.
+    /// Армянского языка в macOS нет, как и в iOS.
+    InstallStepsMac =
+        "Как: в Safari выберите в строке меню «Файл», затем «Добавить в Dock» (или нажмите «Поделиться» на панели Safari и выберите «Добавить в Dock») и нажмите «Добавить». Так можно в macOS Sonoma 14 и новее. Открывайте программу её значком в Dock.",
+        "How: in Safari, choose “File”, then “Add to Dock” in the menu bar (or click “Share” in the Safari toolbar and choose “Add to Dock”), then click “Add”. This works on macOS Sonoma 14 or later. Open the app from its icon in the Dock.",
+        "Ինչպես. Safari-ում ընտրացանկի տողում ընտրեք «File», ապա «Add to Dock» (կամ Safari-ի վահանակում սեղմեք «Share» և ընտրեք «Add to Dock»), հետո սեղմեք «Add»։ Դա հնարավոր է macOS Sonoma 14 և ավելի նոր տարբերակներում։ Բացեք ծրագիրը նրա պատկերակով Dock-ում։";
+    /// Как установить в Chrome на компьютере, когда его вопроса нет (уже
+    /// задан или ещё не пришёл). Подписи — из строк Chromium 155
+    /// (`generated_resources.grd` и перевод ru; справка Google 9658361;
+    /// сверено 2026-10-20). Армянского интерфейса у Chrome на компьютере нет
+    /// (`build/config/locales.gni`: hy — только Android): армянская строка
+    /// называет пункты по-английски.
+    InstallStepsChrome =
+        "Как: нажмите значок «Установить» справа в адресной строке или откройте меню с тремя точками, затем «Транслировать, сохранить, поделиться» и «Установить приложение „Kvartik“», и подтвердите «Установить».",
+        "How: click the “Install” icon on the right of the address bar, or open the menu with three dots, then “Cast, save, and share” and “Install Kvartik…”, and confirm with “Install”.",
+        "Ինչպես. սեղմեք «Install» պատկերակը հասցեի տողի աջ կողմում կամ բացեք երեք կետով ցանկը, ապա «Cast, save, and share» և «Install Kvartik…», և հաստատեք «Install» կոճակով։";
+    /// Как установить в Chrome на Android: с Chrome 150 пункт меню —
+    /// «Установить и создать ярлык», а в нём выбор — программа или ярлык,
+    /// который открывает сайт во вкладке Chrome (строки Chromium,
+    /// `android_webapps_strings.grd` и переводы ru и hy; сверено
+    /// 2026-10-20). Армянский интерфейс у Chrome на Android есть: армянская
+    /// строка называет пункты по-армянски, а в скобках — как в английском.
+    InstallStepsChromeAndroid =
+        "Как: откройте меню с тремя точками, выберите «Установить и создать ярлык», затем «Установить» (а не «Создать ярлык»: ярлык откроет сайт во вкладке Chrome) и подтвердите «Установить». Открывайте программу её значком.",
+        "How: open the menu with three dots, choose “Install and create shortcut”, then “Install” (not “Create shortcut”: a shortcut opens the site in a Chrome tab), and confirm with “Install”. Open the app from its icon.",
+        "Ինչպես. բացեք երեք կետով ցանկը, ընտրեք «Տեղադրել և ստեղծել դյուրանցում» (Install and create shortcut), ապա «Տեղադրել» (Install), ոչ թե «Ստեղծել դյուրանցում». դյուրանցումը կայքը կբացի Chrome-ի ներդիրում։ Հաստատեք «Տեղադրել» կոճակով և բացեք ծրագիրը նրա պատկերակով։";
+    /// Как установить в Edge на компьютере: значок «Доступно приложение»
+    /// в адресной строке (Microsoft Learn, «Use Progressive Web Apps in
+    /// Microsoft Edge», en и ru) или пункт меню «Приложения» (справка
+    /// Microsoft: «Install this site as an app»; где «Приложения» в меню,
+    /// у версий Edge по-разному, а русский текст справки — машинный
+    /// перевод: поэтому без кавычек; сверено 2026-10-20).
+    InstallStepsEdge =
+        "Как: нажмите значок «Доступно приложение» справа в адресной строке и затем «Установить» или найдите в меню с тремя точками «Приложения» и выберите там установку этого сайта как приложения.",
+        "How: click the “App available” icon on the right of the address bar, then “Install”, or find “Apps” in the menu with three dots and choose “Install this site as an app”.",
+        "Ինչպես. սեղմեք «App available» պատկերակը հասցեի տողի աջ կողմում, ապա «Install», կամ երեք կետով ցանկում գտեք «Apps» և ընտրեք «Install this site as an app»։";
+    /// Edge на Android: как он ставит программы, первоисточника нет —
+    /// только сторонние руководства с разными подписями (2026-10-20). Слова
+    /// поэтому без названий пунктов; обычно хватает вопроса браузера,
+    /// который задаёт кнопка.
+    InstallStepsEdgeAndroid =
+        "Как: откройте меню Edge и выберите пункт, который добавляет сайт на телефон или устанавливает приложение, затем подтвердите установку. Открывайте программу её значком.",
+        "How: open the Edge menu and choose the item that adds the site to your phone or installs the app, then confirm. Open the app from its icon.",
+        "Ինչպես. բացեք Edge-ի ցանկը և ընտրեք կետը, որը կայքն ավելացնում է հեռախոսին կամ տեղադրում է հավելվածը, ապա հաստատեք։ Բացեք ծրագիրը նրա պատկերակով։";
+    /// Как установить в Samsung Internet. Своего вопроса браузера он ждёт,
+    /// пока сайт не открывали несколько раз (условия Samsung нигде не
+    /// описаны; трекер SamsungInternet/support, 2020). Подписи меню — по
+    /// сторонним руководствам на английском и русском, справки Samsung
+    /// с ними нет (сверено 2026-10-20). Армянского интерфейса у Samsung
+    /// Internet не знаем: армянская строка называет пункты по-английски.
+    InstallStepsSamsung =
+        "Как: откройте меню (три черты внизу справа), выберите «Добавить страницу», затем «Главный экран» и подтвердите добавление. Открывайте программу её значком.",
+        "How: open the menu (three lines at the bottom right), choose “Add page to”, then “Home screen”, and confirm. Open the app from its icon.",
+        "Ինչպես. բացեք ցանկը (երեք գիծ՝ ներքևի աջ անկյունում), ընտրեք «Add page to», ապա «Home screen» և հաստատեք։ Բացեք ծրագիրը նրա պատկերակով։";
+    /// Как установить в Firefox на Android. Пункт меню — как его пишет сам
+    /// Firefox, когда сайт годится в программы (иначе там простой ярлык «На
+    /// домашний экран»); дальше — окно самого Android (по исходникам
+    /// Firefox 158 для Android, `MoreSettingsSubmenu.kt` и строки en, ru,
+    /// hy-rAM; сверено 2026-10-20). У Firefox есть армянский интерфейс:
+    /// армянская строка называет пункты по-армянски, а в скобках — как
+    /// в английском.
+    InstallStepsFirefoxAndroid =
+        "Как: откройте меню с тремя точками, затем «Больше» и «Добавить приложение на домашний экран» и подтвердите добавление. Открывайте программу её значком.",
+        "How: open the menu with three dots, then “More” and “Add app to Home screen”, and confirm. Open the app from its icon.",
+        "Ինչպես. բացեք երեք կետով ցանկը, ապա «Ավելին» (More) և «Ավելացնել հավելվածը տնային էկրանին» (Add app to Home screen) և հաստատեք։ Բացեք ծրագիրը նրա պատկերակով։";
+    /// Как установить в Firefox на Windows (с Firefox 143): только значком
+    /// в адресной строке, пункта меню нет, а подпись значка — во всплывающей
+    /// подсказке (по исходникам Firefox 158, `taskbartabs.ftl` en-US, ru,
+    /// hy-AM; сверено 2026-10-20).
+    InstallStepsFirefoxWindows =
+        "Как: нажмите значок «Добавить вкладку на панель задач» справа в адресной строке (экран со стрелкой вниз). Программа откроется своим окном, а её значок встанет на панель задач.",
+        "How: click the “Add tab to taskbar” icon on the right of the address bar (a screen with an arrow pointing down). The app opens in its own window, and its icon is pinned to the taskbar.",
+        "Ինչպես. սեղմեք «Ավելացնել ներդիրը խնդրագոտիում» (Add tab to taskbar) պատկերակը հասցեի տողի աջ կողմում (էկրան՝ դեպի ներքև սլաքով)։ Ծրագիրը կբացվի իր պատուհանում, իսկ նրա պատկերակը կհայտնվի խնդրագոտիում։";
+    /// Firefox на Mac и Linux программой сайт не ставит (по исходникам
+    /// Firefox 158, 2026-10-20) — только другой браузер, и данные туда
+    /// переезжают копией (`InstallMoveData`).
+    InstallElsewhere =
+        "В Firefox на Mac и Linux программу не установить. Откройте kvartik.com/app/ в Chrome, Edge или Safari и установите её там.",
+        "Firefox on Mac and Linux can't install the app. Open kvartik.com/app/ in Chrome, Edge or Safari and install it there.",
+        "Mac-ում և Linux-ում Firefox-ը չի կարող տեղադրել ծրագիրը։ Բացեք kvartik.com/app/ հասցեն Chrome-ում, Edge-ում կամ Safari-ում և տեղադրեք այն այնտեղ։";
+    /// Незнакомый браузер: как он ставит программы, не знаем.
+    InstallStepsOther =
+        "Как: найдите в меню браузера пункт, который устанавливает сайт программой или добавляет его на главный экран. Нет такого\u{A0}— откройте kvartik.com/app/ в Chrome, Edge или Safari и установите программу там.",
+        "How: look in the browser menu for an item that installs the site as an app or adds it to the home screen. If there isn't one, open kvartik.com/app/ in Chrome, Edge or Safari and install the app there.",
+        "Ինչպես. դիտարկիչի ցանկում գտեք կետը, որը կայքը տեղադրում է որպես ծրագիր կամ ավելացնում է հիմնական էկրանին։ Եթե այդպիսին չկա, բացեք kvartik.com/app/ հասցեն Chrome-ում, Edge-ում կամ Safari-ում և տեղադրեք ծրագիրն այնտեղ։";
     /// Данные уже введены в браузере: перенос — только копией (Правило 6).
     InstallMoveData =
         "Если данные здесь уже есть, сделайте резервную копию и восстановите её в установленной программе.",
         "If you already have data here, make a backup and restore it in the installed app.",
         "Եթե այստեղ արդեն տվյալներ կան, արեք պահուստային պատճեն և վերականգնեք այն տեղադրված ծրագրում։";
+    /// Браузер, где программа и вкладка видят одни данные, а программа уже
+    /// стоит: из вкладки этого не узнать, и вопроса браузера тогда нет.
+    InstallAlready =
+        "Если программа уже установлена, открывайте её значком: данные у неё те же, что здесь.",
+        "If the app is already installed, open it from its icon: it has the same data as here.",
+        "Եթե ծրագիրն արդեն տեղադրված է, բացեք այն իր պատկերակով. նրա տվյալները նույնն են, ինչ այստեղ։";
 
     /// Раздел о резервной копии (задача 7). Пока экрана настроек нет,
     /// раздел стоит на единственном экране каркаса.

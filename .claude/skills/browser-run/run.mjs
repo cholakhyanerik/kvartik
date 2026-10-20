@@ -241,7 +241,10 @@ async function update() {
 }
 
 /// Установка: манифест без ошибок, `id` — `/app/`, кнопка «Установить» на
-/// главном. Основной контекст браузера: в отдельном вопроса об установке нет.
+/// главном задаёт вопрос браузера. Кнопка есть и без него (задача 55),
+/// но тогда раскрывает слова и несёт `aria-expanded`; пришёл вопрос — этого
+/// атрибута у неё нет. Основной контекст браузера: в отдельном вопроса об
+/// установке нет.
 async function install() {
   const port = Number(opt.port ?? 8792);
   const srv = await wrangler(DIST, port, WORK);
@@ -257,7 +260,10 @@ async function install() {
     checks.check("устанавливается: ошибок установки нет", installabilityErrors.length === 0, JSON.stringify(installabilityErrors));
     const { appId } = await page.send("Page.getAppId");
     checks.check("id программы — /app/", appId === `${origin}/app/`, appId);
-    checks.check("кнопка «Установить»", await page.waitFor(hasText(t("InstallButton", opt.lang)), 15000));
+    const asks = `const button = [...document.querySelectorAll("#home .install button")]
+      .find((b) => b.textContent.trim() === ${JSON.stringify(t("InstallButton", opt.lang))});
+      return button && !button.hasAttribute("aria-expanded") ? true : null;`;
+    checks.check("кнопка «Установить» задаёт вопрос браузера", await page.waitFor(asks, 15000));
     await page.shot(path.join(OUT, "install.png"));
   } finally {
     browser.close();

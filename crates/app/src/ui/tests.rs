@@ -25,6 +25,7 @@ use crate::store::{Store, StoreError, Writes};
 
 mod annual;
 mod documents;
+mod install;
 mod ledger;
 mod share;
 mod tax;

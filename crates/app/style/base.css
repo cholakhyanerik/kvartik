@@ -283,6 +283,12 @@ h1[tabindex="-1"]:focus {
   margin-bottom: var(--space-4);
 }
 
+/* Слова об установке руками (задача 55) — под кнопкой, которая их
+   раскрыла. */
+.install-steps {
+  margin-top: var(--space-3);
+}
+
 .greeting h1 {
   margin: 0;
 }

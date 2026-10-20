@@ -201,6 +201,14 @@ impl Pwa {
             log("userChoice", &error);
         }
     }
+
+    /// Есть ли вопрос браузера, который можно задать. После отказа Chromium
+    /// присылает новый сразу, на той же странице (по исходникам Chromium,
+    /// `AppBannerManager::SendBannerDismissed`, 2026-10-20) — до ответа
+    /// или после.
+    pub fn can_ask(&self) -> bool {
+        self.shared.prompt.borrow().is_some()
+    }
 }
 
 impl Shared {
@@ -428,23 +436,123 @@ fn listen_install(shared: &Rc<Shared>) {
 
 /// Открыта ли программа установленной — своим окном или с экрана «Домой».
 ///
-/// `fullscreen` — тоже установленная: программа с экрана «Домой» на iPhone
-/// с iOS 17 отвечает им вместо `standalone` из манифеста (WebKit bug 264218,
-/// открыт; по данным browser-compat-data, 2026-10-12).
+/// `fullscreen` — тоже установленная, но только у WebKit: программа
+/// с экрана «Домой» на iPhone с iOS 17 отвечает им вместо `standalone` из
+/// манифеста (WebKit bug 264218, открыт; по данным browser-compat-data,
+/// 2026-10-12), а у Chromium им отвечает и обычная вкладка на весь экран
+/// (F11; по исходникам Chromium, `BrowserWebContentsDelegate::
+/// GetDisplayMode`, 2026-10-20). И `minimal-ui`: окно программы на панели
+/// задач Firefox для Windows ставит его, что бы ни писал манифест (по
+/// исходникам Firefox 158, `TaskbarTabsWindowManager.sys.mjs`, 2026-10-20).
+/// Во вкладке браузера режим — `browser`.
 pub fn installed() -> bool {
     let matches = |query: &str| {
         web_sys::window()
             .and_then(|window| window.match_media(query).ok().flatten())
             .is_some_and(|list| list.matches())
     };
-    navigator_standalone() == Some(true)
+    let webkit = navigator_standalone();
+    webkit == Some(true)
         || matches("(display-mode: standalone)")
-        || matches("(display-mode: fullscreen)")
+        || (webkit.is_some() && matches("(display-mode: fullscreen)"))
+        || matches("(display-mode: minimal-ui)")
 }
 
-/// Ставят ли программу здесь только руками: iPhone или iPad в браузере.
-pub fn install_by_hand() -> bool {
-    apple_touch() && navigator_standalone() == Some(false)
+/// Где открыта страница — чтобы сказать словами, как установить программу
+/// там, где браузер своего вопроса не задаёт (задача 55): он бывает только
+/// у Chromium, а и там его нет, пока программа уже стоит или человек
+/// недавно отказался. Свойства — первыми, строка `User-Agent` — последней:
+/// iPad называет себя Mac'ом, а Chrome и Firefox на iPhone — тот же WebKit,
+/// что Safari.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Browser {
+    /// Safari на iPhone или iPad.
+    SafariTouch,
+    /// Chrome, Edge или Firefox на iPhone или iPad.
+    OtherTouch,
+    /// Safari на Mac.
+    SafariMac,
+    /// Chrome на компьютере.
+    Chrome,
+    /// Chrome на Android.
+    ChromeAndroid,
+    /// Edge на компьютере.
+    Edge,
+    /// Edge на Android.
+    EdgeAndroid,
+    /// Samsung Internet.
+    Samsung,
+    /// Firefox на Android.
+    FirefoxAndroid,
+    /// Firefox на Windows: программой на панели задач (с Firefox 143).
+    FirefoxWindows,
+    /// Firefox на Mac и Linux: сайт программой не ставит (по исходникам
+    /// Firefox 158: на Linux выключено, на Mac нет вовсе; 2026-10-20).
+    Firefox,
+    /// Остальные: Opera, Яндекс, браузеры внутри других программ
+    /// и незнакомые.
+    Other,
+}
+
+impl Browser {
+    /// Браузер этой страницы.
+    pub fn detect() -> Self {
+        let Some(window) = web_sys::window() else {
+            return Self::Other;
+        };
+        let navigator = window.navigator();
+        let agent = navigator.user_agent().unwrap_or_default();
+        Self::of(
+            &agent,
+            navigator_standalone().is_some(),
+            navigator.max_touch_points() > 0,
+        )
+    }
+
+    /// По строке `User-Agent`, свойству WebKit `navigator.standalone`
+    /// и касанию.
+    fn of(agent: &str, webkit: bool, touch: bool) -> Self {
+        let has = |token: &str| agent.contains(token);
+        if webkit {
+            return if touch {
+                if has("CriOS/") || has("EdgiOS/") || has("FxiOS/") {
+                    Self::OtherTouch
+                } else {
+                    Self::SafariTouch
+                }
+            } else if has("Version/") && has("Safari/") {
+                Self::SafariMac
+            } else {
+                Self::Other
+            };
+        }
+        // Планшет на Android в режиме «версия для компьютера» называет себя
+        // Linux'ом — так у Firefox на планшете по умолчанию (по исходникам
+        // Firefox 158, 2026-10-20). Его выдаёт касание: у компьютера на
+        // Linux экран обычно без него, а Chromebook — `CrOS`, а не Linux.
+        let android = has("Android") || (touch && has("Linux"));
+        if has("SamsungBrowser/") {
+            Self::Samsung
+        } else if has("Firefox/") {
+            if android {
+                Self::FirefoxAndroid
+            } else if has("Windows") {
+                Self::FirefoxWindows
+            } else {
+                Self::Firefox
+            }
+        } else if has("EdgA/") || (has("Edg/") && android) {
+            Self::EdgeAndroid
+        } else if has("Edg/") {
+            Self::Edge
+        } else if has("OPR/") || has("YaBrowser/") || has("; wv)") || !has("Chrome/") {
+            Self::Other
+        } else if android {
+            Self::ChromeAndroid
+        } else {
+            Self::Chrome
+        }
+    }
 }
 
 /// iPhone или iPad — в браузере или программой с экрана «Домой».
@@ -493,4 +601,152 @@ fn container() -> Option<ServiceWorkerContainer> {
 /// (Правило 13).
 fn log(context: &str, error: &JsValue) {
     web_sys::console::error_2(&format!("Kvartik, приложение ({context}):").into(), error);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Browser;
+
+    /// Строки `User-Agent` — из документации и исходников браузеров
+    /// (разведка задачи 55, 2026-10-20): Chromium `user_agent_utils.cc`,
+    /// Microsoft Learn «User-Agent guidance», developer.samsung.com,
+    /// Firefox 158 `nsHttpHandler.cpp` и `UserAgent.swift`, WebKit
+    /// `UserAgentIOS.mm`. iPad называет себя Mac'ом, и Firefox на iPad —
+    /// тоже Safari: его не отличить, и он получит слова Safari.
+    #[test]
+    fn browsers_are_told_apart() {
+        const MAC: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
+        const LINUX_FIREFOX: &str =
+            "Mozilla/5.0 (X11; Linux x86_64; rv:158.0) Gecko/20100101 Firefox/158.0";
+        // Строка, есть ли `navigator.standalone`, есть ли касание, браузер.
+        let cases = [
+            (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+                false,
+                false,
+                Browser::Chrome,
+            ),
+            (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+                false,
+                false,
+                Browser::Chrome,
+            ),
+            (
+                "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36",
+                false,
+                true,
+                Browser::ChromeAndroid,
+            ),
+            (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+                false,
+                true,
+                Browser::ChromeAndroid,
+            ),
+            (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0",
+                false,
+                true,
+                Browser::Edge,
+            ),
+            (
+                "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EdgA/120.0.0.0",
+                false,
+                true,
+                Browser::EdgeAndroid,
+            ),
+            (
+                "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/24.0 Chrome/117.0.0.0 Mobile Safari/537.36",
+                false,
+                true,
+                Browser::Samsung,
+            ),
+            (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/24.0 Chrome/117.0.0.0 Safari/537.36",
+                false,
+                true,
+                Browser::Samsung,
+            ),
+            (
+                "Mozilla/5.0 (Android 14; Mobile; rv:158.0) Gecko/158.0 Firefox/158.0",
+                false,
+                true,
+                Browser::FirefoxAndroid,
+            ),
+            (LINUX_FIREFOX, false, true, Browser::FirefoxAndroid),
+            (LINUX_FIREFOX, false, false, Browser::Firefox),
+            (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0",
+                false,
+                false,
+                Browser::FirefoxWindows,
+            ),
+            (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:158.0) Gecko/20100101 Firefox/158.0",
+                false,
+                false,
+                Browser::Firefox,
+            ),
+            (MAC, true, false, Browser::SafariMac),
+            (MAC, true, true, Browser::SafariTouch),
+            (
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+                true,
+                true,
+                Browser::SafariTouch,
+            ),
+            (
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/155.0.7390.96 Mobile/15E148 Safari/604.1",
+                true,
+                true,
+                Browser::OtherTouch,
+            ),
+            (
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) EdgiOS/155.0.3537.71 Mobile/15E148 Safari/605.1.15",
+                true,
+                true,
+                Browser::OtherTouch,
+            ),
+            (
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/158.1 Mobile/15E148 Safari/604.1",
+                true,
+                true,
+                Browser::OtherTouch,
+            ),
+            // Программа на WKWebView для Mac: без хвоста Safari.
+            (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+                true,
+                false,
+                Browser::Other,
+            ),
+            (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 OPR/120.0.0.0",
+                false,
+                false,
+                Browser::Other,
+            ),
+            (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 YaBrowser/26.9.0.0 Safari/537.36",
+                false,
+                false,
+                Browser::Other,
+            ),
+            (
+                "Mozilla/5.0 (Linux; Android 14; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/155.0.0.0 Mobile Safari/537.36",
+                false,
+                true,
+                Browser::Other,
+            ),
+        ];
+        let wrong: Vec<String> = cases
+            .iter()
+            .filter_map(|&(agent, webkit, touch, expected)| {
+                let got = Browser::of(agent, webkit, touch);
+                (got != expected).then(|| format!("{got:?} вместо {expected:?}: {agent}"))
+            })
+            .collect();
+        assert!(wrong.is_empty(), "браузер не тот: {wrong:#?}");
+    }
 }

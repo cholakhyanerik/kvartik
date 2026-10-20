@@ -10,10 +10,11 @@
 //! окно ждёт, когда её сохранят или закроют, а до того над экраном — только
 //! слова (решение человека 2026-10-18): начатое в форме не пропадает.
 //!
-//! Установка — кнопкой там, где браузер её даёт (Chromium), а на iPhone
-//! и iPad — словами: браузеры там установку кнопкой не дают, а от неё
-//! зависит, увидит ли программа данные (Правило 6), поэтому раздел стоит
-//! выше разделов о данных.
+//! Установка — кнопкой «Установить» всегда, пока программа не установлена
+//! (задача 55): там, где браузер даёт свой вопрос (Chromium), она задаёт
+//! его, а где нет — раскрывает слова, как установить в этом браузере
+//! руками. На iPhone, iPad и Mac от установки зависит, увидит ли программа
+//! данные (Правило 6), поэтому раздел стоит выше разделов о данных.
 
 use std::sync::Arc;
 
@@ -25,7 +26,7 @@ use web_sys::HtmlElement;
 
 use super::form::Forms;
 use super::tr;
-use crate::platform::pwa::{self as browser, Event, Pwa};
+use crate::platform::pwa::{self as browser, Browser, Event, Pwa};
 
 /// Новая версия программы.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -95,41 +96,35 @@ impl News {
     }
 }
 
-/// Что предложить про установку.
+/// Что предложить про установку. Кнопка «Установить» есть всегда, пока
+/// программа не установлена (решение человека 2026-10-20, задача 55):
+/// вопрос браузера бывает только у Chromium, а и там его нет, пока
+/// программа уже стоит или человек недавно отказался.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Install {
     /// Программа установлена или открыта установленной: предлагать нечего,
     /// что бы ни говорил браузер.
     Installed,
-    /// Нечего: браузер установку не даёт или ещё не сказал, что даёт.
-    Nothing,
-    /// Браузер даёт установить по кнопке.
+    /// Вопроса браузера нет: кнопка раскрывает слова, как установить
+    /// программу в этом браузере руками.
+    Manual,
+    /// Браузер даёт установить своим вопросом — его и задаёт кнопка.
     Button,
     /// Вопрос браузера на экране — ждём ответа человека.
     Asking,
-    /// iPhone или iPad не в установленной программе: установить можно
-    /// только руками, из меню браузера.
-    Manual,
 }
 
 impl Install {
-    /// С чего начать: открыта ли программа установленной и ставят ли её
-    /// здесь только руками.
-    pub const fn initial(installed: bool, by_hand: bool) -> Self {
-        if installed {
-            Self::Installed
-        } else if by_hand {
-            Self::Manual
-        } else {
-            Self::Nothing
-        }
+    /// С чего начать: открыта ли программа установленной.
+    pub const fn initial(installed: bool) -> Self {
+        if installed { Self::Installed } else { Self::Manual }
     }
 
     /// Браузер сообщил об установке.
     pub fn apply(&mut self, event: Event) {
         match event {
             Event::CanInstall => {
-                if *self == Self::Nothing {
+                if *self == Self::Manual {
                     *self = Self::Button;
                 }
             }
@@ -138,14 +133,72 @@ impl Install {
         }
     }
 
-    /// Человек ответил браузеру. Второй раз тот же вопрос браузер не задаёт:
-    /// отказался — кнопки больше нет до следующего открытия, согласился —
-    /// установку подтвердит событие `Installed`, до или после ответа.
-    pub fn answered(&mut self) {
+    /// Человек ответил браузеру; `again` — браузер уже прислал новый вопрос
+    /// ([`Pwa::can_ask`]). Отказался — кнопка снова задаёт вопрос, а нет
+    /// его — раскрывает слова; согласился — установку подтвердит событие
+    /// `Installed`, до или после ответа.
+    pub fn answered(&mut self, again: bool) {
         if *self == Self::Asking {
-            *self = Self::Nothing;
+            *self = if again { Self::Button } else { Self::Manual };
         }
     }
+}
+
+/// Слова раздела «Установка» для браузера: над кнопкой, как установить
+/// руками и что помнить о данных.
+#[derive(Clone, Copy)]
+struct Words {
+    about: Key,
+    steps: Key,
+    hint: Key,
+}
+
+impl Words {
+    const fn of(browser: Browser) -> Self {
+        let (about, steps) = match browser {
+            Browser::SafariTouch => (Key::InstallFirst, Key::InstallSteps),
+            Browser::OtherTouch => (Key::InstallFirst, Key::InstallStepsIosOther),
+            Browser::SafariMac => (Key::InstallFirstMac, Key::InstallStepsMac),
+            Browser::Chrome => (Key::InstallAbout, Key::InstallStepsChrome),
+            Browser::ChromeAndroid => (Key::InstallAbout, Key::InstallStepsChromeAndroid),
+            Browser::Edge => (Key::InstallAbout, Key::InstallStepsEdge),
+            Browser::EdgeAndroid => (Key::InstallAbout, Key::InstallStepsEdgeAndroid),
+            Browser::Samsung => (Key::InstallAbout, Key::InstallStepsSamsung),
+            Browser::FirefoxAndroid => (Key::InstallAbout, Key::InstallStepsFirefoxAndroid),
+            Browser::FirefoxWindows => (Key::InstallAbout, Key::InstallStepsFirefoxWindows),
+            Browser::Firefox => (Key::InstallAbout, Key::InstallElsewhere),
+            Browser::Other => (Key::InstallAbout, Key::InstallStepsOther),
+        };
+        // Что установленная программа видит данные вкладки, известно по
+        // исходникам Chromium и Firefox (разведка задачи 55, 2026-10-20).
+        // На iPhone, iPad и Mac не видит, у Samsung Internet, Edge на
+        // Android и незнакомых браузеров — неизвестно, а из другого браузера
+        // данные не видны точно: туда — копией. Восстановление сливает
+        // записи (Правило 2), и лишняя копия ничего не задвоит.
+        let hint = match browser {
+            Browser::Chrome
+            | Browser::ChromeAndroid
+            | Browser::Edge
+            | Browser::FirefoxAndroid
+            | Browser::FirefoxWindows => Key::InstallAlready,
+            Browser::SafariTouch
+            | Browser::OtherTouch
+            | Browser::SafariMac
+            | Browser::EdgeAndroid
+            | Browser::Samsung
+            | Browser::Firefox
+            | Browser::Other => Key::InstallMoveData,
+        };
+        Self { about, steps, hint }
+    }
+}
+
+/// Слова об установке руками в этом браузере и подсказка о данных —
+/// браузерным тестам окна (`ui/tests/install.rs`).
+#[cfg(all(test, target_arch = "wasm32"))]
+pub(super) const fn manual_words(browser: Browser) -> (Key, Key) {
+    let words = Words::of(browser);
+    (words.steps, words.hint)
 }
 
 /// Что окно знает о программе как приложении — одно на все разделы.
@@ -154,6 +207,10 @@ pub struct Program {
     version: RwSignal<NewVersion>,
     news: RwSignal<News>,
     install: RwSignal<Install>,
+    /// Где открыта страница — чьими словами объяснять установку руками.
+    browser: Browser,
+    /// Раскрыты ли слова об установке руками.
+    steps: RwSignal<bool>,
     /// Страницей правит service worker, и весь сайт — в его кэше
     /// ([`Event::Serving`]).
     serving: RwSignal<bool>,
@@ -165,10 +222,7 @@ impl Program {
     pub fn new() -> Self {
         let version = RwSignal::new(NewVersion::Current);
         let news = RwSignal::new(News::Reading);
-        let install = RwSignal::new(Install::initial(
-            browser::installed(),
-            browser::install_by_hand(),
-        ));
+        let install = RwSignal::new(Install::initial(browser::installed()));
         let serving = RwSignal::new(false);
         let pwa = Pwa::start(move |event| {
             // Подписчикам — только перемена: событие установки или правки
@@ -194,6 +248,8 @@ impl Program {
             version,
             news,
             install,
+            browser: Browser::detect(),
+            steps: RwSignal::new(false),
             serving,
             pwa: StoredValue::new_local(pwa),
         }
@@ -230,17 +286,25 @@ impl Program {
         self.pwa.with_value(Pwa::update);
     }
 
-    fn ask_install(&self) {
-        if self.install.get_untracked() != Install::Button {
-            return;
+    /// «Установить»: задать вопрос браузера, а нет его — раскрыть или
+    /// спрятать слова, как установить руками.
+    fn press_install(&self) {
+        match self.install.get_untracked() {
+            Install::Button => {
+                // Отказался — раздел снова закрыт, а не раскрыт словами,
+                // открытыми до вопроса.
+                self.steps.set(false);
+                self.install.set(Install::Asking);
+                let pwa = self.pwa.get_value();
+                let install = self.install;
+                leptos::task::spawn_local(async move {
+                    pwa.install().await;
+                    install.update(|state| state.answered(pwa.can_ask()));
+                });
+            }
+            Install::Manual => self.steps.update(|open| *open = !*open),
+            Install::Asking | Install::Installed => {}
         }
-        self.install.set(Install::Asking);
-        let pwa = self.pwa.get_value();
-        let install = self.install;
-        leptos::task::spawn_local(async move {
-            pwa.install().await;
-            install.update(Install::answered);
-        });
     }
 
     /// Как будто браузер сообщил о новой версии, а её заметки — `notes`:
@@ -391,38 +455,47 @@ pub fn UpdateNotice(lang: ReadSignal<Lang>, program: Program, forms: Forms) -> i
 }
 
 /// Раздел «Установка» на языке окна — блоком, как карточки под ним (стиль
-/// `.install`). Пусто, когда предложить нечего.
+/// `.install`). Есть всегда, пока программа не установлена (задача 55):
+/// кнопка задаёт вопрос браузера, а нет его — раскрывает слова, как
+/// установить программу в этом браузере руками. Пусто в установленной.
+///
+/// Рисуется заново, только когда программу установили (`Memo`): вопрос
+/// браузера приходит, когда раздел уже на экране, и фокус с кнопки не
+/// должен пропадать. Слова раскрываются под кнопкой, а не заменяют её:
+/// второе нажатие их прячет (`aria-expanded`). Спрятанных слов нет и в
+/// разметке: в армянских — английские названия пунктов меню, и проверка
+/// смены языка (`ui/tests.rs`) приняла бы их за непереведённые строки.
 #[component]
 pub fn InstallSection(lang: ReadSignal<Lang>, program: Program) -> impl IntoView {
-    move || match program.install.get() {
-        Install::Installed | Install::Nothing => None,
-        state @ (Install::Button | Install::Asking) => Some(
+    let offered = Memo::new(move |_| program.install.get() != Install::Installed);
+    let words = Words::of(program.browser);
+    move || {
+        offered.get().then(|| {
+            let state = move || program.install.get();
+            let open = move || state() == Install::Manual && program.steps.get();
+            // Раскрывает слова кнопка, только пока вопроса браузера нет.
+            let expanded = move || (state() == Install::Manual).then(|| open().to_string());
             view! {
                 <section class="install">
                     <h2>{tr(lang, Key::InstallTitle)}</h2>
-                    <p>{tr(lang, Key::InstallAbout)}</p>
+                    <p>{tr(lang, words.about)}</p>
                     <button
                         type="button"
-                        disabled=state == Install::Asking
-                        on:click=move |_| program.ask_install()
+                        aria-expanded=expanded
+                        disabled=move || state() == Install::Asking
+                        on:click=move |_| program.press_install()
                     >
                         {tr(lang, Key::InstallButton)}
                     </button>
+                    {move || open().then(|| view! {
+                        <div class="install-steps">
+                            <p>{tr(lang, words.steps)}</p>
+                            <p class="hint">{tr(lang, words.hint)}</p>
+                        </div>
+                    })}
                 </section>
             }
-            .into_any(),
-        ),
-        Install::Manual => Some(
-            view! {
-                <section class="install">
-                    <h2>{tr(lang, Key::InstallTitle)}</h2>
-                    <p>{tr(lang, Key::InstallFirst)}</p>
-                    <p>{tr(lang, Key::InstallSteps)}</p>
-                    <p class="hint">{tr(lang, Key::InstallMoveData)}</p>
-                </section>
-            }
-            .into_any(),
-        ),
+        })
     }
 }
 
@@ -468,38 +541,38 @@ mod tests {
     }
 
     /// Установленной программе установку не предлагают, даже если браузер
-    /// прислал вопрос (так делает headless Chrome); на iPhone — слова
-    /// с первого кадра, а кнопка появляется, только когда браузер её дал,
-    /// и пропадает после ответа: второй раз браузер не спросит.
+    /// прислал вопрос (так делает headless Chrome); в браузере кнопка есть
+    /// с первого кадра — слова, пока браузер не дал вопроса, и его вопрос,
+    /// когда дал. После ответа — снова вопрос, если браузер его прислал
+    /// (Chromium шлёт новый сразу после отказа), иначе слова.
     #[test]
     fn install_states_follow_the_browser() {
-        assert_eq!(Install::initial(true, true), Install::Installed);
-        assert_eq!(Install::initial(true, false), Install::Installed);
-        assert_eq!(Install::initial(false, true), Install::Manual);
-        assert_eq!(Install::initial(false, false), Install::Nothing);
+        assert_eq!(Install::initial(true), Install::Installed);
+        assert_eq!(Install::initial(false), Install::Manual);
 
         let mut installed = Install::Installed;
         installed.apply(Event::CanInstall);
         assert_eq!(installed, Install::Installed);
+        installed.answered(true);
+        assert_eq!(installed, Install::Installed);
 
-        let mut manual = Install::Manual;
-        manual.apply(Event::CanInstall);
-        assert_eq!(manual, Install::Manual);
-        manual.apply(Event::Installed);
-        assert_eq!(manual, Install::Installed);
-
-        let mut install = Install::Nothing;
+        let mut install = Install::Manual;
         install.apply(Event::UpdateReady);
-        assert_eq!(install, Install::Nothing);
+        assert_eq!(install, Install::Manual);
         install.apply(Event::CanInstall);
         assert_eq!(install, Install::Button);
         install = Install::Asking;
         install.apply(Event::CanInstall);
         assert_eq!(install, Install::Asking);
-        install.answered();
-        assert_eq!(install, Install::Nothing);
-        install = Install::Manual;
-        install.answered();
+        install.answered(false);
         assert_eq!(install, Install::Manual);
+        install = Install::Asking;
+        install.answered(true);
+        assert_eq!(install, Install::Button);
+        install = Install::Manual;
+        install.answered(true);
+        assert_eq!(install, Install::Manual);
+        install.apply(Event::Installed);
+        assert_eq!(install, Install::Installed);
     }
 }

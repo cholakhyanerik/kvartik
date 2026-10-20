@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.52",
+      "date": "2026-10-20",
+      "hy": [
+        "Գլխավոր էկրանին «Տեղադրել» կոճակն այժմ միշտ կա, քանի դեռ ծրագիրը տեղադրված չէ։ Որտեղ դիտարկիչն ինքը չի տեղադրում ծրագիրը, կոճակը բացատրում է, թե ինչպես դա անել այդ դիտարկիչի ցանկից՝ Safari-ում iPhone-ի, iPad-ի և Mac-ի վրա, Chrome-ում, Edge-ում, Firefox-ում և Samsung Internet-ում։",
+        "Mac-ում, ինչպես iPhone-ում, ծրագիրը լավ է տեղադրել նախքան տվյալներ մուտքագրելը. Dock-ի ծրագիրը չի տեսնում Safari-ի տվյալները։"
+      ],
+      "ru": [
+        "Кнопка «Установить» на главном экране теперь есть всегда, пока программа не установлена. Где браузер не ставит программу сам, она объясняет, как поставить её из меню этого браузера: в Safari на iPhone, iPad и Mac, в Chrome, Edge, Firefox и Samsung Internet.",
+        "На Mac, как и на iPhone, программу лучше установить до того, как вводить данные: программа из Dock не видит данных Safari."
+      ],
+      "en": [
+        "The Install button on Home is now always there until the app is installed. Where the browser doesn't install the app itself, the button explains how to do it from that browser's menu: in Safari on iPhone, iPad and Mac, and in Chrome, Edge, Firefox and Samsung Internet.",
+        "On a Mac, as on iPhone, install the app before entering any data: the app in the Dock doesn't see Safari's data."
+      ]
+    },
+    {
       "version": "0.0.51",
       "date": "2026-10-20",
       "hy": [
