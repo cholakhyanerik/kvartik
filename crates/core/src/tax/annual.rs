@@ -57,6 +57,7 @@
 use std::collections::BTreeMap;
 
 use super::closing::Closing;
+use super::deadlines;
 use super::rules::{self, FundedPension, HealthBy, HealthInsurance, Monthly, Rule, Version};
 use super::turnover::{self, Books, Leaving, Regime, Span};
 use crate::model::activity::IncomeKind;
@@ -909,10 +910,11 @@ pub struct Saving {
 }
 
 /// Сколько откладывать в месяц с сегодняшнего дня `today`; `None` — срок
-/// прошёл, его нет или платить нечего.
+/// прошёл, его нет или платить нечего. Срок — с переносом с нерабочего
+/// дня (`tax::deadlines`), как его показывает окно.
 pub fn saving(annual: &Annual, today: Date) -> Option<Saving> {
     let total = Total::of(annual);
-    let due = total.due.filter(|due| today <= *due)?;
+    let due = total.due.map(deadlines::last_day).filter(|due| today <= *due)?;
     let sum = total.sum.filter(|sum| *sum > 0)?;
     let index = |day: Date| u32::from(day.year()) * 12 + u32::from(day.month());
     let months = index(due) - index(today) + 1;
@@ -923,7 +925,8 @@ pub fn saving(annual: &Annual, today: Date) -> Option<Saving> {
 
 /// Год, платежи за который ждут ближе всех в день `today`: прошлый — пока
 /// его срок не прошёл и человек был ИП уже в нём, иначе этот. Срок —
-/// правило налога на прибыль прошлого года; правила нет — этот год.
+/// правило налога на прибыль прошлого года с переносом с нерабочего дня
+/// (`tax::deadlines`); правила нет — этот год.
 pub fn due_year(today: Date, person: Option<&Person>) -> u16 {
     let this = today.year();
     let Some(previous) = this.checked_sub(1) else {
@@ -932,7 +935,9 @@ pub fn due_year(today: Date, person: Option<&Person>) -> u16 {
     let registered_later = person
         .and_then(|person| person.registered)
         .is_some_and(|day| day.year() > previous);
-    let due = rules::for_year(rules::armenia().profit_tax(), previous).and_then(|rule| rule.due.after(previous));
+    let due = rules::for_year(rules::armenia().profit_tax(), previous)
+        .and_then(|rule| rule.due.after(previous))
+        .map(deadlines::last_day);
     match due {
         Some(due) if today <= due && !registered_later => previous,
         Some(_) | None => this,

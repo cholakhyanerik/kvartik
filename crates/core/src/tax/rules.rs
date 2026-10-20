@@ -39,7 +39,10 @@
 //!   границы ступеней гербового сбора растут, а без границы — только
 //!   последняя; у медстраховки возраст больше нуля, порог оборота не
 //!   отрицательный, а число месяца у помесячного срока есть в каждом
-//!   месяце (не позже 28-го);
+//!   месяце (не позже 28-го); у сроков (задача 21) число месяца — в каждом
+//!   месяце, день года — в каждом году, выходные — дни недели от 1 до 7 без
+//!   повторов и не вся неделя, праздники — без повторов, а дни решения
+//!   правительства — в его периоде и каждый в одном списке;
 //! - незнакомых полей нет: опечатка в имени поля — ошибка, а не молча
 //!   пропущенное правило.
 //!
@@ -811,6 +814,275 @@ impl Rule for HealthInsurance {
     }
 }
 
+/// День года — срок, который каждый год приходится на одно число:
+/// «до 20 февраля данного года» — `{"month":2,"day":20}`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct YearDay {
+    pub month: u8,
+    pub day: u8,
+}
+
+impl YearDay {
+    /// Этот день в году `year`.
+    pub fn of(self, year: u16) -> Option<Date> {
+        Date::new(year, self.month, self.day)
+    }
+
+    /// Есть ли такой день в каждом году: 29 февраля — не в каждом.
+    fn usable(self) -> bool {
+        Date::new(2023, self.month, self.day).is_some()
+    }
+}
+
+/// Срок расчёта и налога с оборота за квартал (`tax::deadlines`): число
+/// `day` месяца, следующего за кварталом.
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TurnoverDue {
+    pub day: u8,
+    pub from: Date,
+    /// Ключ обязателен, как у [`Exclusion::until`].
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub until: Option<Date>,
+    pub source: Source,
+}
+
+impl Rule for TurnoverDue {
+    fn period(&self) -> Period {
+        Period {
+            from: self.from,
+            until: self.until,
+        }
+    }
+
+    fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// Срок один на всех: две записи — всегда об одном.
+    fn same_subject(&self, _: &Self) -> bool {
+        true
+    }
+
+    /// Число есть в каждом месяце: не позже 28-го.
+    fn usable(&self) -> bool {
+        (1..=28).contains(&self.day)
+    }
+}
+
+/// Срок заявления о налоге с оборота на год (`tax::deadlines`): день `due`
+/// того же года, а у нового ИП и у того, кто остановил деятельность до
+/// этого дня, — через `after_days` дней после дня учёта или возобновления.
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TurnoverApplication {
+    pub due: YearDay,
+    pub after_days: u8,
+    pub from: Date,
+    /// Ключ обязателен, как у [`Exclusion::until`].
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub until: Option<Date>,
+    pub source: Source,
+}
+
+impl Rule for TurnoverApplication {
+    fn period(&self) -> Period {
+        Period {
+            from: self.from,
+            until: self.until,
+        }
+    }
+
+    fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// Срок один на всех: две записи — всегда об одном.
+    fn same_subject(&self, _: &Self) -> bool {
+        true
+    }
+
+    fn usable(&self) -> bool {
+        self.due.usable() && self.after_days > 0
+    }
+}
+
+/// Всеобщая декларация о доходах за отчётный год (`tax::deadlines`):
+/// последний день — день `due` следующего года. Подают резиденты —
+/// граждане Армении на 31 декабря отчётного года, кроме несовершеннолетних
+/// (НК, ст. 156, ч. 4.1); доход ИП подоходным налогом не облагается (ст.
+/// 141, ч. 1, п. 1), но декларацию гражданин подаёт всё равно. Запись, как
+/// у гербового сбора, — об отчётном годе.
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IncomeDeclaration {
+    pub due: NextYearDay,
+    pub from: Date,
+    /// Ключ обязателен, как у [`Exclusion::until`].
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub until: Option<Date>,
+    pub source: Source,
+}
+
+impl Rule for IncomeDeclaration {
+    fn period(&self) -> Period {
+        Period {
+            from: self.from,
+            until: self.until,
+        }
+    }
+
+    fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// Срок один на всех: две записи — всегда об одном.
+    fn same_subject(&self, _: &Self) -> bool {
+        true
+    }
+
+    fn usable(&self) -> bool {
+        self.due.usable()
+    }
+}
+
+/// Перенос срока (`tax::deadlines`): последний день срока пришёлся на
+/// нерабочий — срок кончается в следующий рабочий. Нерабочие — дни недели
+/// `weekend` (по ISO 8601: понедельник — 1, воскресенье — 7), праздники
+/// ([`Holidays`]) и дни, которые правительство объявило нерабочими
+/// ([`DaysOff`]).
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeadlineShift {
+    pub weekend: Vec<u8>,
+    pub from: Date,
+    /// Ключ обязателен, как у [`Exclusion::until`].
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub until: Option<Date>,
+    pub source: Source,
+}
+
+impl Rule for DeadlineShift {
+    fn period(&self) -> Period {
+        Period {
+            from: self.from,
+            until: self.until,
+        }
+    }
+
+    fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// Правило одно на всех: две записи — всегда об одном.
+    fn same_subject(&self, _: &Self) -> bool {
+        true
+    }
+
+    /// Дни недели — от 1 до 7, без повторов, и рабочий день в неделе есть:
+    /// иначе перенос не кончился бы никогда.
+    fn usable(&self) -> bool {
+        let unique = self.weekend.iter().enumerate().all(|(i, a)| !self.weekend[..i].contains(a));
+        !self.weekend.is_empty()
+            && self.weekend.len() < 7
+            && unique
+            && self.weekend.iter().all(|day| (1..=7).contains(day))
+    }
+}
+
+/// Нерабочие дни закона о праздниках (`tax::deadlines`) — днями года: закон
+/// называет их числом и месяцем, и праздник, выпавший на выходной, никуда не
+/// переносится.
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Holidays {
+    pub days: Vec<YearDay>,
+    pub from: Date,
+    /// Ключ обязателен, как у [`Exclusion::until`].
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub until: Option<Date>,
+    pub source: Source,
+}
+
+impl Holidays {
+    /// Праздник ли день `day`.
+    pub fn contains(&self, day: Date) -> bool {
+        self.days
+            .iter()
+            .any(|holiday| holiday.month == day.month() && holiday.day == day.day())
+    }
+}
+
+impl Rule for Holidays {
+    fn period(&self) -> Period {
+        Period {
+            from: self.from,
+            until: self.until,
+        }
+    }
+
+    fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// Список один на всех: две записи — всегда об одном.
+    fn same_subject(&self, _: &Self) -> bool {
+        true
+    }
+
+    /// Дни есть, каждый — в каждом году, без повторов.
+    fn usable(&self) -> bool {
+        let unique = self.days.iter().enumerate().all(|(i, a)| !self.days[..i].contains(a));
+        !self.days.is_empty() && unique && self.days.iter().all(|day| day.usable())
+    }
+}
+
+/// Решение правительства о нерабочих днях года (`tax::deadlines`): дни `off`
+/// — нерабочие, дни `work` — рабочие, хотя по календарю выходные.
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DaysOff {
+    pub off: Vec<Date>,
+    pub work: Vec<Date>,
+    pub from: Date,
+    /// Ключ обязателен, как у [`Exclusion::until`].
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub until: Option<Date>,
+    pub source: Source,
+}
+
+impl Rule for DaysOff {
+    fn period(&self) -> Period {
+        Period {
+            from: self.from,
+            until: self.until,
+        }
+    }
+
+    fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// Об одном — если называют один и тот же день: два решения о разных
+    /// днях действуют вместе.
+    fn same_subject(&self, other: &Self) -> bool {
+        self.off
+            .iter()
+            .chain(&self.work)
+            .any(|day| other.off.contains(day) || other.work.contains(day))
+    }
+
+    /// Дни есть, каждый — в дни действия записи и только в одном списке,
+    /// без повторов.
+    fn usable(&self) -> bool {
+        let days: Vec<Date> = self.off.iter().chain(&self.work).copied().collect();
+        let unique = days.iter().enumerate().all(|(i, a)| !days[..i].contains(a));
+        let period = self.period();
+        !days.is_empty() && unique && days.iter().all(|day| period.contains(*day))
+    }
+}
+
 /// Правила страны — файл целиком.
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -826,6 +1098,12 @@ pub struct Rules {
     social_payment: Vec<Monthly>,
     stamp_duty: Vec<StampDuty>,
     health_insurance: Vec<HealthInsurance>,
+    turnover_due: Vec<TurnoverDue>,
+    turnover_application: Vec<TurnoverApplication>,
+    income_declaration: Vec<IncomeDeclaration>,
+    deadline_shift: Vec<DeadlineShift>,
+    holidays: Vec<Holidays>,
+    days_off: Vec<DaysOff>,
 }
 
 /// Какая запись: список файла и номер в нём, с нуля.
@@ -872,6 +1150,12 @@ impl Rules {
         check("social_payment", &rules.social_payment)?;
         check("stamp_duty", &rules.stamp_duty)?;
         check("health_insurance", &rules.health_insurance)?;
+        check("turnover_due", &rules.turnover_due)?;
+        check("turnover_application", &rules.turnover_application)?;
+        check("income_declaration", &rules.income_declaration)?;
+        check("deadline_shift", &rules.deadline_shift)?;
+        check("holidays", &rules.holidays)?;
+        check("days_off", &rules.days_off)?;
         Ok(rules)
     }
 
@@ -930,6 +1214,36 @@ impl Rules {
     /// Взнос медстраховки ИП за отчётный год.
     pub fn health_insurance(&self) -> &[HealthInsurance] {
         &self.health_insurance
+    }
+
+    /// Срок расчёта и налога с оборота за квартал.
+    pub fn turnover_due(&self) -> &[TurnoverDue] {
+        &self.turnover_due
+    }
+
+    /// Срок заявления о налоге с оборота на год.
+    pub fn turnover_application(&self) -> &[TurnoverApplication] {
+        &self.turnover_application
+    }
+
+    /// Срок всеобщей декларации о доходах гражданина за отчётный год.
+    pub fn income_declaration(&self) -> &[IncomeDeclaration] {
+        &self.income_declaration
+    }
+
+    /// Перенос срока с нерабочего дня и дни недели, которые нерабочие.
+    pub fn deadline_shift(&self) -> &[DeadlineShift] {
+        &self.deadline_shift
+    }
+
+    /// Нерабочие дни закона о праздниках.
+    pub fn holidays(&self) -> &[Holidays] {
+        &self.holidays
+    }
+
+    /// Решения правительства о нерабочих и рабочих днях.
+    pub fn days_off(&self) -> &[DaysOff] {
+        &self.days_off
     }
 }
 

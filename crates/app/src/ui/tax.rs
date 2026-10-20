@@ -27,11 +27,13 @@ use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::model::record::RecordId;
 use kvartik_core::tax::annual::{self, Annual};
 use kvartik_core::tax::closing::Closing;
+use kvartik_core::tax::deadlines;
 use kvartik_core::tax::rules::{self, Percent};
 use kvartik_core::tax::turnover::{self, Books, Leaving, Line, QuarterTax, Regime};
 use leptos::prelude::*;
 
 use super::annual::{AnnualCard, AnnualEntry, AnnualPage};
+use super::deadlines::{DeadlineReminder, DeadlinesEntry, DeadlinesPage, shift_note};
 use super::backup::{BackupChip, Backups};
 use super::documents::Documents;
 use super::icon::{Icon, icon};
@@ -170,9 +172,9 @@ impl Sources {
             .or_else(|| self.closings.failure())
     }
 
-    /// Налог квартала — отслеживаемое; `None` — что-то ещё читается или не
-    /// прочиталось: неполные данные дали бы неверное число.
-    fn quarter(&self, quarter: Quarter) -> Option<QuarterTax> {
+    /// Расчёт по всей книге — отслеживаемое; `None` — что-то ещё читается
+    /// или не прочиталось: неполные данные дали бы неверное число.
+    pub(super) fn with_books<T>(&self, read: impl FnOnce(Books<'_>) -> T) -> Option<T> {
         let Self {
             documents,
             operations,
@@ -183,20 +185,22 @@ impl Sources {
             operations.with(|operations, operations_unreadable| {
                 profiles.with(|profile| {
                     closings.with(|closings, _| {
-                        Some(turnover::quarter(
-                            Books {
-                                documents,
-                                operations,
-                                profile,
-                                closings,
-                                unreadable: documents_unreadable + operations_unreadable,
-                            },
-                            quarter,
-                        ))
+                        Some(read(Books {
+                            documents,
+                            operations,
+                            profile,
+                            closings,
+                            unreadable: documents_unreadable + operations_unreadable,
+                        }))
                     })
                 })
             })
         })
+    }
+
+    /// Налог квартала — отслеживаемое; `None` — как у [`Self::with_books`].
+    fn quarter(&self, quarter: Quarter) -> Option<QuarterTax> {
+        self.with_books(|books| turnover::quarter(books, quarter))
     }
 
     /// Снимок квартала, если он закрыт. Отслеживаемое.
@@ -204,33 +208,10 @@ impl Sources {
         self.closings.with(|closings, _| Closing::current(closings, quarter).cloned())
     }
 
-    /// Годовые платежи года — отслеживаемое; `None` — что-то ещё читается
-    /// или не прочиталось, как у [`Self::quarter`].
+    /// Годовые платежи года — отслеживаемое; `None` — как у
+    /// [`Self::with_books`].
     pub(super) fn annual(&self, year: u16) -> Option<Annual> {
-        let Self {
-            documents,
-            operations,
-            profiles,
-            closings,
-        } = *self;
-        documents.with(|documents, _, documents_unreadable| {
-            operations.with(|operations, operations_unreadable| {
-                profiles.with(|profile| {
-                    closings.with(|closings, _| {
-                        Some(annual::year(
-                            Books {
-                                documents,
-                                operations,
-                                profile,
-                                closings,
-                                unreadable: documents_unreadable + operations_unreadable,
-                            },
-                            year,
-                        ))
-                    })
-                })
-            })
-        })
+        self.with_books(|books| annual::year(books, year))
     }
 }
 
@@ -375,11 +356,26 @@ fn Card(ctx: Ctx) -> impl IntoView {
             let sum = tax.tax;
             let note = Note::of(&tax, due);
             let label = if due { Key::TaxToPay } else { Key::TaxSoFar };
+            // Квартал к уплате — с последним днём, перенесённым с нерабочего
+            // (задача 21), если расчёт за него подают.
+            let deadline = due
+                .then(|| sources.with_books(|books| deadlines::quarter_deadline(books, quarter)))
+                .flatten()
+                .flatten();
             view! {
                 <a class="hero-card" href=Screen::Tax.href()>
                     <span class="hero-meta">{move || i18n::quarter(lang.get(), quarter)}</span>
-                    <span class="hero-label">{tr(lang, label)}</span>
+                    <span class="hero-label">{move || {
+                        let lang = lang.get();
+                        match deadline {
+                            Some(deadline) => fill(t(lang, Key::TaxToPayBy), &[&i18n::date(lang, deadline.day)]),
+                            None => t(lang, label).to_owned(),
+                        }
+                    }}</span>
                     <span class="hero-sum">{move || drams(lang.get(), sum)}</span>
+                    {deadline.map(|deadline| move || shift_note(lang.get(), deadline.by_law).map(|note| view! {
+                        <span class="hero-note">{note}</span>
+                    }))}
                     {note.map(|note| view! { <span class="hero-note">{move || note.text(lang.get())}</span> })}
                 </a>
             }
@@ -432,6 +428,8 @@ pub(super) enum Part {
     Screen,
     /// Содержимое экрана годовых платежей (`ui/annual.rs`, задача 20).
     Annual,
+    /// Содержимое экрана сроков (`ui/deadlines.rs`, задача 21).
+    Deadlines,
 }
 
 /// Карточки или экран — зовёт часть книги (`ledger::book_part`). Годовые
@@ -440,12 +438,14 @@ pub(super) enum Part {
 pub(super) fn content(ctx: Ctx, part: Part) -> AnyView {
     match part {
         Part::Card => view! {
+            <DeadlineReminder ctx />
             <Card ctx />
             <AnnualCard ctx />
         }
         .into_any(),
         Part::Screen => view! { <TaxBody ctx /> }.into_any(),
         Part::Annual => view! { <AnnualPage ctx /> }.into_any(),
+        Part::Deadlines => view! { <DeadlinesPage ctx /> }.into_any(),
     }
 }
 
@@ -498,6 +498,12 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
     });
     let tax = Memo::new(move |_| sources.quarter(quarter.get()));
     let closing = Memo::new(move |_| sources.closing(quarter.get()));
+    // Срок расчёта и налога квартала — пока он не закрыт (задача 21).
+    let deadline = Memo::new(move |_| {
+        sources
+            .with_books(|books| deadlines::quarter_deadline(books, quarter.get()))
+            .flatten()
+    });
     let unreadable = Memo::new(move |_| sources.closings.with(|_, unreadable| unreadable));
     let busy = RwSignal::new(false);
     let notice = RwSignal::new(None::<Key>);
@@ -632,6 +638,12 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
                 }}
             }
         })}
+        {move || closing.with(Option::is_none).then(|| deadline.get()).flatten().map(|deadline| view! {
+            <div class="tax-deadline">
+                <p>{move || fill(t(lang.get(), Key::TaxDeadline), &[&i18n::date(lang.get(), deadline.day)])}</p>
+                {move || shift_note(lang.get(), deadline.by_law).map(|note| view! { <p class="hint">{note}</p> })}
+            </div>
+        })}
         {move || tax.get().map(|tax| view! { <Quarterly lang tax /> })}
         {move || (ended() && closing.with(Option::is_none) && tax.with(Option::is_some)).then(|| {
             let closable = move || tax.with(|tax| tax.as_ref().zip(ctx.today).is_some_and(|(tax, today)| tax.closable(today)));
@@ -655,6 +667,7 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
             }
         })}
         <AnnualEntry ctx />
+        <DeadlinesEntry ctx />
         <p class="tax-check">{tr(lang, Key::TaxCheck)}</p>
         <p class="hint">{move || fill(t(lang.get(), Key::TaxRulesVersion), &[&rules_version])}</p>
     }

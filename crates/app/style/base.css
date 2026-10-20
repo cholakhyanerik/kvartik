@@ -2090,6 +2090,57 @@ dl.months dd,
   margin-top: var(--space-5);
 }
 
+/* Сроки (`ui/deadlines.rs`, задача 21). Строка к экрану сроков — под
+   строкой годовых платежей, своей карточкой. */
+.deadlines-entry {
+  margin-top: var(--space-4);
+}
+
+/* Список сроков — под словами о нём; насколько близок срок и что квартал
+   закрыт — строкой под днём, словами: цвет их не говорит (Правило 4). */
+ul.deadlines {
+  margin: var(--space-4) 0;
+}
+
+.deadline-soon,
+.deadline-done {
+  font-size: var(--font-size-sm);
+  font-weight: var(--weight-strong);
+}
+
+/* Последний день квартала на экране налога — над его карточкой, а слова
+   о переносе — вплотную под ним. */
+.tax-deadline {
+  margin-bottom: var(--space-4);
+}
+
+.tax-deadline > p:first-child {
+  font-weight: var(--weight-strong);
+}
+
+/* Чего не хватает профилю для полного списка сроков — над правилами
+   переноса. */
+.deadline-gaps {
+  margin-top: var(--space-4);
+}
+
+/* Напоминание о сроках на главном — строки-ссылки в карточке
+   `.notice.due`: когда — жирным (`.reminder`), что сделать — под ним. */
+.deadline-reminder ul {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.deadline-reminder li a {
+  display: grid;
+  gap: 0.125rem;
+  color: inherit;
+  text-decoration: none;
+}
+
 .annual-line dd {
   font-variant-numeric: tabular-nums;
 }

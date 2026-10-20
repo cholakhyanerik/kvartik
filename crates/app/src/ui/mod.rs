@@ -9,6 +9,7 @@ mod annual;
 mod avatar;
 mod backup;
 mod clients;
+mod deadlines;
 mod documents;
 mod form;
 mod home;
@@ -36,6 +37,7 @@ use crate::store::{self, Store};
 use annual::AnnualScreen;
 use backup::{BackupChip, BackupEntry, BackupSection, Backups};
 use clients::{Clients, ClientsSection};
+use deadlines::DeadlinesScreen;
 use documents::{Documents, DocumentsScreen};
 use form::Forms;
 use home::Home;
@@ -238,6 +240,9 @@ pub fn App() -> impl IntoView {
                 </section>
                 <section id=Screen::Annual.id() class="screen" hidden=hidden(Screen::Annual)>
                     <AnnualScreen ctx=tax router />
+                </section>
+                <section id=Screen::Deadlines.id() class="screen" hidden=hidden(Screen::Deadlines)>
+                    <DeadlinesScreen ctx=tax router />
                 </section>
                 <section id=Screen::Profile.id() class="screen" hidden=hidden(Screen::Profile)>
                     <h1 tabindex="-1">{tr(lang, Key::ProfileTitle)}</h1>

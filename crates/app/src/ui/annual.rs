@@ -21,11 +21,13 @@ use kvartik_core::tax::annual::{
     self, Annual, Fixed, Health, HealthOut, HealthUnclear, Missing, Saving, Social, SocialOut, Stamp, Status,
     Total,
 };
+use kvartik_core::tax::deadlines;
 use kvartik_core::tax::rules::{self, HealthBy};
 use kvartik_core::tax::turnover::Leaving;
 use leptos::prelude::*;
 
 use super::backup::BackupChip;
+use super::deadlines::shift_note;
 use super::icon::{Icon, icon};
 use super::ledger::tax_part;
 use super::route::{Router, Screen};
@@ -91,8 +93,9 @@ pub fn AnnualCard(ctx: tax::Ctx) -> impl IntoView {
                     <span class="annual-meta">{move || fill(t(lang.get(), Key::AnnualFor), &[&year.to_string()])}</span>
                     {total.due.map(|due| view! {
                         <span class="annual-label">
-                            {move || fill(t(lang.get(), Key::AnnualDue), &[&i18n::date(lang.get(), due)])}
+                            {move || fill(t(lang.get(), Key::AnnualDue), &[&i18n::date(lang.get(), deadlines::last_day(due))])}
                         </span>
+                        {move || shift_note(lang.get(), due).map(|note| view! { <span class="annual-note">{note}</span> })}
                     })}
                     {total.sum.map(|sum| view! { <span class="annual-sum">{move || drams(lang.get(), sum)}</span> })}
                     {saving.map(|saving| view! {
@@ -129,7 +132,8 @@ pub fn AnnualEntry(ctx: tax::Ctx) -> impl IntoView {
                                 {total.map(|total| view! {
                                     <span class="entry-meta">
                                         {total.due.map(|due| view! {
-                                            <span>{move || fill(t(lang.get(), Key::AnnualDue), &[&i18n::date(lang.get(), due)])}</span>
+                                            <span>{move || fill(t(lang.get(), Key::AnnualDue), &[&i18n::date(lang.get(), deadlines::last_day(due))])}</span>
+                                            {move || shift_note(lang.get(), due).map(|note| view! { <span>{note}</span> })}
                                         })}
                                         {(!total.complete).then(|| view! { <span>{tr(lang, Key::AnnualPartialShort)}</span> })}
                                     </span>
@@ -293,10 +297,14 @@ fn Payments(lang: ReadSignal<Lang>, annual: Annual, residency: Option<Residency>
 fn Summary(lang: ReadSignal<Lang>, annual: Annual, today: Option<Date>) -> impl IntoView {
     let total = Total::of(&annual);
     let saving = today.and_then(|today| annual::saving(&annual, today));
-    let passed = total.due.zip(today).is_some_and(|(due, today)| due < today);
+    // Срок — с переносом с нерабочего дня, как в календаре сроков
+    // (`tax::deadlines`, задача 21).
+    let by_law = total.due;
+    let due = by_law.map(deadlines::last_day);
+    let passed = due.zip(today).is_some_and(|(due, today)| due < today);
     view! {
         <div class="hero-card">
-            {total.due.map(|due| view! {
+            {due.map(|due| view! {
                 <span class="hero-meta">
                     {move || {
                         let lang = lang.get();
@@ -305,6 +313,9 @@ fn Summary(lang: ReadSignal<Lang>, annual: Annual, today: Option<Date>) -> impl 
                     }}
                 </span>
             })}
+            {by_law.map(|by_law| move || shift_note(lang.get(), by_law).map(|note| view! {
+                <span class="hero-note">{note}</span>
+            }))}
             <span class="hero-label">{tr(lang, Key::AnnualSumOf)}</span>
             {match total.sum {
                 Some(sum) => view! { <span class="hero-sum">{move || drams(lang.get(), sum)}</span> }.into_any(),
@@ -556,7 +567,7 @@ impl Note {
             Self::HealthNoStatus => t(lang, Key::AnnualHealthNoStatus).to_owned(),
             Self::HealthNoPrevious { year, over, amount, due } => fill(
                 t(lang, Key::AnnualHealthNoPrevious),
-                &[&year.to_string(), &money(over), &money(amount), &date(due)],
+                &[&year.to_string(), &money(over), &money(amount), &date(deadlines::last_day(due))],
             ),
             Self::HealthPreviousUnrated {
                 year,
@@ -567,7 +578,7 @@ impl Note {
                 due,
             } => fill(
                 t(lang, Key::AnnualHealthPreviousUnrated),
-                &[&year.to_string(), &count(rows), &money(income), &money(over), &money(amount), &date(due)],
+                &[&year.to_string(), &count(rows), &money(income), &money(over), &money(amount), &date(deadlines::last_day(due))],
             ),
             Self::HealthTurnsAge(age) => fill(t(lang, Key::AnnualHealthTurnsAge), &[&age.to_string()]),
             Self::HealthResumed(day) => fill(t(lang, Key::AnnualHealthResumed), &[&date(day)]),
@@ -650,7 +661,7 @@ fn PaymentCard(lang: ReadSignal<Lang>, card: Card) -> impl IntoView {
                     Amount::Unknown => rows.push(pair(t(lang, Key::AnnualUnknown).to_owned(), String::new())),
                 }
                 match due {
-                    Some(Due::Day(day)) => rows.push(pair(t(lang, Key::AnnualDueLabel).to_owned(), i18n::date(lang, day))),
+                    Some(Due::Day(day)) => rows.push(pair(t(lang, Key::AnnualDueLabel).to_owned(), i18n::date(lang, deadlines::last_day(day)))),
                     Some(Due::Monthly(day)) => rows.push(pair(
                         t(lang, Key::AnnualDueLabel).to_owned(),
                         fill(t(lang, Key::AnnualHealthMonthDue), &[&day.to_string()]),

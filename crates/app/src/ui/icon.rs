@@ -40,6 +40,8 @@ pub enum Icon {
     Share,
     /// Налог — знак процента, как в дизайне «Kvartik Design» (задача 19).
     Percent,
+    /// Сроки — лист календаря (задача 21).
+    Calendar,
 }
 
 /// Значок для разметки. Он только украшает: что делает кнопка или ссылка,
@@ -91,6 +93,11 @@ pub fn icon(icon: Icon) -> impl IntoView {
             <path d="M19 5 5 19" />
             <circle cx="6.5" cy="6.5" r="2.5" />
             <circle cx="17.5" cy="17.5" r="2.5" />
+        }
+        .into_any(),
+        Icon::Calendar => view! {
+            <rect x="4" y="5" width="16" height="16" rx="2" />
+            <path d="M8 3v4M16 3v4M4 10h16" />
         }
         .into_any(),
     };

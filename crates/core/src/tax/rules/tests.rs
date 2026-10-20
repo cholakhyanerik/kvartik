@@ -63,7 +63,13 @@ fn file(exclusions: &[Value], pensions: &[Value]) -> String {
         "profit_tax": [],
         "social_payment": [],
         "stamp_duty": [],
-        "health_insurance": []
+        "health_insurance": [],
+        "turnover_due": [],
+        "turnover_application": [],
+        "income_declaration": [],
+        "deadline_shift": [],
+        "holidays": [],
+        "days_off": []
     })
     .to_string()
 }
@@ -156,6 +162,12 @@ fn the_built_in_file_is_sound() {
     assert!(!rules.social_payment().is_empty());
     assert!(!rules.stamp_duty().is_empty());
     assert!(!rules.health_insurance().is_empty());
+    assert!(!rules.turnover_due().is_empty());
+    assert!(!rules.turnover_application().is_empty());
+    assert!(!rules.income_declaration().is_empty());
+    assert!(!rules.deadline_shift().is_empty());
+    assert!(!rules.holidays().is_empty());
+    assert!(!rules.days_off().is_empty());
     assert_eq!(armenia(), &rules);
 }
 
@@ -498,7 +510,7 @@ fn version_parse_is_strict() {
 
 /// Отпечаток значений текущей версии правил: её запись и FNV-1a значений
 /// файла ([`values`]).
-const PINNED: (&str, u64) = ("2026.3", 0xd897_5a8f_05da_b471);
+const PINNED: (&str, u64) = ("2026.4", 0x22e5_004d_5496_a01b);
 
 /// Значения файла правил одной строкой: всё, кроме версии и источников, —
 /// JSON с ключами по алфавиту. Источник — когда сверили и где лежит
@@ -591,8 +603,9 @@ fn values_see_rules_not_sources() {
     let spaced = serde_json::to_string_pretty(&bumped).expect("JSON пишется");
     assert_eq!(print(&base), print(&spaced), "пробелы — не новое правило");
     let reordered = format!(
-        r#"{{"funded_pension": [{}], "health_insurance": [], "high_tech": [], "profit_tax": [], "social_payment": [],
-            "stamp_duty": [], "turnover_exclusions": [{}], "turnover_expenses": [], "turnover_rates": [],
+        r#"{{"days_off": [], "deadline_shift": [], "funded_pension": [{}], "health_insurance": [], "high_tech": [],
+            "holidays": [], "income_declaration": [], "profit_tax": [], "social_payment": [], "stamp_duty": [], "turnover_application": [],
+            "turnover_due": [], "turnover_exclusions": [{}], "turnover_expenses": [], "turnover_rates": [],
             "turnover_threshold": [], "version": "2026.1"}}"#,
         pension("2014-01-01", None),
         exclusion(&["69"], "2025-07-01", None),
@@ -928,4 +941,114 @@ fn health_insurance_is_checked() {
         }
     }
     assert!(wrong.is_empty(), "медстраховка: {wrong:#?}");
+}
+
+/// Запись сроков вида `kind`: поля `fields`, действует с `from` до `until`.
+fn timed(fields: Value, from: &str, until: Option<&str>) -> Value {
+    let mut record = fields;
+    record["from"] = json!(from);
+    record["until"] = json!(until);
+    record["source"] = source();
+    record
+}
+
+/// Записи сроков (задача 21): число месяца после квартала — в каждом
+/// месяце, день заявления — в каждом году; выходные — дни недели от 1 до 7
+/// без повторов, и рабочий день в неделе есть; праздники — дни каждого
+/// года без повторов; решение правительства — дни в его периоде, каждый
+/// в одном списке. Два решения о разных днях действуют вместе, об одном
+/// дне — нет.
+#[test]
+fn deadline_records_are_checked() {
+    let mut wrong = Vec::new();
+    let decision = |off: &[&str], work: &[&str]| {
+        timed(json!({"off": off, "work": work}), "2026-01-01", Some("2026-12-31"))
+    };
+    let sound = [
+        ("turnover_due", vec![timed(json!({"day": 20}), "2025-01-01", None)]),
+        (
+            "turnover_application",
+            vec![timed(json!({"due": {"month": 2, "day": 20}, "after_days": 20}), "2025-01-01", None)],
+        ),
+        ("deadline_shift", vec![timed(json!({"weekend": [6, 7]}), "2025-01-01", None)]),
+        (
+            "holidays",
+            vec![timed(json!({"days": [{"month": 1, "day": 1}, {"month": 12, "day": 31}]}), "2025-01-01", None)],
+        ),
+        ("days_off", vec![decision(&["2026-05-04"], &["2026-04-18"]), decision(&["2026-12-30"], &[])]),
+    ];
+    for (kind, records) in &sound {
+        if let Err(error) = Rules::parse(&file_of(kind, records)) {
+            wrong.push(format!("{kind}: годные записи: {error:?}"));
+        }
+    }
+    for (kind, case, record) in [
+        ("turnover_due", "29-е число", timed(json!({"day": 29}), "2025-01-01", None)),
+        ("turnover_due", "нулевое число", timed(json!({"day": 0}), "2025-01-01", None)),
+        (
+            "turnover_application",
+            "29 февраля",
+            timed(json!({"due": {"month": 2, "day": 29}, "after_days": 20}), "2025-01-01", None),
+        ),
+        (
+            "turnover_application",
+            "ноль дней",
+            timed(json!({"due": {"month": 2, "day": 20}, "after_days": 0}), "2025-01-01", None),
+        ),
+        ("deadline_shift", "нет выходных", timed(json!({"weekend": []}), "2025-01-01", None)),
+        ("deadline_shift", "нулевой день", timed(json!({"weekend": [0, 7]}), "2025-01-01", None)),
+        ("deadline_shift", "восьмой день", timed(json!({"weekend": [6, 8]}), "2025-01-01", None)),
+        ("deadline_shift", "повтор", timed(json!({"weekend": [6, 6]}), "2025-01-01", None)),
+        (
+            "deadline_shift",
+            "вся неделя",
+            timed(json!({"weekend": [1, 2, 3, 4, 5, 6, 7]}), "2025-01-01", None),
+        ),
+        ("holidays", "нет дней", timed(json!({"days": []}), "2025-01-01", None)),
+        (
+            "holidays",
+            "29 февраля",
+            timed(json!({"days": [{"month": 2, "day": 29}]}), "2025-01-01", None),
+        ),
+        (
+            "holidays",
+            "повтор",
+            timed(json!({"days": [{"month": 1, "day": 1}, {"month": 1, "day": 1}]}), "2025-01-01", None),
+        ),
+        ("days_off", "нет дней", decision(&[], &[])),
+        ("days_off", "день вне периода", decision(&["2027-01-04"], &[])),
+        ("days_off", "день в обоих списках", decision(&["2026-05-04"], &["2026-05-04"])),
+        ("days_off", "повтор", decision(&["2026-05-04", "2026-05-04"], &[])),
+    ] {
+        let got = Rules::parse(&file_of(kind, &[record]));
+        if got != Err(RulesError::Unusable(at(kind, 0))) {
+            wrong.push(format!("{kind}: {case}: {got:?}"));
+        }
+    }
+    let same_day = [decision(&["2026-05-04"], &[]), decision(&[], &["2026-05-04"])];
+    let got = Rules::parse(&file_of("days_off", &same_day));
+    if got
+        != Err(RulesError::Overlap {
+            kind: "days_off",
+            first: 0,
+            second: 1,
+        })
+    {
+        wrong.push(format!("два решения об одном дне: {got:?}"));
+    }
+    let two_lists = [
+        timed(json!({"day": 20}), "2025-01-01", None),
+        timed(json!({"day": 25}), "2026-01-01", None),
+    ];
+    let got = Rules::parse(&file_of("turnover_due", &two_lists));
+    if got
+        != Err(RulesError::Overlap {
+            kind: "turnover_due",
+            first: 0,
+            second: 1,
+        })
+    {
+        wrong.push(format!("два срока квартала в один день: {got:?}"));
+    }
+    assert!(wrong.is_empty(), "записи сроков: {wrong:#?}");
 }

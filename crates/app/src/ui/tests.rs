@@ -318,7 +318,11 @@ async fn choosing_a_language_translates_the_whole_window() {
     if !wait_for(&host, t(Lang::Am, Key::BackupChooseFile)).await {
         wrong.push("раздел копии не появился".to_owned());
     }
-    visit(&host, &[Screen::Documents, Screen::Clients, Screen::Tax, Screen::Annual, Screen::Profile]).await;
+    visit(
+        &host,
+        &[Screen::Documents, Screen::Clients, Screen::Tax, Screen::Annual, Screen::Deadlines, Screen::Profile],
+    )
+    .await;
     if !wait_for(&host, t(Lang::Am, Key::AnnualSumOf)).await {
         wrong.push("экран годовых платежей не показал платежей".to_owned());
     }
@@ -406,6 +410,7 @@ async fn choosing_a_language_translates_the_whole_window() {
             Key::AnnualSumOf,
             Key::AnnualProfitLaw,
             Key::AnnualHealth,
+            Key::DeadlinesShiftRule,
         ] {
             if !text.contains(t(lang, key)) {
                 wrong.push(format!("{lang:?}: нет {key:?} на этом языке"));
