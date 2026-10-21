@@ -14,9 +14,10 @@
 //! папки сборки, а `public_url` меняет только адреса в странице (по
 //! исходникам trunk 0.22.0-rc.2, `pipelines/html.rs`, `pipelines/css.rs`).
 //! Поэтому с `--root` программа перекладывает собранное Trunk в папку
-//! программы, а в корень кладёт файлы корня сайта из `<папка>`. Разложил
-//! бы и сам Trunk (`html_output` и `data-target-path`), но имя папки стояло
-//! бы тогда в восьми местах, а не в одном `public_url`.
+//! программы, а в корень кладёт файлы корня сайта из `<папка>` и общий
+//! календарь сроков (задача 22). Разложил бы и сам Trunk (`html_output`
+//! и `data-target-path`), но имя папки стояло бы тогда в восьми местах,
+//! а не в одном `public_url`.
 //!
 //! С `--wasm` она собирает wasm пакета и вписывает его запуск в страницу,
 //! а потом пишет `sw.js` программы по всем файлам, wasm в том числе. Одна
@@ -36,6 +37,9 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+
+use kvartik_core::i18n::Lang;
+use kvartik_core::tax::calendar;
 
 mod wasm;
 
@@ -145,7 +149,28 @@ fn lay_out(staging: &Path, app: &str, root: &Path) -> Result<(), String> {
         let (from, to) = (staging.join(&name), app_dir.join(&name));
         fs::rename(&from, &to).map_err(|error| format!("{}: {error}", from.display()))?;
     }
-    copy_new(root, staging)
+    copy_new(root, staging)?;
+    write_calendars(staging)
+}
+
+/// Общий календарь сроков (задача 22) — файлы корня на трёх языках,
+/// `calendar/<код языка>.ics`, из ядра (`kvartik_core::tax::calendar`).
+/// Пишет их сборка, а не лежат они в папке корня: сроки — производное файла
+/// правил, и копия рядом с ним однажды разошлась бы с ним. Ядро пишет их
+/// без часов, поэтому сборка остаётся повторяемой. Файл корня на их месте
+/// — ошибка, а не молча затёртый файл.
+fn write_calendars(staging: &Path) -> Result<(), String> {
+    for lang in Lang::ALL {
+        let target = staging.join(calendar::path(lang));
+        if target.exists() {
+            return Err(format!("{}: файл корня лёг бы на календарь сроков", target.display()));
+        }
+        if let Some(folder) = target.parent() {
+            fs::create_dir_all(folder).map_err(|error| format!("{}: {error}", folder.display()))?;
+        }
+        fs::write(&target, calendar::public(lang)).map_err(|error| format!("{}: {error}", target.display()))?;
+    }
+    Ok(())
 }
 
 /// Скопировать содержимое папки `from` в `to`, со вложенными папками.
@@ -449,8 +474,9 @@ mod tests {
     }
 
     /// Собранное Trunk уходит в папку программы целиком, со вложенными
-    /// папками, а файлы корня ложатся в корень. Имя папки программы в
-    /// сборке Trunk и файл корня на месте файла программы — ошибка, а не
+    /// папками, а файлы корня ложатся в корень, и рядом — общий календарь
+    /// сроков из ядра на трёх языках. Имя папки программы в сборке Trunk,
+    /// файл корня на месте файла программы или календаря — ошибка, а не
     /// молча затёртый файл.
     #[test]
     fn lays_the_site_out() {
@@ -464,7 +490,27 @@ mod tests {
         lay_out(&stage, "app", &temp.0.join("root")).expect("раскладка");
         let files = collect(&stage, "app").expect("папка читается");
         let paths: Vec<&str> = files.iter().map(|file| file.path.as_str()).collect();
-        assert_eq!(paths, ["_headers", "app/fonts/a.ttf", "app/index.html", "sw.js"]);
+        assert_eq!(
+            paths,
+            [
+                "_headers",
+                "app/fonts/a.ttf",
+                "app/index.html",
+                "calendar/en.ics",
+                "calendar/hy.ics",
+                "calendar/ru.ics",
+                "sw.js"
+            ]
+        );
+        let russian = files.iter().find(|file| file.path == "calendar/ru.ics").expect("календарь есть");
+        assert_eq!(russian.bytes, calendar::public(Lang::Ru).into_bytes());
+
+        let calendar_clash = Temp::new("calendar-clash");
+        calendar_clash.put("stage/index.html", b"page");
+        calendar_clash.put("root/calendar/ru.ics", b"BEGIN:VCALENDAR");
+        let error = lay_out(&calendar_clash.0.join("stage"), "app", &calendar_clash.0.join("root"))
+            .expect_err("файл корня на месте календаря");
+        assert!(error.contains("лёг бы на календарь сроков"), "{error}");
 
         let clash = Temp::new("clash");
         clash.put("stage/app", b"file");

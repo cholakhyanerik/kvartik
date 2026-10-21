@@ -30,7 +30,7 @@ const WRANGLER = path.join(REPO, "tools/deploy/node_modules/wrangler/bin/wrangle
 const TYPES = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".wasm": "application/wasm", ".css": "text/css",
   ".ttf": "font/ttf", ".png": "image/png", ".webmanifest": "application/manifest+json", ".json": "application/json",
-  ".pdf": "application/pdf", ".svg": "image/svg+xml",
+  ".pdf": "application/pdf", ".svg": "image/svg+xml", ".ics": "text/calendar; charset=utf-8",
 };
 
 /// Свой сервер. Возвращает `{ port, stop() }`.

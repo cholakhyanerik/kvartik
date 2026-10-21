@@ -2118,6 +2118,15 @@ ul.deadlines {
   font-weight: var(--weight-strong);
 }
 
+/* Адрес общего календаря (задача 22): его вставляют в Google Календарь
+   руками — выделяется целиком одним касанием и переносится где угодно,
+   чтобы не раздвинуть экран телефона в 360 точек. */
+.calendar-address {
+  overflow-wrap: anywhere;
+  user-select: all;
+  -webkit-user-select: all;
+}
+
 /* Чего не хватает профилю для полного списка сроков — над правилами
    переноса. */
 .deadline-gaps {

@@ -204,6 +204,9 @@ expected_type() {
     # таблице `mime` (по исходникам wrangler 4.149.0, 2026-10-18).
     *.json) echo application/json ;;
     *.txt) echo text/plain ;;
+    # Общий календарь сроков (задача 22): тип iCalendar — RFC 5545, 8.1;
+    # ставит его wrangler по той же таблице `mime`.
+    *.ics) echo text/calendar ;;
     *) echo "?" ;;
   esac
 }

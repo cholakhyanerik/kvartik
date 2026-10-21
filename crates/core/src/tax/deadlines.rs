@@ -33,17 +33,30 @@
 //! срок, а квартал не закрыт — расчёт, по всей видимости, не подан
 //! ([`overdue`]). Об уплате, заявлении и годовых платежах программе никто не
 //! сообщает: у них напоминание до дня срока, а после — следующий срок.
+//!
+//! # Сроки этого ИП и сроки всех
+//!
+//! [`between`] — сроки по профилю и книге: экран сроков и личный календарь
+//! (`tax::calendar`). [`general`] — сроки по одним правилам, без профиля:
+//! общий календарь на сайте (задача 22). Дни у обоих — одни и те же функции
+//! от правил, а не второй расчёт.
 
 use super::annual::{self, Health, Status, Total};
 use super::closing::Closing;
 use super::rules::{self, HealthBy, Rule, Rules};
 use super::turnover::Books;
+use crate::i18n::{self, Key, Lang, fill, t};
 use crate::model::date::{Date, Quarter};
 use crate::model::profile::{Person, Residency};
 
 /// За сколько дней до срока напоминать: модуль «Календарь» из описания
 /// продукта — напоминание за 7 дней и за день.
 pub const REMIND_DAYS: i32 = 7;
+
+/// На сколько дней вперёд показывать сроки — экран сроков и личный
+/// календарь (`tax::calendar`): год — все сроки года, включая годовые
+/// платежи и заявление.
+pub const AHEAD_DAYS: i32 = 366;
 
 /// Сколько нерабочих дней подряд перенос перешагивает, не больше: по
 /// правилам их не бывает больше шести (31 декабря — 2 января и выходные).
@@ -93,6 +106,26 @@ impl Deadline {
             day: last_day(by_law),
             done: false,
         }
+    }
+}
+
+/// Что надо сделать к сроку — словами: экран сроков, напоминание и календарь
+/// (`tax::calendar`) говорят одно.
+pub fn what(lang: Lang, kind: Kind) -> String {
+    match kind {
+        Kind::Turnover(quarter) => fill(t(lang, Key::DeadlineTurnover), &[&i18n::quarter(lang, quarter)]),
+        Kind::Application(year) => fill(t(lang, Key::DeadlineApplication), &[&year.to_string()]),
+        Kind::Annual(year) => fill(t(lang, Key::DeadlineAnnual), &[&year.to_string()]),
+        Kind::HealthYear(year) => fill(t(lang, Key::DeadlineHealthYear), &[&year.to_string()]),
+        // Месяц — всегда с годом: «за декабрь» в январском напоминании
+        // читалось бы как декабрь этого года. Пробел перед «г.» CLDR ставит
+        // обычный, и в строке срока «г.» уезжала одна на новую строку
+        // (глазной прогон задачи 21): здесь он неразрывный.
+        Kind::HealthMonth { year, month } => fill(
+            t(lang, Key::DeadlineHealthMonth),
+            &[&i18n::month_heading(lang, year, month, 0).replace(" г.", "\u{a0}г.")],
+        ),
+        Kind::Declaration(year) => fill(t(lang, Key::DeadlineDeclaration), &[&year.to_string()]),
     }
 }
 
@@ -216,24 +249,65 @@ pub fn between(books: Books<'_>, from: Date, until: Date) -> Vec<Deadline> {
         match health {
             Health::Year { due, .. } => found.push(Deadline::new(Kind::HealthYear(year), due)),
             Health::Month { due_day, months, .. } => {
-                for month in (13 - months)..=12 {
-                    let next = Date::new(year, month, 1)
-                        .and_then(|first| first.last_of_month().add_days(1))
-                        .and_then(|next| Date::new(next.year(), next.month(), due_day));
-                    if let Some(due) = next {
-                        found.push(Deadline::new(Kind::HealthMonth { year, month }, due));
-                    }
-                }
+                found.extend(((13 - months)..=12).filter_map(|month| health_month(year, month, due_day)));
             }
             Health::Out(_) | Health::Unknown(_) | Health::Unclear(_) | Health::NoRule => {}
         }
-        if let Some(deadline) = declaration(all, person, year) {
-            found.push(deadline);
+        if person.is_some_and(|person| person.residency == Some(Residency::Citizen)) {
+            found.extend(declaration(all, year));
         }
     }
+    window(found, from, until)
+}
+
+/// Сроки всех ИП на налоге с оборота, которые с переносом кончаются с `from`
+/// по `until` включительно, — по одним правилам, без профиля: общий
+/// календарь на сайте (`tax::calendar`, задача 22). Каждый срок — как у ИП,
+/// о котором ничего не известно: заявление — к общему дню (у нового ИП —
+/// свой: день учёта и `after_days`), медстраховка — по правилу года, хоть
+/// платят её не все,
+/// декларация — хоть подают её только граждане. Кого срок касается,
+/// говорят слова события, а точно — программа по профилю.
+pub fn general(from: Date, until: Date) -> Vec<Deadline> {
+    let all = rules::armenia();
+    let mut found = Vec::new();
+    let first = from.year().saturating_sub(1).max(Date::MIN_YEAR);
+    for year in first..=until.year() {
+        found.extend((1..=4).filter_map(|number| turnover(Quarter::new(year, number)?)));
+        found.extend(application(all, None, year));
+        // Срок годовых платежей — правило налога на прибыль, как у
+        // `annual::Total`.
+        if let Some(due) = rules::for_year(all.profit_tax(), year).and_then(|rule| rule.due.after(year)) {
+            found.push(Deadline::new(Kind::Annual(year), due));
+        }
+        match rules::for_year(all.health_insurance(), year).map(|rule| rule.by) {
+            Some(HealthBy::Year { due, .. }) => found.push(Deadline::new(Kind::HealthYear(year), due)),
+            Some(HealthBy::Month { due_day }) => {
+                found.extend((1..=12).filter_map(|month| health_month(year, month, due_day)));
+            }
+            None => {}
+        }
+        found.extend(declaration(all, year));
+    }
+    window(found, from, until)
+}
+
+/// Сроки, которые с переносом кончаются с `from` по `until` включительно, —
+/// по дням, а в один день — по порядку [`Kind`].
+fn window(mut found: Vec<Deadline>, from: Date, until: Date) -> Vec<Deadline> {
     found.retain(|deadline| from <= deadline.day && deadline.day <= until);
     found.sort_by_key(|deadline| (deadline.day, deadline.kind));
     found
+}
+
+/// Взнос медстраховки за месяц `month` года `year` — до числа `due_day`
+/// следующего месяца (ст. 14, ч. 4).
+fn health_month(year: u16, month: u8, due_day: u8) -> Option<Deadline> {
+    let next = Date::new(year, month, 1)?.last_of_month().add_days(1)?;
+    Some(Deadline::new(
+        Kind::HealthMonth { year, month },
+        Date::new(next.year(), next.month(), due_day)?,
+    ))
 }
 
 /// Заявление о налоге с оборота на год `year` (НК, ст. 254, ч. 1) — у того,
@@ -277,15 +351,12 @@ fn application(all: &Rules, person: Option<&Person>, year: u16) -> Option<Deadli
     Some(Deadline::new(Kind::Application(year), by_law))
 }
 
-/// Всеобщая декларация о доходах за год `year` — у гражданина Армении:
-/// подают резиденты-граждане (НК, ст. 156, ч. 4.1), а ИП на налоге
-/// с оборота — резидент (ст. 254, ч. 1). Гражданство профиль знает
-/// нынешнее, а закон смотрит на 31 декабря отчётного года: сменившему его
-/// посреди года программа ошибётся годом.
-fn declaration(all: &Rules, person: Option<&Person>, year: u16) -> Option<Deadline> {
-    if person?.residency != Some(Residency::Citizen) {
-        return None;
-    }
+/// Всеобщая декларация о доходах за год `year`. Подают её граждане Армении
+/// — резиденты (НК, ст. 156, ч. 4.1), а ИП на налоге с оборота — резидент
+/// (ст. 254, ч. 1): [`between`] берёт её только у гражданина. Гражданство
+/// профиль знает нынешнее, а закон смотрит на 31 декабря отчётного года:
+/// сменившему его посреди года программа ошибётся годом.
+fn declaration(all: &Rules, year: u16) -> Option<Deadline> {
     let rule = rules::for_year(all.income_declaration(), year)?;
     Some(Deadline::new(Kind::Declaration(year), rule.due.after(year)?))
 }

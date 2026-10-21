@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.54",
+      "date": "2026-10-21",
+      "hy": [
+        "Ժամկետներն այժմ նաև հեռախոսի և փոստի օրացույցում են. ժամկետների էկրանին «Ներբեռնել իմ ժամկետները» կոճակը տալիս է օրացույցի ֆայլ՝ ձեր ժամկետներով մեկ տարի առաջ և այսօրվա գումարներով, իսկ իրադարձություններում հիշեցումներ կան ժամկետից մեկ շաբաթ և մեկ օր առաջ։",
+        "Այնտեղ կարելի է նաև բաժանորդագրվել շրջանառության հարկ վճարող ԱՁ-ների ժամկետների ընդհանուր օրացույցին. այն ինքն է թարմանում։"
+      ],
+      "ru": [
+        "Сроки теперь можно добавить в календарь телефона и почты: на экране сроков кнопка «Скачать мои сроки» отдаёт файл календаря с вашими сроками на год вперёд и суммами на сегодня, а в событиях — напоминания за неделю и за день до срока.",
+        "Там же можно подписаться на общий календарь сроков ИП на налоге с оборота — он обновляется сам."
+      ],
+      "en": [
+        "You can now add your deadlines to your phone or email calendar: on the Deadlines screen, “Download my deadlines” gives you a calendar file with your deadlines for the year ahead and today's amounts, with reminders a week and a day before each deadline.",
+        "You can also subscribe there to a shared deadline calendar for IEs on turnover tax; it updates itself."
+      ]
+    },
+    {
       "version": "0.0.53",
       "date": "2026-10-20",
       "hy": [

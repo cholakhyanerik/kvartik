@@ -21,6 +21,17 @@ pub fn reload() {
     }
 }
 
+/// Адрес сайта — схема, домен и порт (`https://kvartik.com`) — и адрес
+/// программы без `#…` (`https://kvartik.com/app/`): общий календарь сроков
+/// лежит в корне сайта, а ссылка из личного ведёт в программу (задача 22).
+/// `None` — браузер не сказал.
+pub fn address() -> Option<(String, String)> {
+    let location = web_sys::window()?.location();
+    let origin = location.origin().ok()?;
+    let page = format!("{origin}{}", location.pathname().ok()?);
+    Some((origin, page))
+}
+
 /// Часть адреса после `#` вместе с `#` (`#/clients`); пусто — её нет.
 pub fn hash() -> String {
     web_sys::window()

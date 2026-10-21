@@ -11,12 +11,19 @@
 //!
 //! Уведомлений с закрытой программой нет: у неё нет сервера, и в фоне она
 //! ничего не делает (Правило 1, «Покой»; Архитектура). Напоминание —
-//! карточкой при открытии, и экран говорит это словами.
+//! карточкой при открытии, и экран говорит это словами. Напомнить
+//! с закрытой программой может календарь телефона и почты — сроки ему
+//! отдаёт экран сроков файлом и подпиской (задача 22, [`Calendar`]).
 
 use kvartik_core::i18n::{self, Key, Lang, fill, plural, t};
 use kvartik_core::model::date::Date;
-use kvartik_core::tax::deadlines::{self, Deadline, Kind, Reminder, When};
+use kvartik_core::tax::calendar;
+use kvartik_core::tax::deadlines::{self, AHEAD_DAYS, Deadline, Kind, Reminder, When, what};
+use leptos::ev::MouseEvent;
+use leptos::html::A;
 use leptos::prelude::*;
+
+use crate::platform::{self, file::Download};
 
 use super::backup::BackupChip;
 use super::icon::{Icon, icon};
@@ -25,10 +32,6 @@ use super::route::{Router, Screen};
 use super::split::screen;
 use super::tax::{self, Part};
 use super::tr;
-
-/// На сколько дней вперёд экран показывает сроки: год — все сроки года,
-/// включая годовые платежи и заявление.
-const AHEAD_DAYS: i32 = 366;
 
 /// Экран сроков на языке окна: «назад» к налогу и заголовок — сразу,
 /// остальное — частью wasm с первого показа (`split::screen`).
@@ -43,25 +46,6 @@ pub fn DeadlinesScreen(ctx: tax::Ctx, router: Router) -> impl IntoView {
         <h1 tabindex="-1">{tr(lang, Key::DeadlinesTitle)}</h1>
         <BackupChip lang backups nudge=true />
         {screen(lang, router, Screen::Deadlines, move || tax_part(ctx, Part::Deadlines))}
-    }
-}
-
-/// Что надо сделать к сроку — словами.
-fn what(lang: Lang, kind: Kind) -> String {
-    match kind {
-        Kind::Turnover(quarter) => fill(t(lang, Key::DeadlineTurnover), &[&i18n::quarter(lang, quarter)]),
-        Kind::Application(year) => fill(t(lang, Key::DeadlineApplication), &[&year.to_string()]),
-        Kind::Annual(year) => fill(t(lang, Key::DeadlineAnnual), &[&year.to_string()]),
-        Kind::HealthYear(year) => fill(t(lang, Key::DeadlineHealthYear), &[&year.to_string()]),
-        // Месяц — всегда с годом: «за декабрь» в январском напоминании
-        // читалось бы как декабрь этого года. Пробел перед «г.» CLDR ставит
-        // обычный, и в строке срока «г.» уезжала одна на новую строку
-        // (глазной прогон задачи 21): здесь он неразрывный.
-        Kind::HealthMonth { year, month } => fill(
-            t(lang, Key::DeadlineHealthMonth),
-            &[&i18n::month_heading(lang, year, month, 0).replace(" г.", "\u{a0}г.")],
-        ),
-        Kind::Declaration(year) => fill(t(lang, Key::DeadlineDeclaration), &[&year.to_string()]),
     }
 }
 
@@ -277,7 +261,102 @@ pub fn DeadlinesPage(ctx: tax::Ctx) -> impl IntoView {
         })}
         <p class="hint">{tr(lang, Key::DeadlinesShiftRule)}</p>
         <p class="hint">{tr(lang, Key::DeadlinesPayEarly)}</p>
-        <p class="hint">{tr(lang, Key::DeadlinesNoAlerts)}</p>
+        <Calendar ctx mine=Signal::derive(move || {
+            list.with(|list| {
+                list.as_ref()
+                    .is_some_and(|(_, _, ahead)| ahead.iter().any(|(deadline, _)| !deadline.done))
+            })
+        }) />
         <p class="tax-check">{tr(lang, Key::TaxCheck)}</p>
     }
 }
+
+/// Сроки в календаре телефона и почты (задача 22): программа без сервера
+/// не напомнит, пока закрыта, а календарь — напомнит. Свои сроки с суммами
+/// — файлом (`tax::calendar::personal`), когда есть несделанные (`mine`);
+/// общий календарь всех ИП — подпиской на файл сайта (`calendar::public`).
+///
+/// Файл собирается в самом нажатии на ссылку, а не заранее: он нужен
+/// редко, и пересобирать его на каждое изменение данных — лишняя работа
+/// (Правило 1). Сборка синхронная, и ссылка получает адрес файла ещё
+/// в обработчике нажатия: переход по ссылке браузер делает после
+/// обработчиков, по адресу на этот момент (по спецификации HTML,
+/// «activation behavior» у `a`), — скачивание идёт от того же нажатия.
+#[component]
+fn Calendar(ctx: tax::Ctx, mine: Signal<bool>) -> impl IntoView {
+    let lang = ctx.lang;
+    // Файл держит адрес `blob:`, пока его не сменит следующий: начатое
+    // скачивание адрес уже разобрало (`platform::file::Download`).
+    let file = StoredValue::new_local(None::<Download>);
+    let failed = RwSignal::new(false);
+    // Ссылка — по `NodeRef`, а не `currentTarget` события: Leptos слушает
+    // нажатия выше по дереву, и `currentTarget` там — не ссылка (по
+    // исходникам tachys 0.2.19, `add_event_listener_delegated`).
+    let link = NodeRef::<A>::new();
+    let (origin, page) = platform::address().unzip();
+    let page = page.unwrap_or_else(|| calendar::APP_URL.to_owned());
+    let origin = StoredValue::new(origin);
+    let export = move |event: MouseEvent| {
+        let lang = lang.get_untracked();
+        let made = ctx
+            .today
+            .and_then(|today| ctx.sources.with_books(|books| calendar::personal(books, today, lang, &page)))
+            .flatten()
+            .and_then(|text| Download::bytes(text.as_bytes(), FILE_NAME, MIME));
+        match (made, link.get_untracked()) {
+            (Some(download), Some(link)) if link.set_attribute("href", download.url()).is_ok() => {
+                failed.set(false);
+                file.set_value(Some(download));
+            }
+            _ => {
+                event.prevent_default();
+                failed.set(true);
+            }
+        }
+    };
+    // Адрес общего календаря — на этом же сайте: на kvartik.com — его,
+    // на адресе проверки — свой. Подписка по ссылке `webcal:` открывает
+    // календарь устройства, а адрес `https:` вставляют в календарь сами.
+    let shared = move || {
+        origin.with_value(|origin| {
+            origin
+                .as_ref()
+                .map(|origin| format!("{origin}/{}", calendar::path(lang.get())))
+        })
+    };
+    let subscribe = move || shared().map(|url| url.replacen("https://", "webcal://", 1).replacen("http://", "webcal://", 1));
+    view! {
+        <section class="calendar">
+            <h2>{tr(lang, Key::CalendarTitle)}</h2>
+            <p>{tr(lang, Key::DeadlinesNoAlerts)}</p>
+            <p>{tr(lang, Key::CalendarAbout)}</p>
+            {move || mine.get().then(|| view! {
+                <a class="button" node_ref=link href=Screen::Deadlines.href() download=FILE_NAME on:click=export.clone()>
+                    {icon(Icon::Download)}
+                    <span>{tr(lang, Key::CalendarMine)}</span>
+                </a>
+                <p class="hint">{tr(lang, Key::CalendarMineHint)}</p>
+            })}
+            {move || failed.get().then(|| view! { <p role="alert">{tr(lang, Key::CalendarFailed)}</p> })}
+            <a class="button secondary" href=subscribe>
+                {icon(Icon::Calendar)}
+                <span>{tr(lang, Key::CalendarSubscribe)}</span>
+            </a>
+            <p class="hint">{tr(lang, Key::CalendarSubscribeHint)}</p>
+            <p class="calendar-address">{shared}</p>
+        </section>
+    }
+}
+
+/// Имя файла личного календаря: одно на всех языках, как у копии.
+const FILE_NAME: &str = "Kvartik-deadlines.ics";
+
+/// Тип файла — настоящий, а не `application/octet-stream`, как у копии:
+/// iPhone с ним открывает лист «Добавить в Календарь», а безымянный тип
+/// молча кладёт файл в «Загрузки» (вторичный: tsml-ui, issue 560 и PR 562,
+/// iOS 27, 2026-10-04). Во вкладке, как текст копии, его WebKit не
+/// показывает: `text/calendar` у него в списке неподдержанных текстовых
+/// типов (по исходникам WebKit, `MIMETypeRegistry.cpp`, 2026-10-21).
+/// «Поделиться» нет: Chromium такой файл в меню не пустит (по исходникам,
+/// `share_service_impl.cc`, 2026-10-21; `platform::share`).
+const MIME: &str = "text/calendar;charset=utf-8";

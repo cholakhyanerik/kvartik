@@ -2201,6 +2201,74 @@ strings! {
         "The app reminds you of deadlines only when you open it: while it's closed, it does nothing and sends no notifications.",
         "Ծրագիրը ժամկետների մասին հիշեցնում է միայն այն բացելիս. փակ ժամանակ այն ոչինչ չի անում և ծանուցումներ չի ուղարկում։";
 
+    /// Сроки в файле календаря (задача 22, `tax::calendar`): имя и описание
+    /// общего календаря на сайте и личного из программы.
+    CalendarPublicName = "Kvartik\u{A0}— сроки ИП", "Kvartik\u{A0}— IE deadlines", "Kvartik\u{A0}— ԱՁ-ի ժամկետներ";
+    /// Шаблон: день последней сверки правил (`Rules::checked`).
+    CalendarPublicAbout =
+        "Последние дни налогов, расчётов и заявлений ИП на налоге с оборота в Армении. Правила сверены с законом {}. Сверьте с бухгалтером.",
+        "Last days for taxes, returns and applications of IEs on turnover tax in Armenia. Rules checked against the law on {}. Check with an accountant.",
+        "Հայաստանում շրջանառության հարկ վճարող ԱՁ-ների հարկերի, հաշվարկների և հայտարարությունների վերջին օրերը։ Կանոնները օրենքի հետ ստուգված են {}։ Ստուգեք հաշվապահի հետ։";
+    CalendarPersonalName = "Kvartik\u{A0}— мои сроки", "Kvartik\u{A0}— my deadlines", "Kvartik\u{A0}— իմ ժամկետները";
+    /// Шаблон: день выгрузки.
+    CalendarPersonalAbout =
+        "Ваши сроки на год вперёд и суммы к ним по данным Kvartik на {}. Изменились данные\u{A0}— выгрузите календарь снова. Сверьте с бухгалтером.",
+        "Your deadlines for the year ahead and the amounts due, from Kvartik's data as of {}. If your data changes, export the calendar again. Check with an accountant.",
+        "Ձեր ժամկետները մեկ տարի առաջ և վճարվող գումարները՝ ըստ Kvartik-ի տվյալների {} դրությամբ։ Տվյալները փոխվել են՝ կրկին ներբեռնեք օրացույցը։ Ստուգեք հաշվապահի հետ։";
+    /// Шаблон: сумма к сроку и день, на который она посчитана.
+    CalendarAmount =
+        "К уплате: {}\u{A0}— по данным Kvartik на {}.",
+        "To pay: {}, from Kvartik's data as of {}.",
+        "Վճարելու գումար՝ {}՝ ըստ Kvartik-ի տվյալների {} դրությամբ։";
+    /// Шаблон: срок заявления нового ИП — число дней после учёта (`DaysOne`…;
+    /// НК, ст. 254, ч. 1, п. 2).
+    CalendarApplicationNew =
+        "У нового ИП срок\u{A0}— {} после учёта, а не этот день.",
+        "For a new IE, the deadline is {} after registration instead.",
+        "Նոր ԱՁ-ի համար ժամկետը հաշվառման օրվանից {} է, ոչ թե այս օրը։";
+    /// Шаблон: порог оборота прошлого года для взноса медстраховки за год
+    /// (`rules::HealthBy::Year`).
+    CalendarHealthOver =
+        "Платит ИП, у которого оборот прошлого года больше {}.",
+        "Due from IEs whose turnover last year was over {}.",
+        "Վճարում է ԱՁ-ն, որի նախորդ տարվա շրջանառությունը գերազանցել է {} շեմը։";
+    /// Шаблон: адрес программы — в событии общего календаря.
+    CalendarYours =
+        "Касается ли вас срок и сколько платить, Kvartik посчитает по вашему профилю: {}",
+        "Kvartik works out from your profile whether this deadline applies to you and how much to pay: {}",
+        "Արդյոք ժամկետը ձեզ վերաբերում է և որքան վճարել, Kvartik-ը կհաշվի ձեր պրոֆիլով՝ {}";
+    /// Шаблон: адрес программы — в событии личного календаря.
+    CalendarOpen = "Подробности\u{A0}— в Kvartik: {}", "Details in Kvartik: {}", "Մանրամասները Kvartik-ում՝ {}";
+    /// Экран сроков: раздел о календаре (`ui/deadlines.rs`, `Calendar`).
+    CalendarTitle = "Сроки в календаре", "Deadlines in your calendar", "Ժամկետները օրացույցում";
+    /// Сработают ли напоминания, решает программа календаря: у подписки их
+    /// Apple, по-видимому, снимает, Google, скорее всего, не берёт, а Outlook
+    /// берёт только первое (разведка задачи 22, 2026-10-21; CLAUDE.md,
+    /// Правило 6).
+    CalendarAbout =
+        "Календарь телефона или почты напомнит и тогда: добавьте в него свои сроки файлом или подпишитесь на общий календарь сроков. В событиях\u{A0}— напоминания за неделю и за день до срока, а сработают ли они, решает программа календаря.",
+        "Your phone or email calendar can remind you even then: add your deadlines to it as a file or subscribe to the shared deadline calendar. The events come with reminders a week and a day before each deadline; whether they go off is up to your calendar app.",
+        "Հեռախոսի կամ փոստի օրացույցը կհիշեցնի նաև այդ ժամանակ. ավելացրեք դրան ձեր ժամկետները ֆայլով կամ բաժանորդագրվեք ժամկետների ընդհանուր օրացույցին։ Իրադարձություններում հիշեցումներ կան ժամկետից մեկ շաբաթ և մեկ օր առաջ, իսկ կաշխատեն դրանք, թե ոչ, որոշում է օրացույցի ծրագիրը։";
+    CalendarMine = "Скачать мои сроки", "Download my deadlines", "Ներբեռնել իմ ժամկետները";
+    /// Google импортирует файл только на компьютере (support.google.com,
+    /// answer 37118, 2026-10-21).
+    CalendarMineHint =
+        "Ваши сроки на год вперёд и суммы на сегодня. На iOS и macOS файл открывает Календарь, а в Google Календарь его добавляют с компьютера, в настройках: «Импорт и экспорт». Изменились данные\u{A0}— скачайте снова.",
+        "Your deadlines for the year ahead with today's amounts. On iOS and macOS, Calendar opens the file; to add it to Google Calendar, use a computer: Settings, then “Import & export”. If your data changes, download it again.",
+        "Ձեր ժամկետները մեկ տարի առաջ՝ այսօրվա գումարներով։ iOS-ում և macOS-ում ֆայլը բացում է Calendar ծրագիրը, իսկ Google Calendar-ում այն ներմուծում են համակարգչից՝ կարգավորումների ներմուծման և արտահանման բաժնում։ Տվյալները փոխվել են՝ կրկին ներբեռնեք։";
+    CalendarFailed =
+        "Браузер не дал собрать файл календаря. Перезагрузите страницу и попробуйте снова.",
+        "The browser couldn't make the calendar file. Reload the page and try again.",
+        "Դիտարկիչը թույլ չտվեց պատրաստել օրացույցի ֆայլը։ Վերաբեռնեք էջը և նորից փորձեք։";
+    CalendarSubscribe = "Подписаться на общий календарь", "Subscribe to the shared calendar", "Բաժանորդագրվել ընդհանուր օրացույցին";
+    /// Google подписывается только в браузере на компьютере
+    /// (support.google.com, answer 37100, 2026-10-21); на Android ссылку
+    /// `webcal:` открыть нечем.
+    CalendarSubscribeHint =
+        "Общий календарь\u{A0}— сроки всех ИП на налоге с оборота, без ваших сумм; он обновляется сам, бывает, через сутки. Кнопка открывает Календарь iOS и macOS или Outlook. В Google Календаре подписываются с компьютера: кнопкой «+» у раздела «Другие календари», затем «Добавить по URL» и этот адрес. Напоминания у подписки бывают выключены: включите их в настройках этого календаря.",
+        "The shared calendar has the deadlines of all IEs on turnover tax, without your amounts, and updates itself, sometimes a day later. The button opens Calendar on iOS and macOS, or Outlook. In Google Calendar, subscribe on a computer: “+” next to “Other calendars”, then “From URL” and this address. Subscribed calendars may have reminders turned off: turn them on in that calendar's settings.",
+        "Ընդհանուր օրացույցում շրջանառության հարկ վճարող բոլոր ԱՁ-ների ժամկետներն են՝ առանց ձեր գումարների, և այն ինքն է թարմանում, երբեմն՝ մեկ օր անց։ Կոճակը բացում է Calendar-ը iOS-ում և macOS-ում կամ Outlook-ը։ Google Calendar-ում բաժանորդագրվում են համակարգչից՝ այլ օրացույցների «+» կոճակով, URL-ով՝ այս հասցեով։ Բաժանորդագրված օրացույցում հիշեցումները կարող են անջատված լինել. միացրեք դրանք այդ օրացույցի կարգավորումներում։";
+
     /// Курс документа в валюте — в карточке выпущенного (задача 14).
     DocRateSet = "Указать курс ЦБ", "Enter the CBA rate", "Նշել ԿԲ փոխարժեքը";
     DocRateChange = "Изменить курс", "Change the rate", "Փոխել փոխարժեքը";

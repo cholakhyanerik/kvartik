@@ -1164,6 +1164,57 @@ impl Rules {
         self.version
     }
 
+    /// Когда правила сверены с законом последний раз — самый поздний день
+    /// сверки источника; `None` — записей нет. До конца следующего за ним
+    /// года общий календарь сроков (`tax::calendar`) сроки и обещает.
+    pub fn checked(&self) -> Option<Date> {
+        fn latest<R: Rule>(records: &[R]) -> Option<Date> {
+            records.iter().map(|record| record.source().checked).max()
+        }
+        // Разбор без `..`: новый вид записей не соберётся, пока его не
+        // назовут и здесь.
+        let Self {
+            version: _,
+            turnover_exclusions,
+            funded_pension,
+            turnover_rates,
+            high_tech,
+            turnover_threshold,
+            turnover_expenses,
+            profit_tax,
+            social_payment,
+            stamp_duty,
+            health_insurance,
+            turnover_due,
+            turnover_application,
+            income_declaration,
+            deadline_shift,
+            holidays,
+            days_off,
+        } = self;
+        [
+            latest(turnover_exclusions),
+            latest(funded_pension),
+            latest(turnover_rates),
+            latest(high_tech),
+            latest(turnover_threshold),
+            latest(turnover_expenses),
+            latest(profit_tax),
+            latest(social_payment),
+            latest(stamp_duty),
+            latest(health_insurance),
+            latest(turnover_due),
+            latest(turnover_application),
+            latest(income_declaration),
+            latest(deadline_shift),
+            latest(holidays),
+            latest(days_off),
+        ]
+        .into_iter()
+        .flatten()
+        .max()
+    }
+
     /// Кто не может быть плательщиком налога с оборота по виду
     /// деятельности.
     pub fn turnover_exclusions(&self) -> &[Exclusion] {
