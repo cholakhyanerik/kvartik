@@ -51,6 +51,7 @@ fn shift_rules() -> Rules {
         "turnover_due": [],
         "turnover_application": [],
         "income_declaration": [],
+        "settlement_due": [],
         "deadline_shift": [
             {"weekend": [6, 7], "from": "2025-01-01", "until": null, "source": source()}
         ],

@@ -67,6 +67,7 @@ fn file(exclusions: &[Value], pensions: &[Value]) -> String {
         "turnover_due": [],
         "turnover_application": [],
         "income_declaration": [],
+        "settlement_due": [],
         "deadline_shift": [],
         "holidays": [],
         "days_off": []
@@ -165,6 +166,7 @@ fn the_built_in_file_is_sound() {
     assert!(!rules.turnover_due().is_empty());
     assert!(!rules.turnover_application().is_empty());
     assert!(!rules.income_declaration().is_empty());
+    assert!(!rules.settlement_due().is_empty());
     assert!(!rules.deadline_shift().is_empty());
     assert!(!rules.holidays().is_empty());
     assert!(!rules.days_off().is_empty());
@@ -510,7 +512,7 @@ fn version_parse_is_strict() {
 
 /// Отпечаток значений текущей версии правил: её запись и FNV-1a значений
 /// файла ([`values`]).
-const PINNED: (&str, u64) = ("2026.4", 0x22e5_004d_5496_a01b);
+const PINNED: (&str, u64) = ("2026.5", 0x2402_111d_2038_64f3);
 
 /// Значения файла правил одной строкой: всё, кроме версии и источников, —
 /// JSON с ключами по алфавиту. Источник — когда сверили и где лежит
@@ -604,7 +606,7 @@ fn values_see_rules_not_sources() {
     assert_eq!(print(&base), print(&spaced), "пробелы — не новое правило");
     let reordered = format!(
         r#"{{"days_off": [], "deadline_shift": [], "funded_pension": [{}], "health_insurance": [], "high_tech": [],
-            "holidays": [], "income_declaration": [], "profit_tax": [], "social_payment": [], "stamp_duty": [], "turnover_application": [],
+            "holidays": [], "income_declaration": [], "profit_tax": [], "settlement_due": [], "social_payment": [], "stamp_duty": [], "turnover_application": [],
             "turnover_due": [], "turnover_exclusions": [{}], "turnover_expenses": [], "turnover_rates": [],
             "turnover_threshold": [], "version": "2026.1"}}"#,
         pension("2014-01-01", None),
@@ -976,6 +978,13 @@ fn deadline_records_are_checked() {
             vec![timed(json!({"days": [{"month": 1, "day": 1}, {"month": 12, "day": 31}]}), "2025-01-01", None)],
         ),
         ("days_off", vec![decision(&["2026-05-04"], &["2026-04-18"]), decision(&["2026-12-30"], &[])]),
+        (
+            "settlement_due",
+            vec![
+                timed(json!({"after_days": 0}), "2025-01-01", Some("2026-08-31")),
+                timed(json!({"after_days": 0}), "2026-09-01", None),
+            ],
+        ),
     ];
     for (kind, records) in &sound {
         if let Err(error) = Rules::parse(&file_of(kind, records)) {

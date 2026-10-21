@@ -42,7 +42,9 @@
 //!   месяце (не позже 28-го); у сроков (задача 21) число месяца — в каждом
 //!   месяце, день года — в каждом году, выходные — дни недели от 1 до 7 без
 //!   повторов и не вся неделя, праздники — без повторов, а дни решения
-//!   правительства — в его периоде и каждый в одном списке;
+//!   правительства — в его периоде и каждый в одном списке; у срока
+//!   расчётного документа (задача 23) — любое число дней, ноль — тот же
+//!   день;
 //! - незнакомых полей нет: опечатка в имени поля — ошибка, а не молча
 //!   пропущенное правило.
 //!
@@ -947,6 +949,45 @@ impl Rule for IncomeDeclaration {
     }
 }
 
+/// Когда выписать расчётный документ по услуге (`tax::settlement`, задача
+/// 23): через `after_days` дней после дня оказания услуги, `0` — в тот же
+/// день. Слова окна называют правило сами (`Key::SettleAbout`: день
+/// окончания услуги, ст. 56, ч. 4; `Key::DocServiceDateHint`): запись
+/// с другим числом дней или основанием — повод поправить и их.
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SettlementDue {
+    pub after_days: u8,
+    pub from: Date,
+    /// Ключ обязателен, как у [`Exclusion::until`].
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub until: Option<Date>,
+    pub source: Source,
+}
+
+impl Rule for SettlementDue {
+    fn period(&self) -> Period {
+        Period {
+            from: self.from,
+            until: self.until,
+        }
+    }
+
+    fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// Срок один на всех: две записи — всегда об одном.
+    fn same_subject(&self, _: &Self) -> bool {
+        true
+    }
+
+    /// Любое число дней, и ноль тоже: в тот же день.
+    fn usable(&self) -> bool {
+        true
+    }
+}
+
 /// Перенос срока (`tax::deadlines`): последний день срока пришёлся на
 /// нерабочий — срок кончается в следующий рабочий. Нерабочие — дни недели
 /// `weekend` (по ISO 8601: понедельник — 1, воскресенье — 7), праздники
@@ -1101,6 +1142,7 @@ pub struct Rules {
     turnover_due: Vec<TurnoverDue>,
     turnover_application: Vec<TurnoverApplication>,
     income_declaration: Vec<IncomeDeclaration>,
+    settlement_due: Vec<SettlementDue>,
     deadline_shift: Vec<DeadlineShift>,
     holidays: Vec<Holidays>,
     days_off: Vec<DaysOff>,
@@ -1153,6 +1195,7 @@ impl Rules {
         check("turnover_due", &rules.turnover_due)?;
         check("turnover_application", &rules.turnover_application)?;
         check("income_declaration", &rules.income_declaration)?;
+        check("settlement_due", &rules.settlement_due)?;
         check("deadline_shift", &rules.deadline_shift)?;
         check("holidays", &rules.holidays)?;
         check("days_off", &rules.days_off)?;
@@ -1188,6 +1231,7 @@ impl Rules {
             turnover_due,
             turnover_application,
             income_declaration,
+            settlement_due,
             deadline_shift,
             holidays,
             days_off,
@@ -1206,6 +1250,7 @@ impl Rules {
             latest(turnover_due),
             latest(turnover_application),
             latest(income_declaration),
+            latest(settlement_due),
             latest(deadline_shift),
             latest(holidays),
             latest(days_off),
@@ -1280,6 +1325,11 @@ impl Rules {
     /// Срок всеобщей декларации о доходах гражданина за отчётный год.
     pub fn income_declaration(&self) -> &[IncomeDeclaration] {
         &self.income_declaration
+    }
+
+    /// Когда выписать расчётный документ по услуге.
+    pub fn settlement_due(&self) -> &[SettlementDue] {
+        &self.settlement_due
     }
 
     /// Перенос срока с нерабочего дня и дни недели, которые нерабочие.

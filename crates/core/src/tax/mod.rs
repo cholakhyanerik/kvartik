@@ -11,11 +11,13 @@
 //! налог на прибыль, соцплатёж, гербовый сбор и медстраховка — [`annual`]
 //! (задача 20), сроки всего этого с переносом на рабочий день —
 //! [`deadlines`] (задача 21), они же файлом календаря — [`calendar`]
-//! (задача 22).
+//! (задача 22), по каким документам ещё не выписан расчётный документ
+//! в системе ՊԵԿ — [`settlement`] (задача 23).
 
 pub mod annual;
 pub mod calendar;
 pub mod closing;
 pub mod deadlines;
 pub mod rules;
+pub mod settlement;
 pub mod turnover;

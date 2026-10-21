@@ -73,7 +73,12 @@ use crate::model::record::RecordMeta;
 ///   `person.registered` (день государственной регистрации ИП,
 ///   `#[serde(default)]`). Записи версий 1–8 читаются как есть: без поля
 ///   день не указан.
-pub const FORMAT_VERSION: u32 = 9;
+/// - 10 (0.0.55) — у документа поле `settlement` (расчётный документ,
+///   выписанный в системе ՊԵԿ: день и номер; `null` — не отмечен), задача
+///   23. Записи версий 1–9 читаются как есть: у документа без поля
+///   неизвестно, отмечен ли он, — отмечать было негде, — и ключа нет и при
+///   записи, пока документ не отметят.
+pub const FORMAT_VERSION: u32 = 10;
 
 /// Первая версия формата: старше не бывает.
 pub(crate) const FIRST_VERSION: u32 = 1;
@@ -175,7 +180,7 @@ fn split_raw(text: &str) -> Result<(u32, &RawValue), FormatError> {
 /// и файл копии.
 fn decode_record<T: DeserializeOwned>(version: u32, record: &str) -> Result<T, FormatError> {
     match version {
-        // Версии 2–9 прибавили виды записей и поля со значением по
+        // Версии 2–10 прибавили виды записей и поля со значением по
         // умолчанию, а не переименовали и не убрали прежние (шапка
         // `FORMAT_VERSION`): записи прошлых версий читаются как есть.
         FIRST_VERSION..=FORMAT_VERSION => serde_json::from_str(record).map_err(damaged),
@@ -343,11 +348,23 @@ mod tests {
         r#"}}"#
     );
 
-    /// Та же запись в версии 9 — так её пишет эта программа. Выписана
+    /// Та же запись в версии 9 — так её писала 0.0.49. Выписана
     /// человеком: версия 9 прибавила поле профилю, а у пробы его нет,
     /// и запись отличается только номером.
     const SAMPLE_V9: &str = concat!(
         r#"{"format_version":9,"record":{"#,
+        r#""meta":{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":1760000000000,"deleted":null},"#,
+        r#""day":"2026-10-12","#,
+        r#""sum":{"minor":150000,"currency":"USD"},"#,
+        r#""rate":{"currency":"USD","per_unit_e4":3619300,"date":"2026-10-09","source":"central_bank"}"#,
+        r#"}}"#
+    );
+
+    /// Та же запись в версии 10 — так её пишет эта программа. Выписана
+    /// человеком: версия 10 прибавила поле документу, а у пробы его нет,
+    /// и запись отличается только номером.
+    const SAMPLE_V10: &str = concat!(
+        r#"{"format_version":10,"record":{"#,
         r#""meta":{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":1760000000000,"deleted":null},"#,
         r#""day":"2026-10-12","#,
         r#""sum":{"minor":150000,"currency":"USD"},"#,
@@ -371,8 +388,8 @@ mod tests {
     /// значений — слово в слово образец. Поменялась запись — это новая
     /// версия формата с миграцией (Правило 5), а не правка образца.
     #[test]
-    fn sample_v9_is_pinned() {
-        let record: Probe = decode(SAMPLE_V9).expect("образец версии 9 читается");
+    fn sample_v10_is_pinned() {
+        let record: Probe = decode(SAMPLE_V10).expect("образец версии 10 читается");
         assert_eq!(
             record.meta.id().to_string(),
             "0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a"
@@ -385,14 +402,14 @@ mod tests {
         assert_eq!(record.day, day(2026, 10, 12));
         assert_eq!(record.sum, Money::new(150_000, Currency::Usd));
         assert_eq!(record.rate, probe().rate);
-        assert_eq!(encode(&record), SAMPLE_V9);
+        assert_eq!(encode(&record), SAMPLE_V10);
     }
 
-    /// Записи версий 1–8 читаются той же записью, а пишутся уже версией 9:
+    /// Записи версий 1–9 читаются той же записью, а пишутся уже версией 10:
     /// данные прошлых версий не теряются (Правило 2).
     #[test]
     fn older_samples_still_read() {
-        let current: Probe = decode(SAMPLE_V9).expect("образец версии 9 читается");
+        let current: Probe = decode(SAMPLE_V10).expect("образец версии 10 читается");
         let older = [
             (1, SAMPLE_V1),
             (2, SAMPLE_V2),
@@ -402,12 +419,13 @@ mod tests {
             (6, SAMPLE_V6),
             (7, SAMPLE_V7),
             (8, SAMPLE_V8),
+            (9, SAMPLE_V9),
         ];
         for (version, sample) in older {
             let old: Probe = decode(sample)
                 .unwrap_or_else(|error| panic!("образец версии {version}: {error:?}"));
             assert_eq!(old, current, "версия {version}");
-            assert_eq!(encode(&old), SAMPLE_V9, "версия {version}");
+            assert_eq!(encode(&old), SAMPLE_V10, "версия {version}");
         }
     }
 
@@ -421,7 +439,7 @@ mod tests {
                 format!(r#"{{"format_version":{next},"record":{{"meta":"что угодно","wings":2}}}}"#),
                 next,
             ),
-            (r#"{"record":null,"format_version":10}"#.to_owned(), 10),
+            (r#"{"record":null,"format_version":11}"#.to_owned(), 11),
             (
                 r#"{"format_version":4294967295,"record":{}}"#.to_owned(),
                 u32::MAX,

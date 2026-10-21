@@ -8,6 +8,12 @@
 //! `stop`, `generate`) и одна транзакция хранилища (CLAUDE.md, «Данные
 //! меняются одним путём»).
 //!
+//! Расчётный документ в системе ՊԵԿ (задача 23) человек выписывает там сам,
+//! а здесь отмечает — в карточке документа дохода. Какие документы ждут
+//! отметки, говорят строка над списком, список «без расчётного документа»
+//! и напоминание на главном экране (`tax::settlement`); напоминание — из
+//! части книги, как сроки: срок — запись файла правил (Правило 1).
+//!
 //! Выпуск читает в той же транзакции все документы — номер следующий за
 //! самым большим выданным, — профиль и клиента: копия их реквизитов
 //! ложится в документ. Черновики повторяющихся счетов появляются при
@@ -18,16 +24,17 @@
 //! показывает, что поняло: сумму строки записью `i18n::money` (Правило 6,
 //! «Ввод суммы не угадывается»).
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use kvartik_core::format::Stored;
-use kvartik_core::i18n::{self, Key, Lang, ParseError, fill, t};
+use kvartik_core::i18n::{self, Key, Lang, ParseError, fill, plural, t};
 use kvartik_core::model::activity::ActivityCode;
 use kvartik_core::model::client::Client;
 use kvartik_core::model::country::Country;
 use kvartik_core::model::date::Date;
 use kvartik_core::model::document::{
-    DocError, DocKind, Document, DocumentData, Item, Payment, QUANTITY_DIGITS, Status,
+    DocError, DocKind, Document, DocumentData, Item, Payment, QUANTITY_DIGITS, Settlement, Status,
 };
 use kvartik_core::model::ledger;
 use kvartik_core::model::money::{Currency, Money};
@@ -35,7 +42,7 @@ use kvartik_core::model::profile::Profile;
 use kvartik_core::model::record::RecordId;
 use kvartik_core::model::recurring::Recurring;
 use kvartik_core::model::text::Line;
-use kvartik_core::tax::turnover;
+use kvartik_core::tax::{settlement, turnover};
 use leptos::ev::SubmitEvent;
 use leptos::prelude::*;
 
@@ -70,6 +77,10 @@ pub struct Documents {
     /// (`new_invoice`).
     mode: RwSignal<Mode>,
     notice: RwSignal<Option<Notice>>,
+    /// Список — только документы без отметки о расчётном документе
+    /// (задача 23). Тоже здесь: напоминание на главном экране открывает
+    /// список уже таким (`show_unsettled`).
+    unsettled: RwSignal<bool>,
 }
 
 /// Где документы.
@@ -95,6 +106,7 @@ impl Documents {
             created: RwSignal::new(0),
             mode: RwSignal::new(Mode::List),
             notice: RwSignal::new(None),
+            unsettled: RwSignal::new(false),
         }
     }
 
@@ -109,6 +121,13 @@ impl Documents {
         self.mode.set(Mode::New(DocKind::Invoice));
     }
 
+    /// Показывать в списке только документы без отметки о расчётном
+    /// документе — из напоминания на главном экране. Открытую форму это не
+    /// закрывает: начатое в ней не пропадает, а список станет таким, когда
+    /// форму закроют.
+    pub fn show_unsettled(&self) {
+        self.unsettled.set(true);
+    }
 
     /// Прочитать документы и повторы: когда база открылась и когда её
     /// заменило восстановление из копии. Повторам, которым к дню `today`
@@ -290,6 +309,9 @@ enum Notice {
     /// Акт отмечен подписанным клиентом и отметка снята (задача 62).
     Signed,
     Unsigned,
+    /// Расчётный документ отмечен выписанным и отметка снята (задача 23).
+    Settled,
+    Unsettled,
 }
 
 /// Что не вышло: хранилище или команда ядра.
@@ -605,6 +627,7 @@ fn DocList(ctx: Ctx) -> impl IntoView {
     } = ctx;
     let query = RwSignal::new(String::new());
     let kind = RwSignal::new(None::<DocKind>);
+    let unsettled = documents.unsettled;
     let limit = RwSignal::new(PAGE);
     let show_deleted = RwSignal::new(false);
     let failure = RwSignal::new(None::<Problem>);
@@ -612,12 +635,23 @@ fn DocList(ctx: Ctx) -> impl IntoView {
     // Производные от списка, поиска и фильтра — пересчитываются, только
     // когда меняется одно из них (Правило 1).
     let any = Memo::new(move |_| documents.with(|list, _, _| list.iter().any(|d| !d.is_deleted())));
+    // Документы без отметки о расчётном документе и их последние дни
+    // (задача 23).
+    let pending = Memo::new(move |_| {
+        documents.with(|list, _, _| {
+            settlement::pending(list)
+                .iter()
+                .map(|item| (item.document.id(), item.due))
+                .collect::<BTreeMap<_, _>>()
+        })
+    });
     let shown = Memo::new(move |_| {
-        let (query, kind) = (query.get(), kind.get());
+        let (query, kind, only) = (query.get(), kind.get(), unsettled.get());
         documents.with(|list, _, _| {
             Document::by_date(list)
                 .into_iter()
                 .filter(|document| kind.is_none_or(|kind| document.data().kind == kind))
+                .filter(|document| !only || pending.with(|pending| pending.contains_key(&document.id())))
                 .filter(|document| {
                     let lang = lang.get_untracked();
                     document.matches(&query, &client_label(lang, document, clients))
@@ -724,6 +758,36 @@ fn DocList(ctx: Ctx) -> impl IntoView {
                         .collect_view()}
                 </div>
             </div>
+            // Расчётный документ в системе ՊԵԿ (задача 23): сколько документов
+            // без отметки — и список только их.
+            {move || {
+                let count = pending.with(BTreeMap::len);
+                (count > 0 || unsettled.get()).then(|| view! {
+                    <div class="notice-row settle-row">
+                        <p>{move || {
+                            let lang = lang.get();
+                            if unsettled.get() {
+                                t(lang, Key::SettleShown).to_owned()
+                            } else {
+                                fill(t(lang, Key::SettlePending), &[&documents_count(lang, count)])
+                            }
+                        }}</p>
+                        <button
+                            type="button"
+                            class="secondary"
+                            on:click=move |_| {
+                                unsettled.update(|only| *only = !*only);
+                                limit.set(PAGE);
+                            }
+                        >
+                            {move || {
+                                let key = if unsettled.get() { Key::SettleShowAll } else { Key::SettleShow };
+                                t(lang.get(), key)
+                            }}
+                        </button>
+                    </div>
+                })
+            }}
             {move || shown.with(Vec::is_empty).then(|| view! {
                 <p class="hint">{tr(lang, Key::DocsNotFound)}</p>
             })}
@@ -738,7 +802,7 @@ fn DocList(ctx: Ctx) -> impl IntoView {
                     key=|document| (document.id(), document.meta().modified())
                     let(document)
                 >
-                    <DocEntry ctx document />
+                    <DocEntry ctx document pending />
                 </For>
             </ul>
         </For>
@@ -818,9 +882,10 @@ fn DocList(ctx: Ctx) -> impl IntoView {
 /// Документ в списке (дизайн «Kvartik Design»): клиент, вид с номером
 /// и дата слева, итог и статус словом справа. Вся строка — ссылка:
 /// выпущенный открывается карточкой по своему адресу, черновик — формой.
-/// Открытый на компьютере — отмечен (`aria-current`) и подсвечен.
+/// Открытый на компьютере — отмечен (`aria-current`) и подсвечен. В списке
+/// без расчётного документа (задача 23) вместо статуса — его срок.
 #[component]
-fn DocEntry(ctx: Ctx, document: Document) -> impl IntoView {
+fn DocEntry(ctx: Ctx, document: Document, pending: Memo<BTreeMap<RecordId, Option<Date>>>) -> impl IntoView {
     let Ctx { lang, clients, router, .. } = ctx;
     let status = document.status(ctx.today_or(document.data().date));
     let (status_key, status_class) = status_look(status);
@@ -834,6 +899,11 @@ fn DocEntry(ctx: Ctx, document: Document) -> impl IntoView {
         Screen::Documents.href()
     };
     let label = document.clone();
+    let settle = move || {
+        let today = ctx.today?;
+        let due = ctx.documents.unsettled.get().then(|| pending.with(|map| map.get(&id).copied()))??;
+        Some(settle_look(lang.get(), due, today))
+    };
     view! {
         <li>
             <a
@@ -856,11 +926,35 @@ fn DocEntry(ctx: Ctx, document: Document) -> impl IntoView {
                 </span>
                 <span class="entry-side">
                     <span class="entry-amount">{move || money_text(lang.get(), total)}</span>
-                    <span class=status_class>{tr(lang, status_key)}</span>
+                    {move || match settle() {
+                        Some((text, class)) => view! { <span class=class>{text}</span> }.into_any(),
+                        None => view! { <span class=status_class>{tr(lang, status_key)}</span> }.into_any(),
+                    }}
                 </span>
             </a>
         </li>
     }
+}
+
+/// Срок расчётного документа словом и класс оформления: слово говорит, цвет
+/// помогает (Правило 4). Прошёл, сегодня, до какого дня; правила на день
+/// услуги нет — «не отмечен», без срока.
+fn settle_look(lang: Lang, due: Option<Date>, today: Date) -> (String, &'static str) {
+    match due {
+        Some(due) if due < today => (t(lang, Key::SettleLate).to_owned(), "status late"),
+        Some(due) if due == today => (t(lang, Key::SettleToday).to_owned(), "status waiting"),
+        Some(due) => (fill(t(lang, Key::SettleBy), &[&i18n::date(lang, due)]), "status waiting"),
+        None => (t(lang, Key::SettleNone).to_owned(), "status muted"),
+    }
+}
+
+/// «3 документа» — по правилам множественного числа языка.
+fn documents_count(lang: Lang, count: usize) -> String {
+    let n = count as u64;
+    fill(
+        plural(lang, n, Key::DocumentsOne, Key::DocumentsFew, Key::DocumentsMany),
+        &[&i18n::integer(lang, count as i64)],
+    )
 }
 
 /// Счета, которые ждут оплаты, — на главном экране (дизайн «Kvartik
@@ -898,6 +992,36 @@ pub fn Awaiting(lang: ReadSignal<Lang>, documents: Documents, clients: Clients) 
                 </ul>
             </Show>
         </Show>
+    }
+}
+
+/// Напоминание на главном экране (задача 23): документы, по которым пора
+/// выписать расчётный документ в системе ՊԵԿ — срок наступил или прошёл, —
+/// а отметки нет. Нет таких — карточки нет; часы без даты — тоже: без
+/// сегодня не сказать, что пора. «Открыть список» открывает список только
+/// документов без отметки. Зовёт её часть книги (`ui/tax.rs`), как
+/// напоминание о сроках: срок — запись файла правил, а его разбору в главном
+/// wasm не место (Правило 1).
+#[component]
+pub fn SettlementReminder(lang: ReadSignal<Lang>, documents: Documents, today: Option<Date>) -> impl IntoView {
+    let count = Memo::new(move |_| match today {
+        Some(today) => documents.with(|list, _, _| settlement::due_count(list, today)),
+        None => 0,
+    });
+    move || {
+        let count = count.get();
+        (count > 0).then(|| view! {
+            <div class="notice due" role="status">
+                {icon(Icon::Document)}
+                <p class="reminder">{move || {
+                    let lang = lang.get();
+                    fill(t(lang, Key::SettleRemind), &[&documents_count(lang, count)])
+                }}</p>
+                <a class="button" href=Screen::Documents.href() on:click=move |_| documents.show_unsettled()>
+                    {tr(lang, Key::SettleOpen)}
+                </a>
+            </div>
+        })
     }
 }
 
@@ -952,6 +1076,8 @@ fn NoticeLine(ctx: Ctx, busy: RwSignal<bool>, failure: RwSignal<Option<Problem>>
             Notice::ActivitySaved => view! { <p role="status">{tr(lang, Key::DocActivitySaved)}</p> }.into_any(),
             Notice::Signed => view! { <p role="status">{tr(lang, Key::SignSaved)}</p> }.into_any(),
             Notice::Unsigned => view! { <p role="status">{tr(lang, Key::SignRemoved)}</p> }.into_any(),
+            Notice::Settled => view! { <p role="status">{tr(lang, Key::SettleSaved)}</p> }.into_any(),
+            Notice::Unsettled => view! { <p role="status">{tr(lang, Key::SettleRemoved)}</p> }.into_any(),
             Notice::Restored => {
                 view! { <p role="status">{tr(lang, Key::DocRestoredNotice)}</p> }.into_any()
             }
@@ -1008,7 +1134,7 @@ fn NoticeLine(ctx: Ctx, busy: RwSignal<bool>, failure: RwSignal<Option<Problem>>
 }
 
 /// Правка документа одним действием.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 enum Change {
     Annul(Date),
     Unannul,
@@ -1024,6 +1150,9 @@ enum Change {
     /// Акт подписан клиентом в этот день и отметка снята (задача 62).
     Sign(Date),
     Unsign,
+    /// Расчётный документ выписан в системе ՊԵԿ и отметка снята (задача 23).
+    Settle(Settlement),
+    Unsettle,
 }
 
 /// Сделать `change` с документом `id` и, если записано, — `done` с ним.
@@ -1081,6 +1210,8 @@ async fn apply(store: &Store, id: RecordId, change: Change) -> Result<Option<Doc
         Change::SetActivity(activity) => document.set_activity(activity, now)?,
         Change::Sign(day) => document.sign(day, now)?,
         Change::Unsign => document.unsign(now),
+        Change::Settle(settlement) => document.set_settlement(settlement, now)?,
+        Change::Unsettle => document.remove_settlement(now),
     };
     let Some(changed) = changed else {
         return Ok(None);
@@ -2090,6 +2221,7 @@ fn DocView(ctx: Ctx, id: RecordId) -> impl IntoView {
             <DocItems ctx document=shown.clone() />
             {invoice.then(|| view! { <Payments ctx document=shown.clone() busy failure /> })}
             {(!invoice).then(|| view! { <Signature ctx document=shown.clone() busy failure /> })}
+            <SettlementMark ctx document=shown.clone() busy failure />
             <History ctx document=shown.clone() />
             <DocActions ctx document=shown busy failure />
         }
@@ -2492,24 +2624,29 @@ enum Event {
     Issued,
     Paid(i64),
     Signed,
+    /// Расчётный документ выписан в системе ՊԵԿ (задача 23).
+    Settled,
     Annulled,
 }
 
 /// Что было с документом — свежее сверху (дизайн «Kvartik Design»): выпуск,
-/// поступления оплаты, подпись акта клиентом, аннулирование. Дата выпуска —
-/// дата документа: момент выпуска программа не хранит, а в документе
-/// написана она.
+/// поступления оплаты, подпись акта клиентом, расчётный документ в системе
+/// ՊԵԿ, аннулирование. Дата выпуска — дата документа: момент выпуска
+/// программа не хранит, а в документе написана она.
 #[component]
 fn History(ctx: Ctx, document: Document) -> impl IntoView {
     let lang = ctx.lang;
     let number = document.number().map(|number| number.to_string()).unwrap_or_default();
     let currency = document.data().currency;
-    // В один день: аннулирование — позже оплат и подписи, они — позже
-    // выпуска.
+    // В один день: аннулирование — позже оплат, подписи и расчётного
+    // документа, они — позже выпуска.
     let mut events = vec![(document.data().date, 0, Event::Issued)];
     events.extend(document.payments().iter().map(|payment| (payment.date, 1, Event::Paid(payment.amount))));
     if let Some(day) = document.signed() {
         events.push((day, 1, Event::Signed));
+    }
+    if let Some(settlement) = document.settlement() {
+        events.push((settlement.day, 1, Event::Settled));
     }
     if let Some(day) = document.annulled() {
         events.push((day, 2, Event::Annulled));
@@ -2529,6 +2666,7 @@ fn History(ctx: Ctx, document: Document) -> impl IntoView {
                             &[&i18n::money(lang, Money::new(amount, currency))],
                         ),
                         Event::Signed => t(lang, Key::HistorySigned).to_owned(),
+                        Event::Settled => t(lang, Key::HistorySettled).to_owned(),
                         Event::Annulled => t(lang, Key::StatusAnnulled).to_owned(),
                     }
                 };
@@ -2723,6 +2861,116 @@ fn Signature(
                     </button>
                 }
                 .into_any(),
+            }}
+        </fieldset>
+    })
+}
+
+/// Расчётный документ в системе ՊԵԿ (задача 23) — у документа дохода: пока
+/// он не отмечен — до какого дня его выписать, номер и день выписки
+/// и «Отметить, что выписан»; у отмеченного — день и номер и «Снять
+/// отметку». У документа, выпущенного до 0.0.55, вместо срока — слова, что
+/// программа не знает, выписан ли он (Правило 6): «срок прошёл» у него
+/// звучал бы обвинением без оснований. У счёта с действующим актом отметка —
+/// у акта: поставка одна (`ledger::income_documents`), и здесь только слова
+/// об этом. Аннулированный показывает отметку, если она была, а действий над
+/// ним нет.
+#[component]
+fn SettlementMark(
+    ctx: Ctx,
+    document: Document,
+    busy: RwSignal<bool>,
+    failure: RwSignal<Option<Problem>>,
+) -> impl IntoView {
+    let Ctx { lang, notice, .. } = ctx;
+    let id = document.id();
+    let open = document.annulled().is_none();
+    let mark = document.settlement().cloned();
+    if mark.is_none() && !open {
+        return None;
+    }
+    let covered = covered_by_act(ctx, &document);
+    let known = document.settlement_known();
+    // Последний день — по правилу на день оказания услуги; правила нет —
+    // о сроке и о правиле окно молчит, а не пугает (Правило 6).
+    let due = settlement::due(document.data().service_date);
+    let late = matches!((due, ctx.today), (Some(due), Some(today)) if due < today);
+    let date = RwSignal::new(ctx.today.map(Date::iso).unwrap_or_default());
+    let number = RwSignal::new(String::new());
+    let tried = RwSignal::new(false);
+    let save = move |_| {
+        tried.set(true);
+        let Some(day) = Date::from_iso(&date.get_untracked()) else {
+            return;
+        };
+        let Ok(number) = Line::new(&number.get_untracked()) else {
+            return;
+        };
+        act(ctx, busy, failure, id, Change::Settle(Settlement { day, number }), move |_| {
+            notice.set(Some(Notice::Settled));
+        });
+    };
+    let remove = move |_| {
+        act(ctx, busy, failure, id, Change::Unsettle, move |_| {
+            notice.set(Some(Notice::Unsettled));
+        });
+    };
+    Some(view! {
+        <fieldset class="settlement">
+            <legend>{tr(lang, Key::SettleTitle)}</legend>
+            // У счёта, закрытого актом, — только слова, что отметка у акта:
+            // своя отметка счёта могла устареть, пока её правили у акта
+            // (ревью задачи 23).
+            {move || if covered.get() {
+                view! { <p class="hint">{tr(lang, Key::SettleByAct)}</p> }.into_any()
+            } else if let Some(mark) = mark.clone() {
+                let text = move || {
+                    let lang = lang.get();
+                    let day = i18n::date(lang, mark.day);
+                    if mark.number.is_empty() {
+                        fill(t(lang, Key::SettledOn), &[&day])
+                    } else {
+                        fill(t(lang, Key::SettledOnNumbered), &[&day, mark.number.as_str()])
+                    }
+                };
+                view! {
+                    <p>{text}</p>
+                    {open.then(|| view! {
+                        <button type="button" class="secondary" disabled=move || busy.get() on:click=remove>
+                            {tr(lang, Key::SignRemove)}
+                        </button>
+                    })}
+                }
+                .into_any()
+            } else {
+                view! {
+                    {due.is_some().then(|| view! { <p class="hint">{tr(lang, Key::SettleAbout)}</p> })}
+                    {if known {
+                        due.map(|due| view! {
+                            <p class:warning=late>{move || {
+                                let lang = lang.get();
+                                let key = if late { Key::SettleDueWas } else { Key::SettleDueOn };
+                                fill(t(lang, key), &[&i18n::date(lang, due)])
+                            }}</p>
+                        })
+                        .into_any()
+                    } else {
+                        view! { <p>{tr(lang, Key::SettleUnknown)}</p> }.into_any()
+                    }}
+                    <TextField
+                        lang
+                        label=Key::SettleNumber
+                        value=number
+                        tried
+                        autocomplete="off"
+                        hint=Key::SettleNumberHint
+                    />
+                    <DateField lang label=Key::SettleDate value=date tried />
+                    <button type="button" disabled=move || busy.get() on:click=save>
+                        {tr(lang, Key::SettleMark)}
+                    </button>
+                }
+                .into_any()
             }}
         </fieldset>
     })

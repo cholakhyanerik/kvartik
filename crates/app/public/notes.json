@@ -1,6 +1,25 @@
 {
   "notes": [
     {
+      "version": "0.0.55",
+      "date": "2026-10-21",
+      "hy": [
+        "Հաշվարկային փաստաթուղթ ՊԵԿ համակարգում. հաշվի կամ ակտի քարտում երևում է, մինչև որ օրը այն դուրս գրել, իսկ այնտեղ դուրս գրելուց հետո նշեք դա այստեղ՝ ամսաթվով և համարով։ Ծրագիրն ինքը այն դուրս չի գրում և ոչ մի տեղ չի ուղարկում։",
+        "Փաստաթղթերի ցանկի վերևում երևում է, թե քանիսն են առանց այդ նշման, և կարելի է ցույց տալ միայն դրանք, իսկ գլխավոր էկրանին ծրագիրը հիշեցնում է, երբ դուրս գրման ժամկետը եկել է։",
+        "Ավելի վաղ թողարկված փաստաթղթերը ծրագիրը դուրս չգրված չի համարում. դրանց մասին այն չգիտի և չի հիշեցնում, բայց քարտում դրանք կարելի է նշել։"
+      ],
+      "ru": [
+        "Расчётный документ в системе ՊԵԿ: в карточке счёта или акта видно, до какого дня его выписать, а выписав его там, отметьте это здесь — днём и номером. Программа сама его не выписывает и никуда не отправляет.",
+        "Над списком документов видно, сколько из них без такой отметки, и можно показать только их, а на главном экране программа напоминает, когда срок выписки наступил.",
+        "Документы, выпущенные раньше, программа невыписанными не считает: о них она не знает и не напоминает, но отметить их в карточке можно."
+      ],
+      "en": [
+        "Settlement documents in the SRC system: an invoice or act card shows the day to issue one by, and once you've issued it there, mark it here with its date and number. The app doesn't issue it or send it anywhere.",
+        "Above the document list you can see how many have no such mark and show only them, and on Home the app reminds you when the day to issue one has come.",
+        "For documents issued earlier, the app doesn't assume the settlement document is missing: it doesn't know, so it doesn't remind you, but you can mark them on their card."
+      ]
+    },
+    {
       "version": "0.0.54",
       "date": "2026-10-21",
       "hy": [

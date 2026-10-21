@@ -18,9 +18,14 @@ fn line(text: &str) -> Line {
     Line::new(text).expect("в тесте — годный текст")
 }
 
+/// Отметка образца счёта: расчётный документ выписан в системе ՊԵԿ в день
+/// оказания услуги (задача 23) — та же строка, что в [`INVOICE`].
+const INVOICE_SETTLEMENT: &str = r#""settlement":{"day":"2026-09-30","number":"Ա12345678"},"#;
+
 /// Выпущенный счёт в долларах: две строки — 5 000,00 $ и 12,5 часа по
 /// 40,00 $, итого 5 500,00 $, — оплачен двумя платежами, 2 000,00 $
-/// и 3 500,00 $; курс для книги — 388,00 ֏ на день оказания услуги.
+/// и 3 500,00 $; курс для книги — 388,00 ֏ на день оказания услуги;
+/// расчётный документ выписан в день оказания услуги.
 const INVOICE: &str = concat!(
     r#"{"meta":{"id":"7c9e6679-7425-40de-944b-e07fc1f90ae7","modified":1760000000000,"deleted":null},"#,
     r#""data":{"kind":"invoice","client":"5b0e8f9a-3c2d-4e1f-8a7b-9c6d5e4f3a2b","lang":"en","currency":"USD","#,
@@ -40,6 +45,7 @@ const INVOICE: &str = concat!(
     r#""buyer":{"name":"Beispiel GmbH","country":"DE","address":"Hauptstraße 1\n10115 Berlin","tin":null,"#,
     r#""tax_id":"DE123456789","currency":"EUR","lang":"en","payment_days":14}},"#,
     r#""annulled":null,"signed":null,"#,
+    r#""settlement":{"day":"2026-09-30","number":"Ա12345678"},"#,
     r#""payments":[{"date":"2026-10-10","amount":200000},{"date":"2026-10-20","amount":350000}]}"#
 );
 
@@ -50,7 +56,7 @@ const ACT: &str = concat!(
     r#""date":"2026-10-13","service_date":"2026-10-13","due":null,"#,
     r#""items":[{"text":"Ծրագրային ապահովման մշակում","quantity_e3":1000,"price":1500000}],"#,
     r#""basis":"7c9e6679-7425-40de-944b-e07fc1f90ae7","recurring":null,"rate":null,"activity":null},"#,
-    r#""issued":null,"annulled":null,"signed":null,"payments":[]}"#
+    r#""issued":null,"annulled":null,"signed":null,"settlement":null,"payments":[]}"#
 );
 
 /// Образцы читаются в ожидаемые значения, а их запись — слово в слово
@@ -79,6 +85,13 @@ fn data_shape_is_pinned() {
     // 5 500,00 $ × 388,00 = 2 134 000,00 ֏.
     assert_eq!(invoice.data().total_lumas(), Ok(Lumas::new(213_400_000)));
     assert_eq!(data.activity, ActivityCode::parse("62.01.0").ok());
+    assert_eq!(
+        invoice.settlement(),
+        Some(&Settlement {
+            day: day(2026, 9, 30),
+            number: line("Ա12345678"),
+        })
+    );
     assert_eq!(invoice.status(day(2026, 10, 30)), Status::Paid);
     assert_eq!(serde_json::to_string(&invoice).ok().as_deref(), Some(INVOICE));
 
@@ -91,6 +104,7 @@ fn data_shape_is_pinned() {
     assert_eq!(act.data().rate, None);
     assert_eq!(act.data().total_lumas(), Ok(Lumas::new(150_000_000)));
     assert_eq!(act.data().activity, None);
+    assert_eq!(act.settlement(), None);
     assert_eq!(serde_json::to_string(&act).ok().as_deref(), Some(ACT));
 }
 
@@ -255,12 +269,27 @@ fn data_rejects_what_commands_never_write() {
     if serde_json::from_str::<Document>(&paid_act).is_ok() {
         wrong.push("акт с оплатами прочитан".to_owned());
     }
-    // Подпись — только у выпущенного акта и не раньше его даты.
+    // Подпись — только у выпущенного акта и не раньше его даты. Отметка
+    // о расчётном документе — только у выпущенного, своих полей и годных
+    // значений.
     let act = issued_act_sample();
+    let settled = |to: &str| invoice(INVOICE_SETTLEMENT, to);
     for (case, text) in [
         ("подписанный счёт", invoice(r#""signed":null"#, r#""signed":"2026-10-20""#)),
         ("подписанный черновик", ACT.replacen(r#""signed":null"#, r#""signed":"2026-10-13""#, 1)),
         ("подпись раньше акта", act.replacen(r#""signed":null"#, r#""signed":"2026-09-30""#, 1)),
+        (
+            "черновик с расчётным документом",
+            ACT.replacen(r#""settlement":null"#, r#""settlement":{"day":"2026-10-13","number":""}"#, 1),
+        ),
+        (
+            "лишнее поле расчётного документа",
+            settled(r#""settlement":{"day":"2026-09-30","number":"Ա12345678","sum":1},"#),
+        ),
+        ("расчётный документ без номера", settled(r#""settlement":{"day":"2026-09-30"},"#)),
+        ("расчётный документ 30 февраля", settled(r#""settlement":{"day":"2026-02-30","number":""},"#)),
+        ("номер с пробелом по краю", settled(r#""settlement":{"day":"2026-09-30","number":" Ա1"},"#)),
+        ("номер с табуляцией", settled(r#""settlement":{"day":"2026-09-30","number":"Ա\t1"},"#)),
     ] {
         if serde_json::from_str::<Document>(&text).is_ok() {
             wrong.push(format!("{case} прочитан"));
@@ -521,6 +550,131 @@ fn acts_are_signed_by_the_client() {
     assert_eq!(invoice.sign(today, at(4_000)), Err(DocError::NotAct));
     let draft = Document::create(data(DocKind::Act, &client, date), at(2_000)).expect("черновик");
     assert_eq!(draft.sign(today, at(3_000)), Err(DocError::NotIssued));
+}
+
+/// Отметка о расчётном документе в системе ՊԵԿ.
+fn settlement(day: Date, number: &str) -> Settlement {
+    Settlement {
+        day,
+        number: line(number),
+    }
+}
+
+/// Расчётный документ отмечают у выпущенного документа — и счёта, и акта —
+/// днём и номером, поправляют и снимают; текст документа от этого не
+/// меняется. Та же отметка — нечего писать; у аннулированного и черновика —
+/// нельзя. Аннулирование отметку не снимает: документ в системе ՊԵԿ
+/// остаётся.
+#[test]
+fn settlement_is_marked_on_an_issued_document() {
+    let client = client();
+    let date = day(2026, 10, 1);
+    let today = day(2026, 10, 9);
+    for kind in [DocKind::Invoice, DocKind::Act] {
+        let document = issued(kind, &client, date, &[]);
+        assert_eq!(document.settlement(), None);
+        assert!(document.settlement_known(), "выпущенный этой версией — не отмечен, а не «неизвестно»");
+        let mark = settlement(date, "Ա123456789");
+        let marked = document.set_settlement(mark.clone(), at(4_000)).expect("годно").expect("отмечен");
+        assert_eq!(marked.settlement(), Some(&mark));
+        assert_eq!(marked.meta().modified(), at(4_000));
+        assert_eq!((marked.number(), marked.issued()), (document.number(), document.issued()));
+        assert_eq!(marked.data(), document.data());
+        assert_eq!(marked.status(today), document.status(today), "статус не меняется");
+        assert_eq!(marked.set_settlement(mark.clone(), at(5_000)), Ok(None));
+        let fixed = settlement(day(2026, 10, 2), "");
+        let moved = marked.set_settlement(fixed.clone(), at(5_000)).expect("годно").expect("поправлен");
+        assert_eq!(moved.settlement(), Some(&fixed), "номер можно не записывать");
+
+        let annulled = marked.annul(today, at(6_000)).expect("выпущен").expect("аннулирован");
+        assert_eq!(annulled.settlement(), Some(&mark), "аннулирование отметку не снимает");
+        assert_eq!(annulled.set_settlement(fixed.clone(), at(7_000)), Err(DocError::Annulled));
+        let back = annulled.unannul(at(7_000)).expect("возвращён");
+        assert_eq!(back.settlement(), Some(&mark));
+
+        let removed = marked.remove_settlement(at(8_000)).expect("отметка снята");
+        assert_eq!(removed.settlement(), None);
+        assert!(removed.settlement_known(), "снятая отметка — «не отмечен»");
+        assert_eq!(removed.meta().modified(), at(8_000));
+        assert_eq!(removed.remove_settlement(at(9_000)), None);
+    }
+    let draft = Document::create(data(DocKind::Invoice, &client, date), at(2_000)).expect("черновик");
+    assert_eq!(
+        draft.set_settlement(settlement(date, "Ա123456789"), at(3_000)),
+        Err(DocError::NotIssued)
+    );
+}
+
+/// Тот же документ, каким его записала версия до 0.0.55: без ключа отметки.
+fn from_before(document: &Document) -> Document {
+    let text = serde_json::to_string(document).expect("записывается");
+    let old = text.replacen(r#""settlement":null,"#, "", 1);
+    assert_ne!(old, text, "у документа была пустая отметка");
+    serde_json::from_str(&old).expect("документ прежней версии читается")
+}
+
+/// Акт по счёту — та же поставка: выпуск акта берёт отметку
+/// счёта-основания, какая она есть, — и «неизвестно» у счёта, выпущенного
+/// до 0.0.55; акт без основания не отмечен.
+#[test]
+fn an_act_takes_the_settlement_of_its_invoice() {
+    let client = client();
+    let invoice = issued(DocKind::Invoice, &client, day(2026, 10, 1), &[]);
+    let mark = settlement(day(2026, 10, 1), "Ա123456789");
+    let marked = invoice.set_settlement(mark.clone(), at(4_000)).expect("годно").expect("отмечен");
+    let act_of = |invoice: &Document| {
+        Document::create(invoice.act_data(day(2026, 10, 13)).expect("акт по счёту"), at(5_000))
+            .expect("черновик акта")
+            .issue(std::slice::from_ref(invoice), 0, Some(&profile()), &client, at(6_000))
+            .expect("акт выпущен")
+    };
+    assert_eq!(act_of(&marked).settlement(), Some(&mark));
+    let unmarked = act_of(&invoice);
+    assert_eq!((unmarked.settlement(), unmarked.settlement_known()), (None, true));
+    let old = act_of(&from_before(&invoice));
+    assert_eq!((old.settlement(), old.settlement_known()), (None, false));
+    let alone = issued(DocKind::Act, &client, day(2026, 10, 13), std::slice::from_ref(&marked));
+    assert_eq!(alone.settlement(), None, "акт без основания — своя поставка");
+    assert!(alone.settlement_known());
+}
+
+/// Документ версии формата 9 — без ключа отметки — читается с отметкой
+/// «неизвестно», а не «не отмечен»: отмечать было негде (Правило 6). Правка
+/// его не теряет — ключа нет и в записи, — а отмеченный и снова снятый
+/// становится неотмеченным.
+#[test]
+fn documents_without_settlement_still_read() {
+    let mut wrong = Vec::new();
+    for (name, sample, field) in [("счёт", INVOICE, INVOICE_SETTLEMENT), ("акт", ACT, r#""settlement":null,"#)] {
+        let old = sample.replacen(field, "", 1);
+        if old == sample {
+            wrong.push(format!("{name}: образец без поля отметки не получился"));
+            continue;
+        }
+        match serde_json::from_str::<Document>(&old) {
+            Ok(document) if document.settlement().is_none() && !document.settlement_known() => {
+                if serde_json::to_string(&document).ok().as_deref() != Some(old.as_str()) {
+                    wrong.push(format!("{name}: записан не тем, чем прочитан"));
+                }
+            }
+            other => wrong.push(format!("{name}: {other:?}")),
+        }
+    }
+    let old: Document = serde_json::from_str(&INVOICE.replacen(INVOICE_SETTLEMENT, "", 1)).expect("читается");
+    let edited = old.remove_payment(old.payments()[0], at(1_760_000_001_000)).expect("оплата убрана");
+    if edited.settlement_known() {
+        wrong.push("правка документа отметила его неотмеченным".to_owned());
+    }
+    let mark = settlement(day(2026, 9, 30), "Ա12345678");
+    let marked = old.set_settlement(mark.clone(), at(1_760_000_002_000)).expect("годно").expect("отмечен");
+    let removed = marked.remove_settlement(at(1_760_000_003_000)).expect("снята");
+    if marked.settlement() != Some(&mark) || removed.settlement().is_some() || !removed.settlement_known() {
+        wrong.push(format!("отметка документа прежней версии: {:?} → {:?}", marked.settlement(), removed.settlement()));
+    }
+    if old.remove_settlement(at(1_760_000_004_000)).is_some() {
+        wrong.push("«неизвестно» снялось как отметка".to_owned());
+    }
+    assert!(wrong.is_empty(), "документы без отметки: {wrong:#?}");
 }
 
 /// Черновик правится, удаляется меткой и восстанавливается.

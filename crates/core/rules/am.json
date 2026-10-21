@@ -1,5 +1,5 @@
 {
-  "version": "2026.4",
+  "version": "2026.5",
   "turnover_exclusions": [
     {
       "codes": ["69", "70", "78.2", "78.3"],
@@ -358,6 +358,30 @@
         "article": "հոդված 156, մաս 4.1; հոդված 156.1, մաս 4",
         "url": "https://www.arlis.am/hy/acts/230455",
         "checked": "2026-10-20"
+      }
+    }
+  ],
+  "settlement_due": [
+    {
+      "after_days": 0,
+      "from": "2025-01-01",
+      "until": "2026-08-31",
+      "source": {
+        "law": "ՀՕ-165-Ն ՀՀ հարկային օրենսգիրք (01.06.20 ՀՕ-280-Ն)",
+        "article": "հոդված 56, մաս 4",
+        "url": "https://www.arlis.am/hy/acts/219122",
+        "checked": "2026-10-21"
+      }
+    },
+    {
+      "after_days": 0,
+      "from": "2026-09-01",
+      "until": null,
+      "source": {
+        "law": "ՀՕ-165-Ն ՀՀ հարկային օրենսգիրք (03.07.26 ՀՕ-309-Ն)",
+        "article": "հոդված 56, մաս 4, կետ 2",
+        "url": "https://www.arlis.am/hy/acts/230455",
+        "checked": "2026-10-21"
       }
     }
   ],

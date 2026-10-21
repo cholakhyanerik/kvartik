@@ -41,13 +41,27 @@
 //! В PDF его нет, и у выпущенного документа его можно указать
 //! ([`Document::set_activity`]), как курс.
 //!
+//! **Расчётный документ в системе ՊԵԿ** (задача 23) — «հաշիվ վավերագիր»,
+//! который ИП выписывает там сам: счёт программы его не заменяет.
+//! Программа его не выписывает и никуда не отправляет, а помнит отметку
+//! человека — день и номер ([`Document::set_settlement`]); по каким
+//! документам её нет и до какого дня, говорит `tax::settlement`. Отметка —
+//! о поставке, а акт по счёту — та же поставка: выпуск акта берёт отметку
+//! счёта-основания ([`Document::issue`]). У документа, выпущенного до
+//! 0.0.55, отметить было негде, и выписан ли документ, программа не знает:
+//! это «нет значения», а не «не выписан» (Правило 6,
+//! [`Document::settlement_known`]).
+//!
 //! Меняется документ только командами ядра (CLAUDE.md, «Данные меняются
 //! одним путём»): [`Document::create`], `edit`, `issue`, `annul`,
 //! `unannul`, `delete`, `restore`, `add_payment`, `remove_payment`,
-//! `set_rate`, `set_activity`, `sign`, `unsign`.
+//! `set_rate`, `set_activity`, `sign`, `unsign`, `set_settlement`,
+//! `remove_settlement`.
 //!
 //! В данных: `{"meta":{…},"data":{…},"issued":{…},"annulled":null,
-//! "signed":null,"payments":[…]}`; образец — в тесте `data_shape_is_pinned`.
+//! "signed":null,"settlement":null,"payments":[…]}` — у документа,
+//! выпущенного до 0.0.55, ключа `settlement` нет; образец — в тесте
+//! `data_shape_is_pinned`.
 
 use std::fmt;
 
@@ -475,6 +489,21 @@ pub struct Payment {
     pub amount: i64,
 }
 
+/// Расчётный документ в системе ՊԵԿ, который ИП выписал по этой поставке
+/// сам (задача 23): день и номер — как их показала система. Номер
+/// человек может не записать: отметка «выписан» важнее, а номер нужен, чтобы
+/// сверить его с системой.
+///
+/// В данных — `{"day":"2026-09-30","number":"…"}`.
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Settlement {
+    /// День, которым он выписан в системе ՊԵԿ.
+    pub day: Date,
+    /// Номер в системе ՊԵԿ; пустой — не записан.
+    pub number: Line,
+}
+
 /// Где документ: черновик, выпущен, оплачен, аннулирован. Окно говорит
 /// его словом, а цвет только помогает (Правило 4).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -511,8 +540,22 @@ pub struct Document {
     /// у выпущенного акта; аннулирование её не снимает: подписанный акт
     /// аннулируют, а не «отписывают».
     signed: Option<Date>,
+    /// Расчётный документ в системе ՊԵԿ (задача 23): `Some(Some(…))` —
+    /// отмечен, `Some(None)` — не отмечен, `None` — неизвестно: документ
+    /// выпущен до 0.0.55, когда отмечать было негде. Отмечен — только
+    /// выпущенный; аннулирование отметку не снимает: документ в системе
+    /// ՊԵԿ от этого никуда не делся. Неизвестное в данных — нет ключа, как
+    /// у записей прежних версий, и правка документа его не теряет.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    settlement: Option<Option<Settlement>>,
     /// Поступления оплаты — только у выпущенного счёта, по дням.
     payments: Vec<Payment>,
+}
+
+/// Ключ есть — `Some` с его значением, и с `null` тоже; ключа нет — `None`
+/// (`#[serde(default)]`). Так «не отмечен» отличается от «неизвестно».
+fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(deserializer: D) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
 }
 
 /// Поля документа, как они лежат в данных, — до проверки.
@@ -526,6 +569,11 @@ struct DocumentFields {
     /// С версии формата 7 (задача 62); у записей прежних — подписи нет.
     #[serde(default)]
     signed: Option<Date>,
+    /// С версии формата 10 (задача 23). Ключа нет — неизвестно, отмечен ли
+    /// (записи прежних версий и документы, выпущенные до 0.0.55); `null` —
+    /// не отмечен.
+    #[serde(default, deserialize_with = "present")]
+    settlement: Option<Option<Settlement>>,
     payments: Vec<Payment>,
 }
 
@@ -538,9 +586,10 @@ impl Stored for Document {
 }
 
 /// Читается только то, что пишут команды: номер — того года, что дата
-/// документа; аннулирован и оплачен — только выпущенный, оплачен — только
-/// счёт, подписан — только акт и не раньше своей даты; выпущенный не удалён; в копии реквизитов есть имя на языке
-/// документа; списки — в пределах (Правило 13).
+/// документа; аннулирован, оплачен и отмечен выписанным в системе ՊԵԿ —
+/// только выпущенный, оплачен — только счёт, подписан — только акт и не
+/// раньше своей даты; выпущенный не удалён; в копии реквизитов есть имя на
+/// языке документа; списки — в пределах (Правило 13).
 impl<'de> Deserialize<'de> for Document {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let DocumentFields {
@@ -549,10 +598,16 @@ impl<'de> Deserialize<'de> for Document {
             issued,
             annulled,
             signed,
+            settlement,
             payments,
         } = DocumentFields::deserialize(deserializer)?;
         let fits = match &issued {
-            None => annulled.is_none() && signed.is_none() && payments.is_empty(),
+            None => {
+                annulled.is_none()
+                    && signed.is_none()
+                    && settlement.as_ref().and_then(Option::as_ref).is_none()
+                    && payments.is_empty()
+            }
             Some(issued) => {
                 issued.number.year == data.date.year()
                     && !meta.is_deleted()
@@ -576,6 +631,7 @@ impl<'de> Deserialize<'de> for Document {
             issued,
             annulled,
             signed,
+            settlement,
             payments,
         };
         // Сумма оплат помещается, как и сумма строк.
@@ -599,6 +655,7 @@ impl Document {
             issued: None,
             annulled: None,
             signed: None,
+            settlement: Some(None),
             payments: Vec::new(),
         })
     }
@@ -618,7 +675,9 @@ impl Document {
     }
 
     /// Команда «выпустить»: следующий номер серии и копия реквизитов ИП
-    /// и клиента на этот день.
+    /// и клиента на этот день; у акта по счёту — ещё и отметка о расчётном
+    /// документе у счёта, какая она есть: поставка та же (шапка модуля).
+    /// Выпущенный без основания — не отмечен.
     ///
     /// `documents` — все документы, прочитанные в той же транзакции,
     /// включая удалённые и аннулированные; `unreadable` — сколько записей
@@ -659,6 +718,14 @@ impl Document {
             seller: Seller::from_profile(profile),
             buyer: client.data().clone(),
         });
+        // Без этого акт, ставший документом дохода вместо отмеченного счёта,
+        // снова ждал бы расчётного документа, уже выписанного, а акт по
+        // счёту, выпущенному до 0.0.55, — того, о чём программа не знает.
+        document.settlement = self
+            .data
+            .basis
+            .and_then(|basis| documents.iter().find(|known| known.id() == basis))
+            .map_or(Some(None), |invoice| invoice.settlement.clone());
         Ok(document)
     }
 
@@ -834,6 +901,34 @@ impl Document {
         Some(document)
     }
 
+    /// Команда «расчётный документ выписан в системе ՊԵԿ» — у выпущенного
+    /// действующего документа (задача 23), и у выпущенного до 0.0.55 тоже.
+    /// Другой день или номер — поправка прежней отметки. Текст документа
+    /// и PDF от неё не меняются. `Ok(None)` — отмечен так же.
+    pub fn set_settlement(&self, settlement: Settlement, now: Timestamp) -> Result<Option<Self>, DocError> {
+        self.must_be_issued()?;
+        if self.annulled.is_some() {
+            return Err(DocError::Annulled);
+        }
+        if self.settlement() == Some(&settlement) {
+            return Ok(None);
+        }
+        let mut document = self.clone();
+        document.settlement = Some(Some(settlement));
+        document.meta.touch(now);
+        Ok(Some(document))
+    }
+
+    /// Команда «снять отметку о расчётном документе» — поставленную по
+    /// ошибке: документ становится неотмеченным. `None` — отметки нет.
+    pub fn remove_settlement(&self, now: Timestamp) -> Option<Self> {
+        self.settlement()?;
+        let mut document = self.clone();
+        document.settlement = Some(None);
+        document.meta.touch(now);
+        Some(document)
+    }
+
     /// Данные акта по этому счёту — «акт из счёта одним нажатием»: тот же
     /// клиент, язык, валюта, строки, дата оказания услуги и курс для неё,
     /// дата акта — `today`, основание — этот счёт.
@@ -928,6 +1023,19 @@ impl Document {
     /// День подписи акта клиентом; `None` — подписи нет.
     pub const fn signed(&self) -> Option<Date> {
         self.signed
+    }
+
+    /// Расчётный документ в системе ՊԵԿ; `None` — не отмечен или неизвестно
+    /// ([`Self::settlement_known`]).
+    pub fn settlement(&self) -> Option<&Settlement> {
+        self.settlement.as_ref().and_then(Option::as_ref)
+    }
+
+    /// Знает ли программа, выписан ли расчётный документ: у документа,
+    /// выпущенного до 0.0.55, отметить его было негде — не знает, и такой
+    /// документ не числится невыписанным (Правило 6).
+    pub const fn settlement_known(&self) -> bool {
+        self.settlement.is_some()
     }
 
     /// Поступления оплаты — по дням.

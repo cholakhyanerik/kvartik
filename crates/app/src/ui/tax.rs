@@ -35,7 +35,7 @@ use leptos::prelude::*;
 use super::annual::{AnnualCard, AnnualEntry, AnnualPage};
 use super::deadlines::{DeadlineReminder, DeadlinesEntry, DeadlinesPage, shift_note};
 use super::backup::{BackupChip, Backups};
-use super::documents::Documents;
+use super::documents::{Documents, SettlementReminder};
 use super::icon::{Icon, icon};
 use super::ledger::{Operations, tax_part};
 use super::profile::Profiles;
@@ -321,8 +321,9 @@ impl Note {
 }
 
 /// Карточки налога квартала (дизайн «Kvartik Design», экран 02) и годовых
-/// платежей (`ui/annual.rs`) на главном экране — из части книги, где
-/// считается налог. Часть грузится, когда в базе есть данные: на пустой
+/// платежей (`ui/annual.rs`) на главном экране и напоминания о сроках
+/// и о расчётных документах ՊԵԿ (`ui/deadlines.rs`, `ui/documents.rs`) —
+/// из части книги, где считается налог и разобран файл правил. Часть грузится, когда в базе есть данные: на пустой
 /// карточке сказать нечего, и первый заход её не качает. Пока часть
 /// грузится или если не загрузилась — карточек нет: о сбое скажет экран
 /// налога, а налог открывается и вкладкой.
@@ -422,7 +423,8 @@ pub fn TaxScreen(ctx: Ctx, router: Router) -> impl IntoView {
 /// Что рисует налог в части книги.
 #[derive(Clone, Copy)]
 pub(super) enum Part {
-    /// Карточки главного экрана: налог квартала и годовые платежи.
+    /// Карточки главного экрана: напоминания о сроках и о расчётных
+    /// документах, налог квартала и годовые платежи.
     Card,
     /// Содержимое экрана налога.
     Screen,
@@ -439,6 +441,7 @@ pub(super) fn content(ctx: Ctx, part: Part) -> AnyView {
     match part {
         Part::Card => view! {
             <DeadlineReminder ctx />
+            <SettlementReminder lang=ctx.lang documents=ctx.sources.documents today=ctx.today />
             <Card ctx />
             <AnnualCard ctx />
         }

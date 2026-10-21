@@ -6,9 +6,10 @@ use kvartik_core::i18n::{self, Key, Lang, fill, t};
 use kvartik_core::model::client::{Client, ClientData};
 use kvartik_core::model::country::Country;
 use kvartik_core::model::date::Date;
-use kvartik_core::model::document::{DocKind, Document, DocumentData, Item, Status};
+use kvartik_core::model::document::{DocKind, Document, DocumentData, Item, Settlement, Status};
 use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::model::profile::{Profile, ProfileData};
+use kvartik_core::model::record::RecordId;
 use kvartik_core::model::recurring::Recurring;
 use kvartik_core::model::text::{Line, Lines};
 use js_sys::{Function, Promise, Reflect, Uint8Array};
@@ -1253,4 +1254,152 @@ async fn an_invoice_with_an_act_leaves_the_rate_to_the_act() {
     crate::platform::set_hash("");
     forget_device();
     assert!(wrong.is_empty(), "курс у счёта с актом: {wrong:#?}");
+}
+
+/// Ссылка с подписью `text` внутри `scope` (CSS).
+fn link(host: &HtmlElement, scope: &str, text: &str) -> Option<HtmlElement> {
+    let links = host.query_selector_all(&format!("{scope} a")).ok()?;
+    (0..links.length())
+        .filter_map(|at| links.item(at))
+        .map(JsCast::unchecked_into::<HtmlElement>)
+        .find(|link| link.text_content().unwrap_or_default().trim() == text)
+}
+
+/// Отметка о расчётном документе у документа `id` в базе программы;
+/// `None` — документа нет.
+async fn stored_settlement(id: RecordId) -> Option<Option<Settlement>> {
+    let (documents, _) = stored().await;
+    documents.iter().find(|d| d.id() == id).map(|d| d.settlement().cloned())
+}
+
+/// Расчётный документ в системе ՊԵԿ (задача 23). Главный экран напоминает
+/// о счёте, срок которого прошёл, а о счёте со сроком через неделю и о счёте,
+/// выпущенном до 0.0.55, — нет: о последнем программа не знает, и его
+/// карточка так и говорит; «Открыть список» открывает список только
+/// документов без отметки — со сроком вместо статуса. В карточке — срок
+/// и «Отметить, что выписан»: отметка с номером ложится в базу, карточка
+/// называет её день и номер, в истории — событие, а счёт уходит из списка
+/// без отметки. «Снять отметку» убирает её из базы, а «Показать все»
+/// возвращает весь список.
+#[wasm_bindgen_test]
+async fn settlement_documents_are_marked_and_listed() {
+    let client = fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let now = clock::now();
+    let today = clock::today().expect("часы с датой");
+    let yesterday = today.add_days(-1).expect("дата есть");
+    let next_week = today.add_days(7).expect("дата есть");
+    let issue = |service: Date, before: &[Document]| {
+        let data = DocumentData {
+            service_date: service,
+            ..invoice_data(&client)
+        };
+        Document::create(data, now)
+            .expect("черновик")
+            .issue(before, 0, Some(&profile()), &client, now)
+            .expect("выпущен")
+    };
+    let late = issue(yesterday, &[]);
+    let ahead = issue(next_week, std::slice::from_ref(&late));
+    // Выпущенный до 0.0.55: в его записи ключа отметки нет.
+    let before = issue(yesterday, &[late.clone(), ahead.clone()]);
+    let text = kvartik_core::format::encode(&before);
+    let before: Document =
+        kvartik_core::format::decode(&text.replacen(r#""settlement":null,"#, "", 1)).expect("читается");
+    assert!(!before.settlement_known(), "документ прежней версии не получился");
+    let mut writes = Writes::default();
+    writes.insert(&late);
+    writes.insert(&ahead);
+    writes.insert(&before);
+    commit(writes).await;
+
+    let (host, mounted) = mount_at("#/");
+    let mut wrong = Vec::new();
+    let one = fill(t(lang, Key::DocumentsOne), &["1"]);
+    let remind = fill(t(lang, Key::SettleRemind), &[&one]);
+    if !wait_for(&host, &remind).await {
+        wrong.push(format!("на главном нет «{remind}»"));
+    }
+    match link(&host, "#home .notice.due", t(lang, Key::SettleOpen)) {
+        Some(show) => show.click(),
+        None => wrong.push("у напоминания нет «Открыть список»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::SettleShown)).await {
+        wrong.push("список без отметки не открылся".to_owned());
+    }
+    let rows = listed_rows(&host);
+    let ahead_chip = fill(t(lang, Key::SettleBy), &[&i18n::date(lang, next_week)]);
+    match rows.as_slice() {
+        [first, second]
+            if first.contains(&ahead_chip) && second.contains(t(lang, Key::SettleLate)) => {}
+        other => wrong.push(format!("строки без отметки: {other:?}")),
+    }
+
+    crate::platform::set_hash(&format!("#/documents/{}", before.id()));
+    if !wait_for(&host, t(lang, Key::SettleUnknown)).await {
+        wrong.push("у документа прежней версии нет слов, что программа не знает".to_owned());
+    }
+    crate::platform::set_hash(&format!("#/documents/{}", late.id()));
+    let due_was = fill(t(lang, Key::SettleDueWas), &[&i18n::date(lang, yesterday)]);
+    if !wait_for(&host, &due_was).await {
+        wrong.push(format!("в карточке нет «{due_was}»"));
+    }
+    let fieldset = || host.query_selector(".docs-detail .settlement").ok().flatten().map(JsCast::unchecked_into::<HtmlElement>);
+    match fieldset().and_then(|box_| field(&box_, t(lang, Key::SettleNumber), 0)) {
+        Some(input) => type_into(&input, "Ա 0123456789"),
+        None => wrong.push("нет поля номера".to_owned()),
+    }
+    match fieldset().and_then(|box_| button(&box_, &[t(lang, Key::SettleMark)])) {
+        Some(mark) => mark.click(),
+        None => wrong.push("нет «Отметить, что выписан»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::SettleSaved)).await {
+        wrong.push("отметка не подтвердилась".to_owned());
+    }
+    let expected = Settlement {
+        day: today,
+        number: line("Ա 0123456789"),
+    };
+    if stored_settlement(late.id()).await != Some(Some(expected)) {
+        wrong.push(format!("в базе отметка не та: {:?}", stored_settlement(late.id()).await));
+    }
+    let text = host.query_selector(".docs-detail").ok().flatten().and_then(|d| d.text_content()).unwrap_or_default();
+    let settled = fill(t(lang, Key::SettledOnNumbered), &[&i18n::date(lang, today), "Ա 0123456789"]);
+    if !text.contains(&settled) || !text.contains(t(lang, Key::HistorySettled)) {
+        wrong.push(format!("в карточке нет «{settled}» или события истории"));
+    }
+
+    crate::platform::set_hash("#/documents");
+    sleep(200).await;
+    let rows = listed_rows(&host);
+    if rows.len() != 1 || !rows[0].contains(&ahead_chip) {
+        wrong.push(format!("после отметки в списке без отметки: {rows:?}"));
+    }
+    match button(&host, &[t(lang, Key::SettleShowAll)]) {
+        Some(all) => all.click(),
+        None => wrong.push("нет «Показать все»".to_owned()),
+    }
+    sleep(100).await;
+    if listed_rows(&host).len() != 3 {
+        wrong.push(format!("«Показать все»: {:?}", listed_rows(&host)));
+    }
+
+    crate::platform::set_hash(&format!("#/documents/{}", late.id()));
+    sleep(200).await;
+    match fieldset().and_then(|box_| button(&box_, &[t(lang, Key::SignRemove)])) {
+        Some(remove) => remove.click(),
+        None => wrong.push("нет «Снять отметку»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::SettleRemoved)).await {
+        wrong.push("отметка не снялась".to_owned());
+    }
+    if stored_settlement(late.id()).await != Some(None) {
+        wrong.push(format!("после снятия в базе: {:?}", stored_settlement(late.id()).await));
+    }
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "расчётный документ: {wrong:#?}");
 }
