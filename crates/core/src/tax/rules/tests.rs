@@ -60,6 +60,7 @@ fn file(exclusions: &[Value], pensions: &[Value]) -> String {
         "high_tech": [],
         "turnover_threshold": [],
         "turnover_expenses": [],
+        "turnover_form": [],
         "profit_tax": [],
         "social_payment": [],
         "stamp_duty": [],
@@ -159,6 +160,7 @@ fn the_built_in_file_is_sound() {
     assert!(!rules.high_tech().is_empty());
     assert!(!rules.turnover_threshold().is_empty());
     assert!(!rules.turnover_expenses().is_empty());
+    assert!(!rules.turnover_form().is_empty());
     assert!(!rules.profit_tax().is_empty());
     assert!(!rules.social_payment().is_empty());
     assert!(!rules.stamp_duty().is_empty());
@@ -512,7 +514,7 @@ fn version_parse_is_strict() {
 
 /// Отпечаток значений текущей версии правил: её запись и FNV-1a значений
 /// файла ([`values`]).
-const PINNED: (&str, u64) = ("2026.5", 0x2402_111d_2038_64f3);
+const PINNED: (&str, u64) = ("2026.6", 0x98b9_2c53_1ab2_f6ad);
 
 /// Значения файла правил одной строкой: всё, кроме версии и источников, —
 /// JSON с ключами по алфавиту. Источник — когда сверили и где лежит
@@ -607,7 +609,7 @@ fn values_see_rules_not_sources() {
     let reordered = format!(
         r#"{{"days_off": [], "deadline_shift": [], "funded_pension": [{}], "health_insurance": [], "high_tech": [],
             "holidays": [], "income_declaration": [], "profit_tax": [], "settlement_due": [], "social_payment": [], "stamp_duty": [], "turnover_application": [],
-            "turnover_due": [], "turnover_exclusions": [{}], "turnover_expenses": [], "turnover_rates": [],
+            "turnover_due": [], "turnover_exclusions": [{}], "turnover_expenses": [], "turnover_form": [], "turnover_rates": [],
             "turnover_threshold": [], "version": "2026.1"}}"#,
         pension("2014-01-01", None),
         exclusion(&["69"], "2025-07-01", None),
@@ -1060,4 +1062,111 @@ fn deadline_records_are_checked() {
         wrong.push(format!("два срока квартала в один день: {got:?}"));
     }
     assert!(wrong.is_empty(), "записи сроков: {wrong:#?}");
+}
+
+const FORM: &str = "turnover_form";
+
+/// Запись формы расчёта (задача 24) с тремя строками налога и номерами,
+/// как в приказе 299-Ն; действует с `from` до `until`.
+fn form(from: &str, until: Option<&str>) -> Value {
+    timed(
+        json!({
+            "lines": [
+                {"kind": "trade", "section": "5", "row": "11"},
+                {"kind": "high_tech", "section": null, "row": "19"},
+                {"kind": "other", "section": "9", "row": "21"}
+            ],
+            "fields": {
+                "income": "1", "rate": "2", "gross": "3", "direct": "4.1", "overhead": "4.2", "expenses": "4",
+                "percent": "5", "current": "6", "carry_in": "7", "total": "8", "floor": "9", "tax": "10",
+                "carry_out": "11"
+            },
+            "total": "22",
+            "turnover": "27"
+        }),
+        from,
+        until,
+    )
+}
+
+/// Форма расчёта (задача 24): номера — числа без нулей впереди через точку,
+/// у пунктов формы — разделов, строк сводки, итога и оборота — без точки
+/// и все разные, поля раздела — тоже разные, строка налога — по разу, дни —
+/// целые кварталы: форму подают за отчётный период. Две формы в один день
+/// не действуют, а смена формы с квартала — годна. Забытое поле раздела —
+/// ошибка разбора, а не поле без номера.
+#[test]
+fn the_form_is_checked() {
+    let mut wrong = Vec::new();
+    let sound = [
+        vec![form("2025-01-01", None)],
+        vec![form("2025-01-01", Some("2026-06-30")), form("2026-07-01", None)],
+    ];
+    for records in &sound {
+        if let Err(error) = Rules::parse(&file_of(FORM, records)) {
+            wrong.push(format!("годная форма: {error:?}"));
+        }
+    }
+    let line = |kind: &str, section: Option<&str>, row: &str| json!({"kind": kind, "section": section, "row": row});
+    let lines = |list: &[Value]| with(form("2025-01-01", None), "lines", json!(list));
+    let point = |key: &str, number: &str| with(form("2025-01-01", None), key, json!(number));
+    let field = |key: &str, number: &str| {
+        let mut record = form("2025-01-01", None);
+        record["fields"][key] = json!(number);
+        record
+    };
+    for (case, record) in [
+        ("нет строк", lines(&[])),
+        ("строка дважды", lines(&[line("other", Some("9"), "21"), line("other", None, "23")])),
+        ("раздел с точкой", lines(&[line("trade", Some("5.1"), "11")])),
+        ("строка с нулём впереди", lines(&[line("trade", Some("5"), "011")])),
+        ("пустой номер строки", lines(&[line("trade", Some("5"), "")])),
+        ("раздел с точкой в конце", lines(&[line("trade", Some("5."), "11")])),
+        ("раздел — буква", lines(&[line("trade", Some("V"), "11")])),
+        ("раздел совпал со строкой", lines(&[line("trade", Some("11"), "11")])),
+        ("две строки с одним номером", lines(&[line("trade", Some("5"), "11"), line("rent", None, "11")])),
+        ("итог совпал со строкой", point("total", "21")),
+        ("оборот совпал с итогом", point("turnover", "22")),
+        ("итог с точкой", point("total", "22.1")),
+        ("поле ноль", field("income", "0")),
+        ("поле с точкой в конце", field("direct", "4.")),
+        ("поле с двумя точками подряд", field("direct", "4..1")),
+        ("два поля с одним номером", field("overhead", "4.1")),
+        ("поле с буквой", field("carry_out", "11a")),
+        ("с середины квартала", form("2025-02-01", None)),
+        ("конец не в конце квартала", form("2025-01-01", Some("2026-06-29"))),
+    ] {
+        let got = Rules::parse(&file_of(FORM, &[record]));
+        if got != Err(RulesError::Unusable(at(FORM, 0))) {
+            wrong.push(format!("{case}: {got:?}"));
+        }
+    }
+    let got = Rules::parse(&file_of(FORM, &[form("2025-01-01", None), form("2026-01-01", None)]));
+    if got
+        != Err(RulesError::Overlap {
+            kind: FORM,
+            first: 0,
+            second: 1,
+        })
+    {
+        wrong.push(format!("две формы в один день: {got:?}"));
+    }
+    let without_field = {
+        let mut record = form("2025-01-01", None);
+        record["fields"].as_object_mut().expect("поля — объект").remove("carry_out");
+        record
+    };
+    let without_section = lines(&[json!({"kind": "trade", "row": "11"})]);
+    for (case, record) in [
+        ("нет поля раздела", without_field),
+        ("нет ключа раздела", without_section),
+        ("незнакомое поле", field("income_total", "12")),
+        ("незнакомая строка налога", lines(&[line("services", Some("9"), "21")])),
+    ] {
+        let got = Rules::parse(&file_of(FORM, &[record]));
+        if !matches!(got, Err(RulesError::Malformed(_))) {
+            wrong.push(format!("{case}: {got:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "форма расчёта: {wrong:#?}");
 }

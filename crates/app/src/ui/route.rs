@@ -33,6 +33,8 @@ pub enum Screen {
     Annual,
     /// Сроки — экран внутри раздела налога (задача 21).
     Deadlines,
+    /// Числа для расчёта ՊԵԿ — экран внутри раздела налога (задача 24).
+    Report,
     Profile,
     /// Резервная копия и хранение данных — экран внутри профиля.
     Backup,
@@ -43,7 +45,7 @@ const DOCUMENT: &str = "#/documents/";
 
 impl Screen {
     /// Экраны без параметров — в порядке разделов.
-    pub const PLAIN: [Screen; 9] = [
+    pub const PLAIN: [Screen; 10] = [
         Screen::Home,
         Screen::Documents,
         Screen::Ledger,
@@ -51,6 +53,7 @@ impl Screen {
         Screen::Tax,
         Screen::Annual,
         Screen::Deadlines,
+        Screen::Report,
         Screen::Profile,
         Screen::Backup,
     ];
@@ -67,6 +70,7 @@ impl Screen {
             Screen::Tax => "#/tax".to_owned(),
             Screen::Annual => "#/annual".to_owned(),
             Screen::Deadlines => "#/deadlines".to_owned(),
+            Screen::Report => "#/report".to_owned(),
             Screen::Profile => "#/profile".to_owned(),
             Screen::Backup => "#/backup".to_owned(),
         }
@@ -95,12 +99,12 @@ impl Screen {
     }
 
     /// Раздел, который подсвечен в меню на этом экране: копия — часть
-    /// профиля, годовые платежи и сроки — налога, документ — раздела
-    /// документов.
+    /// профиля, годовые платежи, сроки и числа для расчёта — налога,
+    /// документ — раздела документов.
     pub const fn section(self) -> Screen {
         match self {
             Screen::Backup => Screen::Profile,
-            Screen::Annual | Screen::Deadlines => Screen::Tax,
+            Screen::Annual | Screen::Deadlines | Screen::Report => Screen::Tax,
             Screen::Document(_) => Screen::Documents,
             other => other,
         }
@@ -116,6 +120,7 @@ impl Screen {
             Screen::Tax => "tax",
             Screen::Annual => "annual",
             Screen::Deadlines => "deadlines",
+            Screen::Report => "report",
             Screen::Profile => "profile",
             Screen::Backup => "backup",
         }
@@ -215,8 +220,8 @@ mod tests {
     }
 
     /// В меню подсвечен раздел экрана: у копии — профиль, у годовых
-    /// платежей и сроков — налог, у документа — документы; документ показан
-    /// на странице документов.
+    /// платежей, сроков и чисел для расчёта — налог, у документа —
+    /// документы; документ показан на странице документов.
     #[test]
     fn screens_live_in_their_sections() {
         let document = Screen::Document(RecordId::random());
@@ -225,6 +230,9 @@ mod tests {
         assert_eq!(Screen::Annual.page(), Screen::Annual);
         assert_eq!(Screen::Deadlines.section(), Screen::Tax);
         assert_eq!(Screen::Deadlines.page(), Screen::Deadlines);
+        assert_eq!(Screen::Report.section(), Screen::Tax);
+        assert_eq!(Screen::Report.page(), Screen::Report);
+        assert_eq!(Screen::Report.href(), "#/report");
         assert_eq!(document.section(), Screen::Documents);
         assert_eq!(document.page(), Screen::Documents);
         assert_eq!(document.id(), "documents");

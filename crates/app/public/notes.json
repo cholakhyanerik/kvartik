@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.56",
+      "date": "2026-10-22",
+      "hy": [
+        "Թվեր ՊԵԿ հաշվարկի համար. հարկի էկրանին «Պատճենել թվերը հաշվարկի համար» կոճակը բացում է եռամսյակի հարկը ձևի դաշտերով՝ նույն համարներով, ինչ ձևում, և յուրաքանչյուր թվի մոտ պատճենելու կոճակով։ «Պատճենել բոլորը»՝ բոլոր դաշտերը տեքստով, օրինակ՝ հաշվապահի համար։",
+        "Թիվը պատճենվում է առանց բացատների և դրամի նշանի՝ այնպես, ինչպես այն կընդունի ձևի դաշտը։ Փակված եռամսյակի թվերը ներկայացված հաշվարկինն են, իսկ բաց եռամսյակի թվերը կան միայն, երբ այն ամբողջությամբ հաշվարկված է. հակառակ դեպքում ծրագիրն ասում է, ինչն է պակասում։"
+      ],
+      "ru": [
+        "Числа для расчёта ՊԵԿ: на экране налога кнопка «Скопировать числа для расчёта» открывает налог квартала полями формы — с теми же номерами, что в форме, и кнопкой «скопировать» у каждого числа. «Скопировать всё» отдаёт все поля текстом, например для бухгалтера.",
+        "Число копируется без пробелов и знака драма — так его примет поле формы. У закрытого квартала — числа поданного расчёта, а у открытого они есть, только когда квартал посчитан целиком: иначе программа говорит, чего не хватает."
+      ],
+      "en": [
+        "Numbers for the SRC return: on the Tax screen, “Copy the numbers for the return” opens the quarter's tax as the form's fields, numbered as in the form, with a copy button by each number. “Copy everything” gives all the fields as text, for example for your accountant.",
+        "A number is copied without spaces or the dram sign, the way the form's field takes it. For a closed quarter these are the numbers from the return you filed; for an open one they appear only once the quarter is fully counted, and otherwise the app says what's missing."
+      ]
+    },
+    {
       "version": "0.0.55",
       "date": "2026-10-21",
       "hy": [

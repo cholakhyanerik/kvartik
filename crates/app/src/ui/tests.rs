@@ -27,6 +27,7 @@ mod annual;
 mod documents;
 mod install;
 mod ledger;
+mod report;
 mod share;
 mod tax;
 mod update;
@@ -320,7 +321,15 @@ async fn choosing_a_language_translates_the_whole_window() {
     }
     visit(
         &host,
-        &[Screen::Documents, Screen::Clients, Screen::Tax, Screen::Annual, Screen::Deadlines, Screen::Profile],
+        &[
+            Screen::Documents,
+            Screen::Clients,
+            Screen::Tax,
+            Screen::Annual,
+            Screen::Deadlines,
+            Screen::Report,
+            Screen::Profile,
+        ],
     )
     .await;
     if !wait_for(&host, t(Lang::Am, Key::AnnualSumOf)).await {
@@ -411,6 +420,8 @@ async fn choosing_a_language_translates_the_whole_window() {
             Key::AnnualProfitLaw,
             Key::AnnualHealth,
             Key::DeadlinesShiftRule,
+            Key::ReportAbout,
+            Key::ReportTurnover,
         ] {
             if !text.contains(t(lang, key)) {
                 wrong.push(format!("{lang:?}: нет {key:?} на этом языке"));

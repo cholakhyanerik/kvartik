@@ -22,6 +22,7 @@ pub mod panic;
 mod paper;
 mod profile;
 mod pwa;
+mod report;
 mod route;
 mod split;
 mod storage;
@@ -48,6 +49,7 @@ use nav::Nav;
 use onboarding::Welcome;
 use profile::{ProfileSection, Profiles};
 use pwa::{Program, UpdateDialog, UpdateNotice};
+use report::ReportScreen;
 use route::{Router, Screen};
 use storage::{Storage, StorageAlert, StorageSection};
 use tax::{Closings, Sources, TaxScreen};
@@ -112,8 +114,9 @@ impl Base {
 }
 
 /// Корень окна (дизайн «Kvartik Design»): меню разделов и экраны —
-/// главный, счета и акты, книга, клиенты, налог и годовые платежи внутри
-/// него, профиль и копия внутри него (`ui/route.rs`). Все экраны —
+/// главный, счета и акты, книга, клиенты, налог и внутри него годовые
+/// платежи, сроки и числа для расчёта, профиль и копия внутри него
+/// (`ui/route.rs`). Все экраны —
 /// в странице, открытый виден, остальные спрятаны: начатое в форме не
 /// пропадает при переходе. Содержимое счетов, книги, клиентов, налога,
 /// годовых платежей и профиля — частями wasm с первого показа
@@ -243,6 +246,9 @@ pub fn App() -> impl IntoView {
                 </section>
                 <section id=Screen::Deadlines.id() class="screen" hidden=hidden(Screen::Deadlines)>
                     <DeadlinesScreen ctx=tax router />
+                </section>
+                <section id=Screen::Report.id() class="screen" hidden=hidden(Screen::Report)>
+                    <ReportScreen ctx=tax router />
                 </section>
                 <section id=Screen::Profile.id() class="screen" hidden=hidden(Screen::Profile)>
                     <h1 tabindex="-1">{tr(lang, Key::ProfileTitle)}</h1>

@@ -57,6 +57,7 @@ use serde::{Deserialize, Serialize};
 
 use super::closing::Closing;
 use super::rules::{self, Exclusion, Percent, Rate, Rule, Version};
+use crate::i18n::Key;
 use crate::model::activity::{ActivityCode, IncomeKind};
 use crate::model::date::{Date, Quarter};
 use crate::model::document::Document;
@@ -111,6 +112,23 @@ pub fn kind_of(profile: Option<&ProfileData>, code: &ActivityCode, on: Date) -> 
 pub fn default_kind(code: &ActivityCode, on: Date) -> IncomeKind {
     let listed = rules::on(rules::armenia().high_tech(), on).is_some_and(|list| list.contains(code));
     if listed { IncomeKind::HighTech } else { IncomeKind::Other }
+}
+
+/// Слова строки налога: в окне, в числах отчёта (`tax::report`) и в их
+/// тексте для бухгалтера.
+pub const fn kind_key(kind: IncomeKind) -> Key {
+    match kind {
+        IncomeKind::Trade => Key::KindTrade,
+        IncomeKind::Recyclables => Key::KindRecyclables,
+        IncomeKind::Newspapers => Key::KindNewspapers,
+        IncomeKind::Production => Key::KindProduction,
+        IncomeKind::Rent => Key::KindRent,
+        IncomeKind::Catering => Key::KindCatering,
+        IncomeKind::CateringOther => Key::KindCateringOther,
+        IncomeKind::HighTech => Key::KindHighTech,
+        IncomeKind::Assets => Key::KindAssets,
+        IncomeKind::Other => Key::KindOther,
+    }
 }
 
 /// Ставка строки в день `on`; `None` — правила на этот день нет: у строки 8
@@ -526,8 +544,9 @@ pub(crate) fn income_kind(profile: Option<&ProfileData>, row: &Row<'_>) -> Optio
 }
 
 /// Код дохода: указанный у дохода, а без него — единственный код профиля.
-/// Из нескольких кодов одной строки программа выбрать не может.
-fn income_code(profile: Option<&ProfileData>, row: &Row<'_>) -> Option<ActivityCode> {
+/// Из нескольких кодов одной строки программа выбрать не может. Им же
+/// числа отчёта делят доход по кодам деятельности (`tax::report`).
+pub(crate) fn income_code(profile: Option<&ProfileData>, row: &Row<'_>) -> Option<ActivityCode> {
     row.activity.or_else(|| match profile.map(|data| data.activities.as_slice()) {
         Some([only]) => Some(*only),
         Some(_) | None => None,

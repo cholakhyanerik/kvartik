@@ -17,6 +17,9 @@
 //! Число налога — расчёт, а не пример, но расчёт по прочтению закона:
 //! экран говорит «сверьте с бухгалтером» и называет всё, чего расчёту не
 //! хватило (Правило 6).
+//!
+//! С экрана налога кнопка ведёт к числам для расчёта (`ui/report.rs`,
+//! задача 24), и квартал у двух экранов один ([`shown`]).
 
 use std::sync::Arc;
 
@@ -28,8 +31,9 @@ use kvartik_core::model::record::RecordId;
 use kvartik_core::tax::annual::{self, Annual};
 use kvartik_core::tax::closing::Closing;
 use kvartik_core::tax::deadlines;
+use kvartik_core::tax::report;
 use kvartik_core::tax::rules::{self, Percent};
-use kvartik_core::tax::turnover::{self, Books, Leaving, Line, QuarterTax, Regime};
+use kvartik_core::tax::turnover::{self, Books, Leaving, Line, QuarterTax, Regime, kind_key};
 use leptos::prelude::*;
 
 use super::annual::{AnnualCard, AnnualEntry, AnnualPage};
@@ -39,6 +43,7 @@ use super::documents::{Documents, SettlementReminder};
 use super::icon::{Icon, icon};
 use super::ledger::{Operations, tax_part};
 use super::profile::Profiles;
+use super::report::ReportPage;
 use super::route::{Router, Screen};
 use super::split::screen;
 use super::storage::error_key;
@@ -138,7 +143,7 @@ impl Closings {
 
     /// Что-то, посчитанное по снимкам; пока их нет — значение по умолчанию.
     /// Отслеживаемое.
-    fn with<T: Default>(&self, read: impl FnOnce(&[Closing], usize) -> T) -> T {
+    pub(super) fn with<T: Default>(&self, read: impl FnOnce(&[Closing], usize) -> T) -> T {
         self.state.with(|state| match state {
             State::Ready { closings, unreadable } => read(closings, *unreadable),
             State::Loading | State::Failed(_) => T::default(),
@@ -199,12 +204,12 @@ impl Sources {
     }
 
     /// Налог квартала — отслеживаемое; `None` — как у [`Self::with_books`].
-    fn quarter(&self, quarter: Quarter) -> Option<QuarterTax> {
+    pub(super) fn quarter(&self, quarter: Quarter) -> Option<QuarterTax> {
         self.with_books(|books| turnover::quarter(books, quarter))
     }
 
     /// Снимок квартала, если он закрыт. Отслеживаемое.
-    fn closing(&self, quarter: Quarter) -> Option<Closing> {
+    pub(super) fn closing(&self, quarter: Quarter) -> Option<Closing> {
         self.closings.with(|closings, _| Closing::current(closings, quarter).cloned())
     }
 
@@ -212,22 +217,6 @@ impl Sources {
     /// [`Self::with_books`].
     pub(super) fn annual(&self, year: u16) -> Option<Annual> {
         self.with_books(|books| annual::year(books, year))
-    }
-}
-
-/// Слова строки налога.
-pub(super) const fn kind_key(kind: IncomeKind) -> Key {
-    match kind {
-        IncomeKind::Trade => Key::KindTrade,
-        IncomeKind::Recyclables => Key::KindRecyclables,
-        IncomeKind::Newspapers => Key::KindNewspapers,
-        IncomeKind::Production => Key::KindProduction,
-        IncomeKind::Rent => Key::KindRent,
-        IncomeKind::Catering => Key::KindCatering,
-        IncomeKind::CateringOther => Key::KindCateringOther,
-        IncomeKind::HighTech => Key::KindHighTech,
-        IncomeKind::Assets => Key::KindAssets,
-        IncomeKind::Other => Key::KindOther,
     }
 }
 
@@ -258,7 +247,7 @@ pub(super) fn kind_label(lang: Lang, kind: IncomeKind, on: Option<Date>) -> Stri
 }
 
 /// Процент по правилам языка.
-fn percent(lang: Lang, value: Percent) -> String {
+pub(super) fn percent(lang: Lang, value: Percent) -> String {
     i18n::percent(lang, i64::from(value.hundredths()))
 }
 
@@ -394,6 +383,9 @@ pub struct Ctx {
     pub(super) backups: Backups,
     /// Сегодня — один раз (Архитектура, «Время — параметр»).
     pub(super) today: Option<Date>,
+    /// Квартал экранов налога и чисел для расчёта — один на оба
+    /// ([`shown`]); `None` — ещё не выбран.
+    pub(super) quarter: RwSignal<Option<Quarter>>,
 }
 
 impl Ctx {
@@ -404,7 +396,62 @@ impl Ctx {
             base,
             backups,
             today: clock::today(),
+            quarter: RwSignal::new(None),
         }
+    }
+}
+
+/// Квартал экранов налога и чисел для расчёта — один на оба: числа
+/// открывают с экрана налога на том же квартале, а «Назад» возвращает на
+/// него. Сразу — тот же, что на карточке главного экрана, и выбирается
+/// один раз, когда данные прочитаны: закрыли его — экран остаётся на нём,
+/// а не уходит к следующему вслед за карточкой.
+pub(super) fn shown(ctx: Ctx) -> Memo<Quarter> {
+    let chosen = ctx.quarter;
+    Effect::new(move |_| {
+        if chosen.get_untracked().is_none()
+            && let Some((tax, _)) = ctx.today.and_then(|today| shown_quarter(ctx.sources, today))
+        {
+            chosen.set(Some(tax.quarter));
+        }
+    });
+    Memo::new(move |_| {
+        chosen
+            .get()
+            .unwrap_or_else(|| ctx.today.map_or(FALLBACK_QUARTER, Date::quarter))
+    })
+}
+
+/// Квартал стрелками — на экранах налога и чисел для расчёта.
+#[component]
+pub(super) fn QuarterBar(ctx: Ctx, quarter: Memo<Quarter>) -> impl IntoView {
+    let lang = ctx.lang;
+    let step = move |next: bool| {
+        let now = quarter.get_untracked();
+        if let Some(moved) = if next { now.next() } else { now.previous() } {
+            ctx.quarter.set(Some(moved));
+        }
+    };
+    view! {
+        <div class="quarter-bar">
+            <button
+                type="button"
+                class="round"
+                aria-label=move || t(lang.get(), Key::LedgerPrevQuarter)
+                on:click=move |_| step(false)
+            >
+                {icon(Icon::Back)}
+            </button>
+            <p class="quarter-name" aria-live="polite">{move || i18n::quarter(lang.get(), quarter.get())}</p>
+            <button
+                type="button"
+                class="round"
+                aria-label=move || t(lang.get(), Key::LedgerNextQuarter)
+                on:click=move |_| step(true)
+            >
+                {icon(Icon::Forward)}
+            </button>
+        </div>
     }
 }
 
@@ -432,11 +479,14 @@ pub(super) enum Part {
     Annual,
     /// Содержимое экрана сроков (`ui/deadlines.rs`, задача 21).
     Deadlines,
+    /// Содержимое экрана чисел для расчёта (`ui/report.rs`, задача 24).
+    Report,
 }
 
 /// Карточки или экран — зовёт часть книги (`ledger::book_part`). Годовые
-/// платежи — в той же части: они считаются из книги и профиля, а своя
-/// часть делила бы с налогом почти весь код (CLAUDE.md, Правило 6).
+/// платежи и числа для расчёта — в той же части: они считаются из книги
+/// и профиля, а своя часть делила бы с налогом почти весь код (CLAUDE.md,
+/// Правило 6).
 pub(super) fn content(ctx: Ctx, part: Part) -> AnyView {
     match part {
         Part::Card => view! {
@@ -449,6 +499,7 @@ pub(super) fn content(ctx: Ctx, part: Part) -> AnyView {
         Part::Screen => view! { <TaxBody ctx /> }.into_any(),
         Part::Annual => view! { <AnnualPage ctx /> }.into_any(),
         Part::Deadlines => view! { <DeadlinesPage ctx /> }.into_any(),
+        Part::Report => view! { <ReportPage ctx /> }.into_any(),
     }
 }
 
@@ -477,30 +528,23 @@ async fn reopen(store: &Store, id: RecordId) -> Result<Option<Closing>, StoreErr
 }
 
 /// Содержимое экрана: квартал стрелками, налог карточкой, что не так,
-/// доход по месяцам, расчёт по строкам формы и закрытие квартала.
+/// доход по месяцам, расчёт по строкам формы, числа для расчёта и закрытие
+/// квартала.
 #[component]
 fn TaxBody(ctx: Ctx) -> impl IntoView {
     let lang = ctx.lang;
     let sources = ctx.sources;
     sources.watch(ctx.base);
-    let chosen = RwSignal::new(None::<Quarter>);
-    // Квартал сразу — тот же, что на карточке главного экрана, и выбирается
-    // один раз, когда данные прочитаны: закрыли его — экран остаётся на нём,
-    // а не уходит к следующему вслед за карточкой.
-    Effect::new(move |_| {
-        if chosen.get_untracked().is_none()
-            && let Some((tax, _)) = ctx.today.and_then(|today| shown_quarter(sources, today))
-        {
-            chosen.set(Some(tax.quarter));
-        }
-    });
-    let quarter = Memo::new(move |_| {
-        chosen
-            .get()
-            .unwrap_or_else(|| ctx.today.map_or(FALLBACK_QUARTER, Date::quarter))
-    });
+    let quarter = shown(ctx);
     let tax = Memo::new(move |_| sources.quarter(quarter.get()));
     let closing = Memo::new(move |_| sources.closing(quarter.get()));
+    // Числа для расчёта есть — к ним кнопка, как в дизайне (экран 10).
+    let numbers = Memo::new(move |_| {
+        tax.with(|tax| {
+            tax.as_ref()
+                .is_some_and(|tax| closing.with(|closing| report::report(tax, closing.as_ref()).is_ok()))
+        })
+    });
     // Срок расчёта и налога квартала — пока он не закрыт (задача 21).
     let deadline = Memo::new(move |_| {
         sources
@@ -511,15 +555,16 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
     let busy = RwSignal::new(false);
     let notice = RwSignal::new(None::<Key>);
     let failure = RwSignal::new(None::<StoreError>);
-    let step = move |next: bool| {
-        let now = quarter.get_untracked();
-        let moved = if next { now.next() } else { now.previous() };
-        if let Some(moved) = moved {
-            chosen.set(Some(moved));
+    // Слова о закрытии — о своём квартале: сменился квартал (стрелками
+    // здесь или на экране чисел) — они уходят.
+    Effect::watch(
+        move || quarter.get(),
+        move |_, _, _| {
             notice.set(None);
             failure.set(None);
-        }
-    };
+        },
+        false,
+    );
     let close_quarter = move |_| {
         if busy.get_untracked() {
             return;
@@ -583,25 +628,7 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
     let rules_version = rules::armenia().version().to_string();
 
     view! {
-        <div class="quarter-bar">
-            <button
-                type="button"
-                class="round"
-                aria-label=move || t(lang.get(), Key::LedgerPrevQuarter)
-                on:click=move |_| step(false)
-            >
-                {icon(Icon::Back)}
-            </button>
-            <p class="quarter-name" aria-live="polite">{move || i18n::quarter(lang.get(), quarter.get())}</p>
-            <button
-                type="button"
-                class="round"
-                aria-label=move || t(lang.get(), Key::LedgerNextQuarter)
-                on:click=move |_| step(true)
-            >
-                {icon(Icon::Forward)}
-            </button>
-        </div>
+        <QuarterBar ctx quarter />
         {move || notice.get().map(|key| view! { <p role="status">{tr(lang, key)}</p> })}
         {move || failure.get().map(|error| view! { <p role="alert">{tr(lang, error_key(error))}</p> })}
         {move || sources.failure().map(|error| view! { <p role="alert">{tr(lang, error_key(error))}</p> })}
@@ -648,6 +675,12 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
             </div>
         })}
         {move || tax.get().map(|tax| view! { <Quarterly lang tax /> })}
+        {move || numbers.get().then(|| view! {
+            <a class="button report-open" href=Screen::Report.href()>
+                {icon(Icon::Copy)}
+                <span>{tr(lang, Key::ReportOpen)}</span>
+            </a>
+        })}
         {move || (ended() && closing.with(Option::is_none) && tax.with(Option::is_some)).then(|| {
             let closable = move || tax.with(|tax| tax.as_ref().zip(ctx.today).is_some_and(|(tax, today)| tax.closable(today)));
             view! {
@@ -815,9 +848,10 @@ impl Subtitle {
 }
 
 /// Что окно обязано сказать о квартале — красным: число без этого неполно
-/// или уже не всё (Правило 6).
+/// или уже не всё (Правило 6). Их же говорит экран чисел для расчёта,
+/// когда чисел нет (`ui/report.rs`).
 #[derive(Clone, PartialEq, Eq, Debug)]
-enum Alert {
+pub(super) enum Alert {
     Left { from: Date, why: Leaving, threshold: Option<i64> },
     Unrated(usize),
     YearUnrated(usize),
@@ -831,7 +865,7 @@ enum Alert {
 }
 
 impl Alert {
-    fn text(&self, lang: Lang) -> String {
+    pub(super) fn text(&self, lang: Lang) -> String {
         let count = |count: usize| i18n::integer(lang, count as i64);
         match self {
             Self::Left { from, why, threshold } => {
@@ -859,7 +893,7 @@ impl Alert {
     }
 }
 
-fn alerts(tax: &QuarterTax) -> Vec<Alert> {
+pub(super) fn alerts(tax: &QuarterTax) -> Vec<Alert> {
     let mut alerts = Vec::new();
     if let Regime::Left { from, why } = tax.regime {
         alerts.push(Alert::Left {

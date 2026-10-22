@@ -2156,6 +2156,115 @@ ul.deadlines {
   font-variant-numeric: tabular-nums;
 }
 
+/* Числа для расчёта (`ui/report.rs`, задача 24). Кнопка к ним на экране
+   налога — главной, во всю ширину, как в дизайне (экран 10). */
+.report-open {
+  display: flex;
+  margin-top: var(--space-5);
+}
+
+/* «Скопировать всё» и слова о копировании — над полями. */
+.report-all {
+  margin-bottom: var(--space-2);
+}
+
+.report-section h3 {
+  margin: var(--space-5) 0 0;
+  font-size: var(--font-size-md);
+  font-weight: var(--weight-strong);
+}
+
+/* Поле формы — карточкой: номер в своём столбце, чтобы глаз шёл по нему,
+   как по форме; что в поле — над числом, а не рядом: на телефоне в 360
+   точек подпись и сумма в одну строку не помещаются; «скопировать» —
+   справа, кружком на 44 точки. Слова под полем и «скопировано» — строками
+   под числом. */
+ul.report-fields {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.report-field {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr) var(--touch);
+  grid-template-areas:
+    "no what copy"
+    "no value copy";
+  align-items: center;
+  column-gap: var(--space-3);
+  row-gap: 0.125rem;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+}
+
+/* Доля по коду: номера у неё нет — код и есть подпись. */
+.report-field.share {
+  grid-template-columns: minmax(0, 1fr) var(--touch);
+  grid-template-areas:
+    "what copy"
+    "value copy";
+}
+
+.report-no {
+  grid-area: no;
+  align-self: start;
+  font-weight: var(--weight-strong);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.report-what {
+  grid-area: what;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.report-field.share .report-what {
+  color: var(--text);
+  font-weight: var(--weight-strong);
+}
+
+/* Число — табличными цифрами (Правило 4) и выделяется целиком одним
+   касанием: где буфер обмена не дал скопировать, его копируют сами. */
+.report-value {
+  grid-area: value;
+  font-weight: var(--weight-strong);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  user-select: all;
+  -webkit-user-select: all;
+}
+
+/* Кружок «скопировать» — на фоне экрана: на фоне карточки кружок цвета
+   карточки пропал бы. */
+.report-field > button.round {
+  grid-area: copy;
+  background: var(--surface);
+}
+
+.report-note,
+.report-status {
+  grid-column: 2 / -1;
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+
+.report-note {
+  color: var(--text-muted);
+}
+
+.report-status {
+  font-weight: var(--weight-strong);
+}
+
+.report-field.share .report-status {
+  grid-column: 1 / -1;
+}
+
 /* «Сверьте расчёт с бухгалтером» — внизу экрана, как в дизайне. */
 .tax-check {
   margin: var(--space-6) 0 var(--space-1);

@@ -1,5 +1,5 @@
 {
-  "version": "2026.5",
+  "version": "2026.6",
   "turnover_exclusions": [
     {
       "codes": ["69", "70", "78.2", "78.3"],
@@ -213,6 +213,36 @@
         "article": "հոդված 258, մաս 6; հոդված 55, մաս 2, կետեր 1–5, մասեր 3, 12, 13; ՀՕ-72-Ն, հոդված 9, մաս 4",
         "url": "https://www.arlis.am/hy/acts/230455",
         "checked": "2026-10-19"
+      }
+    }
+  ],
+  "turnover_form": [
+    {
+      "lines": [
+        {"kind": "trade", "section": "5", "row": "11"},
+        {"kind": "recyclables", "section": null, "row": "12"},
+        {"kind": "newspapers", "section": null, "row": "13"},
+        {"kind": "production", "section": "6", "row": "14"},
+        {"kind": "rent", "section": null, "row": "15"},
+        {"kind": "catering", "section": "7", "row": "16"},
+        {"kind": "catering_other", "section": null, "row": "18"},
+        {"kind": "high_tech", "section": null, "row": "19"},
+        {"kind": "assets", "section": null, "row": "20"},
+        {"kind": "other", "section": "9", "row": "21"}
+      ],
+      "fields": {
+        "income": "1", "rate": "2", "gross": "3", "direct": "4.1", "overhead": "4.2", "expenses": "4",
+        "percent": "5", "current": "6", "carry_in": "7", "total": "8", "floor": "9", "tax": "10", "carry_out": "11"
+      },
+      "total": "22",
+      "turnover": "27",
+      "from": "2025-01-01",
+      "until": null,
+      "source": {
+        "law": "N 299-Ն ՀՀ կառավարությանն առընթեր պետական եկամուտների կոմիտեի նախագահի հրաման (30.10.24 N 1430-Ն, 07.04.25 N 420-Ն)",
+        "article": "հավելված N 1, ձևի կետեր 5–7, 9–22, 27, լրացման կարգի կետեր 6–41, 49–64, 69; N 1430-Ն, կետ 2",
+        "url": "https://www.arlis.am/hy/acts/205434",
+        "checked": "2026-10-22"
       }
     }
   ],

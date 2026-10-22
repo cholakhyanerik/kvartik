@@ -42,6 +42,8 @@ pub enum Icon {
     Percent,
     /// Сроки — лист календаря (задача 21).
     Calendar,
+    /// Скопировать — два листа один на другом (задача 24).
+    Copy,
 }
 
 /// Значок для разметки. Он только украшает: что делает кнопка или ссылка,
@@ -98,6 +100,11 @@ pub fn icon(icon: Icon) -> impl IntoView {
         Icon::Calendar => view! {
             <rect x="4" y="5" width="16" height="16" rx="2" />
             <path d="M8 3v4M16 3v4M4 10h16" />
+        }
+        .into_any(),
+        Icon::Copy => view! {
+            <rect x="9" y="9" width="11" height="11" rx="2" />
+            <path d="M15 9V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h4" />
         }
         .into_any(),
     };

@@ -44,7 +44,9 @@
 //!   повторов и не вся неделя, праздники — без повторов, а дни решения
 //!   правительства — в его периоде и каждый в одном списке; у срока
 //!   расчётного документа (задача 23) — любое число дней, ноль — тот же
-//!   день;
+//!   день; у формы расчёта налога с оборота (задача 24) номера полей —
+//!   числа через точку, без повторов, строки налога — по разу, а дни —
+//!   целые кварталы;
 //! - незнакомых полей нет: опечатка в имени поля — ошибка, а не молча
 //!   пропущенное правило.
 //!
@@ -185,6 +187,11 @@ pub struct Percent(u16);
 impl Percent {
     /// Сто процентов.
     pub const WHOLE: Self = Self(10_000);
+
+    /// Процент из сотых долей: 4,5 % — 450. `None` — больше ста процентов.
+    pub const fn from_hundredths(hundredths: u16) -> Option<Self> {
+        if hundredths <= Self::WHOLE.0 { Some(Self(hundredths)) } else { None }
+    }
 
     /// Процент из записи `4.5`, `10`, `1.5`. `None` — не число от 0 до 100
     /// с одним-двумя знаками после точки, ведущий ноль, ноль в конце дробной
@@ -612,6 +619,164 @@ impl Rule for Expenses {
             && unique(&self.payment_only)
             && unique(&self.excluded)
             && !self.payment_only.iter().any(|nature| self.excluded.contains(nature))
+    }
+}
+
+/// Строка налога в форме расчёта налога с оборота ([`TurnoverForm`]).
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FormLine {
+    /// Строка налога — вид дохода (таблица НК, ст. 258, ч. 1).
+    pub kind: IncomeKind,
+    /// Раздел расчёта — у строки с вычетом расходов: `5`; `None` — своего
+    /// раздела у строки нет, только строка сводки. Ключ обязателен, как
+    /// у [`Exclusion::until`].
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub section: Option<String>,
+    /// Строка сводки: доход [Ա], ставка [Բ] и налог [Գ] — `11`.
+    pub row: String,
+}
+
+/// Поля раздела строки с вычетом — номером внутри раздела: поле `4.1`
+/// раздела `5` — это `5.4.1`. Разделы строк с вычетом устроены одинаково
+/// (приказ 299-Ն, прил. 1, п. 6–60), а поле, которого запись не назвала,
+/// не разберётся: новая форма с другими полями не пройдёт молча.
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SectionFields {
+    /// Доход квартала (x.1).
+    pub income: String,
+    /// Ставка (x.2) — её форма ставит сама.
+    pub rate: String,
+    /// Налог по ставке (x.3).
+    pub gross: String,
+    /// Прямые расходы (x.4.1).
+    pub direct: String,
+    /// Сбытовые и административные расходы (x.4.2).
+    pub overhead: String,
+    /// Расходы всего (x.4).
+    pub expenses: String,
+    /// Процент расходов (x.5) — его форма ставит сама.
+    pub percent: String,
+    /// Уменьшение налога за расходы квартала (x.6).
+    pub current: String,
+    /// Перенос с прошлых кварталов (x.7).
+    pub carry_in: String,
+    /// Уменьшение всего (x.8).
+    pub total: String,
+    /// Нижний предел налога (x.9).
+    pub floor: String,
+    /// Налог к уплате (x.10).
+    pub tax: String,
+    /// Перенос на следующие кварталы (x.11).
+    pub carry_out: String,
+}
+
+impl SectionFields {
+    /// Все номера — по порядку формы.
+    fn list(&self) -> [&str; 13] {
+        [
+            &self.income,
+            &self.rate,
+            &self.gross,
+            &self.direct,
+            &self.overhead,
+            &self.expenses,
+            &self.percent,
+            &self.current,
+            &self.carry_in,
+            &self.total,
+            &self.floor,
+            &self.tax,
+            &self.carry_out,
+        ]
+    }
+}
+
+/// Номера полей формы расчёта налога с оборота (`tax::report`, задача 24):
+/// у какой строки налога какой раздел формы и какая строка сводки.
+///
+/// Номера — данные, а не код: форму меняет приказ ՊԵԿ вместе с законом,
+/// и новая форма — новая запись. Запись — об отчётных периодах, как у
+/// гербового сбора: форму подают «за отчётные периоды после» дня своего
+/// приказа (приказ 1430-Ն, п. 2), поэтому её дни — целые кварталы.
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TurnoverForm {
+    /// Строки налога, которые знает форма.
+    pub lines: Vec<FormLine>,
+    /// Поля раздела строки с вычетом.
+    pub fields: SectionFields,
+    /// Строка «Итого» сводки: доход и налог всех строк.
+    pub total: String,
+    /// Строка дохода по всем видам деятельности.
+    pub turnover: String,
+    pub from: Date,
+    /// Ключ обязателен, как у [`Exclusion::until`].
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub until: Option<Date>,
+    pub source: Source,
+}
+
+impl TurnoverForm {
+    /// Место строки налога `kind` в форме; `None` — форма её не знает.
+    pub fn line(&self, kind: IncomeKind) -> Option<&FormLine> {
+        self.lines.iter().find(|line| line.kind == kind)
+    }
+}
+
+/// Номер поля формы, как его пишет приказ: числа без нулей впереди через
+/// точку — `5`, `4.1`, `11`. Опечатка вроде `5.` или `05` дала бы поле,
+/// которого в форме нет.
+fn form_number(text: &str) -> bool {
+    text.split('.').all(|part| {
+        !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()) && !part.starts_with('0')
+    })
+}
+
+impl Rule for TurnoverForm {
+    fn period(&self) -> Period {
+        Period {
+            from: self.from,
+            until: self.until,
+        }
+    }
+
+    fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// Форма одна на всех: две записи — всегда об одном.
+    fn same_subject(&self, _: &Self) -> bool {
+        true
+    }
+
+    /// Строки налога есть, каждая — по разу; номера — числа через точку,
+    /// а у разделов и строк сводки, итога и оборота — без точки, как пункты
+    /// формы, и все разные, поля раздела — тоже; дни — целые кварталы.
+    fn usable(&self) -> bool {
+        let mut points: Vec<&str> = self
+            .lines
+            .iter()
+            .flat_map(|line| line.section.as_deref().into_iter().chain([line.row.as_str()]))
+            .collect();
+        points.extend([self.total.as_str(), self.turnover.as_str()]);
+        let fields = self.fields.list();
+        let unique = |list: &[&str]| list.iter().enumerate().all(|(i, a)| !list[..i].contains(a));
+        let kinds = self
+            .lines
+            .iter()
+            .enumerate()
+            .all(|(i, a)| !self.lines[..i].iter().any(|b| b.kind == a.kind));
+        let quarters = self.from.quarter().first_day() == self.from
+            && self.until.is_none_or(|until| until.quarter().last_day() == until);
+        !self.lines.is_empty()
+            && kinds
+            && points.iter().all(|point| form_number(point) && !point.contains('.'))
+            && fields.iter().all(|field| form_number(field))
+            && unique(&points)
+            && unique(&fields)
+            && quarters
     }
 }
 
@@ -1135,6 +1300,7 @@ pub struct Rules {
     high_tech: Vec<HighTech>,
     turnover_threshold: Vec<Threshold>,
     turnover_expenses: Vec<Expenses>,
+    turnover_form: Vec<TurnoverForm>,
     profit_tax: Vec<Monthly>,
     social_payment: Vec<Monthly>,
     stamp_duty: Vec<StampDuty>,
@@ -1188,6 +1354,7 @@ impl Rules {
         check("high_tech", &rules.high_tech)?;
         check("turnover_threshold", &rules.turnover_threshold)?;
         check("turnover_expenses", &rules.turnover_expenses)?;
+        check("turnover_form", &rules.turnover_form)?;
         check("profit_tax", &rules.profit_tax)?;
         check("social_payment", &rules.social_payment)?;
         check("stamp_duty", &rules.stamp_duty)?;
@@ -1224,6 +1391,7 @@ impl Rules {
             high_tech,
             turnover_threshold,
             turnover_expenses,
+            turnover_form,
             profit_tax,
             social_payment,
             stamp_duty,
@@ -1243,6 +1411,7 @@ impl Rules {
             latest(high_tech),
             latest(turnover_threshold),
             latest(turnover_expenses),
+            latest(turnover_form),
             latest(profit_tax),
             latest(social_payment),
             latest(stamp_duty),
@@ -1289,6 +1458,11 @@ impl Rules {
     /// Какие расходы идут в вычет.
     pub fn turnover_expenses(&self) -> &[Expenses] {
         &self.turnover_expenses
+    }
+
+    /// Номера полей формы расчёта налога с оборота.
+    pub fn turnover_form(&self) -> &[TurnoverForm] {
+        &self.turnover_form
     }
 
     /// Налог на прибыль ИП на налоге с оборота — за месяц (НК, ст. 125,
