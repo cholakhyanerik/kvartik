@@ -34,7 +34,7 @@ node .claude/skills/browser-run/run.mjs <сценарий> --task <номер> [
 | `offline` | scope `/app/`, страницей правит `/app/sw.js`, один кэш только с файлами `/app/`; сервер выключен — рабочий экран из кэша | wrangler |
 | `update` | копия `dist/` новой версией (`newVersion` в `tools/browser/serve.mjs`: заметка «Что нового» новее, правка `404.html`, `sw.js`, переписанный `kvartik-sw`) на том же порту: с открытой формой — слова над экраном; закрыли — окно «Что нового», снимки окна на `--langs` × `--widths` × `--themes`; «Обновить» открывает новую сборку, прежний кэш удалён | wrangler |
 | `install` | манифест без ошибок установки (`Page.getInstallabilityErrors`), `id` — `/app/`, кнопка «Установить» | wrangler |
-| `measure` | первый заход на телефонном профиле: первый текст, рабочий экран, шрифты; медиана `--runs`; `--repeat` — ещё повторный заход из кэша service worker | свой, brotli заранее |
+| `measure` | первый заход на телефонном профиле: первый текст, рабочий экран, шрифты; медиана `--runs`; `--repeat` — ещё повторный заход из кэша service worker; `--sw` — ещё когда страницей стал править service worker, поставивший весь сайт (число файлов, CLAUDE.md, Правило 6) | свой, brotli заранее |
 | `pdf` | страница PDF читалкой Chrome: `--pdf <файл>` (можно несколько) | — |
 
 Опции:
@@ -66,6 +66,7 @@ node .claude/skills/browser-run/run.mjs screens --task 70 --routes documents,led
 node .claude/skills/browser-run/run.mjs screens --task 70 --routes clients --script C:/tmp/k70/open-form.mjs
 node .claude/skills/browser-run/run.mjs offline --task 70
 node .claude/skills/browser-run/run.mjs measure --task 70 --dist C:/tmp/k70/old/crates/app/dist --dist crates/app/dist
+node .claude/skills/browser-run/run.mjs measure --task 80 --sw --dist C:/tmp/k80/before/dist --dist crates/app/dist
 node .claude/skills/browser-run/run.mjs pdf --task 70 --pdf target/look/task-12/invoice-hy.pdf
 ```
 
@@ -184,6 +185,11 @@ Chrome присылает его и уже установленной прогр
 - Седьмой файл первого захода ждёт свободного соединения целый круг сети:
   журнал сети (`Network.requestWillBeSent` и `loadingFinished`) это
   показывает.
+- Установка service worker (`--sw`) — событие `controllerchange`
+  страницы первого захода: `sw.js` кладёт в кэш весь сайт и после
+  активации зовёт `clients.claim()`. Каждый лишний файл — лишний запрос по
+  шести соединениям: 0.0.57 → 0.0.58 — 5,12 → 4,97 с при 64 → 65 файлах
+  wasm (главный wasm легче на 40 КБ, задача 80, 2026-10-23).
 - `Network.setBlockedURLs` — как сделать, чтобы часть wasm не загрузилась.
 - Новый замер — записью в `docs/measurements.md`: версия, дата, что
   изменилось, числа, способ, версия Chrome.

@@ -33,6 +33,7 @@ const { values: opt, positionals } = parseArgs({
     runs: { type: "string", default: "5" },
     path: { type: "string", default: "/app/" },
     repeat: { type: "boolean", default: false },
+    sw: { type: "boolean", default: false },
     pdf: { type: "string", multiple: true },
   },
 });
@@ -275,13 +276,17 @@ async function install() {
 /// RTT 562,5 мс, 1,47 Мбит/с, процессор ×4, без кэша, каждый заход в своём
 /// контексте. Сборки `--dist` — по кругу после одного прогревочного захода,
 /// медиана `--runs`. `--repeat` — ещё и повторный заход из кэша service
-/// worker. Сравнивать можно только с замером тем же способом в тот же день.
+/// worker. `--sw` — ещё и когда страницей стал править service worker:
+/// он поставил весь сайт, и части приходят из его кэша (задача 80; каждый
+/// лишний файл — круг сети по шести соединениям, CLAUDE.md, Правило 6).
+/// Сравнивать можно только с замером тем же способом в тот же день.
 async function measure() {
   const servers = DISTS.map((d, i) => own(d, 8801 + i));
   const browser = await Browser.launch({ work: WORK, name: "measure", port: 9334 });
   const OBSERVER = `new MutationObserver((_, obs) => {
     if (document.querySelector('input[type=file][accept=".json,application/json"]')) { window.__working = performance.now(); obs.disconnect(); }
-  }).observe(document, { childList: true, subtree: true });`;
+  }).observe(document, { childList: true, subtree: true });
+  navigator.serviceWorker?.addEventListener("controllerchange", () => { window.__sw ??= performance.now(); });`;
   const visit = async (url) => {
     const page = await browser.page({ context: true });
     await page.send("Network.enable");
@@ -297,6 +302,7 @@ async function measure() {
       return { working: window.__working, fcp: (performance.getEntriesByName("first-contentful-paint")[0] || {}).startTime,
         fonts: fonts.length ? Math.max(...fonts) : null };`;
     const first = await page.waitFor(read, 30000);
+    const sw = opt.sw && first ? await page.waitFor(`return window.__sw ?? null;`, 60000) : null;
     let repeat = null;
     if (opt.repeat && first) {
       await page.waitFor(CONTROLLER, 30000);
@@ -305,7 +311,7 @@ async function measure() {
       repeat = (await page.waitFor(read, 30000))?.working ?? null;
     }
     await page.close();
-    return first && { ...first, repeat };
+    return first && { ...first, sw, repeat };
   };
   const runs = DISTS.map((d, i) => ({ name: path.relative(REPO, d) || d, url: `http://127.0.0.1:${8801 + i}${opt.path}`, results: [] }));
   try {
@@ -327,7 +333,8 @@ async function measure() {
     const ok = r.results.filter(Boolean);
     checks.check(`${r.name}: все заходы дошли до рабочего экрана`, ok.length === Number(opt.runs), `${ok.length} из ${opt.runs}`);
     console.log(`${r.name} ${opt.path}: первый текст ${sec(median(ok.map((x) => x.fcp)))} с, рабочий экран ${sec(median(ok.map((x) => x.working)))} с, `
-      + `шрифты ${sec(median(ok.map((x) => x.fonts)))} с${opt.repeat ? `, повторный заход ${median(ok.map((x) => x.repeat)).toFixed(0)} мс` : ""} `
+      + `шрифты ${sec(median(ok.map((x) => x.fonts)))} с${opt.sw ? `, под service worker ${sec(median(ok.map((x) => x.sw)))} с` : ""}`
+      + `${opt.repeat ? `, повторный заход ${median(ok.map((x) => x.repeat)).toFixed(0)} мс` : ""} `
       + `(медиана ${ok.length}; Chrome ${(await chromeVersion())})`);
   }
 }

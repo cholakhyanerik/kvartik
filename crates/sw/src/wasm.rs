@@ -22,7 +22,8 @@
 //! 5. проверка: заглушек разреза не осталось, каждой части хватает
 //!    экспортов главного модуля, а главному — загрузчиков. Иначе сборка
 //!    прошла бы, а программа не запустилась бы или упала бы на первом
-//!    нажатии (Правило 6);
+//!    нажатии (Правило 6). И строки частей лежат в частях, а не в главном
+//!    модуле (задача 80): иначе первый заход молча потяжелел бы;
 //! 6. имена с хэшем — одним на все файлы: главный JS ссылается на
 //!    загрузчик, загрузчик — на главный JS и на части, и хэш каждого
 //!    по отдельности ходил бы по кругу (у cargo-leptos на этом ошибки #690
@@ -50,6 +51,7 @@ use std::process::{Command, Stdio};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
+use kvartik_core::i18n::{Key, Lang, t};
 use sha2::{Digest, Sha384};
 use wasmparser::{Parser, Payload};
 
@@ -203,6 +205,7 @@ pub fn build(package: &str, app: &Path, public_url: &str) -> Result<Built, Strin
         ));
     }
     check(&Module::parse(&main_bytes)?, &part_info, &loader)?;
+    strings_in_parts(&main_bytes, &part_bytes)?;
 
     // Имена с хэшем: один хэш всех файлов, ещё без хэшей внутри, и запуска,
     // который встанет в клей.
@@ -503,6 +506,35 @@ fn check(main: &Module, parts: &[(String, Module)], loader: &str) -> Result<(), 
     }
 }
 
+/// Строки частей — в частях (задача 80). Ключ таблицы строк — постоянная
+/// со своими строками (`kvartik_core::i18n::Key`), и программа разреза
+/// кладёт их туда, где их зовёт код. Вернись общий `match` по всем ключам
+/// или позови код окна `ALL_KEYS` — строки всех экранов молча легли бы
+/// в главный модуль, и рабочий экран первого захода ждал бы их: на 0.0.57
+/// это 40 КБ после brotli и 0,26 с на телефоне (docs/measurements.md,
+/// 0.0.58). Канарейка — строка, которую рисует только экран чисел для
+/// расчёта в части книги: в главном модуле её нет, а в одной из частей —
+/// есть. Нет её нигде — строку убрали, и канарейку пора сменить.
+fn strings_in_parts(main: &[u8], parts: &[(String, Vec<u8>)]) -> Result<(), String> {
+    let canary = t(Lang::Ru, Key::ReportSplit).as_bytes();
+    let holds = |bytes: &[u8]| bytes.windows(canary.len()).any(|window| window == canary);
+    if holds(main) {
+        return Err(
+            "строка экрана чисел для расчёта (Key::ReportSplit) — в главном модуле: строки частей \
+             легли в него, первый заход потяжелел (crates/core/src/i18n.rs, Key)"
+                .into(),
+        );
+    }
+    if !parts.iter().any(|(_, bytes)| holds(bytes)) {
+        return Err(
+            "строки Key::ReportSplit нет ни в одной части: смените канарейку в \
+             crates/sw/src/wasm.rs на строку, которую рисует только часть"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 /// У каждой части ровно одна точка разреза. Точка разреза импортирует
 /// свою функцию как `__wasm_split_00<часть>00_import_<хэш>_<функция>`
 /// (`wasm_split_macros` 0.2.2), а часть называется по имени функции
@@ -729,6 +761,24 @@ mod tests {
         ] {
             assert!(error.contains(expected), "нет «{expected}» в {error}");
         }
+    }
+
+    /// Строка части — только в части: в главном модуле она — провал, и нет
+    /// её ни в одной части — тоже, канарейка пропала.
+    #[test]
+    fn strings_of_parts_stay_in_parts() {
+        let canary = t(Lang::Ru, Key::ReportSplit).as_bytes();
+        let wasm = |text: &[u8]| [b"\0asm".as_slice(), text, b"\x01\x02"].concat();
+        let other = |name: &str| (name.to_owned(), wasm(b"other"));
+        let with = |name: &str| (name.to_owned(), wasm(canary));
+        assert_eq!(
+            strings_in_parts(&wasm(b"main"), &[other("chunk_1.wasm"), with("split_book.wasm")]),
+            Ok(())
+        );
+        let in_main = strings_in_parts(&wasm(canary), &[with("split_book.wasm")]);
+        assert!(in_main.is_err_and(|error| error.contains("в главном модуле")));
+        let nowhere = strings_in_parts(&wasm(b"main"), &[other("split_book.wasm")]);
+        assert!(nowhere.is_err_and(|error| error.contains("ни в одной части")));
     }
 
     /// Импорты и экспорты читаются из настоящего wasm.
