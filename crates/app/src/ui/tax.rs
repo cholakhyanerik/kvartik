@@ -37,7 +37,7 @@ use kvartik_core::tax::turnover::{self, Books, Leaving, Line, QuarterTax, Regime
 use leptos::prelude::*;
 
 use super::annual::{AnnualCard, AnnualEntry, AnnualPage};
-use super::deadlines::{DeadlineReminder, DeadlinesEntry, DeadlinesPage, shift_note};
+use super::deadlines::{DeadlineReminder, DeadlinesEntry, DeadlinesPage};
 use super::backup::{BackupChip, Backups};
 use super::documents::{Documents, SettlementReminder};
 use super::icon::{Icon, icon};
@@ -364,7 +364,7 @@ fn Card(ctx: Ctx) -> impl IntoView {
                         }
                     }}</span>
                     <span class="hero-sum">{move || drams(lang.get(), sum)}</span>
-                    {deadline.map(|deadline| move || shift_note(lang.get(), deadline.by_law).map(|note| view! {
+                    {deadline.map(|deadline| move || deadlines::moved(lang.get(), deadline.kind, deadline.by_law).map(|note| view! {
                         <span class="hero-note">{note}</span>
                     }))}
                     {note.map(|note| view! { <span class="hero-note">{move || note.text(lang.get())}</span> })}
@@ -687,7 +687,7 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
         {move || closing.with(Option::is_none).then(|| deadline.get()).flatten().map(|deadline| view! {
             <div class="tax-deadline">
                 <p>{move || fill(t(lang.get(), Key::TaxDeadline), &[&i18n::date(lang.get(), deadline.day)])}</p>
-                {move || shift_note(lang.get(), deadline.by_law).map(|note| view! { <p class="hint">{note}</p> })}
+                {move || deadlines::moved(lang.get(), deadline.kind, deadline.by_law).map(|note| view! { <p class="hint">{note}</p> })}
             </div>
         })}
         {move || tax.get().map(|tax| view! { <Quarterly lang tax /> })}

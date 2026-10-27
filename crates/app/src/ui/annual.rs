@@ -21,13 +21,12 @@ use kvartik_core::tax::annual::{
     self, Annual, Fixed, Health, HealthOut, HealthUnclear, Missing, Saving, Social, SocialOut, Stamp, Status,
     Total,
 };
-use kvartik_core::tax::deadlines;
+use kvartik_core::tax::deadlines::{self, Kind};
 use kvartik_core::tax::rules::{self, HealthBy};
 use kvartik_core::tax::turnover::Leaving;
 use leptos::prelude::*;
 
 use super::backup::BackupChip;
-use super::deadlines::shift_note;
 use super::icon::{Icon, icon};
 use super::ledger::tax_part;
 use super::route::{Router, Screen};
@@ -95,7 +94,7 @@ pub fn AnnualCard(ctx: tax::Ctx) -> impl IntoView {
                         <span class="annual-label">
                             {move || fill(t(lang.get(), Key::AnnualDue), &[&i18n::date(lang.get(), deadlines::last_day(due))])}
                         </span>
-                        {move || shift_note(lang.get(), due).map(|note| view! { <span class="annual-note">{note}</span> })}
+                        {move || deadlines::moved(lang.get(), Kind::Annual(year), due).map(|note| view! { <span class="annual-note">{note}</span> })}
                     })}
                     {total.sum.map(|sum| view! { <span class="annual-sum">{move || drams(lang.get(), sum)}</span> })}
                     {saving.map(|saving| view! {
@@ -133,7 +132,7 @@ pub fn AnnualEntry(ctx: tax::Ctx) -> impl IntoView {
                                     <span class="entry-meta">
                                         {total.due.map(|due| view! {
                                             <span>{move || fill(t(lang.get(), Key::AnnualDue), &[&i18n::date(lang.get(), deadlines::last_day(due))])}</span>
-                                            {move || shift_note(lang.get(), due).map(|note| view! { <span>{note}</span> })}
+                                            {move || deadlines::moved(lang.get(), Kind::Annual(year), due).map(|note| view! { <span>{note}</span> })}
                                         })}
                                         {(!total.complete).then(|| view! { <span>{tr(lang, Key::AnnualPartialShort)}</span> })}
                                     </span>
@@ -301,6 +300,7 @@ fn Summary(lang: ReadSignal<Lang>, annual: Annual, today: Option<Date>) -> impl 
     // (`tax::deadlines`, задача 21).
     let by_law = total.due;
     let due = by_law.map(deadlines::last_day);
+    let kind = Kind::Annual(annual.year);
     let passed = due.zip(today).is_some_and(|(due, today)| due < today);
     view! {
         <div class="hero-card">
@@ -313,7 +313,7 @@ fn Summary(lang: ReadSignal<Lang>, annual: Annual, today: Option<Date>) -> impl 
                     }}
                 </span>
             })}
-            {by_law.map(|by_law| move || shift_note(lang.get(), by_law).map(|note| view! {
+            {by_law.map(|by_law| move || deadlines::moved(lang.get(), kind, by_law).map(|note| view! {
                 <span class="hero-note">{note}</span>
             }))}
             <span class="hero-label">{tr(lang, Key::AnnualSumOf)}</span>

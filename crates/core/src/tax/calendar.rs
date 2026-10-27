@@ -174,9 +174,7 @@ fn common_lines(lang: Lang, deadline: Deadline, lines: &mut Vec<String>) {
     if matches!(deadline.kind, Kind::Declaration(_)) {
         lines.push(t(lang, Key::DeadlinesDeclarationAbout).to_owned());
     }
-    if deadline.day != deadline.by_law {
-        lines.push(fill(t(lang, Key::DeadlineShifted), &[&i18n::date(lang, deadline.by_law)]));
-    }
+    lines.extend(deadlines::moved(lang, deadline.kind, deadline.by_law));
     if tax_payment(deadline.kind) {
         lines.push(t(lang, Key::DeadlinesPayEarly).to_owned());
     }

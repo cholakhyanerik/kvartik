@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.62",
+      "date": "2026-10-27",
+      "hy": [
+        "Ոչ աշխատանքային օրից տեղափոխված հայտարարության և հայտարարագրի ներկայացման ժամկետն այլևս վերապահում չունի. ՊԵԿ-ն ինքն է այդպիսի ժամկետները տեղափոխում։ Վճարման ժամկետների դեպքում ծրագիրը դեռ խորհուրդ է տալիս վճարել մինչև օրենքով նշված օրը։"
+      ],
+      "ru": [
+        "Перенесённый с нерабочего дня срок подачи заявления и декларации больше не идёт с оговоркой: ՊԵԿ сам переносит такие сроки. У сроков уплаты программа по-прежнему советует заплатить до дня по закону."
+      ],
+      "en": [
+        "A filing deadline moved off a non-working day, for the application or the declaration, no longer comes with a caveat: the SRC moves such deadlines itself. For payment deadlines the app still advises paying by the day the law names."
+      ]
+    },
+    {
       "version": "0.0.61",
       "date": "2026-10-27",
       "hy": [

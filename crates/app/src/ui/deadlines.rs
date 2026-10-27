@@ -49,15 +49,6 @@ pub fn DeadlinesScreen(ctx: tax::Ctx, router: Router) -> impl IntoView {
     }
 }
 
-/// Слова под перенесённым днём: с какого дня по закону перенесён и что
-/// надёжнее успеть до него (`tax::deadlines`, «Перенос»: перенос — прочтение
-/// закона). `None` — день не переносился. Окно пишет их везде, где
-/// показывает перенесённый день (ревью задачи 21).
-pub(super) fn shift_note(lang: Lang, by_law: Date) -> Option<String> {
-    let day = deadlines::last_day(by_law);
-    (day != by_law).then(|| fill(t(lang, Key::DeadlineShifted), &[&i18n::date(lang, by_law)]))
-}
-
 /// Насколько близок срок — словами.
 fn when(lang: Lang, when: When, day: Date) -> String {
     match when {
@@ -110,7 +101,7 @@ pub fn DeadlineReminder(ctx: tax::Ctx) -> impl IntoView {
                             <a href=place(deadline.kind).href()>
                                 <span class="reminder">{move || when(lang.get(), soon, deadline.day)}</span>
                                 <span>{move || what(lang.get(), deadline.kind)}</span>
-                                {move || shift_note(lang.get(), by_law).map(|note| view! { <span>{note}</span> })}
+                                {move || deadlines::moved(lang.get(), deadline.kind, by_law).map(|note| view! { <span>{note}</span> })}
                                 {overdue.then(|| view! { <span>{tr(lang, Key::TaxCloseReminder)}</span> })}
                             </a>
                         </li>
@@ -165,7 +156,6 @@ pub fn DeadlinesEntry(ctx: tax::Ctx) -> impl IntoView {
 /// слова срока в узкий столбец (глазной прогон задачи 21).
 #[component]
 fn Row(lang: ReadSignal<Lang>, deadline: Deadline, soon: Option<When>) -> impl IntoView {
-    let shifted = (deadline.day != deadline.by_law).then_some(deadline.by_law);
     let soon = soon.filter(|_| !deadline.done);
     view! {
         <li class="deadline">
@@ -178,9 +168,7 @@ fn Row(lang: ReadSignal<Lang>, deadline: Deadline, soon: Option<When>) -> impl I
                     {deadline.done.then(|| view! { <span class="deadline-done">{tr(lang, Key::DeadlineDone)}</span> })}
                     <span class="entry-meta">
                         <span>{move || what(lang.get(), deadline.kind)}</span>
-                        {shifted.map(|by_law| view! {
-                            <span>{move || fill(t(lang.get(), Key::DeadlineShifted), &[&i18n::date(lang.get(), by_law)])}</span>
-                        })}
+                        {move || deadlines::moved(lang.get(), deadline.kind, deadline.by_law).map(|note| view! { <span>{note}</span> })}
                     </span>
                 </span>
                 {icon(Icon::Forward)}

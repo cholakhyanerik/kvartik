@@ -137,6 +137,47 @@ fn the_built_in_calendar_shifts_by_the_law() {
     assert!(wrong.is_empty(), "встроенный календарь: {wrong:#?}");
 }
 
+/// Перенесённый срок подачи — без оговорки: так переносит и ՊԵԿ. Где к сроку
+/// платят — что заплатить надёжнее до дня по закону: перенос уплаты ՊԵԿ не
+/// подтверждал («Перенос»). У рабочего дня слов нет. 1 ноября 2026 года —
+/// воскресенье, 20 февраля 2027 года — суббота, 20 апреля 2027 года —
+/// вторник (дни недели сверены стандартной библиотекой Python).
+#[test]
+fn a_moved_day_warns_only_where_paid() {
+    let (sunday, saturday, tuesday) = (day(2026, 11, 1), day(2027, 2, 20), day(2027, 4, 20));
+    let cases = [
+        (Kind::Declaration(2025), sunday, Some(false)),
+        (Kind::Application(2027), saturday, Some(false)),
+        (Kind::Turnover(quarter(2027, 1)), saturday, Some(true)),
+        (Kind::Annual(2026), saturday, Some(true)),
+        (Kind::HealthYear(2026), sunday, Some(true)),
+        (Kind::HealthMonth { year: 2026, month: 10 }, sunday, Some(true)),
+        (Kind::Annual(2026), tuesday, None),
+        (Kind::Application(2027), tuesday, None),
+    ];
+    let mut wrong = Vec::new();
+    for lang in [Lang::Am, Lang::Ru, Lang::En] {
+        for (kind, by_law, pays) in cases {
+            let key = match pays {
+                Some(true) => Some(Key::DeadlineShiftedPay),
+                Some(false) => Some(Key::DeadlineShifted),
+                None => None,
+            };
+            let expected = key.map(|key| fill(t(lang, key), &[&i18n::date(lang, by_law)]));
+            let got = moved(lang, kind, by_law);
+            if got != expected {
+                wrong.push(format!("{lang:?} {kind:?} {by_law:?}: {got:?} вместо {expected:?}"));
+            }
+        }
+        // Оговорка — только у уплаты: слова о ней есть в одной строке из двух.
+        let warns = |key| ["надёжнее", "safer", "ապահով"].iter().any(|word| t(lang, key).contains(word));
+        if warns(Key::DeadlineShifted) || !warns(Key::DeadlineShiftedPay) {
+            wrong.push(format!("{lang:?}: оговорка не у той строки"));
+        }
+    }
+    assert!(wrong.is_empty(), "слова о переносе: {wrong:#?}");
+}
+
 /// Срок квартала — 20-е число месяца после него (НК 261(1), 262(1)),
 /// а выходной — понедельник; до правила — срока нет.
 #[test]
