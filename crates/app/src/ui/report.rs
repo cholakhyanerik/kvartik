@@ -26,6 +26,7 @@ use leptos::prelude::*;
 use super::backup::BackupChip;
 use super::icon::{Icon, icon};
 use super::ledger::tax_part;
+use super::license::{ReportLocked, report_locked};
 use super::route::{Router, Screen};
 use super::split::screen;
 use super::storage::error_key;
@@ -90,6 +91,11 @@ pub fn ReportPage(ctx: tax::Ctx) -> impl IntoView {
             .flatten()
     });
     let unreadable = Memo::new(move |_| sources.closings.with(|_, unreadable| unreadable));
+    // Числа квартала — по сроку лицензии (задача 25): пока срок идёт —
+    // любого, после — кончившегося в срок.
+    ctx.licenses.watch(ctx.base);
+    let access = Memo::new(move |_| ctx.licenses.access(sources.profiles));
+    let locked = Memo::new(move |_| report_locked(ctx.licenses, access.get(), quarter.get(), ctx.today));
     let last = RwSignal::new(None::<Copied>);
     // Другой квартал — прежнее «скопировано» не о нём.
     Effect::watch(move || quarter.get(), move |_, _, _| last.set(None), false);
@@ -116,11 +122,18 @@ pub fn ReportPage(ctx: tax::Ctx) -> impl IntoView {
                 .map(|alert| view! { <p role="alert">{move || alert.text(lang.get())}</p> })
                 .collect_view();
             match found {
-                Ok(ready) => view! {
-                    {said}
-                    <Form lang ready shares today=ctx.today last />
-                }
-                .into_any(),
+                Ok(ready) => match locked.get() {
+                    Some(today) => view! {
+                        {said}
+                        <ReportLocked lang access=access.get() today />
+                    }
+                    .into_any(),
+                    None => view! {
+                        {said}
+                        <Form lang ready shares today=ctx.today last />
+                    }
+                    .into_any(),
+                },
                 Err(missing) => {
                     let key = match missing {
                         Missing::Left => Key::ReportLeft,

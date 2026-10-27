@@ -43,7 +43,7 @@ pub(super) fn profile() -> ProfileData {
 
 /// Американская фирма: документы — в долларах, по-английски, оплата через
 /// 15 дней.
-fn acme() -> ClientData {
+pub(super) fn acme() -> ClientData {
     ClientData {
         name: line("Acme Inc."),
         country: Country::from_code("US"),

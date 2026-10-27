@@ -38,6 +38,8 @@ pub enum Screen {
     Profile,
     /// Резервная копия и хранение данных — экран внутри профиля.
     Backup,
+    /// Лицензия и пробный период — экран внутри профиля (задача 25).
+    License,
 }
 
 /// Начало адреса документа: дальше — его идентификатор.
@@ -45,7 +47,7 @@ const DOCUMENT: &str = "#/documents/";
 
 impl Screen {
     /// Экраны без параметров — в порядке разделов.
-    pub const PLAIN: [Screen; 10] = [
+    pub const PLAIN: [Screen; 11] = [
         Screen::Home,
         Screen::Documents,
         Screen::Ledger,
@@ -56,6 +58,7 @@ impl Screen {
         Screen::Report,
         Screen::Profile,
         Screen::Backup,
+        Screen::License,
     ];
 
     /// Адрес экрана — для ссылок. У главного — `#/`, а не пустой: пустая
@@ -73,6 +76,7 @@ impl Screen {
             Screen::Report => "#/report".to_owned(),
             Screen::Profile => "#/profile".to_owned(),
             Screen::Backup => "#/backup".to_owned(),
+            Screen::License => "#/license".to_owned(),
         }
     }
 
@@ -98,12 +102,12 @@ impl Screen {
         }
     }
 
-    /// Раздел, который подсвечен в меню на этом экране: копия — часть
-    /// профиля, годовые платежи, сроки и числа для расчёта — налога,
+    /// Раздел, который подсвечен в меню на этом экране: копия и лицензия —
+    /// часть профиля, годовые платежи, сроки и числа для расчёта — налога,
     /// документ — раздела документов.
     pub const fn section(self) -> Screen {
         match self {
-            Screen::Backup => Screen::Profile,
+            Screen::Backup | Screen::License => Screen::Profile,
             Screen::Annual | Screen::Deadlines | Screen::Report => Screen::Tax,
             Screen::Document(_) => Screen::Documents,
             other => other,
@@ -123,6 +127,7 @@ impl Screen {
             Screen::Report => "report",
             Screen::Profile => "profile",
             Screen::Backup => "backup",
+            Screen::License => "license",
         }
     }
 }
@@ -237,6 +242,9 @@ mod tests {
         assert_eq!(document.page(), Screen::Documents);
         assert_eq!(document.id(), "documents");
         assert_eq!(Screen::Backup.page(), Screen::Backup);
+        assert_eq!(Screen::License.section(), Screen::Profile);
+        assert_eq!(Screen::License.page(), Screen::License);
+        assert_eq!(Screen::License.href(), "#/license");
         for screen in [Screen::Home, Screen::Documents, Screen::Ledger, Screen::Clients, Screen::Tax, Screen::Profile] {
             assert_eq!(screen.section(), screen);
             assert_eq!(screen.page(), screen);

@@ -27,6 +27,7 @@ mod annual;
 mod documents;
 mod install;
 mod ledger;
+pub(super) mod license;
 mod report;
 mod share;
 mod tax;

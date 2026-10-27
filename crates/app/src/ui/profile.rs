@@ -36,6 +36,7 @@ use super::form::{
     AreaField, CURRENCIES, FieldError, Forms, TextField, currency_code, currency_key, optional,
 };
 use super::icon::{Icon, icon};
+use super::license::Licenses;
 use super::route::{Router, Screen};
 use super::split::{screen, split};
 use super::storage::error_key;
@@ -182,6 +183,8 @@ struct Ctx {
     focus: RwSignal<Option<Part>>,
     /// Открытые формы окна: форма профиля отмечается в них, пока открыта.
     forms: Forms,
+    /// Ключи лицензии: ИНН, на который выдан ключ (задача 25).
+    licenses: Licenses,
     /// Сегодня — один раз (Архитектура, «Время — параметр»): по нему
     /// проверяется год рождения и берутся правила налога.
     today: Option<Date>,
@@ -193,6 +196,7 @@ struct Ctx {
 pub fn ProfileSection(
     lang: ReadSignal<Lang>,
     profiles: Profiles,
+    licenses: Licenses,
     base: Base,
     backups: Backups,
     router: Router,
@@ -207,6 +211,7 @@ pub fn ProfileSection(
         saved: RwSignal::new(false),
         focus: RwSignal::new(None),
         forms,
+        licenses,
         today: clock::today(),
     };
     // Копию восстановили — профиль в базе мог стать другим или появиться.
@@ -248,6 +253,7 @@ fn ProfileBody(ctx: Ctx) -> impl IntoView {
         saved,
         focus,
         forms,
+        licenses,
         today,
     } = ctx;
     let open = move |part: Option<Part>| {
@@ -266,7 +272,7 @@ fn ProfileBody(ctx: Ctx) -> impl IntoView {
             State::Ready(profile) if editing.get() => {
                 let data = profile.map(|profile| profile.data().clone());
                 let focus = focus.get_untracked();
-                view! { <ProfileForm lang data profiles base backups editing saved forms today focus /> }
+                view! { <ProfileForm lang data profiles licenses base backups editing saved forms today focus /> }
                     .into_any()
             }
             State::Ready(Some(profile)) => view! {
@@ -771,6 +777,7 @@ fn ProfileForm(
     lang: ReadSignal<Lang>,
     data: Option<ProfileData>,
     profiles: Profiles,
+    licenses: Licenses,
     base: Base,
     backups: Backups,
     editing: RwSignal<bool>,
@@ -781,6 +788,8 @@ fn ProfileForm(
 ) -> impl IntoView {
     forms.hold();
     let form = Form::new(data.as_ref(), profiles.picture);
+    let saved_tin = data.as_ref().and_then(|data| data.tin.clone());
+    licenses.watch(base);
     // Открыли по строке итога — к её группе полей; после кадра: к нему
     // форма уже в странице.
     if let Some(part) = focus {
@@ -838,7 +847,7 @@ fn ProfileForm(
 
     view! {
         <form class="profile" on:submit=submit novalidate>
-            <Requisites lang form />
+            <Requisites lang form licenses saved_tin />
             <Accounts lang form />
             <Activities lang form today />
             <PersonFields lang form today />
@@ -913,10 +922,24 @@ async fn save(store: &Store, data: ProfileData, choice: &LogoChoice) -> Result<P
 }
 
 /// Реквизиты: имя и адрес на трёх языках, ՀՎՀՀ, регистрация, связь,
-/// логотип.
+/// логотип. Под ՀՎՀՀ — сразу при вводе: ключ лицензии выдан на сохранённый
+/// ИНН, и с другим он не откроет выпуск (задача 25); сохранить это не мешает
+/// — данные не запираются (Правило 2).
 #[component]
-fn Requisites(lang: ReadSignal<Lang>, form: Form) -> impl IntoView {
+fn Requisites(lang: ReadSignal<Lang>, form: Form, licenses: Licenses, saved_tin: Option<Tin>) -> impl IntoView {
     let tried = form.tried;
+    let tin_license = move || {
+        let saved = saved_tin.clone()?;
+        let same = form.tin.with(|typed| Tin::parse(typed).is_ok_and(|tin| tin == saved));
+        (!same && licenses.issued_to(&saved)).then(|| {
+            let number = saved.as_str().to_owned();
+            view! {
+                <p class="warning" role="status">
+                    {move || fill(t(lang.get(), Key::ProfileTinLicense), &[&number])}
+                </p>
+            }
+        })
+    };
     view! {
         <fieldset id=Part::Requisites.id()>
             <legend>{tr(lang, Key::ProfileRequisites)}</legend>
@@ -935,6 +958,7 @@ fn Requisites(lang: ReadSignal<Lang>, form: Form) -> impl IntoView {
                 max=Tin::DIGITS
                 check=|text| (!text.trim().is_empty() && Tin::parse(text).is_err()).then_some(Key::TinInvalid)
             />
+            {tin_license}
             <TextField
                 lang
                 label=Key::ProfileRegistration

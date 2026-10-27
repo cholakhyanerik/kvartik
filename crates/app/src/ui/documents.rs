@@ -52,6 +52,7 @@ use super::clients::Clients;
 use super::form::{CURRENCIES, Forms, TextField, WizardHead, currency_code, currency_key};
 use super::icon::{Icon, icon};
 use super::ledger::{IncomeActivity, equivalent, rate_problem};
+use super::license::{self, IssueLocked, Licenses};
 use super::paper::{PaperPanel, Request};
 use super::profile::Profiles;
 use super::route::{Router, Screen};
@@ -385,6 +386,8 @@ struct Ctx {
     clients: Clients,
     /// Профиль — его коды: вид деятельности дохода (задача 19).
     profiles: Profiles,
+    /// Ключи лицензии: выпуск — по сроку (задача 25).
+    licenses: Licenses,
     base: Base,
     backups: Backups,
     mode: RwSignal<Mode>,
@@ -414,6 +417,7 @@ pub fn DocumentsScreen(
     documents: Documents,
     clients: Clients,
     profiles: Profiles,
+    licenses: Licenses,
     base: Base,
     backups: Backups,
     router: Router,
@@ -424,6 +428,7 @@ pub fn DocumentsScreen(
         documents,
         clients,
         profiles,
+        licenses,
         base,
         backups,
         mode: documents.mode,
@@ -1521,6 +1526,11 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
         let day = form.service_date.with(|text| Date::from_iso(text)).or(ctx.today);
         day.is_some_and(|day| ctx.profiles.with(|profile| turnover::activity_needed(profile, day)))
     });
+    // Выпуск — по сроку лицензии (задача 25): кончился — вместо
+    // «Выпустить» слова и ключ, а черновик сохраняется.
+    ctx.licenses.watch(ctx.base);
+    let access = Memo::new(move |_| ctx.licenses.access(ctx.profiles));
+    let locked = Memo::new(move |_| license::issue_locked(ctx.licenses, access.get(), ctx.today));
     // Выбранный клиент — из живых.
     let chosen = move || {
         let chosen = form.client.get()?;
@@ -1570,7 +1580,7 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
         }
     };
     let submit = move |issue: bool| {
-        if form.busy.get_untracked() {
+        if form.busy.get_untracked() || (issue && locked.get_untracked().is_some()) {
             return;
         }
         form.tried.set(true);
@@ -2058,17 +2068,28 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                 }
                 .into_any()),
                 _ => Some(view! {
-                    <p class="hint">{tr(lang, Key::DocIssueHint)}</p>
+                    {move || match locked.get() {
+                        Some(today) => view! { <IssueLocked lang access=access.get() today /> }.into_any(),
+                        None => view! { <p class="hint">{tr(lang, Key::DocIssueHint)}</p> }.into_any(),
+                    }}
                     <div class="actions">
+                        {move || locked.get().is_none().then(|| view! {
+                            <button
+                                type="button"
+                                class:wide=wizard
+                                disabled=move || form.busy.get()
+                                on:click=move |_| submit(true)
+                            >
+                                {tr(lang, Key::DocIssue)}
+                            </button>
+                        })}
+                        // Выпуск заперт — главное действие формы черновик.
                         <button
-                            type="button"
-                            class:wide=wizard
+                            type="submit"
+                            class:secondary=move || locked.get().is_none()
+                            class:wide=move || wizard && locked.get().is_some()
                             disabled=move || form.busy.get()
-                            on:click=move |_| submit(true)
                         >
-                            {tr(lang, Key::DocIssue)}
-                        </button>
-                        <button type="submit" class="secondary" disabled=move || form.busy.get()>
                             {tr(lang, Key::DocSaveDraft)}
                         </button>
                         {id.map(|_| view! {

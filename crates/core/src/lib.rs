@@ -11,6 +11,7 @@
 pub mod doc;
 pub mod format;
 pub mod i18n;
+pub mod license;
 pub mod model;
 pub mod release;
 pub mod tax;

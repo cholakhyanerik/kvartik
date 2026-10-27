@@ -16,6 +16,7 @@ mod home;
 mod icon;
 mod lang;
 mod ledger;
+mod license;
 mod nav;
 mod onboarding;
 pub mod panic;
@@ -45,6 +46,7 @@ use home::Home;
 use icon::{Icon, icon};
 use lang::{LangSwitch, WindowLang};
 use ledger::{LedgerScreen, Operations};
+use license::{LicenseEntry, LicenseScreen, Licenses};
 use nav::Nav;
 use onboarding::Welcome;
 use profile::{ProfileSection, Profiles};
@@ -115,8 +117,8 @@ impl Base {
 
 /// Корень окна (дизайн «Kvartik Design»): меню разделов и экраны —
 /// главный, счета и акты, книга, клиенты, налог и внутри него годовые
-/// платежи, сроки и числа для расчёта, профиль и копия внутри него
-/// (`ui/route.rs`). Все экраны —
+/// платежи, сроки и числа для расчёта, профиль и внутри него копия
+/// и лицензия (`ui/route.rs`). Все экраны —
 /// в странице, открытый виден, остальные спрятаны: начатое в форме не
 /// пропадает при переходе. Содержимое счетов, книги, клиентов, налога,
 /// годовых платежей и профиля — частями wasm с первого показа
@@ -167,7 +169,10 @@ pub fn App() -> impl IntoView {
         profiles,
         closings,
     };
-    let tax = tax::Ctx::new(lang, sources, base, backups);
+    // Пробный период — с первого запуска на устройстве (задача 25); ключи
+    // читают части, которым они нужны (`ui/license.rs`).
+    let licenses = Licenses::start(clock::today());
+    let tax = tax::Ctx::new(lang, sources, base, backups, licenses);
     leptos::task::spawn_local(async move {
         match Store::open(move |event| storage.update(|state| state.apply(event))).await {
             Ok(store) => {
@@ -228,7 +233,7 @@ pub fn App() -> impl IntoView {
                     <Home lang router program backups profiles documents clients tax />
                 </section>
                 <section id=Screen::Documents.id() class="screen" hidden=hidden(Screen::Documents)>
-                    <DocumentsScreen lang documents clients profiles base backups router forms />
+                    <DocumentsScreen lang documents clients profiles licenses base backups router forms />
                 </section>
                 <section id=Screen::Ledger.id() class="screen" hidden=hidden(Screen::Ledger)>
                     <LedgerScreen lang documents clients profiles operations base backups router forms />
@@ -253,11 +258,14 @@ pub fn App() -> impl IntoView {
                 <section id=Screen::Profile.id() class="screen" hidden=hidden(Screen::Profile)>
                     <h1 tabindex="-1">{tr(lang, Key::ProfileTitle)}</h1>
                     <BackupChip lang backups nudge=true />
-                    <ProfileSection lang profiles base backups router forms />
+                    <ProfileSection lang profiles licenses base backups router forms />
                     <h2>{tr(lang, Key::ProfileApp)}</h2>
                     <ul class="list">
                         <li>
                             <BackupEntry lang backups />
+                        </li>
+                        <li>
+                            <LicenseEntry lang />
                         </li>
                         <li class="setting">
                             <span class="entry-title">{tr(lang, Key::Language)}</span>
@@ -274,6 +282,9 @@ pub fn App() -> impl IntoView {
                     <h1 tabindex="-1">{tr(lang, Key::BackupTitle)}</h1>
                     <BackupSection lang backups storage forms />
                     <StorageSection lang storage />
+                </section>
+                <section id=Screen::License.id() class="screen" hidden=hidden(Screen::License)>
+                    <LicenseScreen ctx=tax router />
                 </section>
             </main>
             {panic::debug_trigger()}

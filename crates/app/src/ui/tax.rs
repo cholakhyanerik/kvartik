@@ -42,6 +42,7 @@ use super::backup::{BackupChip, Backups};
 use super::documents::{Documents, SettlementReminder};
 use super::icon::{Icon, icon};
 use super::ledger::{Operations, tax_part};
+use super::license::{LicenseCard, LicensePage, Licenses};
 use super::profile::Profiles;
 use super::report::ReportPage;
 use super::route::{Router, Screen};
@@ -381,6 +382,9 @@ pub struct Ctx {
     pub(super) sources: Sources,
     pub(super) base: Base,
     pub(super) backups: Backups,
+    /// Ключи лицензии: числа для расчёта открыты по сроку (задача 25),
+    /// а экран лицензии — в той же части.
+    pub(super) licenses: Licenses,
     /// Сегодня — один раз (Архитектура, «Время — параметр»).
     pub(super) today: Option<Date>,
     /// Квартал экранов налога и чисел для расчёта — один на оба
@@ -389,12 +393,19 @@ pub struct Ctx {
 }
 
 impl Ctx {
-    pub fn new(lang: ReadSignal<Lang>, sources: Sources, base: Base, backups: Backups) -> Self {
+    pub fn new(
+        lang: ReadSignal<Lang>,
+        sources: Sources,
+        base: Base,
+        backups: Backups,
+        licenses: Licenses,
+    ) -> Self {
         Self {
             lang,
             sources,
             base,
             backups,
+            licenses,
             today: clock::today(),
             quarter: RwSignal::new(None),
         }
@@ -481,15 +492,19 @@ pub(super) enum Part {
     Deadlines,
     /// Содержимое экрана чисел для расчёта (`ui/report.rs`, задача 24).
     Report,
+    /// Содержимое экрана лицензии (`ui/license.rs`, задача 25).
+    License,
 }
 
 /// Карточки или экран — зовёт часть книги (`ledger::book_part`). Годовые
 /// платежи и числа для расчёта — в той же части: они считаются из книги
 /// и профиля, а своя часть делила бы с налогом почти весь код (CLAUDE.md,
-/// Правило 6).
+/// Правило 6). Лицензия — тоже: числа для расчёта открывает её срок, а
+/// карточку на главном часть книги грузит и так.
 pub(super) fn content(ctx: Ctx, part: Part) -> AnyView {
     match part {
         Part::Card => view! {
+            <LicenseCard ctx />
             <DeadlineReminder ctx />
             <SettlementReminder lang=ctx.lang documents=ctx.sources.documents today=ctx.today />
             <Card ctx />
@@ -500,6 +515,7 @@ pub(super) fn content(ctx: Ctx, part: Part) -> AnyView {
         Part::Annual => view! { <AnnualPage ctx /> }.into_any(),
         Part::Deadlines => view! { <DeadlinesPage ctx /> }.into_any(),
         Part::Report => view! { <ReportPage ctx /> }.into_any(),
+        Part::License => view! { <LicensePage ctx /> }.into_any(),
     }
 }
 

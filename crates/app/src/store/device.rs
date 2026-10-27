@@ -1,10 +1,12 @@
 //! Что знает это устройство: когда здесь в последний раз сделали копию,
-//! проверочное значение пароля копий (`DeviceKey`) и выбранный язык окна.
+//! проверочное значение пароля копий (`DeviceKey`), выбранный язык окна
+//! и день начала пробного периода (задача 25).
 //!
 //! Это не данные человека, а состояние устройства, поэтому оно лежит не
 //! в базе записей и не попадает в копию: перенесённая на новое устройство
 //! дата копии обещала бы копию, которой там не делали, а копия, открытая
-//! бухгалтером, сменила бы ему язык окна. Место — `localStorage`: он
+//! бухгалтером, сменила бы ему язык окна, а пробный период идёт «с первого
+//! запуска» на этом устройстве (`kvartik_core::license`). Место — `localStorage`: он
 //! синхронный — язык окна читается до первой отрисовки, и окно не мигает
 //! чужим языком, — и не требует новой версии базы, а стирает его браузер
 //! вместе с базой (по браузеру: данные сайта, записанные скриптом,
@@ -19,6 +21,7 @@
 
 use kvartik_core::format::backup::DeviceKey;
 use kvartik_core::i18n::Lang;
+use kvartik_core::model::date::Date;
 use kvartik_core::model::record::Timestamp;
 
 /// Записи устройства под своим префиксом: программа — под [`Device::new`],
@@ -74,6 +77,18 @@ impl Device {
         self.set("lang", lang.code())
     }
 
+    /// День, когда на этом устройстве начался пробный период; `None` —
+    /// ещё не начинался или запись не читается.
+    pub fn trial_start(&self) -> Option<Date> {
+        Date::from_iso(&self.get("trial")?)
+    }
+
+    /// Запомнить день начала пробного периода. `false` — `localStorage`
+    /// отказал.
+    pub fn set_trial_start(&self, day: Date) -> bool {
+        self.set("trial", &day.iso())
+    }
+
     fn get(&self, name: &str) -> Option<String> {
         storage()?
             .get_item(&format!("{}{name}", self.prefix))
@@ -93,7 +108,7 @@ impl Device {
     #[cfg(all(test, target_arch = "wasm32"))]
     pub(super) fn clear(&self) {
         if let Some(storage) = storage() {
-            for name in ["last_backup", "backup_key", "lang"] {
+            for name in ["last_backup", "backup_key", "lang", "trial"] {
                 let _ = storage.remove_item(&format!("{}{name}", self.prefix));
             }
         }

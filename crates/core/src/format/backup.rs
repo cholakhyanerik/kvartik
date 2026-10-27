@@ -85,6 +85,7 @@ use serde_json::value::RawValue;
 use super::{
     FIRST_VERSION, FORMAT_VERSION, FormatError, Stored, base64, decode_record, split_raw, wrap,
 };
+use crate::license::License;
 use crate::model::attachment::Attachment;
 use crate::model::client::Client;
 use crate::model::date::Date;
@@ -276,6 +277,7 @@ pub const KINDS: &[Kind] = &[
     Kind::of::<Operation>(),
     Kind::of::<Attachment>(),
     Kind::of::<Closing>(),
+    Kind::of::<License>(),
 ];
 
 fn find(kinds: &[Kind], name: &str) -> Option<Kind> {
