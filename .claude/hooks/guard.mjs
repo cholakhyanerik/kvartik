@@ -8,13 +8,17 @@
 // превращаться в разрешение. Формат — по документации Claude Code
 // (code.claude.com/docs/en/hooks, сверено 2026-10-16, Claude Code 2.1.296).
 //
-// Два запрета:
-// 1. Ключи. Пути `*.key`, `*.pem` и папка `keys/` — те же шаблоны, что
-//    в `.gitignore`. Закрытый ключ лицензий агент не читает, не создаёт и не
-//    передаёт в команды (CLAUDE.md, Правила 9 и 13). Путь, где ключ лежит на
-//    машине автора, назовёт задача 26 (`kvartik-keygen`) — он ляжет в
-//    `SECRET_PATHS`.
-// 2. Текст через PowerShell 5.1. `Set-Content`, `Add-Content`, `Out-File`,
+// Три запрета:
+// 1. Ключи. Пути `*.key`, `*.pem` и папки `keys/` и `kvartik-license/` — те
+//    же шаблоны, что в `.gitignore`. Закрытый ключ лицензий агент не читает,
+//    не создаёт и не передаёт в команды (CLAUDE.md, Правила 9 и 13).
+//    В `kvartik-license` домашнего каталога автора ключ и лежит, рядом
+//    с журналом выданных ключей (задача 26, `SECRET_DIRS`).
+// 2. `kvartik-keygen issue` без `--key`. Закрытый ключ программа берёт из
+//    `kvartik-license` сама, и пути в команде нет, а подписанный им ключ —
+//    настоящая лицензия. Ключи выпускает человек; с `--key` путь в команде
+//    есть, и его проверяет первый запрет.
+// 3. Текст через PowerShell 5.1. `Set-Content`, `Add-Content`, `Out-File`,
 //    `Tee-Object`, `[IO.File]::Write…` и перенаправление `>`/`>>` рядом
 //    с текстовым файлом проекта. PowerShell 5.1 читает файл без BOM как CP1252
 //    и пишет его обратно с BOM: армянский и кириллица становятся кракозябрами
@@ -28,9 +32,12 @@ import path from "node:path";
 
 const PROJECT = norm(process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
 
-// Пути вне шаблонов `.gitignore`, которые тоже ключ. Нормализованные
-// (`norm`): прямые слэши, нижний регистр.
-const SECRET_PATHS = [];
+// Папки, всё в которых — ключ, где бы они ни лежали. По имени, а не полным
+// путём: `~/kvartik-license`, `$HOME\kvartik-license`, `cd ~; cat
+// kvartik-license/…` и `Join-Path $HOME kvartik-license` — одна папка, а
+// полный путь поймал бы только первый. Имя редкое, и отказ — даже голому
+// слову, в отличие от `keys` (`jq keys`).
+const SECRET_DIRS = ["kvartik-license"];
 
 // Исходники крейтов из реестра читать можно и нужно (Правило 3), а в них
 // лежат тестовые `*.pem` и `*.key` чужих библиотек — это не наш ключ.
@@ -57,7 +64,7 @@ function norm(p) {
 
 function secret(p) {
   const s = norm(p);
-  if (SECRET_PATHS.some((k) => s === k || s.startsWith(k + "/"))) return true;
+  if (s.split("/").some((seg) => SECRET_DIRS.includes(seg))) return true;
   const base = s.slice(s.lastIndexOf("/") + 1);
   if (/\.(key|pem)$/.test(base) || /\.\{[^}]*\b(key|pem)\b/.test(base)) return true;
   // Голое слово «keys» (`jq keys`) — не путь: папка — только со слэшем.
@@ -120,11 +127,18 @@ function check(input) {
   const readOnly = tool === "Read" || tool === "Grep" || tool === "Glob";
   const key = paths.find((p) => secret(p) && !(readOnly && READABLE.test(norm(p))));
   if (key) {
-    return `Отказ hook'а .claude/hooks/guard.mjs: «${key}» похоже на путь к ключу (*.key, *.pem, keys/). `
+    return `Отказ hook'а .claude/hooks/guard.mjs: «${key}» похоже на путь к ключу (*.key, *.pem, keys/, kvartik-license/). `
       + "Закрытый ключ лицензий агент не читает, не создаёт и не передаёт в команды (CLAUDE.md, Правила 9 и 13). "
       + "Если это не ключ, а слово в тексте, сделайте то же другим путём: строку ищите инструментом Grep "
       + "(его образец поиска путём не считается), текст пишите инструментами Write и Edit, а не командой; "
       + "сообщение коммита — файлом: git commit -F <файл вне проекта>. Если нужен именно такой путь — скажите человеку.";
+  }
+  if (shell && paths.some((w) => /(^|[\\/])kvartik-keygen(\.exe)?$/i.test(w)) && paths.includes("issue")
+    && !paths.includes("--key")) {
+    return "Отказ hook'а .claude/hooks/guard.mjs: kvartik-keygen issue без --key подписывает ключ закрытым ключом автора "
+      + "из папки kvartik-license домашнего каталога — это настоящая лицензия. Ключи выпускает человек в своём терминале "
+      + "(CLAUDE.md, Правила 9 и 13). Проверить программу — cargo test -p kvartik-keygen или issue --key с ключом проб "
+      + "во временной папке задачи.";
   }
   if (tool === "PowerShell") {
     const cmd = String(args.command ?? "");

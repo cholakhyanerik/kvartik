@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.61",
+      "date": "2026-10-27",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել. թարմացվել է կայքը հավաքող գործիքը, իսկ լիցենզիայի բանալիները հեղինակն այժմ թողարկում է իր ծրագրով։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось: обновлён инструмент, которым собирается сайт, а ключи лицензии автор теперь выпускает своей программой."
+      ],
+      "en": [
+        "Nothing has changed in the app: the tool that builds the site has been updated, and the author now issues license keys with a dedicated program."
+      ]
+    },
+    {
       "version": "0.0.60",
       "date": "2026-10-27",
       "hy": [
