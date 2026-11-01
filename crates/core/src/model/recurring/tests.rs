@@ -89,6 +89,7 @@ fn invoice(client: &Client, date: Date, service: Date) -> Document {
         recurring: None,
         rate: None,
         activity: None,
+        income_kind: None,
     };
     Document::create(data, at(2_000))
         .expect("черновик")

@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.68",
+      "date": "2026-11-01",
+      "hy": [
+        "Եթե եկամուտը վարձակալական վճար, տոկոս, ռոյալթի կամ ակտիվի օտարում է, հաշվում, ակտում և մատյանի գրառման մեջ այժմ կարող եք ընտրել հարկի այդ տողը. հարկը կհաշվարկվի դրանով, ոչ թե գործունեության կոդով։",
+        "Այդպիսի եկամուտ ունեցող եռամսյակում ծախսի ձևը հարցնում է գործունեության տեսակը. ապրանքի և անմիջականորեն կապված ծախսերի համար նշեք կոդը, և դրանք ամբողջությամբ կմտնեն նվազեցման մեջ։"
+      ],
+      "ru": [
+        "Если доход — аренда, проценты, роялти или продажа имущества, теперь у счёта, акта и записи книги можно выбрать эту строку налога: налог посчитается по ней, а не по коду деятельности.",
+        "В квартале с таким доходом форма расхода спрашивает вид деятельности: у товара и прямых расходов укажите код, и они войдут в вычет целиком."
+      ],
+      "en": [
+        "If income is rent, interest, royalties or a sale of assets, you can now choose that tax row on an invoice, an act or a ledger entry: the tax is then calculated by that row, not by your activity code.",
+        "In a quarter with such income, the expense form asks for the activity: choose the code for goods and direct expenses, and they will count towards the deduction in full."
+      ]
+    },
+    {
       "version": "0.0.67",
       "date": "2026-11-01",
       "hy": [
@@ -287,19 +303,6 @@
       "en": [
         "Annual payments, on the Tax tab and as a card on Home: profit tax, the social payment and stamp duty for the year, due by April 20, and how much to set aside each month to have the full amount by then.",
         "The health insurance premium is there too: for 2026, and monthly from 2027. Your profile now has the IE registration date: profit tax and the social payment count from its month."
-      ]
-    },
-    {
-      "version": "0.0.48",
-      "date": "2026-10-20",
-      "hy": [
-        "Ակտ ունեցող հաշվի քարտում այլևս չկան ԿԲ փոխարժեքը և գործունեության տեսակը. եկամուտը մատյան և հարկ է գնում ակտով, ուստի դրանք նշվում են ակտում։"
-      ],
-      "ru": [
-        "В карточке счёта, по которому выпущен акт, больше нет курса ЦБ и вида деятельности: доход в книгу и налог идёт по акту, поэтому они указываются у акта."
-      ],
-      "en": [
-        "An invoice that has an act no longer offers the CBA rate and the activity: the ledger and the tax take the income from the act, so they are set on the act."
       ]
     }
   ]

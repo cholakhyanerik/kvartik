@@ -1,0 +1,24 @@
+{
+  "about": "IT и дизайн продали имущество: продажа — в обороте всех видов, и доля общих расходов у дизайна падает",
+  "checked": {
+    "by": "агент вручную по НК 258(5), 258(6), 260(1), 260(3): доля дизайна 500 000 × 300 000 / 1 000 000 = 150 000, вычет 6 % = 9 000, налог 30 000 − 9 000 = 21 000 (предел 13 500); IT 300 000 × 1 % = 3 000; продажа 400 000 × 10 % = 40 000",
+    "on": "2026-11-01",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["62.01.0", "74.10.0"]
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-07-10", "minor": 300000, "currency": "AMD", "rate_e4": null, "activity": "62.01.0", "proof": null, "nature": null},
+    {"flow": "income", "date": "2026-07-20", "minor": 300000, "currency": "AMD", "rate_e4": null, "activity": "74.10.0", "proof": null, "nature": null},
+    {"flow": "income", "date": "2026-08-10", "minor": 400000, "currency": "AMD", "rate_e4": null, "activity": null, "income_kind": "assets", "proof": null, "nature": null},
+    {"flow": "expense", "date": "2026-09-01", "minor": 500000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"}
+  ],
+  "expected": [
+    {"quarter": "2026-3", "tax": 64000, "lines": [
+      {"kind": "high_tech", "income": 300000, "tax": 3000},
+      {"kind": "assets", "income": 400000, "tax": 40000},
+      {"kind": "other", "income": 300000, "tax": 21000}
+    ]}
+  ]
+}

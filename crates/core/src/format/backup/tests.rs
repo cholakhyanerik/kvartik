@@ -52,16 +52,16 @@ fn day(year: u16, month: u8, day: u8) -> Date {
 const NOTE_ID: &str = "0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a";
 const TAG_ID: &str = "92d87e64-1ccb-46d0-93d7-917b1e773af5";
 
-/// Запись `note` в базе — в конверте текущей версии 12, как её кладёт
+/// Запись `note` в базе — в конверте текущей версии 13, как её кладёт
 /// хранилище.
 const STORED_NOTE: &str = concat!(
-    r#"{"format_version":12,"record":{"meta":{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","#,
+    r#"{"format_version":13,"record":{"meta":{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","#,
     r#""modified":1760000000000,"deleted":null},"text":"Ереван ֏"}}"#
 );
 
 /// Запись `tag` в базе: удалена.
 const STORED_TAG: &str = concat!(
-    r#"{"format_version":12,"record":{"meta":{"id":"92d87e64-1ccb-46d0-93d7-917b1e773af5","#,
+    r#"{"format_version":13,"record":{"meta":{"id":"92d87e64-1ccb-46d0-93d7-917b1e773af5","#,
     r#""modified":1760000000500,"deleted":1760000000500}}}"#
 );
 
@@ -374,8 +374,8 @@ const SAMPLE_SEALED_V11: &str = concat!(
     r#""data":"yMnKy8zNzs/Q0dLT1NXW19jZ2ts="}"#
 );
 
-/// Открытый текст копии текущей версии 12 — так её пишет эта программа,
-/// до сжатия. Выписан человеком: от версии 11 отличается номером версии
+/// Открытый текст копии версии 12 — история: так её писала 0.0.66, до
+/// сжатия. Выписан человеком: от версии 11 отличается номером версии
 /// и версией программы в шапке.
 const SAMPLE_PLAIN_V12: &str = concat!(
     r#"{"file":"kvartik-backup","format_version":12,"app_version":"0.0.66","created":1760270400000,"#,
@@ -405,9 +405,49 @@ const SAMPLE_SEALED_V12: &str = concat!(
     r#""data":"yMnKy8zNzs/Q0dLT1NXW19jZ2ts="}"#
 );
 
+/// Открытый текст копии текущей версии 13 — так её пишет эта программа,
+/// до сжатия. Выписан человеком: от версии 12 отличается номером версии
+/// и версией программы в шапке.
+const SAMPLE_PLAIN_V13: &str = concat!(
+    r#"{"file":"kvartik-backup","format_version":13,"app_version":"0.0.68","created":1760270400000,"#,
+    r#""records":["#,
+    r#"{"kind":"note","record":{"meta":{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","#,
+    r#""modified":1760000000000,"deleted":null},"text":"Ереван ֏"}},"#,
+    r#"{"kind":"tag","record":{"meta":{"id":"92d87e64-1ccb-46d0-93d7-917b1e773af5","#,
+    r#""modified":1760000000500,"deleted":1760000000500}}}"#,
+    r#"]}"#
+);
+
+/// Тот же текст, сжатый, как образцы версий 6–12, модулем `zlib` Python
+/// (`compressobj(9, DEFLATED, -15)`), а не этим кодом (2026-11-01).
+const SAMPLE_PACKED_V13: &str = concat!(
+    "dY5NasMwEIWvUmYtBcl/sn2VUspYGhVhxzaKEgpG0Bt01XuUQpe9g7vpeSoXkpJF3mbgvTcz3wLWDQQt9Cf0wfW8Q9",
+    "0fZ2BgJ7/H8Hgif3DTCK3MGeA8/xsgdmJX1amqPWEgkzqqEpkShdjEwJOevDlAe79A78ZUgHEKBOcE2gX2FHCbbkuF",
+    "rXWOZcbLThIvtDK8wazjFRVWmlxnncS0vZ+Ms+788CIGhgb6AxmPwxAZBHoO6ez69v2yfq4f6/v6dffzCjGyC1DAp9",
+    "s8TWZqRVXBpdYdLyojeJMbxRupEqBSOdryBk95xXPlxxgf4i8="
+);
+
+/// Файл копии версии 13 — с теми же солью, вектором и «шифротекстом», что
+/// у образцов прошлых версий.
+const SAMPLE_SEALED_V13: &str = concat!(
+    r#"{"file":"kvartik-backup","format_version":13,"app_version":"0.0.68","created":1760270400000,"#,
+    r#""kdf":{"name":"PBKDF2-SHA256","iterations":600000,"salt":"AAECAwQFBgcICQoLDA0ODw=="},"#,
+    r#""cipher":{"name":"AES-256-GCM","iv":"ZGVmZ2hpamtsbW5v"},"#,
+    r#""data":"yMnKy8zNzs/Q0dLT1NXW19jZ2ts="}"#
+);
+
 /// Шапка копии, которую пишет эта программа.
 fn sample_header() -> Header {
-    Header::new("0.0.66", at(1_760_270_400_000))
+    Header::new("0.0.68", at(1_760_270_400_000))
+}
+
+/// Шапка образца версии 12: так её писала 0.0.66.
+fn header_v12() -> Header {
+    Header {
+        format_version: 12,
+        app_version: "0.0.66".to_owned(),
+        created: at(1_760_270_400_000),
+    }
 }
 
 /// Шапка образца версии 11: так её писала 0.0.60.
@@ -514,7 +554,11 @@ fn sample_lock() -> Lock {
 }
 
 fn sealed_sample() -> Sealed {
-    open(SAMPLE_SEALED_V12).expect("образец файла копии открывается")
+    open(SAMPLE_SEALED_V13).expect("образец файла копии открывается")
+}
+
+fn sealed_sample_v12() -> Sealed {
+    open(SAMPLE_SEALED_V12).expect("образец файла копии версии 12 открывается")
 }
 
 fn sealed_sample_v11() -> Sealed {
@@ -545,7 +589,12 @@ fn sealed_sample_v5() -> Sealed {
     open(SAMPLE_SEALED_V5).expect("образец файла копии версии 5 открывается")
 }
 
-/// Сжатый текст образца версии 12 — так его отдаёт расшифровка.
+/// Сжатый текст образца версии 13 — так его отдаёт расшифровка.
+fn packed_sample_v13() -> Vec<u8> {
+    base64::decode(SAMPLE_PACKED_V13).expect("образец — base64")
+}
+
+/// Сжатый текст образца версии 12 — так его отдавала расшифровка 0.0.66.
 fn packed_sample_v12() -> Vec<u8> {
     base64::decode(SAMPLE_PACKED_V12).expect("образец — base64")
 }
@@ -581,7 +630,7 @@ fn packed_sample_v6() -> Vec<u8> {
 }
 
 /// Текст, сжатый, как его сжимает [`pack`]: так его отдаёт расшифровка
-/// копии версий 6–12.
+/// копии версий 6–13.
 fn packed(text: &str) -> Vec<u8> {
     miniz_oxide::deflate::compress_to_vec(text.as_bytes(), PACK_LEVEL)
 }
@@ -622,11 +671,11 @@ fn stored_pair() -> [Raw<'static>; 2] {
 /// же значений — слово в слово образец. Поменялась запись — это новая
 /// версия формата (Правило 5), а не правка образца.
 #[test]
-fn sealed_sample_v12_is_pinned() {
+fn sealed_sample_v13_is_pinned() {
     let sealed = sealed_sample();
     assert_eq!(sealed.header(), &sample_header());
-    assert_eq!(sealed.header().format_version(), 12);
-    assert_eq!(sealed.header().app_version(), "0.0.66");
+    assert_eq!(sealed.header().format_version(), 13);
+    assert_eq!(sealed.header().app_version(), "0.0.68");
     assert_eq!(sealed.header().created(), at(1_760_270_400_000));
     assert_eq!(sealed.lock(), &sample_lock());
     assert_eq!(sealed.ciphertext(), (200..220).collect::<Vec<u8>>());
@@ -636,11 +685,11 @@ fn sealed_sample_v12_is_pinned() {
             &sample_lock(),
             &(200..220).collect::<Vec<u8>>()
         ),
-        SAMPLE_SEALED_V12
+        SAMPLE_SEALED_V13
     );
 }
 
-/// Файлы версий 1–11 открываются этой программой с той же шапкой
+/// Файлы версий 1–12 открываются этой программой с той же шапкой
 /// и замком.
 #[test]
 fn older_sealed_samples_still_open() {
@@ -656,6 +705,7 @@ fn older_sealed_samples_still_open() {
         (sealed_sample_v9(), header_v9()),
         (sealed_sample_v10(), header_v10()),
         (sealed_sample_v11(), header_v11()),
+        (sealed_sample_v12(), header_v12()),
     ] {
         assert_eq!(sealed.header(), &header);
         assert_eq!(sealed.lock(), &sample_lock());
@@ -667,8 +717,8 @@ fn older_sealed_samples_still_open() {
 /// а запись тех же записей — слово в слово образец; сжатое [`pack`]
 /// разжимается в тот же текст.
 #[test]
-fn plain_sample_v12_is_pinned() {
-    let entries = read(KINDS_UNDER_TEST, &sealed_sample(), &packed_sample_v12())
+fn plain_sample_v13_is_pinned() {
+    let entries = read(KINDS_UNDER_TEST, &sealed_sample(), &packed_sample_v13())
         .expect("образец читается");
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].kind(), "note");
@@ -679,15 +729,15 @@ fn plain_sample_v12_is_pinned() {
     assert_eq!(entries[1].kind(), "tag");
     assert_eq!(entries[1].meta().deleted(), Some(at(1_760_000_000_500)));
     assert_eq!(entries[1].stored(), STORED_TAG);
-    assert_eq!(plaintext(&sample_header(), &entries), SAMPLE_PLAIN_V12);
+    assert_eq!(plaintext(&sample_header(), &entries), SAMPLE_PLAIN_V13);
     let packed = pack(&sample_header(), &entries);
     assert_eq!(
         unpack(&packed, MAX_PLAIN_BYTES).ok().as_deref(),
-        Some(SAMPLE_PLAIN_V12.as_bytes())
+        Some(SAMPLE_PLAIN_V13.as_bytes())
     );
 }
 
-/// Открытый текст версий 1–5 — несжатый — и сжатый версий 6–11 читается в те
+/// Открытый текст версий 1–5 — несжатый — и сжатый версий 6–12 читается в те
 /// же записи, и в базу они ложатся уже в текущей версии.
 #[test]
 fn older_plain_samples_still_read() {
@@ -752,6 +802,14 @@ fn older_plain_samples_still_read() {
         .expect("образец версии 11 читается");
     let stored: Vec<String> = entries.iter().map(Entry::stored).collect();
     assert_eq!(stored, [STORED_NOTE, STORED_TAG], "версия 11");
+    assert_eq!(
+        unpack(&packed_sample_v12(), MAX_PLAIN_BYTES).ok().as_deref(),
+        Some(SAMPLE_PLAIN_V12.as_bytes())
+    );
+    let entries = read(KINDS_UNDER_TEST, &sealed_sample_v12(), &packed_sample_v12())
+        .expect("образец версии 12 читается");
+    let stored: Vec<String> = entries.iter().map(Entry::stored).collect();
+    assert_eq!(stored, [STORED_NOTE, STORED_TAG], "версия 12");
 }
 
 /// Записи базы версии 1 собираются в копию текущей версии.
@@ -768,7 +826,7 @@ fn records_of_version_1_go_into_a_current_backup() {
     assert_eq!(collected.unreadable(), [] as [String; 0]);
     assert_eq!(
         plaintext(&sample_header(), collected.entries()),
-        SAMPLE_PLAIN_V12
+        SAMPLE_PLAIN_V13
     );
 }
 
@@ -807,7 +865,7 @@ fn empty_base_makes_an_empty_backup() {
     let text = plaintext(&sample_header(), collected.entries());
     assert_eq!(
         text,
-        r#"{"file":"kvartik-backup","format_version":12,"app_version":"0.0.66","created":1760270400000,"records":[]}"#
+        r#"{"file":"kvartik-backup","format_version":13,"app_version":"0.0.68","created":1760270400000,"records":[]}"#
     );
     let packed = pack(&sample_header(), collected.entries());
     let entries = read(&[], &sealed_sample(), &packed).expect("пустая копия читается");
@@ -892,8 +950,8 @@ fn open_tells_foreign_newer_and_damaged_apart() {
     for text in [
         format!(r#"{{"file":"kvartik-backup","format_version":{next}}}"#),
         format!(r#"{{"format_version":{next},"file":"kvartik-backup","wings":{{"left":1}}}}"#),
-        SAMPLE_SEALED_V12.replace(
-            r#""format_version":12"#,
+        SAMPLE_SEALED_V13.replace(
+            r#""format_version":13"#,
             &format!(r#""format_version":{next}"#),
         ),
     ] {
@@ -904,26 +962,26 @@ fn open_tells_foreign_newer_and_damaged_apart() {
     let mut cases = vec![
         // Метка своя, а версии нет — своя копия, но испорченная.
         r#"{"file":"kvartik-backup"}"#.to_owned(),
-        SAMPLE_SEALED_V12[..SAMPLE_SEALED_V12.len() / 2].to_owned(),
-        SAMPLE_SEALED_V12[..SAMPLE_SEALED_V12.len() - 1].to_owned(),
+        SAMPLE_SEALED_V13[..SAMPLE_SEALED_V13.len() / 2].to_owned(),
+        SAMPLE_SEALED_V13[..SAMPLE_SEALED_V13.len() - 1].to_owned(),
         SAMPLE_SEALED_V1[..SAMPLE_SEALED_V1.len() / 2].to_owned(),
-        format!("{SAMPLE_SEALED_V12} хвост"),
-        SAMPLE_SEALED_V12.replace(r#""format_version":12"#, r#""format_version":0"#),
-        SAMPLE_SEALED_V12.replace(r#""format_version":12"#, r#""format_version":"2""#),
-        SAMPLE_SEALED_V12.replace(r#""data""#, r#""extra":1,"data""#),
-        SAMPLE_SEALED_V12.replace("PBKDF2-SHA256", "PBKDF2-SHA1"),
-        SAMPLE_SEALED_V12.replace("AES-256-GCM", "AES-256-CBC"),
-        SAMPLE_SEALED_V12.replace("600000", "0"),
-        SAMPLE_SEALED_V12.replace("600000", "10000001"),
-        SAMPLE_SEALED_V12.replace("AAECAwQFBgcICQoLDA0ODw==", "AAECAwQFBgcICQoLDA0O"),
-        SAMPLE_SEALED_V12.replace("AAECAwQFBgcICQoLDA0ODw==", "не base64"),
-        SAMPLE_SEALED_V12.replace("ZGVmZ2hpamtsbW5v", "ZGVmZ2hpamtsbW5vcA=="),
-        SAMPLE_SEALED_V12.replace("yMnKy8zNzs/Q0dLT1NXW19jZ2ts=", "yMnKy8zNzs/Q0dLT1NXW"),
-        SAMPLE_SEALED_V12.replace("yMnKy8zNzs/Q0dLT1NXW19jZ2ts=", "yMnK\ny8zN"),
-        SAMPLE_SEALED_V12.replace(r#""0.0.66""#, r#""<b>0.0.12</b>""#),
-        SAMPLE_SEALED_V12.replace(r#""0.0.66""#, r#""""#),
-        SAMPLE_SEALED_V12.replace("1760270400000", "8640000000000001"),
-        SAMPLE_SEALED_V12.replace(
+        format!("{SAMPLE_SEALED_V13} хвост"),
+        SAMPLE_SEALED_V13.replace(r#""format_version":13"#, r#""format_version":0"#),
+        SAMPLE_SEALED_V13.replace(r#""format_version":13"#, r#""format_version":"2""#),
+        SAMPLE_SEALED_V13.replace(r#""data""#, r#""extra":1,"data""#),
+        SAMPLE_SEALED_V13.replace("PBKDF2-SHA256", "PBKDF2-SHA1"),
+        SAMPLE_SEALED_V13.replace("AES-256-GCM", "AES-256-CBC"),
+        SAMPLE_SEALED_V13.replace("600000", "0"),
+        SAMPLE_SEALED_V13.replace("600000", "10000001"),
+        SAMPLE_SEALED_V13.replace("AAECAwQFBgcICQoLDA0ODw==", "AAECAwQFBgcICQoLDA0O"),
+        SAMPLE_SEALED_V13.replace("AAECAwQFBgcICQoLDA0ODw==", "не base64"),
+        SAMPLE_SEALED_V13.replace("ZGVmZ2hpamtsbW5v", "ZGVmZ2hpamtsbW5vcA=="),
+        SAMPLE_SEALED_V13.replace("yMnKy8zNzs/Q0dLT1NXW19jZ2ts=", "yMnKy8zNzs/Q0dLT1NXW"),
+        SAMPLE_SEALED_V13.replace("yMnKy8zNzs/Q0dLT1NXW19jZ2ts=", "yMnK\ny8zN"),
+        SAMPLE_SEALED_V13.replace(r#""0.0.68""#, r#""<b>0.0.12</b>""#),
+        SAMPLE_SEALED_V13.replace(r#""0.0.68""#, r#""""#),
+        SAMPLE_SEALED_V13.replace("1760270400000", "8640000000000001"),
+        SAMPLE_SEALED_V13.replace(
             r#","cipher":{"name":"AES-256-GCM","iv":"ZGVmZ2hpamtsbW5v"}"#,
             "",
         ),
@@ -947,27 +1005,27 @@ fn open_tells_foreign_newer_and_damaged_apart() {
 #[test]
 fn read_is_all_or_nothing() {
     let sealed = sealed_sample();
-    let second_note = SAMPLE_PLAIN_V12.replace(
+    let second_note = SAMPLE_PLAIN_V13.replace(
         r#"]}"#,
         &format!(
             r#",{{"kind":"note","record":{{"meta":{{"id":"{NOTE_ID}","modified":1,"deleted":null}},"text":""}}}}]}}"#
         ),
     );
     let mut cases = vec![
-        SAMPLE_PLAIN_V12.replace(r#""0.0.66""#, r#""0.0.26""#),
-        SAMPLE_PLAIN_V12.replace("1760270400000", "1760270400001"),
-        SAMPLE_PLAIN_V12.replace(r#""file":"kvartik-backup""#, r#""file":"other""#),
-        SAMPLE_PLAIN_V12.replace(r#""format_version":12"#, r#""format_version":1"#),
-        // Шапка внутри — версии 1, а снаружи — 11: подмена версии.
-        SAMPLE_PLAIN_V1.replace(r#""0.0.8""#, r#""0.0.66""#),
-        SAMPLE_PLAIN_V12.replace(r#""kind":"tag""#, r#""kind":"unicorn""#),
-        SAMPLE_PLAIN_V12.replace(r#""text":"Ереван ֏""#, r#""text":7"#),
-        SAMPLE_PLAIN_V12.replace(r#""text":"Ереван ֏""#, r#""text":"Ереван ֏","wings":2"#),
-        SAMPLE_PLAIN_V12.replace(r#""records""#, r#""extra":1,"records""#),
-        SAMPLE_PLAIN_V12.replace(r#"{"kind":"tag","#, r#"{"extra":1,"kind":"tag","#),
-        SAMPLE_PLAIN_V12.replace(r#""deleted":1760000000500"#, r#""deleted":1760000000501"#),
+        SAMPLE_PLAIN_V13.replace(r#""0.0.68""#, r#""0.0.26""#),
+        SAMPLE_PLAIN_V13.replace("1760270400000", "1760270400001"),
+        SAMPLE_PLAIN_V13.replace(r#""file":"kvartik-backup""#, r#""file":"other""#),
+        SAMPLE_PLAIN_V13.replace(r#""format_version":13"#, r#""format_version":1"#),
+        // Шапка внутри — версии 1, а снаружи — 13: подмена версии.
+        SAMPLE_PLAIN_V1.replace(r#""0.0.8""#, r#""0.0.68""#),
+        SAMPLE_PLAIN_V13.replace(r#""kind":"tag""#, r#""kind":"unicorn""#),
+        SAMPLE_PLAIN_V13.replace(r#""text":"Ереван ֏""#, r#""text":7"#),
+        SAMPLE_PLAIN_V13.replace(r#""text":"Ереван ֏""#, r#""text":"Ереван ֏","wings":2"#),
+        SAMPLE_PLAIN_V13.replace(r#""records""#, r#""extra":1,"records""#),
+        SAMPLE_PLAIN_V13.replace(r#"{"kind":"tag","#, r#"{"extra":1,"kind":"tag","#),
+        SAMPLE_PLAIN_V13.replace(r#""deleted":1760000000500"#, r#""deleted":1760000000501"#),
         second_note,
-        SAMPLE_PLAIN_V12[..SAMPLE_PLAIN_V12.len() - 2].to_owned(),
+        SAMPLE_PLAIN_V13[..SAMPLE_PLAIN_V13.len() - 2].to_owned(),
         "не JSON".to_owned(),
     ];
     cases.push(String::new());
@@ -987,7 +1045,7 @@ fn read_is_all_or_nothing() {
     }
     // Версия 6 сжимает всегда: несжатый текст под её шапкой — порча, как
     // и сжатый обрезанный.
-    let unpacked = SAMPLE_PLAIN_V12.as_bytes();
+    let unpacked = SAMPLE_PLAIN_V13.as_bytes();
     let cut = packed_sample_v12();
     for opened in [unpacked, &cut[..cut.len() / 2], &[]] {
         if !matches!(read(KINDS_UNDER_TEST, &sealed, opened), Err(BackupError::Damaged(_))) {
@@ -1349,7 +1407,7 @@ fn padding_inside_the_data_is_damage() {
     let piece = SLICE_BYTES / 4 * 4;
     let data = format!("{}QQ==QUFB", "A".repeat(piece - 4));
     let text = format!(
-        r#"{{"file":"kvartik-backup","format_version":12,"app_version":"0.0.66","created":1760270400000,"kdf":{{"name":"PBKDF2-SHA256","iterations":600000,"salt":"AAECAwQFBgcICQoLDA0ODw=="}},"cipher":{{"name":"AES-256-GCM","iv":"ZGVmZ2hpamtsbW5v"}},"data":"{data}"}}"#
+        r#"{{"file":"kvartik-backup","format_version":13,"app_version":"0.0.68","created":1760270400000,"kdf":{{"name":"PBKDF2-SHA256","iterations":600000,"salt":"AAECAwQFBgcICQoLDA0ODw=="}},"cipher":{{"name":"AES-256-GCM","iv":"ZGVmZ2hpamtsbW5v"}},"data":"{data}"}}"#
     );
     assert!(matches!(open(&text), Err(BackupError::Damaged(_))));
     let fine = text.replace("QQ==QUFB", "QUFBQUFB");

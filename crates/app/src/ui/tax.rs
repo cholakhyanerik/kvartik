@@ -1121,6 +1121,7 @@ enum Hint {
     PaymentOnly(usize),
     Excluded(usize),
     NoBase(usize),
+    Split(usize),
     Threshold { year: u16, turnover: i64, threshold: i64 },
 }
 
@@ -1133,6 +1134,7 @@ impl Hint {
             Self::PaymentOnly(rows) => fill(t(lang, Key::TaxRefusedPayment), &[&count(*rows)]),
             Self::Excluded(rows) => fill(t(lang, Key::TaxRefusedExcluded), &[&count(*rows)]),
             Self::NoBase(rows) => fill(t(lang, Key::TaxRefusedNoBase), &[&count(*rows)]),
+            Self::Split(rows) => fill(t(lang, Key::TaxRefusedSplit), &[&count(*rows)]),
             Self::Threshold { year, turnover, threshold } => {
                 // Доля порога — целыми процентами, с отбросом: «99 %»
                 // у 114,9 млн не обещает лишнего.
@@ -1164,6 +1166,9 @@ fn hints(tax: &QuarterTax) -> Vec<Hint> {
     }
     if refused.no_base > 0 {
         hints.push(Hint::NoBase(refused.no_base));
+    }
+    if refused.split > 0 {
+        hints.push(Hint::Split(refused.split));
     }
     if let Some(threshold) = tax.threshold
         && tax.regime == Regime::Turnover

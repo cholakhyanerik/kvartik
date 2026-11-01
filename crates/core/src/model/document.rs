@@ -41,6 +41,16 @@
 //! В PDF его нет, и у выпущенного документа его можно указать
 //! ([`Document::set_activity`]), как курс.
 //!
+//! **Строка налога дохода** (задача 70) — если она не та, что у кода: аренда,
+//! проценты, роялти или продажа имущества. Важнее вида деятельности
+//! (`tax::turnover`), в PDF её тоже нет, а выпущенному документу её указывает
+//! [`Document::set_income_kind`]. Акт по счёту и повтор счёта берут её вместе
+//! с остальными данными: месячный счёт за аренду остаётся арендой. Счёт и акт
+//! по нему — одна услуга: выпуск акта берёт строку счёта, указанную, пока акт
+//! лежал черновиком ([`Document::issue`]), а строка, указанная у акта, идёт
+//! и в счёт: иначе повтор счёта и новый акт после аннулирования снова вышли бы
+//! без неё (окно, `ui/documents.rs`).
+//!
 //! **Расчётный документ в системе ՊԵԿ** (задача 23) — «հաշիվ վավերագիր»,
 //! который ИП выписывает там сам: счёт программы его не заменяет.
 //! Программа его не выписывает и никуда не отправляет, а помнит отметку
@@ -55,8 +65,8 @@
 //! Меняется документ только командами ядра (CLAUDE.md, «Данные меняются
 //! одним путём»): [`Document::create`], `edit`, `issue`, `annul`,
 //! `unannul`, `delete`, `restore`, `add_payment`, `remove_payment`,
-//! `set_rate`, `set_activity`, `sign`, `unsign`, `set_settlement`,
-//! `remove_settlement`.
+//! `set_rate`, `set_activity`, `set_income_kind`, `sign`, `unsign`,
+//! `set_settlement`, `remove_settlement`.
 //!
 //! В данных: `{"meta":{…},"data":{…},"issued":{…},"annulled":null,
 //! "signed":null,"settlement":null,"payments":[…]}` — у документа,
@@ -68,7 +78,7 @@ use std::fmt;
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 
-use super::activity::ActivityCode;
+use super::activity::{ActivityCode, IncomeKind};
 use super::bank::BankAccount;
 use super::client::{Client, ClientData};
 use super::date::Date;
@@ -217,6 +227,9 @@ pub struct DocumentData {
     /// налога; `None` — не указан, и строку берут коды профиля
     /// (`tax::turnover`). В PDF его нет, как и курса.
     pub activity: Option<ActivityCode>,
+    /// Строка налога дохода, если она не та, что у кода
+    /// ([`IncomeKind::OF_INCOME`]); `None` — по коду. В PDF её нет.
+    pub income_kind: Option<IncomeKind>,
 }
 
 /// Поля документа, как они лежат в данных, — до проверки.
@@ -240,6 +253,10 @@ struct DocumentDataFields {
     /// деятельности не указан.
     #[serde(default)]
     activity: Option<ActivityCode>,
+    /// С версии формата 13 (задача 70): у документа прошлых версий строка —
+    /// по коду.
+    #[serde(default)]
+    income_kind: Option<IncomeKind>,
 }
 
 /// Почему документ или команда над ним не приняты.
@@ -259,7 +276,7 @@ pub enum DocError {
     /// Срок оплаты раньше даты документа.
     DueBeforeDate,
     /// Поле не того вида документа: срок оплаты или повтор у акта,
-    /// основание у счёта.
+    /// основание у счёта; строка налога, которую у дохода не выбирают.
     WrongKind,
     /// Сумма документа не помещается в `i64` — только от испорченных
     /// данных или нелепых чисел.
@@ -340,6 +357,9 @@ impl DocumentData {
         if self.rate.is_some_and(|rate| rate.currency() != self.currency) {
             return Err(DocError::Rate);
         }
+        if self.income_kind.is_some_and(|kind| !IncomeKind::OF_INCOME.contains(&kind)) {
+            return Err(DocError::WrongKind);
+        }
         self.total().map(|_| ()).map_err(|_| DocError::TooLarge)
     }
 
@@ -392,6 +412,7 @@ impl<'de> Deserialize<'de> for DocumentData {
             recurring,
             rate,
             activity,
+            income_kind,
         } = DocumentDataFields::deserialize(deserializer)?;
         let data = Self {
             kind,
@@ -406,6 +427,7 @@ impl<'de> Deserialize<'de> for DocumentData {
             recurring,
             rate,
             activity,
+            income_kind,
         };
         data.check()
             .map_err(|error| de::Error::custom(format!("документ не годится: {error:?}")))?;
@@ -718,14 +740,21 @@ impl Document {
             seller: Seller::from_profile(profile),
             buyer: client.data().clone(),
         });
+        let basis = self
+            .data
+            .basis
+            .and_then(|basis| documents.iter().find(|known| known.id() == basis));
         // Без этого акт, ставший документом дохода вместо отмеченного счёта,
         // снова ждал бы расчётного документа, уже выписанного, а акт по
         // счёту, выпущенному до 0.0.55, — того, о чём программа не знает.
-        document.settlement = self
-            .data
-            .basis
-            .and_then(|basis| documents.iter().find(|known| known.id() == basis))
-            .map_or(Some(None), |invoice| invoice.settlement.clone());
+        document.settlement = basis.map_or(Some(None), |invoice| invoice.settlement.clone());
+        // Строку указали у счёта, пока акт лежал черновиком: доход теперь по
+        // акту, и она осталась бы у счёта, где ни на что не влияет. «По коду»,
+        // выбранное в самом черновике, от незаполненного не отличить; его
+        // вернёт карточка акта.
+        if let Some(invoice) = basis {
+            document.data.income_kind = document.data.income_kind.or(invoice.data.income_kind);
+        }
         Ok(document)
     }
 
@@ -864,6 +893,30 @@ impl Document {
         }
         let mut document = self.clone();
         document.data.activity = activity;
+        document.meta.touch(now);
+        Ok(Some(document))
+    }
+
+    /// Команда «указать строку налога дохода» выпущенного действующего
+    /// документа: одна из [`IncomeKind::OF_INCOME`], `None` — по коду. Как
+    /// и вид деятельности, в тексте документа и в PDF её нет: меняется только
+    /// строка налога его дохода. Черновик получает её из своей формы (`edit`).
+    /// `Ok(None)` — строка та же.
+    pub fn set_income_kind(
+        &self,
+        income_kind: Option<IncomeKind>,
+        now: Timestamp,
+    ) -> Result<Option<Self>, DocError> {
+        self.must_be_issued()?;
+        if self.annulled.is_some() {
+            return Err(DocError::Annulled);
+        }
+        if income_kind == self.data.income_kind {
+            return Ok(None);
+        }
+        let mut document = self.clone();
+        document.data.income_kind = income_kind;
+        document.data.check()?;
         document.meta.touch(now);
         Ok(Some(document))
     }

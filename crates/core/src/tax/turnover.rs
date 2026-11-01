@@ -28,13 +28,34 @@
 //!   весу их дохода в обороте всех видов, 1 % IT тоже (ст. 260, ч. 3; ответ
 //!   бухгалтера 2026-10-19, вопрос 1.4). У строки без дохода вес — ноль:
 //!   если доход только у строк без вычета, общий расход пропадает, и окно
-//!   это говорит (`Refused::no_base`), а отнесённый к строке — переносится;
+//!   это говорит (`Refused::no_base`), а отнесённый к строке — переносится.
+//!   Прямых расходов и товара ст. 260, ч. 3 не делит, но книга их не отличает
+//!   (задача 79): доход со своей строкой весит и у ИП с одним кодом, поэтому
+//!   окно говорит, что доля ушла на него (`Refused::split`), а форма расхода
+//!   спрашивает вид и при одном коде ([`expense_activity_needed`]);
 //! - каждая строка формы — целые драмы, лумы отбрасываются
 //!   ([`Percent::of`]).
 //!
 //! Строку дохода решает вид деятельности ([`kind_of`]): у кода профиля —
 //! строка, которую человек выбрал сам, иначе по правилам — высокие
 //! технологии по списку правительства, остальное — прочая деятельность.
+//!
+//! Но закон ставит строку и по виду самого дохода: аренда, проценты, роялти —
+//! строка 5, отчуждение активов — строка 9, какой бы код ни был у ИП (ст. 258,
+//! ч. 1; объект — ст. 256, ч. 1). Поэтому строка, выбранная у дохода
+//! ([`IncomeKind::OF_INCOME`]), важнее строки кода ([`chosen_kind`]). Кода такому
+//! доходу не нужно, и режим он не решает: это не деятельность по коду профиля.
+//! А в оборот всех видов — для порога и для долей общих расходов (ст. 260,
+//! ч. 3) — идёт, как любой доход: база — вся сумма продажи (ст. 257, ч. 1;
+//! ст. 4, ч. 1, п. 50), вычета нет (ст. 260, ч. 1). Где граница между услугой
+//! по коду и роялти — например, у лицензии своей программы (ст. 4, ч. 1,
+//! п. 34), — решает человек с бухгалтером, и окно это говорит. Нижние границы
+//! дохода — от кадастровой стоимости (ст. 109, ч. 1) и у ввезённого автомобиля
+//! (ч. 1.2) — программа не считает: первая говорит о базе налога на прибыль,
+//! а ст. 257, ч. 2 отсылает к разделу целиком, — и окно советует сверить. День
+//! дохода — у человека: аренда — по кварталам (ст. 40, ч. 2), недвижимость —
+//! день регистрации права (ст. 38, ч. 2), и окно это говорит. Всё — по закону,
+//! сверено по тексту arlis 230455 2026-11-01.
 //!
 //! # Когда налога с оборота нет
 //!
@@ -110,6 +131,19 @@ pub fn kind_of(profile: Option<&ProfileData>, code: &ActivityCode, on: Date) -> 
         .and_then(|profile| profile.kinds.get(code))
         .copied()
         .unwrap_or_else(|| default_kind(code, on))
+}
+
+/// Строка налога дохода, которому в день `on` выбрали строку `kind` (шапка
+/// модуля). Кто подал заявление об общепите, считает только по строкам 6 и 7
+/// (ст. 258, ч. 8): прочий его доход, в том числе от отчуждения активов, —
+/// строка 7, а не 5 и не 9. Что заявление подано, программа знает только по
+/// строке 7 у кода профиля.
+pub fn chosen_kind(profile: Option<&ProfileData>, kind: IncomeKind, on: Date) -> IncomeKind {
+    if profile_kinds(profile, on).contains(&IncomeKind::CateringOther) {
+        IncomeKind::CateringOther
+    } else {
+        kind
+    }
 }
 
 /// Строка налога для кода по правилам, без выбора человека: код из списка
@@ -306,6 +340,10 @@ pub struct Refused {
     /// Общие расходы квартала, где доход есть только у строк без вычета:
     /// вес строк с вычетом — ноль, их доля — ноль (ст. 260, ч. 3).
     pub no_base: usize,
+    /// Общие расходы рядом с доходом со своей строкой: в вычет вошла только
+    /// доля строк с вычетом. Товар и прямой расход в ней не должны быть, но
+    /// книга их не отличает, и человек относит их к строке сам (шапка модуля).
+    pub split: usize,
 }
 
 /// Почему ИП перестал быть плательщиком налога с оборота.
@@ -461,6 +499,26 @@ fn code_unknown(profile: Option<&ProfileData>, on: Date) -> bool {
     profile.is_some_and(|data| {
         data.activities.len() > 1 && data.activities.iter().any(|code| excluded(code, on).is_some())
     })
+}
+
+/// Спросить ли у расхода дня `on` вид деятельности, хотя код один: в его
+/// квартале есть доход со своей строкой, а у кодов — вычет. Расход без вида
+/// тогда общий, и его доля уходит на строку без вычета (ст. 260, ч. 3); товар
+/// и прямой расход человек относит к своей строке сам: что он прямой, книга
+/// не знает (задача 79).
+pub fn expense_activity_needed(
+    documents: &[Document],
+    operations: &[Operation],
+    profile: Option<&ProfileData>,
+    on: Date,
+) -> bool {
+    let quarter = on.quarter();
+    profile_kinds(profile, on)
+        .into_iter()
+        .any(|kind| rate(kind, on).is_some_and(|rule| rule.deduction.is_some()))
+        && ledger::between(documents, operations, quarter.first_day(), quarter.last_day())
+            .iter()
+            .any(|row| row.income_kind.is_some())
 }
 
 /// Налог квартала `quarter` — с переносом цепочкой от последнего закрытого
@@ -676,11 +734,14 @@ fn profile_kinds(profile: Option<&ProfileData>, on: Date) -> BTreeSet<IncomeKind
         .unwrap_or_default()
 }
 
-/// Строка налога дохода `row`: по виду деятельности у дохода, а без него —
-/// единственная строка кодов профиля, как в расчёте квартала (`compute`);
-/// `None` — не узнать. Для базы гербового сбора (`tax::annual`): оборот
-/// в расчёте — строками, каждая целыми драмами.
+/// Строка налога дохода `row`: выбранная у него самого, по виду деятельности
+/// у дохода, а без них — единственная строка кодов профиля, как в расчёте
+/// квартала (`compute`); `None` — не узнать. Для базы гербового сбора
+/// (`tax::annual`): оборот в расчёте — строками, каждая целыми драмами.
 pub(crate) fn income_kind(profile: Option<&ProfileData>, row: &Row<'_>) -> Option<IncomeKind> {
+    if let Some(kind) = row.income_kind {
+        return Some(chosen_kind(profile, kind, row.date));
+    }
     match row.activity {
         Some(code) => Some(kind_of(profile, &code, row.date)),
         None => {
@@ -695,12 +756,20 @@ pub(crate) fn income_kind(profile: Option<&ProfileData>, row: &Row<'_>) -> Optio
 
 /// Код дохода: указанный у дохода, а без него — единственный код профиля.
 /// Из нескольких кодов одной строки программа выбрать не может. Им же
-/// числа отчёта делят доход по кодам деятельности (`tax::report`).
+/// числа отчёта делят доход по кодам деятельности (`tax::report`): у дохода со
+/// своей строкой другого кода программа не знает, а таблица на налог не влияет.
 pub(crate) fn income_code(profile: Option<&ProfileData>, row: &Row<'_>) -> Option<ActivityCode> {
     row.activity.or_else(|| match profile.map(|data| data.activities.as_slice()) {
         Some([only]) => Some(*only),
         Some(_) | None => None,
     })
+}
+
+/// Код, который решает режим: у дохода со своей строкой — только указанный
+/// у него самого: аренда и продажа имущества — не деятельность по единственному
+/// коду профиля (шапка модуля).
+fn regime_code(profile: Option<&ProfileData>, row: &Row<'_>) -> Option<ActivityCode> {
+    if row.income_kind.is_some() { row.activity } else { income_code(profile, row) }
 }
 
 /// Что известно о годе квартала: режим и сколько дохода каждой строки вошло
@@ -738,7 +807,7 @@ fn year(span: &Span<'_>, profile: Option<&ProfileData>, quarter: Quarter) -> Res
     let income = |rows: &[Row<'_>]| -> Vec<(Date, RecordId, Option<ActivityCode>, Option<Lumas>)> {
         rows.iter()
             .filter(|row| row.flow == Flow::Income)
-            .map(|row| (row.date, row.id(), income_code(profile, row), row.lumas().ok()))
+            .map(|row| (row.date, row.id(), regime_code(profile, row), row.lumas().ok()))
             .collect()
     };
     let previous = match (quarter.year().checked_sub(1).and_then(|year| Date::new(year, 1, 1)), start.add_days(-1)) {
@@ -873,6 +942,7 @@ fn compute(
     let mut unassigned_lumas: i64 = 0;
     let mut shared: i64 = 0;
     let mut shared_rows = 0;
+    let mut chosen_income = false;
     let first_month = quarter.first_day().month();
     for row in rows {
         match row.flow {
@@ -887,12 +957,15 @@ fn compute(
                 };
                 let month = usize::from(row.date.month() - first_month);
                 months[month] = Lumas::new(months[month].get().saturating_add(lumas.get()));
+                chosen_income |= row.income_kind.is_some();
                 // Без вида — строка по единственной строке кодов профиля;
                 // но если среди кодов есть закрывающий налог с оборота, код
-                // дохода решает режим, и без него расчёт неполон.
-                let (kind, unknown) = match row.activity {
-                    Some(code) => (Some(kind_of(books.profile, &code, row.date)), false),
-                    None => {
+                // дохода решает режим, и без него расчёт неполон. Доходу со
+                // своей строкой код не нужен.
+                let (kind, unknown) = match (row.income_kind, row.activity) {
+                    (Some(kind), _) => (Some(chosen_kind(books.profile, kind, row.date)), false),
+                    (None, Some(code)) => (Some(kind_of(books.profile, &code, row.date)), false),
+                    (None, None) => {
                         let kinds = profile_kinds(books.profile, row.date);
                         if kinds.is_empty() {
                             gaps.no_codes = true;
@@ -970,6 +1043,11 @@ fn compute(
             .into_iter()
             .filter(|kind| quarter_rate(*kind, quarter).is_some_and(|rate| rate.deduction.is_some()))
             .collect();
+        // Кодов нет — строку расхода не узнать, даже если доход со своей
+        // строкой код и не спрашивает.
+        if books.profile.is_none_or(|data| data.activities.is_empty()) {
+            gaps.no_codes = true;
+        }
         if turnover > 0 {
             for (kind, lumas) in &income {
                 let part = i128::from(shared) * i128::from(*lumas) / i128::from(turnover);
@@ -987,19 +1065,17 @@ fn compute(
                     .all(|kind| quarter_rate(*kind, quarter).is_none_or(|rate| rate.deduction.is_none()))
             {
                 refused.no_base = shared_rows;
+            } else if !deductible.is_empty() && chosen_income {
+                refused.split = shared_rows;
             }
         } else {
             match deductible.as_slice() {
                 [only] => {
                     shared_by_kind.insert(*only, shared);
                 }
-                // Кодов нет — строку не узнать; а у ИП только со строками без
-                // вычета общим расходам по закону идти некуда.
-                [] => {
-                    if books.profile.is_none_or(|data| data.activities.is_empty()) {
-                        gaps.no_codes = true;
-                    }
-                }
+                // У ИП только со строками без вычета общим расходам по закону
+                // идти некуда.
+                [] => {}
                 _ => gaps.unallocated = shared_rows,
             }
         }

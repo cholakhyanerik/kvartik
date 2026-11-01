@@ -46,6 +46,7 @@ fn entry(flow: Flow, date: Date, drams: i64) -> Operation {
             proof: expense.then_some(Proof::SettlementInvoice),
             nature: expense.then_some(Nature::Ordinary),
             activity: None,
+            income_kind: None,
             attachments: Vec::new(),
         },
         clock::now(),

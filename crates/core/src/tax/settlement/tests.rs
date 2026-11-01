@@ -65,6 +65,7 @@ fn invoice_data(client: &Client, service: Date) -> DocumentData {
         recurring: None,
         rate: None,
         activity: None,
+        income_kind: None,
     }
 }
 

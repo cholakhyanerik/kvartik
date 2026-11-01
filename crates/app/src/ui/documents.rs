@@ -29,7 +29,7 @@ use std::sync::Arc;
 
 use kvartik_core::format::Stored;
 use kvartik_core::i18n::{self, Key, Lang, ParseError, fill, plural, t};
-use kvartik_core::model::activity::ActivityCode;
+use kvartik_core::model::activity::{ActivityCode, IncomeKind};
 use kvartik_core::model::client::Client;
 use kvartik_core::model::country::Country;
 use kvartik_core::model::date::Date;
@@ -51,7 +51,7 @@ use super::backup::{BackupChip, Backups};
 use super::clients::Clients;
 use super::form::{CURRENCIES, Forms, TextField, WizardHead, currency_code, currency_key};
 use super::icon::{Icon, icon};
-use super::ledger::{IncomeActivity, equivalent, rate_problem};
+use super::ledger::{IncomeActivity, IncomeKindChoice, equivalent, rate_problem};
 use super::license::{self, IssueLocked, Licenses};
 use super::paper::{PaperPanel, Request};
 use super::profile::Profiles;
@@ -307,6 +307,7 @@ enum Notice {
     RateSaved,
     /// Вид деятельности документа сохранён (задача 19).
     ActivitySaved,
+    IncomeKindSaved,
     /// Акт отмечен подписанным клиентом и отметка снята (задача 62).
     Signed,
     Unsigned,
@@ -1079,6 +1080,7 @@ fn NoticeLine(ctx: Ctx, busy: RwSignal<bool>, failure: RwSignal<Option<Problem>>
             Notice::Paid => view! { <p role="status">{tr(lang, Key::PaymentSaved)}</p> }.into_any(),
             Notice::RateSaved => view! { <p role="status">{tr(lang, Key::DocRateSaved)}</p> }.into_any(),
             Notice::ActivitySaved => view! { <p role="status">{tr(lang, Key::DocActivitySaved)}</p> }.into_any(),
+            Notice::IncomeKindSaved => view! { <p role="status">{tr(lang, Key::DocIncomeKindSaved)}</p> }.into_any(),
             Notice::Signed => view! { <p role="status">{tr(lang, Key::SignSaved)}</p> }.into_any(),
             Notice::Unsigned => view! { <p role="status">{tr(lang, Key::SignRemoved)}</p> }.into_any(),
             Notice::Settled => view! { <p role="status">{tr(lang, Key::SettleSaved)}</p> }.into_any(),
@@ -1152,6 +1154,7 @@ enum Change {
     SetRate(Option<i64>),
     /// Вид деятельности выпущенного документа, `None` — убрать (задача 19).
     SetActivity(Option<ActivityCode>),
+    SetIncomeKind(Option<IncomeKind>),
     /// Акт подписан клиентом в этот день и отметка снята (задача 62).
     Sign(Date),
     Unsign,
@@ -1183,9 +1186,12 @@ fn act(
         let outcome = apply(&store, id, change).await;
         busy.set(false);
         match outcome {
-            Ok(Some(document)) => {
+            Ok(Some((document, invoice))) => {
                 done(&document);
                 ctx.documents.put(document);
+                if let Some(invoice) = invoice {
+                    ctx.documents.put(invoice);
+                }
                 ctx.backups.data_saved();
             }
             // Документ уже в этом состоянии или пропал — его поменяла другая
@@ -1197,13 +1203,22 @@ fn act(
 }
 
 /// Правка документа — одной транзакцией: прочитать, команда ядра,
-/// записать. `Ok(None)` — записывать нечего.
-async fn apply(store: &Store, id: RecordId, change: Change) -> Result<Option<Document>, Problem> {
+/// записать. `Ok(None)` — записывать нечего. Строка налога, указанная у акта,
+/// идёт и в счёт-основание — он вторым в ответе: это одна услуга (шапка
+/// `model::document`).
+async fn apply(store: &Store, id: RecordId, change: Change) -> Result<Option<(Document, Option<Document>)>, Problem> {
     let tx = store.write()?;
     let Some(document) = tx.get::<Document>(id).await? else {
         return Ok(None);
     };
     let now = clock::now();
+    let invoice = match (&change, document.data().basis) {
+        (Change::SetIncomeKind(kind), Some(basis)) => tx
+            .get::<Document>(basis)
+            .await?
+            .and_then(|invoice| invoice.set_income_kind(*kind, now).ok().flatten()),
+        _ => None,
+    };
     let changed = match change {
         Change::Annul(today) => document.annul(today, now)?,
         Change::Unannul => document.unannul(now),
@@ -1213,6 +1228,7 @@ async fn apply(store: &Store, id: RecordId, change: Change) -> Result<Option<Doc
         Change::RemovePayment(payment) => document.remove_payment(payment, now),
         Change::SetRate(per_unit_e4) => document.set_rate(per_unit_e4, now)?,
         Change::SetActivity(activity) => document.set_activity(activity, now)?,
+        Change::SetIncomeKind(kind) => document.set_income_kind(kind, now)?,
         Change::Sign(day) => document.sign(day, now)?,
         Change::Unsign => document.unsign(now),
         Change::Settle(settlement) => document.set_settlement(settlement, now)?,
@@ -1223,8 +1239,11 @@ async fn apply(store: &Store, id: RecordId, change: Change) -> Result<Option<Doc
     };
     let mut writes = Writes::default();
     writes.update(&changed);
+    if let Some(invoice) = &invoice {
+        writes.update(invoice);
+    }
     tx.commit(writes).await?;
-    Ok(Some(changed))
+    Ok(Some((changed, invoice)))
 }
 
 /// С чего начинается форма.
@@ -1262,6 +1281,8 @@ struct Form {
     rate: RwSignal<String>,
     /// Вид деятельности дохода — код профиля (задача 19).
     activity: RwSignal<Option<ActivityCode>>,
+    /// Строка налога дохода, если она не та, что у кода (задача 70).
+    income_kind: RwSignal<Option<IncomeKind>>,
     items: RwSignal<Vec<ItemRow>>,
     basis: Option<RecordId>,
     recurring: Option<RecordId>,
@@ -1301,6 +1322,7 @@ impl Form {
                     .unwrap_or_default(),
             ),
             activity: RwSignal::new(data.and_then(|d| d.activity)),
+            income_kind: RwSignal::new(data.and_then(|d| d.income_kind)),
             items: RwSignal::new(Vec::new()),
             basis: data.and_then(|d| d.basis),
             recurring: data.and_then(|d| d.recurring),
@@ -1399,8 +1421,10 @@ impl Form {
             recurring: self.recurring,
             rate: None,
             activity: self.activity.get_untracked(),
+            income_kind: self.income_kind.get_untracked(),
         };
-        if needed && data.activity.is_none() {
+        // Доходу со своей строкой код не нужен (`tax::turnover`).
+        if needed && data.activity.is_none() && data.income_kind.is_none() {
             return None;
         }
         // Курс — только у валюты и для дня оказания услуги: поменяли день
@@ -1526,6 +1550,7 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
         let day = form.service_date.with(|text| Date::from_iso(text)).or(ctx.today);
         day.is_some_and(|day| ctx.profiles.with(|profile| turnover::activity_needed(profile, day)))
     });
+    let required = Memo::new(move |_| needed.get() && form.income_kind.get().is_none());
     // Выпуск — по сроку лицензии (задача 25): кончился — вместо
     // «Выпустить» слова и ключ, а черновик сохраняется.
     ctx.licenses.watch(ctx.base);
@@ -2001,16 +2026,17 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                 </button>
                 // Вид деятельности дохода — когда без него не узнать строку
                 // налога или режим (задача 19).
-                {move || (needed.get() || form.activity.get().is_some()).then(|| view! {
+                {move || (required.get() || form.activity.get().is_some()).then(|| view! {
                     <IncomeActivity
                         lang
                         activities
                         chosen=form.activity
                         date=form.service_date
                         tried
-                        required=needed
+                        required
                     />
                 })}
+                <IncomeKindChoice lang profiles=ctx.profiles chosen=form.income_kind date=form.service_date />
                 <Show when=foreign>
                     <label>
                         {move || {
@@ -2403,11 +2429,12 @@ fn DocCard(
     }
 }
 
-/// Курс ЦБ и вид деятельности выпущенного документа — для книги и налога.
-/// У счёта с действующим актом доход — по акту (`ledger::income_documents`):
-/// курс и вид у такого счёта ни на что не влияют, и карточка говорит, что
-/// они у акта, а не предлагает их (дефект 0.0.27–0.0.47: «Указать курс ЦБ»
-/// был и у такого счёта, и курс молча не доходил до книги).
+/// Курс ЦБ, вид деятельности и строка налога выпущенного документа — для книги
+/// и налога. У счёта с действующим актом доход — по акту
+/// (`ledger::income_documents`): курс и вид у такого счёта ни на что не влияют,
+/// и карточка говорит, что они у акта, а не предлагает их (дефект
+/// 0.0.27–0.0.47: «Указать курс ЦБ» был и у такого счёта, и курс молча не
+/// доходил до книги).
 #[component]
 fn ForBook(
     ctx: Ctx,
@@ -2419,23 +2446,20 @@ fn ForBook(
     let data = document.data();
     let live = document.annulled().is_none();
     let foreign = data.currency != Currency::Amd && live;
-    let service = data.service_date;
     let covered = covered_by_act(ctx, &document);
-    let needed = Memo::new(move |_| ctx.profiles.with(|profile| turnover::activity_needed(profile, service)));
     move || {
         if covered.get() {
             view! {
-                {move || (foreign || needed.get()).then(|| view! {
-                    <div class="rate-box">
-                        <p class="hint">{tr(lang, Key::DocIncomeByAct)}</p>
-                    </div>
-                })}
+                <div class="rate-box">
+                    <p class="hint">{tr(lang, Key::DocIncomeByAct)}</p>
+                </div>
             }
             .into_any()
         } else {
             view! {
                 {foreign.then(|| view! { <DocRate ctx document=document.clone() busy failure /> })}
                 {live.then(|| view! { <DocActivity ctx document=document.clone() busy failure /> })}
+                {live.then(|| view! { <DocIncomeKind ctx document=document.clone() busy failure /> })}
             }
             .into_any()
         }
@@ -2560,16 +2584,18 @@ fn DocActivity(
     let id = document.id();
     let saved = document.data().activity;
     let service = document.data().service_date;
+    // Доходу со своей строкой код не нужен (`tax::turnover`).
+    let free = document.data().income_kind.is_some();
     let chosen = RwSignal::new(saved);
     let date = RwSignal::new(service.iso());
     let tried = RwSignal::new(false);
     ctx.forms.hold_while(move || chosen.get() != saved);
     let activities = Memo::new(move |_| ctx.profiles.activities());
-    let needed = Memo::new(move |_| ctx.profiles.with(|profile| turnover::activity_needed(profile, service)));
+    let needed = Memo::new(move |_| !free && ctx.profiles.with(|profile| turnover::activity_needed(profile, service)));
     let save = move |_| {
         tried.set(true);
         let activity = chosen.get_untracked();
-        if activity.is_none() {
+        if activity.is_none() && needed.get_untracked() {
             return;
         }
         act(ctx, busy, failure, id, Change::SetActivity(activity), move |_| {
@@ -2589,6 +2615,50 @@ fn DocActivity(
                 </div>
             }
         })
+    }
+}
+
+/// Строка налога дохода выпущенного документа (задача 70): свёрнутым вопросом,
+/// и сам выбор — уже команда. С отдельным «Сохранить», как у вида деятельности,
+/// выбор пропадал бы молча от любого соседнего действия: карточка строится
+/// заново на каждое изменение документа, а о пропущенной строке, в отличие от
+/// вида, окну сказать нечего — `None` законно. В PDF её нет: выпущенный документ
+/// от неё не меняется (`Document::set_income_kind`). У счёта с действующим
+/// актом её нет вовсе (`ForBook`).
+#[component]
+fn DocIncomeKind(
+    ctx: Ctx,
+    document: Document,
+    busy: RwSignal<bool>,
+    failure: RwSignal<Option<Problem>>,
+) -> impl IntoView {
+    let Ctx { lang, notice, .. } = ctx;
+    let id = document.id();
+    let saved = document.data().income_kind;
+    let chosen = RwSignal::new(saved);
+    let date = RwSignal::new(document.data().service_date.iso());
+    Effect::watch(
+        move || chosen.get(),
+        move |now: &Option<IncomeKind>, _, _| {
+            if *now == saved {
+                return;
+            }
+            // Другое действие ещё пишет: `act` молча откажет, а выбор на
+            // экране не должен выглядеть сохранённым.
+            if busy.get_untracked() {
+                chosen.set(saved);
+                return;
+            }
+            act(ctx, busy, failure, id, Change::SetIncomeKind(*now), move |_| {
+                notice.set(Some(Notice::IncomeKindSaved));
+            });
+        },
+        false,
+    );
+    view! {
+        <div class="rate-box">
+            <IncomeKindChoice lang profiles=ctx.profiles chosen date />
+        </div>
     }
 }
 

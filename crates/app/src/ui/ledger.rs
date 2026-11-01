@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use kvartik_core::format::Stored;
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
-use kvartik_core::model::activity::ActivityCode;
+use kvartik_core::model::activity::{ActivityCode, IncomeKind};
 use kvartik_core::model::attachment::{self, Attachment, AttachmentRef, FileBytes, FileError, FileKind};
 use kvartik_core::model::date::{Date, Quarter};
 use kvartik_core::model::document::DocKind;
@@ -1025,6 +1025,7 @@ struct Form {
     proof: RwSignal<Option<Proof>>,
     nature: RwSignal<Nature>,
     activity: RwSignal<Option<ActivityCode>>,
+    income_kind: RwSignal<Option<IncomeKind>>,
     files: RwSignal<Vec<FileRow>>,
     next_file: StoredValue<u32>,
     tried: RwSignal<bool>,
@@ -1048,6 +1049,7 @@ impl Form {
             proof: RwSignal::new(None),
             nature: RwSignal::new(Nature::Ordinary),
             activity: RwSignal::new(None),
+            income_kind: RwSignal::new(None),
             files: RwSignal::new(Vec::new()),
             next_file: StoredValue::new(0),
             tried: RwSignal::new(false),
@@ -1066,6 +1068,7 @@ impl Form {
             form.proof.set(data.proof);
             form.nature.set(data.nature.unwrap_or(Nature::Ordinary));
             form.activity.set(data.activity);
+            form.income_kind.set(data.income_kind);
             let rows = data
                 .attachments
                 .iter()
@@ -1114,13 +1117,16 @@ impl Form {
             proof: None,
             nature: None,
             activity: None,
+            income_kind: None,
             attachments: rows.iter().filter_map(|row| row.saved.clone()).collect(),
         };
         match self.flow {
             Flow::Income => {
                 data.client = self.client.get_untracked();
                 data.activity = self.activity.get_untracked();
-                if needed && data.activity.is_none() {
+                data.income_kind = self.income_kind.get_untracked();
+                // Доходу со своей строкой код не нужен (`tax::turnover`).
+                if needed && data.activity.is_none() && data.income_kind.is_none() {
                     return None;
                 }
             }
@@ -1212,6 +1218,17 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
     let needed = Memo::new(move |_| {
         let day = form.date.with(|text| Date::from_iso(text)).or(ctx.today);
         day.is_some_and(|day| ctx.profiles.with(|profile| turnover::activity_needed(profile, day)))
+    });
+    let required = Memo::new(move |_| needed.get() && form.income_kind.get().is_none());
+    // Спросить ли у расхода вид и при одном коде (задача 70).
+    let beside = Memo::new(move |_| {
+        form.date.with(|text| Date::from_iso(text)).is_some_and(|day| {
+            ctx.documents.with(|documents, _, _| {
+                ctx.operations.with(|operations, _| {
+                    ctx.profiles.with(|profile| turnover::expense_activity_needed(documents, operations, profile, day))
+                })
+            })
+        })
     });
 
     // Прежние вложения — прочитать и дать на них ссылки. Не прочиталось —
@@ -1397,16 +1414,17 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
                     </label>
                     // Вид деятельности дохода — когда без него не узнать
                     // строку налога или режим (задача 19).
-                    {move || (needed.get() || form.activity.get().is_some()).then(|| view! {
+                    {move || (required.get() || form.activity.get().is_some()).then(|| view! {
                         <IncomeActivity
                             lang
                             activities
                             chosen=form.activity
                             date=form.date
                             tried
-                            required=needed
+                            required
                         />
                     })}
+                    <IncomeKindChoice lang profiles=ctx.profiles chosen=form.income_kind date=form.date />
                 }
                 .into_any(),
                 Flow::Expense => view! {
@@ -1511,9 +1529,10 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
                     </select>
                 </label>
                 <p class="hint">{tr(lang, Key::NatureHint)}</p>
-                // Вид деятельности спрашивается, только когда их в профиле
-                // больше одного: у одного вида выбирать нечего.
-                {move || (activities.with(Vec::len) > 1 || form.activity.get().is_some()).then(|| view! {
+                // Вид деятельности спрашивается, когда их в профиле больше
+                // одного: у одного вида выбирать нечего, пока рядом нет дохода
+                // со своей строкой — тогда он отделяет прямой расход от общего.
+                {move || (activities.with(Vec::len) > 1 || beside.get() || form.activity.get().is_some()).then(|| view! {
                     <label>
                         {tr(lang, Key::OpActivity)}
                         <select on:change=move |event| {
@@ -1653,6 +1672,72 @@ pub(super) fn IncomeActivity(
                 }}</p>
             })
         }}
+    }
+}
+
+/// Строка налога дохода, если она не та, что у кода (задача 70): свёрнутым
+/// вопросом, раскрытым у дохода с такой строкой. Ставка — по правилам на день
+/// дохода и той строкой, какой посчитает расчёт; граница со строкой кода —
+/// подсказкой: её решает человек с бухгалтером. Общее у записи дохода, формы
+/// документа и его карточки.
+#[component]
+pub(super) fn IncomeKindChoice(
+    lang: ReadSignal<Lang>,
+    profiles: Profiles,
+    chosen: RwSignal<Option<IncomeKind>>,
+    /// День дохода — записью ISO: по нему ставка.
+    date: RwSignal<String>,
+) -> impl IntoView {
+    let rate = move |kind| {
+        let day = date.with(|text| Date::from_iso(text))?;
+        let line = profiles.with(|profile| Some(turnover::chosen_kind(profile, kind, day)))?;
+        turnover::rate(line, day).map(|rule| rule.rate)
+    };
+    view! {
+        <details class="income-kind" prop:open=move || chosen.get().is_some()>
+            <summary>{tr(lang, Key::IncomeKindAsk)}</summary>
+            <label>
+                {tr(lang, Key::IncomeKindLabel)}
+                <select on:change=move |event| {
+                    let picked = event_target_value(&event);
+                    chosen.set(IncomeKind::OF_INCOME.into_iter().find(|kind| kind.row().to_string() == picked));
+                }>
+                    <option value="" prop:selected=move || chosen.get().is_none()>
+                        {tr(lang, Key::IncomeKindByCode)}
+                    </option>
+                    {IncomeKind::OF_INCOME.into_iter().map(|kind| view! {
+                        <option value=kind.row().to_string() prop:selected=move || chosen.get() == Some(kind)>
+                            {tr(lang, turnover::kind_key(kind))}
+                        </option>
+                    }).collect_view()}
+                </select>
+            </label>
+            {move || chosen.get().map(|kind| view! {
+                {rate(kind).map(|rate| view! {
+                    <p class="hint">{move || {
+                        let lang = lang.get();
+                        fill(t(lang, Key::IncomeKindRate), &[&tax::percent(lang, rate)])
+                    }}</p>
+                })}
+                {income_kind_hint(kind).map(|key| view! { <p class="hint">{tr(lang, key)}</p> })}
+            })}
+        </details>
+    }
+}
+
+/// Что сказать о выбранной строке (`IncomeKind::OF_INCOME`).
+const fn income_kind_hint(kind: IncomeKind) -> Option<Key> {
+    match kind {
+        IncomeKind::Rent => Some(Key::IncomeKindRentHint),
+        IncomeKind::Assets => Some(Key::IncomeKindAssetsHint),
+        IncomeKind::Trade
+        | IncomeKind::Recyclables
+        | IncomeKind::Newspapers
+        | IncomeKind::Production
+        | IncomeKind::Catering
+        | IncomeKind::CateringOther
+        | IncomeKind::HighTech
+        | IncomeKind::Other => None,
     }
 }
 

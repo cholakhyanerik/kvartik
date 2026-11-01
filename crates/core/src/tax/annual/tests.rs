@@ -62,6 +62,7 @@ fn income(date: Date, drams: i64) -> Operation {
         proof: None,
         nature: None,
         activity: None,
+        income_kind: None,
         attachments: Vec::new(),
     })
 }
@@ -407,6 +408,31 @@ fn stamp_base_is_the_sum_of_quarter_lines_in_whole_drams() {
     assert_eq!(Lumas::total(lumas).expect("помещается").drams(), 12_000_001);
     let got = annual(Some(&data), &operations, 2026);
     match got.stamp {
+        Stamp::Due {
+            amount: 12_000,
+            base: 12_000_000,
+            ..
+        } => {}
+        other => panic!("гербовый сбор у границы: {other:?}"),
+    }
+}
+
+/// Строка, выбранная у дохода, — своя строка и для базы гербового сбора:
+/// услуги 11 999 999,60 ֏ и аренда 1,50 ֏ — в расчёте 11 999 999 и 1, база
+/// 12 000 000 и сбор 12 000. Одной строкой вышло бы 12 000 001 и 120 000.
+#[test]
+fn stamp_base_keeps_the_row_chosen_at_the_income() {
+    let data = profile(person());
+    let date = day(2026, 5, 10);
+    let operations = [
+        income(date, 11_999_999),
+        usd_income(date, 1, Some(600_000)),
+        operation(OperationData {
+            income_kind: Some(IncomeKind::Rent),
+            ..usd_income(date, 1, Some(1_500_000)).data().clone()
+        }),
+    ];
+    match annual(Some(&data), &operations, 2026).stamp {
         Stamp::Due {
             amount: 12_000,
             base: 12_000_000,

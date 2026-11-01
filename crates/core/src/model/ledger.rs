@@ -31,7 +31,9 @@
 //! ИП относится. Какие из них дают вычет, решают правила с источником
 //! в файле правил (`tax::rules`), а не этот модуль. **Доход** без документа
 //! в программе тоже помнит вид деятельности — у ИП, чьи коды облагаются по
-//! разным строкам (решение человека 2026-10-19).
+//! разным строкам (решение человека 2026-10-19), — и строку налога, если она
+//! не та, что у кода: аренда, проценты, роялти или продажа имущества
+//! (задача 70, `tax::turnover`).
 //!
 //! Меняется операция только командами ядра (CLAUDE.md, «Данные меняются
 //! одним путём»): [`Operation::create`], `edit`, `save` — с новыми файлами,
@@ -45,7 +47,7 @@ use std::collections::BTreeSet;
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 
-use super::activity::ActivityCode;
+use super::activity::{ActivityCode, IncomeKind};
 use super::attachment::{Attachment, AttachmentRef, FileBytes};
 use super::date::{Date, Quarter};
 use super::document::{DocKind, Document};
@@ -181,10 +183,14 @@ pub struct OperationData {
     pub nature: Option<Nature>,
     /// Вид деятельности ИП, к которому относится операция. У расхода
     /// `None` — общий: административные и сбытовые расходы делятся по долям
-    /// оборота (НК, ст. 260, ч. 3), а у ИП с одним видом это он и есть.
+    /// оборота (НК, ст. 260, ч. 3), а у ИП с одним видом это он и есть, пока
+    /// в квартале нет дохода со своей строкой (`tax::turnover`).
     /// У дохода `None` — по кодам профиля, если они облагаются по одной
     /// строке (`tax::turnover`); код у дохода — с версии формата 8.
     pub activity: Option<ActivityCode>,
+    /// Строка налога дохода, если она не та, что у кода
+    /// ([`IncomeKind::OF_INCOME`]); `None` — по коду. У расхода — `None`.
+    pub income_kind: Option<IncomeKind>,
     /// Вложения — не больше [`OperationData::MAX_ATTACHMENTS`], без
     /// повторов.
     pub attachments: Vec<AttachmentRef>,
@@ -205,6 +211,10 @@ struct OperationDataFields {
     proof: Option<Proof>,
     nature: Option<Nature>,
     activity: Option<ActivityCode>,
+    /// С версии формата 13 (задача 70): у записи прошлых версий строка — по
+    /// коду.
+    #[serde(default)]
+    income_kind: Option<IncomeKind>,
     attachments: Vec<AttachmentRef>,
 }
 
@@ -217,9 +227,10 @@ pub enum OperationError {
     Amount,
     /// Курс не годится: не больше нуля, у суммы в драмах или другой валюты.
     Rate,
-    /// Поле не того вида операции: клиент у расхода, документ продавца или
-    /// вид расхода у дохода, нет документа или вида у расхода. Форма такого
-    /// не пишет — это порча.
+    /// Поле не того вида операции: клиент или строка налога дохода у расхода,
+    /// документ продавца или вид расхода у дохода, нет документа или вида
+    /// у расхода, строка, которую у дохода не выбирают. Форма такого не пишет —
+    /// это порча.
     WrongFlow,
     /// Вложений больше [`OperationData::MAX_ATTACHMENTS`] или одно дважды.
     Attachments,
@@ -244,8 +255,15 @@ impl OperationData {
             return Err(OperationError::Rate);
         }
         let fits = match self.flow {
-            Flow::Income => self.supplier.is_empty() && self.proof.is_none() && self.nature.is_none(),
-            Flow::Expense => self.client.is_none() && self.proof.is_some() && self.nature.is_some(),
+            Flow::Income => {
+                self.supplier.is_empty()
+                    && self.proof.is_none()
+                    && self.nature.is_none()
+                    && self.income_kind.is_none_or(|kind| IncomeKind::OF_INCOME.contains(&kind))
+            }
+            Flow::Expense => {
+                self.client.is_none() && self.proof.is_some() && self.nature.is_some() && self.income_kind.is_none()
+            }
         };
         if !fits {
             return Err(OperationError::WrongFlow);
@@ -295,6 +313,7 @@ impl<'de> Deserialize<'de> for OperationData {
             proof,
             nature,
             activity,
+            income_kind,
             attachments,
         } = OperationDataFields::deserialize(deserializer)?;
         let data = Self {
@@ -309,6 +328,7 @@ impl<'de> Deserialize<'de> for OperationData {
             proof,
             nature,
             activity,
+            income_kind,
             attachments,
         };
         data.check()
@@ -492,6 +512,8 @@ pub struct Row<'a> {
     /// Вид деятельности ИП, к которому относится строка; `None` — не указан
     /// (у расхода — общий).
     pub activity: Option<ActivityCode>,
+    /// Строка налога, выбранная у самого дохода; `None` — по коду.
+    pub income_kind: Option<IncomeKind>,
 }
 
 impl Row<'_> {
@@ -552,6 +574,7 @@ pub fn between<'a>(
             amount,
             rate: data.rate,
             activity: data.activity,
+            income_kind: data.income_kind,
         })
     });
     let from_operations = operations
@@ -566,6 +589,7 @@ pub fn between<'a>(
                 amount: data.amount,
                 rate: data.rate,
                 activity: data.activity,
+                income_kind: data.income_kind,
             }
         });
     from_documents

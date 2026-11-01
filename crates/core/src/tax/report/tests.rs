@@ -59,6 +59,7 @@ fn income(date: Date, drams: i64, activity: Option<&str>) -> Operation {
         proof: None,
         nature: None,
         activity: activity.map(code),
+        income_kind: None,
         attachments: Vec::new(),
     })
 }
@@ -89,6 +90,7 @@ fn expense(date: Date, drams: i64, activity: Option<&str>) -> Operation {
         proof: Some(Proof::SettlementInvoice),
         nature: Some(Nature::Ordinary),
         activity: activity.map(code),
+        income_kind: None,
         attachments: Vec::new(),
     })
 }
@@ -230,6 +232,55 @@ fn lines_without_deduction_have_only_a_row() {
     );
     assert_eq!((numbers.total.income, numbers.total.tax), (4_000_000, 124_000));
     assert_eq!(numbers.turnover.income, 4_000_000);
+}
+
+/// Доход со своей строкой — в строках 15 и 20 сводки, со ставкой и налогом,
+/// и в обороте всех видов: услуги IT 1 000 000, роялти 300 000, продажа
+/// имущества 200 000 — налог 10 000 + 30 000 + 20 000. Таблица по кодам — на
+/// единственный код: другого программа не знает, а на налог она не влияет.
+/// Кодов несколько — код такого дохода неизвестен, и долей нет.
+#[test]
+fn income_rows_fill_rows_15_and_20() {
+    let q = quarter(2026, 3);
+    let chosen = |date, drams, kind| {
+        operation(OperationData {
+            income_kind: Some(kind),
+            ..income(date, drams, None).data().clone()
+        })
+    };
+    let single = profile(&["62.01.0"]);
+    let operations = [
+        income(day(2026, 7, 10), 1_000_000, None),
+        chosen(day(2026, 8, 10), 300_000, IncomeKind::Rent),
+        chosen(day(2026, 9, 10), 200_000, IncomeKind::Assets),
+    ];
+    let numbers = ready(&tax(&single, &operations, &[], q), None).numbers;
+    assert!(numbers.sections.is_empty());
+    let rows: Vec<(&str, i64, Option<Percent>, i64)> = numbers
+        .rows
+        .iter()
+        .map(|row| (row.number.as_str(), row.income, row.rate, row.tax))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("15", 300_000, Some(percent("10")), 30_000),
+            ("19", 1_000_000, Some(percent("1")), 10_000),
+            ("20", 200_000, Some(percent("10")), 20_000),
+        ]
+    );
+    assert_eq!((numbers.total.income, numbers.total.tax), (1_500_000, 60_000));
+    assert_eq!(numbers.turnover.income, 1_500_000);
+    let got = activities(books(&single, &operations, &[]), q);
+    assert_eq!(got.shares, [Share { code: code("62.01.0"), percent: percent("100") }]);
+
+    let two = profile(&["62.01.0", "74.10.0"]);
+    let operations = [
+        income(day(2026, 7, 10), 1_000_000, Some("62.01.0")),
+        chosen(day(2026, 9, 10), 200_000, IncomeKind::Assets),
+    ];
+    assert_eq!(activities(books(&two, &operations, &[]), q), Activities { shares: Vec::new(), unknown: 1 });
+    assert!(tax(&two, &operations, &[], q).complete());
 }
 
 /// Место каждой строки налога в форме — по тексту приказа: разделы 5, 6, 7

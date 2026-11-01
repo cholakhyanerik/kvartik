@@ -2011,6 +2011,20 @@ dl.months dd,
   cursor: pointer;
 }
 
+/* Строка налога дохода — свёрнута: нужна редко, а в форме стоит у всех,
+   поэтому и заголовок тише, чем у раздела. Содержимое `<details>` лежит
+   в своём `::details-content`, и `gap` на самой `<details>` до него не
+   доходит: отступы — у абзацев. */
+.income-kind > summary {
+  min-height: var(--touch);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+.income-kind > p {
+  margin: var(--space-2) 0 0;
+}
+
 .tax-line {
   margin-top: var(--space-3);
   padding: var(--space-4) var(--space-5);

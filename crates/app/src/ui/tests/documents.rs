@@ -3,6 +3,7 @@
 //! ядра — их формы проверяют свои тесты.
 
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
+use kvartik_core::model::activity::{ActivityCode, IncomeKind};
 use kvartik_core::model::client::{Client, ClientData};
 use kvartik_core::model::country::Country;
 use kvartik_core::model::date::Date;
@@ -585,6 +586,7 @@ async fn a_repeating_invoice_appears_when_the_app_opens() {
         recurring: None,
         rate: None,
         activity: None,
+        income_kind: None,
     };
     let source = Document::create(data, now)
         .expect("черновик")
@@ -741,6 +743,7 @@ async fn documents_are_found_opened_and_marked_paid() {
         recurring: None,
         rate: None,
         activity: None,
+        income_kind: None,
     };
     let issue = |kind: DocKind, price: i64, before: &[Document]| {
         Document::create(data(kind, price), now)
@@ -958,6 +961,7 @@ pub(super) fn invoice_data(client: &Client) -> DocumentData {
         recurring: None,
         rate: None,
         activity: None,
+        income_kind: None,
     }
 }
 
@@ -1254,6 +1258,191 @@ async fn an_invoice_with_an_act_leaves_the_rate_to_the_act() {
     crate::platform::set_hash("");
     forget_device();
     assert!(wrong.is_empty(), "курс у счёта с актом: {wrong:#?}");
+}
+
+/// Строка налога выпущенного документа — в его карточке, свёрнутым вопросом:
+/// сам выбор сохраняет её, номер и строки документа не меняются, а сохранённая
+/// строка раскрывает вопрос. Акт по этому счёту берёт её в свою форму и в свой
+/// черновик. Вернуть «по коду» можно тем же выбором. Выбор у выпущенного акта
+/// идёт и в счёт, а карточка счёта с актом говорит, где её указать.
+#[wasm_bindgen_test]
+async fn the_income_row_is_set_in_the_card_and_kept_by_the_act() {
+    let client = fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let now = clock::now();
+    let invoice = Document::create(invoice_data(&client), now)
+        .expect("черновик")
+        .issue(&[], 0, Some(&profile()), &client, now)
+        .expect("выпущен");
+    let mut writes = Writes::default();
+    writes.insert(&invoice);
+    commit(writes).await;
+
+    let address = format!("#/documents/{}", invoice.id());
+    let (host, mounted) = mount_at(&address);
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::IncomeKindAsk)).await {
+        wrong.push("в карточке нет вопроса о строке налога".to_owned());
+    }
+    let open = || {
+        host.query_selector(".docs-detail details.income-kind")
+            .ok()
+            .flatten()
+            .map(|details| details.has_attribute("open"))
+    };
+    let chosen = |value: &str, wrong: &mut Vec<String>| match select(&host, t(lang, Key::IncomeKindLabel), 0) {
+        Some(list) => super::pick(&list, value),
+        None => wrong.push("нет списка строк налога".to_owned()),
+    };
+    let saved_kind = || async {
+        let store = Store::open(|_| {}).await.expect("база открыта");
+        let found = store
+            .read()
+            .expect("транзакция чтения")
+            .get::<Document>(invoice.id())
+            .await
+            .expect("счёт читается")
+            .expect("счёт есть");
+        (found.data().income_kind, found.number(), found.data().items.clone())
+    };
+    if open() != Some(false) {
+        wrong.push(format!("вопрос не свёрнут: {:?}", open()));
+    }
+    chosen("9", &mut wrong);
+    if !wait_for(&host, t(lang, Key::DocIncomeKindSaved)).await {
+        wrong.push("строка налога не сохранилась".to_owned());
+    }
+    if saved_kind().await != (Some(IncomeKind::Assets), invoice.number(), invoice.data().items.clone()) {
+        wrong.push(format!("в базе: {:?}", saved_kind().await.0));
+    }
+    sleep(50).await;
+    if open() != Some(true) {
+        wrong.push(format!("после сохранения вопрос свёрнут: {:?}", open()));
+    }
+
+    match button(&host, &[t(lang, Key::DocActFromInvoice)]) {
+        Some(act) => act.click(),
+        None => wrong.push("нет «Акт по этому счёту»".to_owned()),
+    }
+    sleep(150).await;
+    if select(&host, t(lang, Key::IncomeKindLabel), 0).map(|list| list.value()).as_deref() != Some("9") {
+        wrong.push("форма акта не взяла строку счёта".to_owned());
+    }
+    match button(&host, &[t(lang, Key::DocSaveDraft)]) {
+        Some(save) => save.click(),
+        None => wrong.push("у акта нет «Сохранить черновик»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::DocSaved)).await {
+        wrong.push("черновик акта не сохранился".to_owned());
+    }
+    let (documents, _) = stored().await;
+    let act = documents.iter().find(|document| document.data().kind == DocKind::Act);
+    if act.map(|act| act.data().income_kind) != Some(Some(IncomeKind::Assets)) {
+        wrong.push(format!("черновик акта: {:?}", act.map(|act| act.data().income_kind)));
+    }
+
+    crate::platform::set_hash(&address);
+    sleep(150).await;
+    chosen("", &mut wrong);
+    sleep(200).await;
+    if saved_kind().await.0.is_some() {
+        wrong.push("«по коду» не вернулось".to_owned());
+    }
+
+    // Выпущенный акт: строка, указанная у него, идёт и в счёт.
+    let (documents, _) = stored().await;
+    let draft = documents.iter().find(|document| document.data().kind == DocKind::Act).expect("черновик акта");
+    let later = clock::now();
+    let issued = draft.issue(&documents, 0, Some(&profile()), &client, later).expect("акт выпущен");
+    let mut writes = Writes::default();
+    writes.update(&issued);
+    commit(writes).await;
+    drop(mounted);
+    host.remove();
+
+    let address = format!("#/documents/{}", issued.id());
+    let (host, mounted) = mount_at(&address);
+    if !wait_for(&host, t(lang, Key::IncomeKindAsk)).await {
+        wrong.push("в карточке акта нет вопроса о строке налога".to_owned());
+    }
+    match select(&host, t(lang, Key::IncomeKindLabel), 0) {
+        Some(list) => super::pick(&list, "5"),
+        None => wrong.push("у акта нет списка строк налога".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::DocIncomeKindSaved)).await {
+        wrong.push("строка акта не сохранилась".to_owned());
+    }
+    let (documents, _) = stored().await;
+    let kinds: Vec<Option<IncomeKind>> = documents.iter().map(|document| document.data().income_kind).collect();
+    if kinds != [Some(IncomeKind::Rent), Some(IncomeKind::Rent)] {
+        wrong.push(format!("строка акта не дошла до счёта: {kinds:?}"));
+    }
+    crate::platform::set_hash(&format!("#/documents/{}", invoice.id()));
+    if !wait_for(&host, t(lang, Key::DocIncomeByAct)).await {
+        wrong.push("карточка счёта с актом не говорит, где строка налога".to_owned());
+    }
+    if host.query_selector(".docs-detail details.income-kind").ok().flatten().is_some() {
+        wrong.push("у счёта с актом остался выбор строки".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "строка налога в карточке: {wrong:#?}");
+}
+
+/// Код у выпущенного документа можно снять: со своей строкой он не нужен,
+/// а оставленный по ошибке закрыл бы налог с оборота (`turnover::regime_code`).
+#[wasm_bindgen_test]
+async fn the_code_is_cleared_beside_an_income_row() {
+    let client = fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let now = clock::now();
+    let code = ActivityCode::parse("69.20.0").expect("код");
+    let mut seller = profile();
+    seller.activities = vec![code, ActivityCode::parse("73.11.0").expect("код")];
+    let saved_profile = Profile::save(None, seller.clone(), now).expect("годный профиль").expect("новый");
+    let mut data = invoice_data(&client);
+    data.activity = Some(code);
+    data.income_kind = Some(IncomeKind::Assets);
+    let invoice = Document::create(data, now)
+        .expect("черновик")
+        .issue(&[], 0, Some(&seller), &client, now)
+        .expect("выпущен");
+    let mut writes = Writes::default();
+    writes.update(&saved_profile);
+    writes.insert(&invoice);
+    commit(writes).await;
+
+    let address = format!("#/documents/{}", invoice.id());
+    let (host, mounted) = mount_at(&address);
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::OpActivity)).await {
+        wrong.push("в карточке нет вида деятельности".to_owned());
+    }
+    match select(&host, t(lang, Key::OpActivity), 0) {
+        Some(list) => super::pick(&list, ""),
+        None => wrong.push("нет списка кодов".to_owned()),
+    }
+    sleep(50).await;
+    match button(&host, &[t(lang, Key::DocActivitySave)]) {
+        Some(save) => save.click(),
+        None => wrong.push("нет «Сохранить вид деятельности»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::DocActivitySaved)).await {
+        wrong.push("код не снялся".to_owned());
+    }
+    let (documents, _) = stored().await;
+    if documents.first().map(|document| document.data().activity) != Some(None) {
+        wrong.push("в базе остался код".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "снять код: {wrong:#?}");
 }
 
 /// Ссылка с подписью `text` внутри `scope` (CSS).

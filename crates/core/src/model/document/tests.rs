@@ -34,7 +34,7 @@ const INVOICE: &str = concat!(
     r#"{"text":"Code review","quantity_e3":12500,"price":4000}],"#,
     r#""basis":null,"recurring":null,"#,
     r#""rate":{"currency":"USD","per_unit_e4":3880000,"date":"2026-09-30","source":"manual"},"#,
-    r#""activity":"62.01.0"},"#,
+    r#""activity":"62.01.0","income_kind":null},"#,
     r#""issued":{"number":{"year":2026,"seq":7},"#,
     r#""seller":{"name":{"hy":"ԱՁ Արամ Պետրոսյան","ru":"ИП Арам Петросян","en":"IE Aram Petrosyan"},"#,
     r#""tin":"07654321","registration":"271.1234567","#,
@@ -55,7 +55,8 @@ const ACT: &str = concat!(
     r#""data":{"kind":"act","client":"5b0e8f9a-3c2d-4e1f-8a7b-9c6d5e4f3a2b","lang":"hy","currency":"AMD","#,
     r#""date":"2026-10-13","service_date":"2026-10-13","due":null,"#,
     r#""items":[{"text":"Ծրագրային ապահովման մշակում","quantity_e3":1000,"price":1500000}],"#,
-    r#""basis":"7c9e6679-7425-40de-944b-e07fc1f90ae7","recurring":null,"rate":null,"activity":null},"#,
+    r#""basis":"7c9e6679-7425-40de-944b-e07fc1f90ae7","recurring":null,"rate":null,"activity":null,"#,
+    r#""income_kind":null},"#,
     r#""issued":null,"annulled":null,"signed":null,"settlement":null,"payments":[]}"#
 );
 
@@ -104,6 +105,7 @@ fn data_shape_is_pinned() {
     assert_eq!(act.data().rate, None);
     assert_eq!(act.data().total_lumas(), Ok(Lumas::new(150_000_000)));
     assert_eq!(act.data().activity, None);
+    assert_eq!(act.data().income_kind, None);
     assert_eq!(act.settlement(), None);
     assert_eq!(serde_json::to_string(&act).ok().as_deref(), Some(ACT));
 }
@@ -119,25 +121,129 @@ fn documents_without_rate_still_read() {
             "",
             1,
         )
-        .replacen(r#","activity":"62.01.0""#, "", 1);
+        .replacen(r#","activity":"62.01.0","income_kind":null"#, "", 1);
     assert!(!old.contains("rate") && !old.contains("activity"), "{old}");
     let invoice: Document = serde_json::from_str(&old).expect("счёт без курса читается");
     assert_eq!(invoice.data().rate, None);
     assert_eq!(invoice.data().total_lumas(), Err(MoneyError::RateUnknown));
     let written = serde_json::to_string(&invoice).expect("записывается");
-    assert!(written.contains(r#""recurring":null,"rate":null,"activity":null}"#), "{written}");
+    assert!(written.contains(r#""recurring":null,"rate":null,"activity":null,"income_kind":null}"#), "{written}");
 }
 
 /// Документ версии формата 7 — без вида деятельности — читается без него
 /// и пишется уже с полем (Правило 2).
 #[test]
 fn documents_without_activity_still_read() {
-    let old = INVOICE.replacen(r#","activity":"62.01.0""#, "", 1);
+    let old = INVOICE.replacen(r#","activity":"62.01.0","income_kind":null"#, "", 1);
     assert!(!old.contains("activity"), "{old}");
     let invoice: Document = serde_json::from_str(&old).expect("счёт версии 7 читается");
     assert_eq!(invoice.data().activity, None);
     let written = serde_json::to_string(&invoice).expect("записывается");
-    assert!(written.contains(r#""source":"manual"},"activity":null}"#), "{written}");
+    assert!(written.contains(r#""source":"manual"},"activity":null,"income_kind":null}"#), "{written}");
+}
+
+/// Документ версии формата 12 — без строки налога дохода — читается со
+/// строкой по коду и пишется уже с полем (Правило 2).
+#[test]
+fn documents_without_income_kind_still_read() {
+    let mut wrong = Vec::new();
+    for (name, sample) in [("счёт", INVOICE), ("акт", ACT)] {
+        let old = sample.replacen(r#","income_kind":null"#, "", 1);
+        if old == sample {
+            wrong.push(format!("{name}: образец без поля не получился"));
+            continue;
+        }
+        match serde_json::from_str::<Document>(&old) {
+            Ok(document) if document.data().income_kind.is_none() => {
+                if serde_json::to_string(&document).ok().as_deref() != Some(sample) {
+                    wrong.push(format!("{name}: записан не с полем"));
+                }
+            }
+            other => wrong.push(format!("{name}: {other:?}")),
+        }
+    }
+    assert!(wrong.is_empty(), "документы без строки налога: {wrong:#?}");
+}
+
+/// Строку налога дохода выпущенного документа указывают и правят: в PDF её
+/// нет, и текст документа не меняется. Та же строка — нечего писать;
+/// у аннулированного и у черновика — нельзя.
+#[test]
+fn income_kind_is_set_on_an_issued_document() {
+    let client = client();
+    let invoice = dollar_invoice(&client);
+    let kind = Some(IncomeKind::Assets);
+    let set = invoice.set_income_kind(kind, at(4_000)).expect("годен").expect("указана");
+    assert_eq!(set.data().income_kind, kind);
+    assert_eq!(set.meta().modified(), at(4_000));
+    assert_eq!((set.number(), set.issued()), (invoice.number(), invoice.issued()));
+    assert_eq!(set.data().items, invoice.data().items);
+    assert_eq!(set.data().activity, invoice.data().activity);
+    assert_eq!(set.set_income_kind(kind, at(5_000)), Ok(None));
+    let cleared = set.set_income_kind(None, at(5_000)).expect("годен").expect("убрана");
+    assert_eq!(cleared.data().income_kind, None);
+    let annulled = set.annul(day(2026, 10, 20), at(6_000)).expect("годен").expect("аннулирован");
+    assert_eq!(annulled.set_income_kind(None, at(7_000)), Err(DocError::Annulled));
+    let draft = Document::create(data(DocKind::Invoice, &client, day(2026, 10, 1)), at(1_000)).expect("черновик");
+    assert_eq!(draft.set_income_kind(kind, at(2_000)), Err(DocError::NotIssued));
+}
+
+/// Строку налога у дохода выбирают только из `OF_INCOME`: другую не читает
+/// разбор и не ставит команда.
+#[test]
+fn only_income_rows_are_chosen_at_the_income() {
+    let mut wrong = Vec::new();
+    for name in ["rent", "assets"] {
+        let text = INVOICE.replacen(r#""income_kind":null"#, &format!(r#""income_kind":"{name}""#), 1);
+        if serde_json::from_str::<Document>(&text).is_err() {
+            wrong.push(format!("{name}: не читается"));
+        }
+    }
+    for name in ["high_tech", "other", "catering_other"] {
+        let text = INVOICE.replacen(r#""income_kind":null"#, &format!(r#""income_kind":"{name}""#), 1);
+        if serde_json::from_str::<Document>(&text).is_ok() {
+            wrong.push(format!("{name}: прочитано"));
+        }
+    }
+    assert!(wrong.is_empty(), "строка у документа: {wrong:#?}");
+    let client = client();
+    let invoice = dollar_invoice(&client);
+    assert_eq!(invoice.set_income_kind(Some(IncomeKind::HighTech), at(4_000)), Err(DocError::WrongKind));
+}
+
+/// Строку указали у счёта, пока акт лежал черновиком: доход теперь по акту,
+/// и выпуск берёт её, иначе она осталась бы у счёта и ни на что не влияла.
+/// Своя строка черновика важнее.
+#[test]
+fn an_act_takes_the_income_kind_of_its_invoice() {
+    let client = client();
+    let invoice = dollar_invoice(&client);
+    let draft = Document::create(invoice.act_data(day(2026, 10, 13)).expect("акт"), at(4_000)).expect("черновик");
+    assert_eq!(draft.data().income_kind, None);
+    let marked = invoice.set_income_kind(Some(IncomeKind::Rent), at(5_000)).expect("годен").expect("указана");
+    let profile = profile();
+    let documents = [marked.clone()];
+    let act = draft.issue(&documents, 0, Some(&profile), &client, at(6_000)).expect("выпущен");
+    assert_eq!(act.data().income_kind, Some(IncomeKind::Rent));
+
+    let mut own = invoice.act_data(day(2026, 10, 13)).expect("акт");
+    own.income_kind = Some(IncomeKind::Assets);
+    let draft = Document::create(own, at(4_000)).expect("черновик");
+    let act = draft.issue(&documents, 0, Some(&profile), &client, at(6_000)).expect("выпущен");
+    assert_eq!(act.data().income_kind, Some(IncomeKind::Assets));
+}
+
+/// Акт и повтор счёта — та же услуга: счёт за аренду остаётся арендой и в акте,
+/// и в черновике следующего месяца.
+#[test]
+fn the_act_and_the_repeat_keep_the_income_kind() {
+    let client = client();
+    let kind = Some(IncomeKind::Rent);
+    let invoice = dollar_invoice(&client).set_income_kind(kind, at(4_000)).expect("годен").expect("указана");
+    let act = invoice.act_data(day(2026, 10, 13)).expect("акт");
+    assert_eq!(act.income_kind, kind);
+    let next = invoice.repeat_data(1, RecordId::random()).expect("календарь не кончился");
+    assert_eq!(next.income_kind, kind);
 }
 
 /// Вид деятельности выпущенного документа указывают и правят: в PDF его
@@ -375,6 +481,7 @@ fn data(kind: DocKind, client: &Client, date: Date) -> DocumentData {
         recurring: None,
         rate: None,
         activity: None,
+        income_kind: None,
     }
 }
 

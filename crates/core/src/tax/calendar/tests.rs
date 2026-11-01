@@ -334,6 +334,7 @@ fn income_of(date: Date, amount: Money) -> Operation {
             proof: None,
             nature: None,
             activity: None,
+            income_kind: None,
             attachments: Vec::new(),
         },
         Timestamp::from_unix_millis(1_760_000_000_000),

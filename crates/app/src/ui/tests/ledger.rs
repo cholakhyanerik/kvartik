@@ -4,11 +4,15 @@
 
 use js_sys::{Array, Uint8Array};
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
+use kvartik_core::model::activity::{ActivityCode, IncomeKind};
 use kvartik_core::model::attachment::{Attachment, FileKind};
+use kvartik_core::model::date::Date;
 use kvartik_core::model::document::{DocKind, Document};
-use kvartik_core::model::ledger::{Flow, Nature, Operation, Proof};
+use kvartik_core::model::ledger::{Flow, Nature, Operation, OperationData, Proof};
 use kvartik_core::model::money::{Currency, Money};
+use kvartik_core::model::profile::Profile;
 use kvartik_core::model::record::RecordId;
+use kvartik_core::model::text::Line;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::wasm_bindgen_test;
 use web_sys::{
@@ -251,6 +255,7 @@ async fn long_quarter_shows_by_pages() {
             proof: None,
             nature: None,
             activity: None,
+            income_kind: None,
             attachments: Vec::new(),
         };
         writes.insert(&Operation::create(data, now).expect("годна"));
@@ -516,4 +521,191 @@ async fn document_rate_reaches_the_ledger() {
     set_hash("");
     forget_device();
     assert!(wrong.is_empty(), "курс документа: {wrong:#?}");
+}
+
+/// Строка налога у дохода: вопрос свёрнут, а выбор раскрывает ставку
+/// и подсказку. У ИП, чьи коды облагаются по-разному, вид деятельности
+/// обязателен, пока строка не выбрана: своей строке код не нужен. Запись ложится
+/// с этой строкой, открывается снова раскрытой и считается ею: 300 000 ֏ × 10 %
+/// = 30 000 ֏, а не 1 % кода.
+#[wasm_bindgen_test]
+async fn income_row_is_chosen_in_the_ledger_form() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let mut data = profile();
+    data.activities = ["62.01.0", "74.10.0"].map(|text| ActivityCode::parse(text).expect("код")).to_vec();
+    let saved = Profile::save(None, data, clock::now()).expect("годный профиль").expect("новый");
+    let mut writes = Writes::default();
+    writes.insert(&saved);
+    commit(writes).await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at("#/ledger");
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::LedgerAddIncome)).await {
+        wrong.push("экран книги не открылся".to_owned());
+    }
+    press(&host, t(lang, Key::LedgerAddIncome), &mut wrong);
+    sleep(50).await;
+    let open = || {
+        host.query_selector("#ledger details.income-kind")
+            .ok()
+            .flatten()
+            .map(|details| details.has_attribute("open"))
+    };
+    if open() != Some(false) {
+        wrong.push(format!("вопрос о строке налога не свёрнут: {:?}", open()));
+    }
+    fill_field(&host, t(lang, Key::OpText), "Лицензия программы", &mut wrong);
+    fill_field(&host, t(lang, Key::OpAmount), &i18n::amount(lang, amd(300_000)), &mut wrong);
+    press(&host, t(lang, Key::ProfileSave), &mut wrong);
+    sleep(50).await;
+    if !host.text_content().unwrap_or_default().contains(t(lang, Key::IncomeActivityMissing)) {
+        wrong.push("без кода и без строки форма не сказала, чего не хватает".to_owned());
+    }
+    if !stored().await.0.is_empty() {
+        wrong.push("запись без кода и строки сохранилась".to_owned());
+    }
+    match host.query_selector("#ledger details.income-kind summary").ok().flatten() {
+        Some(summary) => summary.unchecked_into::<HtmlElement>().click(),
+        None => wrong.push("у вопроса нет заголовка".to_owned()),
+    }
+    if open() != Some(true) {
+        wrong.push("вопрос не раскрылся".to_owned());
+    }
+    choose(&host, t(lang, Key::IncomeKindLabel), "5", &mut wrong);
+    sleep(50).await;
+    let shown = host.text_content().unwrap_or_default();
+    let rate = fill(t(lang, Key::IncomeKindRate), &[&i18n::percent(lang, 1_000)]);
+    if !shown.contains(&rate) || !shown.contains(t(lang, Key::IncomeKindRentHint)) {
+        wrong.push("у выбранной строки нет ставки и подсказки".to_owned());
+    }
+    if shown.contains(t(lang, Key::IncomeActivityMissing)) {
+        wrong.push("строка выбрана, а форма всё просит вид деятельности".to_owned());
+    }
+    press(&host, t(lang, Key::ProfileSave), &mut wrong);
+    if !wait_for(&host, t(lang, Key::LedgerSaved)).await {
+        wrong.push("доход не сохранился".to_owned());
+    }
+    match stored().await.0.as_slice() {
+        [operation] => {
+            let data = operation.data();
+            if (data.income_kind, data.activity) != (Some(IncomeKind::Rent), None) {
+                wrong.push(format!("в базе: {:?} {:?}", data.income_kind, data.activity));
+            }
+        }
+        other => wrong.push(format!("записей: {}", other.len())),
+    }
+    open_entry(&host, "Лицензия программы", &mut wrong);
+    sleep(100).await;
+    if open() != Some(true) {
+        wrong.push(format!("запись открылась со свёрнутой строкой: {:?}", open()));
+    }
+    if select(&host, t(lang, Key::IncomeKindLabel), 0).map(|list| list.value()).as_deref() != Some("5") {
+        wrong.push("запись открылась с другой строкой".to_owned());
+    }
+    press(&host, t(lang, Key::Cancel), &mut wrong);
+    sleep(50).await;
+    set_hash("#/tax");
+    if !wait_for(&host, &i18n::money(lang, amd(30_000))).await {
+        wrong.push("налог посчитан не строкой дохода".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "строка налога у дохода: {wrong:#?}");
+}
+
+/// Расход рядом с доходом со своей строкой: при одном коде форма спрашивает вид
+/// деятельности только в этом квартале, запись ложится с кодом, а без кода экран
+/// налога говорит, что доля ушла на строку без вычета. Это слова закона, а не
+/// угадывание: что расход прямой, книга не знает.
+#[wasm_bindgen_test]
+async fn expense_form_asks_the_code_beside_an_income_row() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let now = clock::now();
+    let today = clock::today().expect("часы с датой");
+    let code = ActivityCode::parse("74.10.0").expect("код");
+    let mut data = profile();
+    data.activities = vec![code];
+    let saved = Profile::save(None, data, now).expect("годный профиль").expect("новый");
+    let line = |text: &str| Line::new(text).expect("текст");
+    let income = |text: &str, flow: Flow, proof, nature, income_kind| OperationData {
+        flow,
+        date: today,
+        paid: None,
+        amount: amd(400_000),
+        rate: None,
+        text: line(text),
+        client: None,
+        supplier: Line::default(),
+        proof,
+        nature,
+        activity: None,
+        income_kind,
+        attachments: Vec::new(),
+    };
+    let sale = Operation::create(income("Продажа ноутбука", Flow::Income, None, None, Some(IncomeKind::Assets)), now)
+        .expect("годна");
+    let design = Operation::create(income("Дизайн сайта", Flow::Income, None, None, None), now).expect("годна");
+    let hosting = Operation::create(
+        income("Хостинг", Flow::Expense, Some(Proof::SettlementInvoice), Some(Nature::Ordinary), None),
+        now,
+    )
+    .expect("годна");
+    let mut writes = Writes::default();
+    writes.insert(&saved);
+    writes.insert(&sale);
+    writes.insert(&design);
+    writes.insert(&hosting);
+    commit(writes).await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at("#/ledger");
+    let mut wrong = Vec::new();
+    if !wait_for(&host, "Продажа ноутбука").await {
+        wrong.push("запись не видна".to_owned());
+    }
+    press(&host, t(lang, Key::LedgerAddExpense), &mut wrong);
+    sleep(100).await;
+    if select(&host, t(lang, Key::OpActivity), 0).is_none() {
+        wrong.push("рядом с доходом со своей строкой форма не спросила вид".to_owned());
+    }
+    // В прошлом году такого дохода нет: один код, выбирать нечего.
+    let last_year = Date::new(today.year() - 1, 6, 15).expect("дата").iso();
+    match field(&host, t(lang, Key::OpReceived), 0) {
+        Some(input) => type_into(&input, &last_year),
+        None => wrong.push("нет поля даты расхода".to_owned()),
+    }
+    sleep(100).await;
+    if select(&host, t(lang, Key::OpActivity), 0).is_some() {
+        wrong.push("в другом квартале форма спросила вид при одном коде".to_owned());
+    }
+    match field(&host, t(lang, Key::OpReceived), 0) {
+        Some(input) => type_into(&input, &today.iso()),
+        None => wrong.push("нет поля даты расхода".to_owned()),
+    }
+    sleep(100).await;
+    fill_field(&host, t(lang, Key::OpText), "Товар", &mut wrong);
+    fill_field(&host, t(lang, Key::OpAmount), &i18n::amount(lang, amd(100_000)), &mut wrong);
+    choose(&host, t(lang, Key::OpProof), "settlement_invoice", &mut wrong);
+    choose(&host, t(lang, Key::OpActivity), "74.10.0", &mut wrong);
+    press(&host, t(lang, Key::ProfileSave), &mut wrong);
+    if !wait_for(&host, t(lang, Key::LedgerSaved)).await {
+        wrong.push("расход не сохранился".to_owned());
+    }
+    let (operations, _) = stored().await;
+    let goods = operations.iter().find(|operation| operation.data().text.as_str() == "Товар");
+    if goods.and_then(|operation| operation.data().activity) != Some(code) {
+        wrong.push("расход лёг без кода".to_owned());
+    }
+    set_hash("#/tax");
+    if !wait_for(&host, &fill(t(lang, Key::TaxRefusedSplit), &["1"])).await {
+        wrong.push("экран налога не сказал о расходе без вида".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "вид у расхода: {wrong:#?}");
 }

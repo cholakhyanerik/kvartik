@@ -85,6 +85,7 @@ async fn seed(person: Person) -> u16 {
             proof: None,
             nature: None,
             activity: None,
+            income_kind: None,
             attachments: Vec::new(),
         },
         now,

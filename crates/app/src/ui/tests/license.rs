@@ -91,6 +91,7 @@ async fn base_with_draft() -> Document {
             proof: None,
             nature: None,
             activity: None,
+            income_kind: None,
             attachments: Vec::new(),
         },
         now,

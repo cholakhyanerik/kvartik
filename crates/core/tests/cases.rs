@@ -68,6 +68,8 @@ struct Entry {
     /// Курс ЦБ в десятитысячных драма; `None` — у драмов.
     rate_e4: Option<i64>,
     activity: Option<String>,
+    #[serde(default)]
+    income_kind: Option<IncomeKind>,
     proof: Option<Proof>,
     nature: Option<Nature>,
 }
@@ -113,6 +115,7 @@ fn operation(entry: &Entry) -> Operation {
         proof: entry.proof,
         nature: entry.nature,
         activity: entry.activity.as_deref().map(code),
+        income_kind: entry.income_kind,
         attachments: Vec::new(),
     };
     Operation::create(data, Timestamp::from_unix_millis(1_760_000_000_000)).expect("запись случая годна")

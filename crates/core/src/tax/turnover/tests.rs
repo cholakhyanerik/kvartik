@@ -57,7 +57,16 @@ fn income(date: Date, drams: i64, activity: Option<&str>) -> Operation {
         proof: None,
         nature: None,
         activity: activity.map(code),
+        income_kind: None,
         attachments: Vec::new(),
+    })
+}
+
+/// Доход в драмах со своей строкой налога и без кода.
+fn income_as(date: Date, drams: i64, kind: IncomeKind) -> Operation {
+    operation(OperationData {
+        income_kind: Some(kind),
+        ..income(date, drams, None).data().clone()
     })
 }
 
@@ -87,6 +96,7 @@ fn expense(date: Date, drams: i64, proof: Proof, nature: Nature, activity: Optio
         proof: Some(proof),
         nature: Some(nature),
         activity: activity.map(code),
+        income_kind: None,
         attachments: Vec::new(),
     })
 }
@@ -662,7 +672,8 @@ fn only_documented_expenses_are_deducted() {
             no_document: 1,
             payment_only: 1,
             excluded: 1,
-            no_base: 0
+            no_base: 0,
+            split: 0,
         }
     );
 }
@@ -1210,26 +1221,296 @@ fn an_excluded_code_needs_the_income_code() {
     assert!(activity_needed(Some(&self::profile(&["62.01.0", "73.11.0"])), day(2026, 8, 1)));
 }
 
+/// Выпущенный акт на 1 500 000 ֏ за дизайн с кодом 74.10.0.
+const ISSUED_ACT: &str = concat!(
+    r#"{"meta":{"id":"7c9e6679-7425-40de-944b-e07fc1f90ae8","modified":1760000000500,"deleted":null},"#,
+    r#""data":{"kind":"act","client":"5b0e8f9a-3c2d-4e1f-8a7b-9c6d5e4f3a2b","lang":"hy","currency":"AMD","#,
+    r#""date":"2026-10-13","service_date":"2026-10-13","due":null,"#,
+    r#""items":[{"text":"Դիզայն","quantity_e3":1000,"price":1500000}],"#,
+    r#""basis":null,"recurring":null,"rate":null,"activity":"74.10.0"},"#,
+    r#""issued":{"number":{"year":2026,"seq":1},"#,
+    r#""seller":{"name":{"hy":"ԱՁ Արամ Պետրոսյան","ru":"ИП Арам Петросян","en":"IE Aram Petrosyan"},"#,
+    r#""tin":null,"registration":"","address":{"hy":"","ru":"","en":""},"phone":"","email":null,"accounts":[]},"#,
+    r#""buyer":{"name":"«Արարատ» ՍՊԸ","country":"AM","address":"","tin":null,"tax_id":"","currency":"AMD","lang":"hy","payment_days":null}},"#,
+    r#""annulled":null,"signed":null,"payments":[]}"#
+);
+
 /// Доход из выпущенного акта — со своим видом деятельности: дизайн по акту
 /// у ИП с IT и дизайном идёт в прочую деятельность.
 #[test]
 fn documents_bring_their_activity() {
-    let act: Document = serde_json::from_str(concat!(
-        r#"{"meta":{"id":"7c9e6679-7425-40de-944b-e07fc1f90ae8","modified":1760000000500,"deleted":null},"#,
-        r#""data":{"kind":"act","client":"5b0e8f9a-3c2d-4e1f-8a7b-9c6d5e4f3a2b","lang":"hy","currency":"AMD","#,
-        r#""date":"2026-10-13","service_date":"2026-10-13","due":null,"#,
-        r#""items":[{"text":"Դիզայն","quantity_e3":1000,"price":1500000}],"#,
-        r#""basis":null,"recurring":null,"rate":null,"activity":"74.10.0"},"#,
-        r#""issued":{"number":{"year":2026,"seq":1},"#,
-        r#""seller":{"name":{"hy":"ԱՁ Արամ Պետրոսյան","ru":"ИП Арам Петросян","en":"IE Aram Petrosyan"},"#,
-        r#""tin":null,"registration":"","address":{"hy":"","ru":"","en":""},"phone":"","email":null,"accounts":[]},"#,
-        r#""buyer":{"name":"«Արարատ» ՍՊԸ","country":"AM","address":"","tin":null,"tax_id":"","currency":"AMD","lang":"hy","payment_days":null}},"#,
-        r#""annulled":null,"signed":null,"payments":[]}"#
-    ))
-    .expect("акт читается");
+    let act: Document = serde_json::from_str(ISSUED_ACT).expect("акт читается");
     let profile = profile(&["62.01.0", "74.10.0"]);
     let got = quarter_of(&[act], Some(&profile), &[], &[], quarter(2026, 4));
     assert_eq!(got.lines, [other(1_500_000, 150_000, 0, 0, 0, 67_500, 150_000, 0)]);
+}
+
+/// Строка налога дохода важнее строки кода (ст. 258, ч. 1): у IT 1 % на
+/// услуги, а лицензия как роялти и проданный ноутбук — по 10 % без вычета.
+///
+/// 1 000 000 × 1 % = 10 000; 300 000 × 10 % = 30 000; 200 000 × 10 % = 20 000;
+/// итого 60 000. Строкой кода было бы 15 000.
+#[test]
+fn the_income_row_beats_the_row_of_the_code() {
+    let profile = profile(&["62.01.0"]);
+    let books = [
+        income(day(2026, 4, 10), 1_000_000, None),
+        income_as(day(2026, 5, 10), 300_000, IncomeKind::Rent),
+        income_as(day(2026, 6, 10), 200_000, IncomeKind::Assets),
+    ];
+    let got = tax(Some(&profile), &books, &[], quarter(2026, 2));
+    assert_eq!(
+        got.lines,
+        [
+            plain(IncomeKind::Rent, 300_000, "10", 30_000),
+            plain(IncomeKind::HighTech, 1_000_000, "1", 10_000),
+            plain(IncomeKind::Assets, 200_000, "10", 20_000),
+        ]
+    );
+    assert_eq!(got.tax, 60_000);
+    assert!(got.complete());
+    assert_eq!(got.year_turnover, 1_500_000);
+}
+
+/// Строка дохода есть и в документе: тот же акт — продажа имущества, хотя код
+/// у него есть.
+#[test]
+fn documents_bring_their_income_row() {
+    let text = ISSUED_ACT.replacen(r#""activity":"74.10.0""#, r#""activity":"74.10.0","income_kind":"assets""#, 1);
+    let act: Document = serde_json::from_str(&text).expect("акт читается");
+    let profile = profile(&["62.01.0", "74.10.0"]);
+    let got = quarter_of(&[act], Some(&profile), &[], &[], quarter(2026, 4));
+    assert_eq!(got.lines, [plain(IncomeKind::Assets, 1_500_000, "10", 150_000)]);
+}
+
+/// Продажа имущества — в обороте всех видов: её вес уменьшает долю общих
+/// расходов у строки с вычетом (ст. 260, ч. 3), хотя у самой строки 9 вычета
+/// нет. IT и дизайн по 300 000, продажа 400 000, общие 500 000: доля дизайна
+/// 500 000 × 300 000 / 1 000 000 = 150 000, вычет 9 000, налог 30 000 − 9 000
+/// = 21 000; IT 3 000, строка 9 — 40 000. Без продажи доля была бы 250 000.
+#[test]
+fn an_income_row_weighs_in_the_split_of_shared_expenses() {
+    let profile = profile(&["62.01.0", "74.10.0"]);
+    let books = [
+        income(day(2026, 7, 10), 300_000, Some("62.01.0")),
+        income(day(2026, 7, 20), 300_000, Some("74.10.0")),
+        income_as(day(2026, 8, 10), 400_000, IncomeKind::Assets),
+        ordinary(day(2026, 9, 1), 500_000),
+    ];
+    let got = tax(Some(&profile), &books, &[], quarter(2026, 3));
+    assert_eq!(
+        got.lines,
+        [
+            plain(IncomeKind::HighTech, 300_000, "1", 3_000),
+            plain(IncomeKind::Assets, 400_000, "10", 40_000),
+            other(300_000, 30_000, 150_000, 9_000, 0, 13_500, 21_000, 0),
+        ]
+    );
+    assert_eq!(got.tax, 64_000);
+    assert_eq!((got.refused.no_base, got.refused.split), (0, 1));
+}
+
+/// Торговец продал кассовый аппарат: прямой расход и товар ст. 260, ч. 3 не
+/// делит (ст. 258, ч. 6), но книга этого не знает. Без вида расход общий, его доля
+/// уходит на строку 9, и окно это называет; с кодом идёт в свою строку целиком.
+///
+/// Выручка 1 000 000 ֏, продажа 1 000 000 ֏, расход 900 000 ֏. Без вида: доля
+/// 450 000, вычет 42 750, налог 57 250, строка 9 — 100 000, итого 157 250.
+/// С кодом: 100 000 − 85 500 = 14 500 (предел 10 000), итого 114 500.
+#[test]
+fn an_expense_with_its_code_keeps_out_of_the_split() {
+    let mut profile = profile(&["47.91.0"]);
+    profile.kinds.insert(code("47.91.0"), IncomeKind::Trade);
+    let sales = [income(day(2026, 7, 10), 1_000_000, None), income_as(day(2026, 8, 10), 1_000_000, IncomeKind::Assets)];
+    let shared = [sales[0].clone(), sales[1].clone(), ordinary(day(2026, 9, 1), 900_000)];
+    let got = tax(Some(&profile), &shared, &[], quarter(2026, 3));
+    assert_eq!(got.tax, 157_250);
+    assert_eq!(got.refused.split, 1);
+    assert!(got.complete());
+
+    let own = [
+        sales[0].clone(),
+        sales[1].clone(),
+        expense(day(2026, 9, 1), 900_000, Proof::SettlementInvoice, Nature::Ordinary, Some("47.91.0")),
+    ];
+    let got = tax(Some(&profile), &own, &[], quarter(2026, 3));
+    assert_eq!(got.tax, 114_500);
+    assert_eq!(got.refused.split, 0);
+}
+
+/// Весь доход квартала — со своей строкой: вес строки с вычетом — ноль, общий
+/// расход пропадает, и окно это говорит, как у IT (ст. 260, ч. 3). Расход
+/// с кодом переносится (ст. 258, ч. 7, «в том числе при отсутствии базы»).
+#[test]
+fn only_an_income_row_leaves_shared_expenses_without_a_base() {
+    let design = profile(&["74.10.0"]);
+    let sale = income_as(day(2026, 8, 10), 400_000, IncomeKind::Rent);
+    let shared = [sale.clone(), ordinary(day(2026, 9, 1), 500_000)];
+    let got = tax(Some(&design), &shared, &[], quarter(2026, 3));
+    assert_eq!(got.lines, [plain(IncomeKind::Rent, 400_000, "10", 40_000)]);
+    assert_eq!((got.refused.no_base, got.refused.split), (1, 0));
+    assert!(got.complete());
+
+    let own = [sale, expense(day(2026, 9, 1), 500_000, Proof::SettlementInvoice, Nature::Ordinary, Some("74.10.0"))];
+    let got = tax(Some(&design), &own, &[], quarter(2026, 3));
+    let line = got.lines.iter().find(|line| line.kind == IncomeKind::Other).expect("строка прочей деятельности");
+    assert_eq!(line.deduction.map(|deduction| (deduction.current, deduction.carry_out)), Some((30_000, 30_000)));
+    assert_eq!(got.refused.no_base, 0);
+}
+
+/// У IT расходы не вычитаются вовсе: о доле, ушедшей на строку без вычета,
+/// говорить незачем, и совет указать код был бы пустым.
+#[test]
+fn without_a_deduction_there_is_no_share_to_name() {
+    let it = profile(&["62.01.0"]);
+    let books = [
+        income(day(2026, 7, 10), 300_000, None),
+        income_as(day(2026, 8, 10), 200_000, IncomeKind::Rent),
+        ordinary(day(2026, 9, 1), 500_000),
+    ];
+    let got = tax(Some(&it), &books, &[], quarter(2026, 3));
+    assert_eq!(got.refused, Refused::default());
+    assert!(got.complete());
+}
+
+/// Вид у расхода спрашивается при одном коде, только когда это что-то меняет:
+/// в квартале есть доход со своей строкой, а у кода есть вычет. Другой квартал,
+/// IT без вычета и книга без такого дохода — не спрашивается.
+#[test]
+fn the_expense_form_asks_the_code_only_beside_an_income_row() {
+    let day_of = day(2026, 8, 20);
+    let sold = [income_as(day(2026, 8, 10), 400_000, IncomeKind::Assets)];
+    let plain_income = [income(day(2026, 8, 10), 400_000, None)];
+    let design = profile(&["74.10.0"]);
+    let it = profile(&["62.01.0"]);
+    assert!(expense_activity_needed(&[], &sold, Some(&design), day_of));
+    assert!(!expense_activity_needed(&[], &sold, Some(&design), day(2026, 10, 1)));
+    assert!(!expense_activity_needed(&[], &sold, Some(&it), day_of));
+    assert!(!expense_activity_needed(&[], &plain_income, Some(&design), day_of));
+    assert!(!expense_activity_needed(&[], &sold, None, day_of));
+}
+
+/// Без кодов в профиле доход со своей строкой посчитан, а общему расходу
+/// некуда идти: какая строка с вычетом у ИП, неизвестно. Окно называет это,
+/// и квартал не закрывается (Правило 2), а не проглатывает расход молча.
+#[test]
+fn an_income_row_without_codes_leaves_expenses_unknown() {
+    let none = profile(&[]);
+    let books = [income_as(day(2026, 8, 10), 400_000, IncomeKind::Rent), ordinary(day(2026, 9, 1), 500_000)];
+    let got = tax(Some(&none), &books, &[], quarter(2026, 3));
+    assert!(got.gaps.no_codes);
+    assert!(!got.complete());
+    let got = tax(Some(&none), &books[..1], &[], quarter(2026, 3));
+    assert!(got.complete());
+}
+
+/// Продажа имущества идёт в оборот для порога (ст. 255, ч. 1, п. 2): 114 млн
+/// за квартиру в феврале и 2 млн услуг в августе — порог перейдён на услуге,
+/// и под налог с оборота идёт только 1 млн из неё.
+#[test]
+fn an_income_row_counts_towards_the_threshold() {
+    let profile = profile(&["62.01.0"]);
+    let books = [
+        income_as(day(2026, 2, 10), 114_000_000, IncomeKind::Assets),
+        income(day(2026, 8, 10), 2_000_000, None),
+    ];
+    let first = tax(Some(&profile), &books, &[], quarter(2026, 1));
+    assert_eq!(first.lines, [plain(IncomeKind::Assets, 114_000_000, "10", 11_400_000)]);
+    let got = tax(Some(&profile), &books, &[], quarter(2026, 3));
+    assert_eq!(got.lines, [plain(IncomeKind::HighTech, 1_000_000, "1", 10_000)]);
+    assert_eq!(
+        got.regime,
+        Regime::Left {
+            from: day(2026, 8, 10),
+            why: Leaving::Threshold,
+        }
+    );
+    assert_eq!(got.year_turnover, 116_000_000);
+}
+
+/// Доходу со своей строкой код не нужен: строка известна, хотя коды профиля
+/// облагаются по-разному, а среди них есть закрывающий налог с оборота. Так же
+/// и без кодов в профиле вовсе.
+#[test]
+fn an_income_row_needs_no_code() {
+    let books = [income_as(day(2026, 8, 1), 1_000_000, IncomeKind::Rent)];
+    let mut wrong = Vec::new();
+    for codes in [&["62.01.0", "74.10.0"][..], &["69.20.0", "73.11.0"], &[]] {
+        let profile = profile(codes);
+        let got = tax(Some(&profile), &books, &[], quarter(2026, 3));
+        if !got.complete() || got.lines != [plain(IncomeKind::Rent, 1_000_000, "10", 100_000)] {
+            wrong.push(format!("{codes:?}: {:?} {:?}", got.gaps, got.lines));
+        }
+        if got.regime != Regime::Turnover {
+            wrong.push(format!("{codes:?}: {:?}", got.regime));
+        }
+    }
+    assert!(wrong.is_empty(), "доход со своей строкой: {wrong:#?}");
+}
+
+/// Режим решает деятельность, а не проданный ноутбук: доход со своей строкой
+/// не становится доходом по единственному коду, закрывающему налог с оборота.
+/// А код, указанный у самого дохода, решает и при своей строке: окно о нём
+/// предупредило.
+#[test]
+fn an_income_row_does_not_decide_the_regime() {
+    let only = profile(&["70.22.0"]);
+    let sold = [income_as(day(2026, 8, 1), 1_000_000, IncomeKind::Assets)];
+    let got = tax(Some(&only), &sold, &[], quarter(2026, 3));
+    assert_eq!(got.regime, Regime::Turnover);
+    assert_eq!(got.lines, [plain(IncomeKind::Assets, 1_000_000, "10", 100_000)]);
+
+    let coded = [operation(OperationData {
+        activity: Some(code("70.22.0")),
+        ..sold[0].data().clone()
+    })];
+    let got = tax(Some(&only), &coded, &[], quarter(2026, 3));
+    assert_eq!(
+        got.regime,
+        Regime::Left {
+            from: day(2026, 8, 1),
+            why: Leaving::Code(code("70.22.0")),
+        }
+    );
+}
+
+/// Кто подал заявление об общепите, считает только по строкам 6 и 7 (ст. 258,
+/// ч. 8): его проданный актив и аренда — строка 7, 20 %. Заявление программа
+/// видит по строке 7 у кода профиля; без неё общепит — обычный плательщик,
+/// и строка 9 остаётся.
+#[test]
+fn a_catering_declaration_leaves_only_its_two_rows() {
+    let mut declared = profile(&["56.10.1", "47.91.0"]);
+    declared.kinds.insert(code("56.10.1"), IncomeKind::Catering);
+    declared.kinds.insert(code("47.91.0"), IncomeKind::CateringOther);
+    let books = [
+        income_as(day(2026, 8, 1), 1_000_000, IncomeKind::Assets),
+        income_as(day(2026, 8, 2), 500_000, IncomeKind::Rent),
+    ];
+    let got = tax(Some(&declared), &books, &[], quarter(2026, 3));
+    assert_eq!(got.lines, [plain(IncomeKind::CateringOther, 1_500_000, "20", 300_000)]);
+
+    let mut plain_catering = profile(&["56.10.1"]);
+    plain_catering.kinds.insert(code("56.10.1"), IncomeKind::Catering);
+    let got = tax(Some(&plain_catering), &books[..1], &[], quarter(2026, 3));
+    assert_eq!(got.lines, [plain(IncomeKind::Assets, 1_000_000, "10", 100_000)]);
+}
+
+/// Строку дохода выбрали после закрытия квартала — расчёт разошёлся со снимком:
+/// 1 000 000 × 1 % = 10 000 поданных против 100 000 по строке 5.
+#[test]
+fn choosing_the_row_after_closing_is_a_drift() {
+    let profile = profile(&["62.01.0"]);
+    let before = [income(day(2026, 8, 1), 1_000_000, None)];
+    let closings = [closed(&profile, &before, &[], quarter(2026, 3), 1_760_000_001_000)];
+    assert_eq!(scan(drift_books(&profile, &before, &closings)), None);
+    let after = [operation(OperationData {
+        income_kind: Some(IncomeKind::Rent),
+        ..before[0].data().clone()
+    })];
+    let (found, closing) = scan(drift_books(&profile, &after, &closings)).expect("расхождение найдено");
+    assert_eq!(found.tax, 100_000);
+    assert_eq!(closing.data().tax, 10_000);
 }
 
 /// Процент — строкой закона: `4.5`, `10`; запятая, ведущий ноль, ноль

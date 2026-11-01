@@ -43,7 +43,7 @@ const INCOME: &str = concat!(
     r#""amount":{"minor":150000,"currency":"USD"},"#,
     r#""rate":{"currency":"USD","per_unit_e4":3880000,"date":"2026-09-30","source":"manual"},"#,
     r#""text":"Web development, September","client":"5b0e8f9a-3c2d-4e1f-8a7b-9c6d5e4f3a2b","#,
-    r#""supplier":"","proof":null,"nature":null,"activity":null,"#,
+    r#""supplier":"","proof":null,"nature":null,"activity":null,"income_kind":null,"#,
     r#""attachments":[{"id":"3f2b8c1d-6a4e-4f7b-9c2d-1e0f5a6b7c8d","name":"act.pdf","kind":"pdf","size":183402}]}}"#
 );
 
@@ -54,7 +54,7 @@ const EXPENSE: &str = concat!(
     r#""data":{"flow":"expense","date":"2026-10-31","paid":null,"#,
     r#""amount":{"minor":60000,"currency":"AMD"},"rate":null,"#,
     r#""text":"Аренда офиса, октябрь","client":null,"#,
-    r#""supplier":"«Արարատ» ՍՊԸ","proof":"settlement_invoice","nature":"ordinary","activity":"62.01.0","#,
+    r#""supplier":"«Արարատ» ՍՊԸ","proof":"settlement_invoice","nature":"ordinary","activity":"62.01.0","income_kind":null,"#,
     r#""attachments":[]}}"#
 );
 
@@ -101,6 +101,8 @@ fn data_rejects_what_commands_never_write() {
         income(r#""proof":null"#, r#""proof":"tax_invoice""#),
         income(r#""supplier":"""#, r#""supplier":"Кто-то""#),
         income(r#""nature":null"#, r#""nature":"ordinary""#),
+        income(r#""income_kind":null"#, r#""income_kind":"salary""#),
+        income(r#""income_kind":null"#, r#""income_kind":"high_tech""#),
         income(
             attachment,
             &format!("{attachment},{attachment}"),
@@ -109,6 +111,7 @@ fn data_rejects_what_commands_never_write() {
         expense(r#""proof":"settlement_invoice""#, r#""proof":null"#),
         expense(r#""nature":"ordinary""#, r#""nature":null"#),
         expense(r#""nature":"ordinary""#, r#""nature":"luxury""#),
+        expense(r#""income_kind":null"#, r#""income_kind":"rent""#),
         expense(r#""rate":null"#, r#""rate":{"currency":"USD","per_unit_e4":3880000,"date":"2026-10-31","source":"manual"}"#),
         expense(r#""deleted":null"#, r#""deleted":1760000000600"#),
     ];
@@ -137,6 +140,52 @@ fn income_names_its_activity_and_levy_is_a_nature() {
     assert_eq!(serde_json::to_string(&read).ok().as_deref(), Some(levy.as_str()));
 }
 
+/// С версии формата 13 у дохода — своя строка налога, если она не та, что
+/// у кода, а запись версии 12 — без поля — читается со строкой по коду
+/// и пишется уже с полем (Правило 2).
+#[test]
+fn income_names_its_tax_row() {
+    let mut wrong = Vec::new();
+    for (name, kind, expected) in [("rent", IncomeKind::Rent, "rent"), ("assets", IncomeKind::Assets, "assets")] {
+        let income = INCOME.replacen(r#""income_kind":null"#, &format!(r#""income_kind":"{expected}""#), 1);
+        match serde_json::from_str::<Operation>(&income) {
+            Ok(read) if read.data().income_kind == Some(kind) => {
+                if serde_json::to_string(&read).ok().as_deref() != Some(income.as_str()) {
+                    wrong.push(format!("{name}: записан не тем, чем прочитан"));
+                }
+            }
+            other => wrong.push(format!("{name}: {other:?}")),
+        }
+    }
+    for (name, sample) in [("доход", INCOME), ("расход", EXPENSE)] {
+        let old = sample.replacen(r#""income_kind":null,"#, "", 1);
+        if old == sample {
+            wrong.push(format!("{name}: образец без поля не получился"));
+            continue;
+        }
+        match serde_json::from_str::<Operation>(&old) {
+            Ok(read) if read.data().income_kind.is_none() => {
+                if serde_json::to_string(&read).ok().as_deref() != Some(sample) {
+                    wrong.push(format!("{name}: записан не с полем"));
+                }
+            }
+            other => wrong.push(format!("{name}: {other:?}")),
+        }
+    }
+    assert!(wrong.is_empty(), "строка налога у дохода: {wrong:#?}");
+}
+
+/// Строка налога — у дохода: у расхода команда её не пропускает, а не только
+/// чтение.
+#[test]
+fn an_expense_has_no_income_row() {
+    let data = OperationData {
+        income_kind: Some(IncomeKind::Rent),
+        ..expense_data(day(2026, 10, 3), amd(12_000))
+    };
+    assert_eq!(Operation::create(data, at(1_000)), Err(OperationError::WrongFlow));
+}
+
 fn income_data(date: Date, amount: Money) -> OperationData {
     OperationData {
         flow: Flow::Income,
@@ -150,6 +199,7 @@ fn income_data(date: Date, amount: Money) -> OperationData {
         proof: None,
         nature: None,
         activity: None,
+        income_kind: None,
         attachments: Vec::new(),
     }
 }
@@ -305,6 +355,7 @@ fn document_data(kind: DocKind, client: &Client, date: Date, service: Date, pric
         recurring: None,
         rate: None,
         activity: None,
+        income_kind: None,
     }
 }
 
