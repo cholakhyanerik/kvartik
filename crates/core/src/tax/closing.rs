@@ -7,9 +7,11 @@
 //! квартала — расчёт разойдётся со снимком (`QuarterTax::differs_from`),
 //! и окно скажет, что нужен уточнённый расчёт (приказ ՊԵԿ 299-Ն, прил. 1,
 //! п. 1). «Открыть снова» помечает снимок удалённым — записи не стираются
-//! (CLAUDE.md, «Записи не стираются»), — а новое закрытие кладёт новый.
+//! (CLAUDE.md, «Записи не стираются»), — а новое закрытие кладёт новый;
+//! «Вернуть» снимает метку, и поданный расчёт снова в силе со своими числами
+//! и версией правил.
 //!
-//! Меняется только командами: [`Closing::close`], `reopen`.
+//! Меняется только командами: [`Closing::close`], `reopen`, `restore`.
 //!
 //! В данных: `{"meta":{…},"data":{"year":2026,"quarter":3,"rules":"2026.2",
 //! "lines":[…],"tax":…}}`, строки — как у расчёта (`turnover::Line`).
@@ -164,6 +166,19 @@ impl Closing {
         }
         let mut closing = self.clone();
         closing.meta.delete(now);
+        Some(closing)
+    }
+
+    /// Команда «вернуть» после «открыть снова»: метка снимается, числа снимка
+    /// те же. `closings` — все снимки базы. `None` — снимок и так живой или
+    /// квартал уже закрыт заново, например в другой вкладке: возвращённый стал
+    /// бы изменённым последним и вытеснил бы поданный позже ([`Self::current`]).
+    pub fn restore(&self, closings: &[Closing], now: Timestamp) -> Option<Self> {
+        if !self.meta.is_deleted() || Self::current(closings, self.quarter()).is_some() {
+            return None;
+        }
+        let mut closing = self.clone();
+        closing.meta.restore(now);
         Some(closing)
     }
 

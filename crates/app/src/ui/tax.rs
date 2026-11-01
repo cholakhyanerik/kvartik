@@ -2,10 +2,16 @@
 //! (дизайн «Kvartik Design», экраны 02 и 10).
 //!
 //! Считает ядро (`kvartik_core::tax::turnover`) — по книге, профилю
-//! и снимкам закрытых кварталов; здесь — показ, закрытие квартала и снятие
-//! закрытия. Каждое из двух действий — команда ядра (`Closing::close`,
-//! `reopen`) и одна транзакция хранилища (CLAUDE.md, «Данные меняются одним
-//! путём»).
+//! и снимкам закрытых кварталов; здесь — показ, закрытие квартала, снятие
+//! закрытия и «Вернуть». Каждое из трёх действий — команда ядра
+//! (`Closing::close`, `reopen`, `restore`) и одна транзакция хранилища
+//! (CLAUDE.md, «Данные меняются одним путём»).
+//!
+//! У закрытого квартала экран показывает числа снимка: это поданный расчёт.
+//! Пересчёт виден расхождением — на экране квартала и своей карточкой на
+//! главном (`turnover::drifted`): недоплату за прошлый квартал иначе увидел
+//! бы только тот, кто сам перелистнёт. Эта карточка стоит над обычной, а не
+//! вместо неё: квартал к уплате не должен пропасть с главного экрана.
 //!
 //! Карточка и экран — частью wasm книги (`ledger::book_part`): расчёт
 //! и разбор файла правил в главном wasm стоили рабочему экрану на телефоне
@@ -27,7 +33,7 @@ use kvartik_core::i18n::{self, Key, Lang, fill, t};
 use kvartik_core::model::activity::IncomeKind;
 use kvartik_core::model::date::{Date, Quarter};
 use kvartik_core::model::money::{Currency, Money};
-use kvartik_core::model::record::RecordId;
+use kvartik_core::model::record::{RecordId, Timestamp};
 use kvartik_core::tax::annual::{self, Annual};
 use kvartik_core::tax::closing::Closing;
 use kvartik_core::tax::deadlines;
@@ -215,6 +221,15 @@ impl Sources {
         self.closings.with(|closings, _| Closing::current(closings, quarter).cloned())
     }
 
+    /// Первый закрытый квартал, чей расчёт разошёлся со снимком, и снимок —
+    /// отслеживаемое; `None` — такого нет, данные ещё читаются или часы без
+    /// даты.
+    fn drifted(&self, today: Option<Date>) -> Option<(QuarterTax, Closing)> {
+        let today = today?;
+        self.with_books(|books| turnover::drifted(books, today).map(|(tax, closing)| (tax, closing.clone())))
+            .flatten()
+    }
+
     /// Годовые платежи года — отслеживаемое; `None` — как у
     /// [`Self::with_books`].
     pub(super) fn annual(&self, year: u16) -> Option<Annual> {
@@ -347,6 +362,7 @@ fn Card(ctx: Ctx) -> impl IntoView {
             let quarter = tax.quarter;
             let sum = tax.tax;
             let note = Note::of(&tax, due);
+            let chosen = ctx.quarter;
             let label = if due { Key::TaxToPay } else { Key::TaxSoFar };
             // Квартал к уплате — с последним днём, перенесённым с нерабочего
             // (задача 21), если расчёт за него подают.
@@ -355,7 +371,7 @@ fn Card(ctx: Ctx) -> impl IntoView {
                 .flatten()
                 .flatten();
             view! {
-                <a class="hero-card" href=Screen::Tax.href()>
+                <a class="hero-card" href=Screen::Tax.href() on:click=move |_| chosen.set(Some(quarter))>
                     <span class="hero-meta">{move || i18n::quarter(lang.get(), quarter)}</span>
                     <span class="hero-label">{move || {
                         let lang = lang.get();
@@ -368,6 +384,40 @@ fn Card(ctx: Ctx) -> impl IntoView {
                     {deadline.map(|deadline| move || deadlines::moved(lang.get(), deadline.kind, deadline.by_law).map(|note| view! {
                         <span class="hero-note">{note}</span>
                     }))}
+                    {note.map(|note| view! { <span class="hero-note">{move || note.text(lang.get())}</span> })}
+                </a>
+            }
+        })
+    }
+}
+
+/// Карточка над обычной: закрытый квартал, чей расчёт разошёлся со снимком, —
+/// налог сейчас и в снимке. Ведёт на экран этого квартала, где сказано, что
+/// делать. Нет такого квартала — карточки нет. Суммы сейчас может и не быть:
+/// с ухода с режима налог считает бухгалтер, и ноль был бы неправдой.
+#[component]
+fn DriftCard(ctx: Ctx) -> impl IntoView {
+    let Ctx { lang, sources, today, .. } = ctx;
+    let drifted = Memo::new(move |_| sources.drifted(today));
+    move || {
+        drifted.get().map(|(tax, closing)| {
+            let quarter = tax.quarter;
+            let (now, before) = (tax.known(), closing.data().tax);
+            let note = Note::of(&tax, false);
+            let chosen = ctx.quarter;
+            view! {
+                <a class="hero-card" href=Screen::Tax.href() on:click=move |_| chosen.set(Some(quarter))>
+                    <span class="hero-meta">{move || i18n::quarter(lang.get(), quarter)}</span>
+                    <span class="hero-label">{tr(lang, Key::TaxDrift)}</span>
+                    {now.map(|now| view! { <span class="hero-sum">{move || drams(lang.get(), now)}</span> })}
+                    <span class="hero-note">{move || {
+                        let lang = lang.get();
+                        if now == Some(before) {
+                            t(lang, Key::TaxDriftSameTax).to_owned()
+                        } else {
+                            fill(t(lang, Key::TaxDriftBefore), &[&drams(lang, before)])
+                        }
+                    }}</span>
                     {note.map(|note| view! { <span class="hero-note">{move || note.text(lang.get())}</span> })}
                 </a>
             }
@@ -419,15 +469,19 @@ impl Ctx {
 
 /// Квартал экранов налога и чисел для расчёта — один на оба: числа
 /// открывают с экрана налога на том же квартале, а «Назад» возвращает на
-/// него. Сразу — тот же, что на карточке главного экрана, и выбирается
-/// один раз, когда данные прочитаны: закрыли его — экран остаётся на нём,
-/// а не уходит к следующему вслед за карточкой.
+/// него. Сразу — закрытый, чей расчёт разошёлся со снимком, иначе тот же, что
+/// на карточке главного экрана, и выбирается один раз, когда данные
+/// прочитаны: закрыли его — экран остаётся на нём, а не уходит к следующему
+/// вслед за карточкой. Нажатая карточка открывает свой квартал сама.
 pub(super) fn shown(ctx: Ctx) -> Memo<Quarter> {
     let chosen = ctx.quarter;
     Effect::new(move |_| {
-        if chosen.get_untracked().is_none()
-            && let Some((tax, _)) = ctx.today.and_then(|today| shown_quarter(ctx.sources, today))
-        {
+        if chosen.get_untracked().is_some() {
+            return;
+        }
+        let drifted = ctx.sources.drifted(ctx.today).map(|(tax, _)| tax);
+        let first = drifted.or_else(|| ctx.today.and_then(|today| shown_quarter(ctx.sources, today)).map(|(tax, _)| tax));
+        if let Some(tax) = first {
             chosen.set(Some(tax.quarter));
         }
     });
@@ -487,7 +541,8 @@ pub fn TaxScreen(ctx: Ctx, router: Router) -> impl IntoView {
 #[derive(Clone, Copy)]
 pub(super) enum Part {
     /// Карточки главного экрана: напоминания о сроках и о расчётных
-    /// документах, налог квартала и годовые платежи.
+    /// документах, разошедшийся закрытый квартал, налог квартала и годовые
+    /// платежи.
     Card,
     /// Содержимое экрана налога.
     Screen,
@@ -512,6 +567,7 @@ pub(super) fn content(ctx: Ctx, part: Part) -> AnyView {
             <LicenseCard ctx />
             <DeadlineReminder ctx />
             <SettlementReminder lang=ctx.lang documents=ctx.sources.documents today=ctx.today />
+            <DriftCard ctx />
             <Card ctx />
             <AnnualCard ctx />
         }
@@ -532,20 +588,34 @@ async fn close(store: &Store, closing: &Closing) -> Result<(), StoreError> {
     tx.commit(writes).await
 }
 
-/// Открыть квартал снова — снимок, прочитанный в той же транзакции,
-/// помечается. `None` — его уже открыли или стёрли в другой вкладке.
-async fn reopen(store: &Store, id: RecordId) -> Result<Option<Closing>, StoreError> {
+/// Команда над записанным снимком: сам снимок и все снимки базы.
+type Command = fn(&Closing, &[Closing], Timestamp) -> Option<Closing>;
+
+/// Открыть квартал снова или вернуть снимок — снимки читаются и снимок
+/// меняется в одной транзакции. `None` — его или квартал уже поменяли, или
+/// снимок стёрли, в другой вкладке.
+async fn apply(store: &Store, id: RecordId, command: Command) -> Result<Option<Closing>, StoreError> {
     let tx = store.write()?;
-    let Some(closing) = tx.get::<Closing>(id).await? else {
+    let closings = tx.list::<Closing>().await?.records;
+    let Some(closing) = closings.iter().find(|closing| closing.id() == id) else {
         return Ok(None);
     };
-    let Some(reopened) = closing.reopen(clock::now()) else {
+    let Some(changed) = command(closing, &closings, clock::now()) else {
         return Ok(None);
     };
     let mut writes = Writes::default();
-    writes.update(&reopened);
+    writes.update(&changed);
     tx.commit(writes).await?;
-    Ok(Some(reopened))
+    Ok(Some(changed))
+}
+
+/// Сообщение о сделанном — над карточкой налога.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Notice {
+    Closed,
+    /// Открыт снова — с кнопкой «Вернуть» рядом.
+    Reopened(RecordId),
+    Restored,
 }
 
 /// Содержимое экрана: квартал стрелками, налог карточкой, что не так,
@@ -574,12 +644,13 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
     });
     let unreadable = Memo::new(move |_| sources.closings.with(|_, unreadable| unreadable));
     let busy = RwSignal::new(false);
-    let notice = RwSignal::new(None::<Key>);
+    let notice = RwSignal::new(None::<Notice>);
     let failure = RwSignal::new(None::<StoreError>);
-    // Слова о закрытии — о своём квартале: сменился квартал (стрелками
-    // здесь или на экране чисел) — они уходят.
+    // Слова о закрытии — о своём квартале и о базе, какой она была: сменился
+    // квартал (стрелками здесь или на экране чисел) или копию восстановили —
+    // они уходят, а с ними и «Вернуть».
     Effect::watch(
-        move || quarter.get(),
+        move || (quarter.get(), ctx.base.replacements()),
         move |_, _, _| {
             notice.set(None);
             failure.set(None);
@@ -609,19 +680,18 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
                 Ok(()) => {
                     sources.closings.put(snapshot);
                     ctx.backups.data_saved();
-                    notice.set(Some(Key::TaxClosedNotice));
+                    notice.set(Some(Notice::Closed));
                 }
                 Err(error) => failure.set(Some(error)),
             }
         });
     };
-    let reopen_quarter = move |_| {
+    // Открыть снова или вернуть: не вышло — сообщение с «Вернуть» остаётся,
+    // и нажать можно снова.
+    let change = move |id: RecordId, command: Command, done: Notice| {
         if busy.get_untracked() {
             return;
         }
-        let Some(id) = closing.with_untracked(|closing| closing.as_ref().map(Closing::id)) else {
-            return;
-        };
         let Some(store) = ctx.base.get() else {
             failure.set(Some(StoreError::Failed));
             return;
@@ -629,18 +699,26 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
         busy.set(true);
         failure.set(None);
         leptos::task::spawn_local(async move {
-            let outcome = reopen(&store, id).await;
+            let outcome = apply(&store, id, command).await;
             busy.set(false);
             match outcome {
-                Ok(Some(reopened)) => {
-                    sources.closings.put(reopened);
-                    notice.set(Some(Key::TaxReopenedNotice));
+                Ok(Some(changed)) => {
+                    sources.closings.put(changed);
+                    notice.set(Some(done));
                 }
                 // Снимок поменяла другая вкладка: окно показывает, что в базе.
-                Ok(None) => sources.closings.load(&store).await,
+                Ok(None) => {
+                    notice.set(None);
+                    sources.closings.load(&store).await;
+                }
                 Err(error) => failure.set(Some(error)),
             }
         });
+    };
+    let reopen_quarter = move |_| {
+        if let Some(id) = closing.with_untracked(|closing| closing.as_ref().map(Closing::id)) {
+            change(id, |closing, _, now| closing.reopen(now), Notice::Reopened(id));
+        }
     };
     // Квартал кончился, но не закрыт: закрыть — или сказать, чего не хватает.
     let ended = move || ctx.today.is_some_and(|today| quarter.get().last_day() < today);
@@ -650,7 +728,24 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
 
     view! {
         <QuarterBar ctx quarter />
-        {move || notice.get().map(|key| view! { <p role="status">{tr(lang, key)}</p> })}
+        {move || notice.get().map(|shown| match shown {
+            Notice::Closed => view! { <p role="status">{tr(lang, Key::TaxClosedNotice)}</p> }.into_any(),
+            Notice::Restored => view! { <p role="status">{tr(lang, Key::TaxRestoredNotice)}</p> }.into_any(),
+            Notice::Reopened(id) => view! {
+                <div class="notice-row">
+                    <p role="status">{tr(lang, Key::TaxReopenedNotice)}</p>
+                    <button
+                        type="button"
+                        class="secondary"
+                        disabled=move || busy.get()
+                        on:click=move |_| change(id, Closing::restore, Notice::Restored)
+                    >
+                        {tr(lang, Key::DocUnannul)}
+                    </button>
+                </div>
+            }
+            .into_any(),
+        })}
         {move || failure.get().map(|error| view! { <p role="alert">{tr(lang, error_key(error))}</p> })}
         {move || sources.failure().map(|error| view! { <p role="alert">{tr(lang, error_key(error))}</p> })}
         {move || (unreadable.get() > 0).then(|| view! {
@@ -672,19 +767,26 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
                 </div>
                 {move || {
                     let (now, rules) = tax.with(|tax| {
-                        tax.as_ref().filter(|tax| tax.differs_from(&closed)).map(|tax| (tax.tax, tax.rules))
+                        let tax = tax.as_ref().filter(|tax| tax.differs_from(&closed))?;
+                        Some((tax.known(), tax.rules))
                     })?;
                     // Поменялся файл правил — часть расхождения от него, а не
                     // от данных.
                     let versions = (rules != closed_rules).then(|| (closed_rules.to_string(), rules.to_string()));
                     Some(view! {
-                        <p role="alert">{move || {
-                            let lang = lang.get();
-                            fill(t(lang, Key::TaxChangedAfterClose), &[&drams(lang, now), &drams(lang, before)])
-                        }}</p>
-                        {versions.map(|(then, now)| view! {
-                            <p class="hint">{move || fill(t(lang.get(), Key::TaxClosedRulesChanged), &[&then, &now])}</p>
-                        })}
+                        <div class="tax-closed">
+                            <p role="alert">{move || {
+                                let lang = lang.get();
+                                match now {
+                                    None => fill(t(lang, Key::TaxChangedNotCounted), &[&drams(lang, before)]),
+                                    Some(now) if now == before => fill(t(lang, Key::TaxChangedSameTax), &[&drams(lang, now)]),
+                                    Some(now) => fill(t(lang, Key::TaxChangedAfterClose), &[&drams(lang, now), &drams(lang, before)]),
+                                }
+                            }}</p>
+                            {versions.map(|(then, now)| view! {
+                                <p class="hint">{move || fill(t(lang.get(), Key::TaxClosedRulesChanged), &[&then, &now])}</p>
+                            })}
+                        </div>
                     })
                 }}
             }
@@ -695,7 +797,7 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
                 {move || deadlines::moved(lang.get(), deadline.kind, deadline.by_law).map(|note| view! { <p class="hint">{note}</p> })}
             </div>
         })}
-        {move || tax.get().map(|tax| view! { <Quarterly lang tax /> })}
+        {move || tax.get().map(|tax| view! { <Quarterly lang tax closing=closing.get() /> })}
         {move || numbers.get().then(|| view! {
             <a class="button report-open" href=Screen::Report.href()>
                 {icon(Icon::Copy)}
@@ -731,21 +833,29 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
 }
 
 /// Налог квартала: карточка, что не так, доход по месяцам и расчёт по
-/// строкам формы.
+/// строкам формы. У закрытого квартала (`closing`) сумма и строки — снимка:
+/// это поданный расчёт, а пересчёт виден расхождением над карточкой
+/// (`TaxBody`). Что не так и что не вошло в вычет — по данным сейчас: только
+/// они и говорят, отчего расчёт разошёлся или чего ему не хватает, — и окно
+/// отделяет их словами от числа снимка.
 #[component]
-fn Quarterly(lang: ReadSignal<Lang>, tax: QuarterTax) -> impl IntoView {
-    let sum = tax.tax;
+fn Quarterly(lang: ReadSignal<Lang>, tax: QuarterTax, closing: Option<Closing>) -> impl IntoView {
+    let snapshot = closing.as_ref().map(Closing::data);
+    let sum = snapshot.map_or(tax.tax, |data| data.tax);
+    let lines = snapshot.map_or_else(|| tax.lines.clone(), |data| data.lines.clone());
     // Строк нет, а доход, пропуск или уход с режима есть — «дохода нет» и
     // ноль были бы неправдой (Правило 6).
-    let nothing = tax.complete() && tax.regime == Regime::Turnover && tax.months.iter().all(|month| month.get() == 0);
-    let subtitle = match tax.lines.as_slice() {
-        [] if nothing => Subtitle::NoIncome,
+    let subtitle = match lines.as_slice() {
+        [] if snapshot.is_some() => Subtitle::FiledNoIncome,
+        [] if tax.known().is_some() => Subtitle::NoIncome,
         [] => Subtitle::NotCounted,
         [line] => Subtitle::One(line.income, line.rate),
         _ => Subtitle::Several,
     };
     let alerts = alerts(&tax);
     let hints = hints(&tax);
+    let changed = closing.as_ref().is_some_and(|closing| tax.differs_from(closing));
+    let about_now = closing.is_some() && (changed || !alerts.is_empty());
     let months: Vec<(u16, u8, i64)> = tax
         .months
         .iter()
@@ -756,7 +866,6 @@ fn Quarterly(lang: ReadSignal<Lang>, tax: QuarterTax) -> impl IntoView {
         })
         .collect();
     let this_year = tax.quarter.year();
-    let lines = tax.lines.clone();
     view! {
         <div class="hero-card">
             <span class="hero-label">{tr(lang, Key::TaxTurnover)}</span>
@@ -765,21 +874,26 @@ fn Quarterly(lang: ReadSignal<Lang>, tax: QuarterTax) -> impl IntoView {
             })}
             <span class="hero-note">{move || subtitle.text(lang.get())}</span>
         </div>
+        {about_now.then(|| view! { <p class="hint">{tr(lang, Key::TaxClosedNow)}</p> })}
         {alerts.into_iter().map(|alert| view! {
             <p role="alert">{move || alert.text(lang.get())}</p>
         }).collect_view()}
         {hints.into_iter().map(|hint| view! {
             <p class="hint">{move || hint.text(lang.get())}</p>
         }).collect_view()}
-        <h2>{tr(lang, Key::TaxByMonth)}</h2>
-        <dl class="pairs months">
-            {months.into_iter().map(|(year, month, income)| view! {
-                <div>
-                    <dt>{move || i18n::month_heading(lang.get(), year, month, this_year)}</dt>
-                    <dd>{move || drams(lang.get(), income)}</dd>
-                </div>
-            }).collect_view()}
-        </dl>
+        // Месяцы снимок не хранит: разошёлся — месяцы расчёта не сошлись бы
+        // с доходом снимка.
+        {(!changed).then(|| view! {
+            <h2>{tr(lang, Key::TaxByMonth)}</h2>
+            <dl class="pairs months">
+                {months.into_iter().map(|(year, month, income)| view! {
+                    <div>
+                        <dt>{move || i18n::month_heading(lang.get(), year, month, this_year)}</dt>
+                        <dd>{move || drams(lang.get(), income)}</dd>
+                    </div>
+                }).collect_view()}
+            </dl>
+        })}
         {(!lines.is_empty()).then(|| view! {
             <details class="tax-how">
                 <summary>{tr(lang, Key::TaxHow)}</summary>
@@ -850,6 +964,8 @@ fn LineCard(lang: ReadSignal<Lang>, line: Line) -> impl IntoView {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Subtitle {
     NoIncome,
+    /// Закрытый квартал без строк: дохода нет в снимке.
+    FiledNoIncome,
     /// Строк нет, а доход или пропуск есть.
     NotCounted,
     /// Одна строка: доход и ставка, как в дизайне.
@@ -861,6 +977,7 @@ impl Subtitle {
     fn text(self, lang: Lang) -> String {
         match self {
             Self::NoIncome => t(lang, Key::TaxNoIncome).to_owned(),
+            Self::FiledNoIncome => t(lang, Key::TaxFiledNoIncome).to_owned(),
             Self::NotCounted => t(lang, Key::TaxNotCounted).to_owned(),
             Self::One(income, rate) => fill(t(lang, Key::TaxIncomeTimesRate), &[&drams(lang, income), &percent(lang, rate)]),
             Self::Several => t(lang, Key::TaxSeveralLines).to_owned(),

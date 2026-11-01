@@ -94,3 +94,30 @@ fn reopening_marks_and_the_latest_wins() {
     let both = [closing.clone(), newer.clone()];
     assert_eq!(Closing::current(&both, q).map(Closing::id), Some(newer.id()));
 }
+
+/// «Вернуть» снимает метку: снимок снова живой, с теми же числами и версией
+/// правил, а момент изменения — новый, иначе слияние копий (задача 41) взяло
+/// бы помеченный. Живому снимку возвращать нечего, а квартал, закрытый заново,
+/// остаётся с новым снимком: возвращённый вытеснил бы поданный позже.
+#[test]
+fn restoring_unmarks_and_keeps_the_numbers() {
+    let closing: Closing = serde_json::from_str(CLOSING).expect("снимок читается");
+    assert!(closing.restore(std::slice::from_ref(&closing), Timestamp::from_unix_millis(1_760_000_000_001)).is_none());
+    let reopened = closing.reopen(Timestamp::from_unix_millis(1_760_000_000_001)).expect("был закрыт");
+
+    let mut newer: Closing = serde_json::from_str(CLOSING).expect("снимок читается");
+    newer.meta = RecordMeta::new(Timestamp::from_unix_millis(1_760_000_000_001));
+    let closed_again = [reopened.clone(), newer];
+    assert!(reopened.restore(&closed_again, Timestamp::from_unix_millis(1_760_000_000_002)).is_none());
+
+    let alone = std::slice::from_ref(&reopened);
+    let restored = reopened.restore(alone, Timestamp::from_unix_millis(1_760_000_000_002)).expect("был открыт снова");
+    assert!(!restored.is_deleted());
+    assert_eq!(restored.id(), closing.id());
+    assert_eq!(restored.data(), closing.data());
+    assert_eq!(restored.modified(), Timestamp::from_unix_millis(1_760_000_000_002));
+    assert_eq!(
+        Closing::current(std::slice::from_ref(&restored), closing.quarter()).map(Closing::id),
+        Some(closing.id())
+    );
+}

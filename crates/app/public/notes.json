@@ -1,6 +1,25 @@
 {
   "notes": [
     {
+      "version": "0.0.65",
+      "date": "2026-11-01",
+      "hy": [
+        "Եթե փակելուց հետո եռամսյակի հաշվարկը տարբերվում է ներկայացվածից, օրինակ՝ մոռացված ակտ եք ավելացրել, գլխավոր էկրանը դա ցույց կտա առանձին քարտով՝ երկու գումարով, իսկ հարկի էկրանը կբացվի այդ եռամսյակի վրա։",
+        "Փակված եռամսյակի համար հարկի էկրանն այժմ ցույց է տալիս ներկայացված թվերը, իսկ վերահաշվարկը՝ որպես տարբերություն։",
+        "«Կրկին բացել»-ից հետո կարող եք սեղմել «Հետ բերել». եռամսյակը կրկին կփակվի նախկին թվերով։"
+      ],
+      "ru": [
+        "Если расчёт закрытого квартала разошёлся с поданным, например вы внесли забытый акт, главный экран покажет это отдельной карточкой с обеими суммами, а экран налога откроется на этом квартале.",
+        "У закрытого квартала экран налога теперь показывает поданные числа, а пересчёт виден расхождением.",
+        "После «Открыть снова» можно нажать «Вернуть»: квартал снова закрыт с прежними числами."
+      ],
+      "en": [
+        "If a closed quarter's calculation no longer matches what you filed, for example after you add a forgotten act, the Home screen shows a separate card with both amounts, and the Tax screen opens on that quarter.",
+        "For a closed quarter, the Tax screen now shows the numbers you filed, and any recalculation appears as a difference.",
+        "After “Reopen” you can press “Undo”: the quarter is closed again with its earlier numbers."
+      ]
+    },
+    {
       "version": "0.0.64",
       "date": "2026-11-01",
       "hy": [
@@ -281,22 +300,6 @@
       ],
       "en": [
         "The app's tax rules now live in a separate file with its own version, 2026.1. Each rule records its law, article, a link to the text and the day it was checked. The quarterly tax calculation will be built on this file; nothing has changed in how the app works."
-      ]
-    },
-    {
-      "version": "0.0.45",
-      "date": "2026-10-18",
-      "hy": [
-        "Նոր տարբերակն այժմ բացվում է «Ինչ նոր կա» պատուհանով՝ ինչ է փոխվել, և մեկ կոճակ՝ «Թարմացնել»։ Մինչև թարմացնելը պատուհանի տակ ծրագիրը չի աշխատում. այդպես բոլորն աշխատում են վերջին տարբերակով և հարկի թարմ կանոններով։",
-        "Եթե այդ պահին բաց է ձև՝ նոր հաշիվ, հաճախորդ, մատյանի գրառում կամ պրոֆիլ, պատուհանը կսպասի, մինչև այն պահպանեք կամ փակեք, և սկսածը չի կորչի։"
-      ],
-      "ru": [
-        "Новая версия теперь открывается окном «Что нового»: что в ней изменилось и одна кнопка «Обновить». Пока вы не обновите, программа под окном не работает — так у всех последняя версия и свежие правила налога.",
-        "Если в этот момент открыта форма — новый счёт, клиент, запись книги или профиль, — окно подождёт, пока вы её сохраните или закроете, и начатое не пропадёт."
-      ],
-      "en": [
-        "A new version now opens in a “What's new” window: what has changed, and a single “Update” button. Until you update, the app under the window doesn't respond, so everyone is on the latest version with the latest tax rules.",
-        "If a form is open at that moment (a new invoice, a client, a ledger entry or the profile), the window waits until you save or close it, so nothing you've started is lost."
       ]
     }
   ]

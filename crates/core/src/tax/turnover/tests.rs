@@ -565,6 +565,212 @@ fn a_closed_quarter_keeps_its_carry() {
     assert_eq!(again.tax, 32_000);
 }
 
+/// Книга для поиска расхождения: только эти записи и снимки.
+fn drift_books<'a>(profile: &'a ProfileData, operations: &'a [Operation], closings: &'a [Closing]) -> Books<'a> {
+    Books {
+        documents: &[],
+        operations,
+        profile: Some(profile),
+        closings,
+        unreadable: 0,
+    }
+}
+
+/// Поиск расхождения в день, когда все кварталы тестов кончились.
+fn scan(books: Books<'_>) -> Option<(QuarterTax, &Closing)> {
+    drifted(books, day(2030, 1, 2))
+}
+
+/// Снимок квартала по этим записям и снимкам, как его кладёт «Закрыть».
+fn closed(profile: &ProfileData, operations: &[Operation], closings: &[Closing], q: Quarter, now: i64) -> Closing {
+    let today = day(2030, 1, 2);
+    Closing::close(&tax(Some(profile), operations, closings, q), today, at(now)).expect("квартал кончился и посчитан")
+}
+
+/// Забытый доход в закрытом квартале находится, и расчёт — тот же, что
+/// у `quarter`. Нашлось два — первый по календарю: его уточнённый расчёт
+/// поправит перенос следующим. Открытый снова в поиск не идёт.
+///
+/// I квартал: 1 000 000 × 10 % = 100 000. II: 500 000 × 10 % = 50 000,
+/// расход 200 000 × 6 % = 12 000, налог 38 000. Забытые 300 000 во II:
+/// 800 000 × 10 % = 80 000, предел 36 000, налог 80 000 − 12 000 = 68 000.
+/// Забытые 100 000 в I: 1 100 000 × 10 % = 110 000.
+#[test]
+fn the_first_drifted_quarter_is_found() {
+    let profile = profile(&["74.10.0"]);
+    let (first, second) = (quarter(2026, 1), quarter(2026, 2));
+    let mut books = vec![
+        income(day(2026, 1, 15), 1_000_000, None),
+        income(day(2026, 4, 15), 500_000, None),
+        ordinary(day(2026, 5, 10), 200_000),
+    ];
+    let mut closings = vec![closed(&profile, &books, &[], first, 1_770_000_000_000)];
+    closings.push(closed(&profile, &books, &closings, second, 1_770_000_000_001));
+    assert_eq!(scan(drift_books(&profile, &books, &[])), None, "снимков нет");
+    assert_eq!(scan(drift_books(&profile, &books, &closings)), None, "данные те же");
+
+    books.push(income(day(2026, 6, 1), 300_000, None));
+    let (found, closing) = scan(drift_books(&profile, &books, &closings)).expect("II квартал разошёлся");
+    assert_eq!(found, tax(Some(&profile), &books, &closings, second));
+    assert_eq!(found.lines, [other(800_000, 80_000, 200_000, 12_000, 0, 36_000, 68_000, 0)]);
+    assert_eq!((found.tax, closing.data().tax, closing.quarter()), (68_000, 38_000, second));
+
+    books.push(income(day(2026, 3, 1), 100_000, None));
+    let (found, closing) = scan(drift_books(&profile, &books, &closings)).expect("I квартал разошёлся");
+    assert_eq!(found, tax(Some(&profile), &books, &closings, first));
+    assert_eq!((found.quarter, found.tax, closing.data().tax), (first, 110_000, 100_000));
+
+    let reopened = [closings[0].reopen(at(1_770_000_000_002)).expect("был закрыт"), closings[1].clone()];
+    let (found, _) = scan(drift_books(&profile, &books, &reopened)).expect("II квартал разошёлся");
+    assert_eq!(found, tax(Some(&profile), &books, &reopened, second));
+    assert_eq!(found.quarter, second);
+}
+
+/// Цепочка идёт от предыдущего снимка и сквозь открытые кварталы между
+/// снимками, а правка раньше снимка до следующего закрытого не доходит.
+/// Расчёт может разойтись и при том же налоге: у снимка важен и перенос.
+///
+/// I квартал: доход 100 000, расход 2 000 000: вычет 120 000, налог —
+/// предел 4 500, перенос 120 000 − 5 500 = 114 500. II (открыт): доход
+/// 1 000 000, налог — предел 45 000, перенос 114 500 − 55 000 = 59 500.
+/// III: то же, перенос 59 500 − 55 000 = 4 500. Забытый расход 1 000 000
+/// во II: вычет 60 000, перенос 174 500 − 55 000 = 119 500, в III налог тот
+/// же, а перенос 119 500 − 55 000 = 64 500.
+#[test]
+fn the_drift_chain_starts_at_the_previous_snapshot() {
+    let profile = profile(&["74.10.0"]);
+    let (first, third) = (quarter(2026, 1), quarter(2026, 3));
+    let mut books = vec![
+        income(day(2026, 1, 15), 100_000, None),
+        ordinary(day(2026, 2, 10), 2_000_000),
+        income(day(2026, 4, 15), 1_000_000, None),
+        income(day(2026, 7, 15), 1_000_000, None),
+    ];
+    let mut closings = vec![closed(&profile, &books, &[], first, 1_770_000_000_000)];
+    closings.push(closed(&profile, &books, &closings, third, 1_770_000_000_001));
+    assert_eq!(closings[1].data().lines, [other(1_000_000, 100_000, 0, 0, 59_500, 45_000, 45_000, 4_500)]);
+    assert_eq!(scan(drift_books(&profile, &books, &closings)), None, "данные те же");
+
+    books.push(ordinary(day(2026, 5, 10), 1_000_000));
+    let (found, closing) = scan(drift_books(&profile, &books, &closings)).expect("III квартал разошёлся");
+    assert_eq!(found, tax(Some(&profile), &books, &closings, third));
+    assert_eq!(found.lines, [other(1_000_000, 100_000, 0, 0, 119_500, 45_000, 45_000, 64_500)]);
+    assert_eq!((found.tax, closing.data().tax), (45_000, 45_000));
+    books.pop();
+
+    // Расход I квартала расходится с его снимком, а III берёт перенос из снимка.
+    books.push(ordinary(day(2026, 3, 1), 500_000));
+    let (found, _) = scan(drift_books(&profile, &books, &closings)).expect("I квартал разошёлся");
+    assert_eq!(found.quarter, first);
+    assert!(!tax(Some(&profile), &books, &closings, third).differs_from(&closings[1]));
+}
+
+/// Неполный расчёт с поданным не сравнивается. Второй код другой строки
+/// налога в профиле: доход без вида стал ничьим, строки пропали, хотя
+/// поданное верно. Нечитаемая запись — то же. Забытый доход рядом с полным
+/// расчётом находится, а его сравнение держит этот случай двусторонним.
+#[test]
+fn an_incomplete_calculation_is_no_drift() {
+    let one = profile(&["74.10.0"]);
+    let q = quarter(2026, 1);
+    let mut books = vec![income(day(2026, 1, 15), 1_000_000, None)];
+    let closings = [closed(&one, &books, &[], q, 1_770_000_000_000)];
+
+    let two = profile(&["74.10.0", "62.01.0"]);
+    let live = tax(Some(&two), &books, &closings, q);
+    assert!(live.differs_from(&closings[0]) && live.known().is_none());
+    assert_eq!(scan(drift_books(&two, &books, &closings)), None, "второй код в профиле");
+
+    books.push(income(day(2026, 3, 1), 100_000, None));
+    assert!(scan(drift_books(&one, &books, &closings)).is_some(), "забытый доход");
+    let unreadable = Books {
+        unreadable: 1,
+        ..drift_books(&one, &books, &closings)
+    };
+    assert_eq!(scan(unreadable), None, "нечитаемая запись");
+}
+
+/// Сумму квартала можно назвать, только когда расчёт полон и весь квартал на
+/// налоге с оборота: дохода нет — это ноль, доход без курса рядом с посчитанным
+/// — ни ноль, ни часть (Правило 6).
+#[test]
+fn only_a_whole_calculation_has_a_sum() {
+    let one = profile(&["74.10.0"]);
+    let q = quarter(2026, 1);
+    let amd = income(day(2026, 1, 15), 1_000_000, None);
+    let usd = usd_income(day(2026, 1, 20), 10_000, None);
+    assert_eq!(tax(Some(&one), &[], &[], q).known(), Some(0), "дохода нет");
+    assert_eq!(tax(Some(&one), std::slice::from_ref(&amd), &[], q).known(), Some(100_000), "доход посчитан");
+    let both = tax(Some(&one), &[amd.clone(), usd.clone()], &[], q);
+    assert_eq!((both.tax, both.known()), (100_000, None), "часть дохода без курса");
+    assert_eq!(tax(Some(&one), std::slice::from_ref(&usd), &[], q).known(), None, "весь доход без курса");
+    assert_eq!(tax(None, &[amd], &[], q).known(), None, "кодов нет");
+}
+
+/// Сверяется то, что идёт в форму: тот же расход отнесли к виду деятельности,
+/// расходы строки разделились иначе, а поля x.1–x.11 те же — нового расчёта
+/// подавать незачем.
+#[test]
+fn a_new_split_of_expenses_is_no_drift() {
+    let profile = profile(&["74.10.0"]);
+    let q = quarter(2026, 1);
+    let sale = income(day(2026, 1, 15), 1_000_000, None);
+    let shared = ordinary(day(2026, 2, 10), 200_000);
+    let closings = [closed(&profile, &[sale.clone(), shared], &[], q, 1_770_000_000_000)];
+    let attributed = expense(day(2026, 2, 10), 200_000, Proof::SettlementInvoice, Nature::Ordinary, Some("74.10.0"));
+    let books = [sale, attributed];
+    let live = tax(Some(&profile), &books, &closings, q);
+    assert_ne!(live.lines, closings[0].data().lines, "расходы разделились иначе");
+    assert!(!live.differs_from(&closings[0]));
+    assert_eq!(scan(drift_books(&profile, &books, &closings)), None);
+}
+
+/// Уход с режима — расхождение и при тех же строках: новый доход по коду,
+/// закрывающему налог с оборота, в строки не идёт, а суммы у квартала больше
+/// нет — его считает бухгалтер.
+#[test]
+fn leaving_after_closing_is_a_drift() {
+    let profile = profile(&["74.10.0", "70.22.0"]);
+    let q = quarter(2026, 4);
+    let mut books = vec![income(day(2026, 10, 5), 1_000_000, Some("74.10.0"))];
+    let closings = [closed(&profile, &books, &[], q, 1_770_000_000_000)];
+    assert_eq!(scan(drift_books(&profile, &books, &closings)), None, "данные те же");
+    books.push(income(day(2026, 12, 20), 300_000, Some("70.22.0")));
+    let (got, closing) = scan(drift_books(&profile, &books, &closings)).expect("квартал разошёлся");
+    assert!(matches!(got.regime, Regime::Left { .. }));
+    assert_eq!(got.lines, closing.data().lines);
+    assert_eq!(got.known(), None);
+}
+
+/// Квартал, не кончившийся на сегодня, не сверяется: такой не закрыть, а снимок
+/// далёкого года из чужой копии растянул бы цепочку. Кончился — сверяется.
+#[test]
+fn a_quarter_still_going_is_not_compared() {
+    let profile = profile(&["74.10.0"]);
+    let q = quarter(2026, 1);
+    let books = [income(day(2026, 1, 15), 1_000_000, None)];
+    let closings = [closed(&profile, &books, &[], q, 1_770_000_000_000)];
+    assert_eq!(drifted(drift_books(&profile, &[], &closings), day(2026, 3, 31)), None, "последний день квартала");
+    assert!(drifted(drift_books(&profile, &[], &closings), day(2026, 4, 1)).is_some(), "квартал кончился");
+}
+
+/// Живых снимков квартала два (слияние копий, задача 41): сверяется
+/// изменённый последним, как и в расчёте.
+#[test]
+fn the_latest_snapshot_is_the_one_compared() {
+    let profile = profile(&["74.10.0"]);
+    let q = quarter(2026, 1);
+    let mut books = vec![income(day(2026, 1, 15), 1_000_000, None)];
+    let older = closed(&profile, &books, &[], q, 1_770_000_000_000);
+    books.push(income(day(2026, 3, 1), 100_000, None));
+    let newer = closed(&profile, &books, &[], q, 1_770_000_000_001);
+    let closings = [newer.clone(), older];
+    assert_eq!(scan(drift_books(&profile, &books, &closings)), None);
+    books.pop();
+    let (found, closing) = scan(drift_books(&profile, &books, &closings)).expect("разошёлся с новым");
+    assert_eq!((found.tax, closing.id()), (100_000, newer.id()));
+}
+
 /// Закрыть можно только кончившийся и посчитанный целиком квартал.
 #[test]
 fn only_a_finished_complete_quarter_closes() {
@@ -783,6 +989,53 @@ fn percents_are_written_as_the_law_writes_them() {
 #[test]
 #[ignore = "замер, а не проверка"]
 fn chain_timing() {
+    let (documents, operations) = five_years();
+    let profile = profile(&["74.10.0"]);
+    let started = std::time::Instant::now();
+    let got = quarter_of(&documents, Some(&profile), &operations, &[], quarter(2029, 4));
+    let elapsed = started.elapsed();
+    println!("цепочка 20 кварталов, {} записей: {elapsed:?}, налог {}", documents.len() + operations.len(), got.tax);
+}
+
+/// Замер: все 20 кварталов закрыты, и поиск расхождения проходит их все —
+/// так на каждое изменение данных. Рядом — те же кварталы отдельными
+/// `quarter`, чего `drifted` избегает. Запуск:
+/// `cargo test -p kvartik-core --release --lib drift_timing -- --ignored --nocapture`.
+#[test]
+#[ignore = "замер, а не проверка"]
+fn drift_timing() {
+    let (documents, operations) = five_years();
+    let profile = profile(&["74.10.0"]);
+    let quarters: Vec<Quarter> = (2025..=2029_u16)
+        .flat_map(|year| (1..=4_u8).map(move |number| quarter(year, number)))
+        .collect();
+    let mut closings = Vec::new();
+    for q in &quarters {
+        let tax = quarter_of(&documents, Some(&profile), &operations, &closings, *q);
+        closings.push(Closing::close(&tax, day(2030, 1, 2), at(1_770_000_000_000)).expect("квартал кончился и посчитан"));
+    }
+    let books = Books {
+        documents: &documents,
+        operations: &operations,
+        profile: Some(&profile),
+        closings: &closings,
+        unreadable: 0,
+    };
+    let started = std::time::Instant::now();
+    let got = drifted(books, day(2030, 1, 2));
+    let once = started.elapsed();
+    let started = std::time::Instant::now();
+    let empty = quarters.iter().filter(|q| super::quarter(books, **q).lines.is_empty()).count();
+    let apart = started.elapsed();
+    assert!(got.is_none(), "данные те же, а расчёт разошёлся со снимком");
+    println!(
+        "20 закрытых кварталов, {} записей: {once:?}, отдельными quarter {apart:?} (пустых {empty})",
+        documents.len() + operations.len()
+    );
+}
+
+/// Книга на пять лет: по 600 актов и 1000 записей в год.
+fn five_years() -> (Vec<Document>, Vec<Operation>) {
     let mut documents = Vec::new();
     let mut operations = Vec::new();
     for year in 2025..=2029_u16 {
@@ -819,9 +1072,5 @@ fn chain_timing() {
             });
         }
     }
-    let profile = profile(&["74.10.0"]);
-    let started = std::time::Instant::now();
-    let got = quarter_of(&documents, Some(&profile), &operations, &[], quarter(2029, 4));
-    let elapsed = started.elapsed();
-    println!("цепочка 20 кварталов, {} записей: {elapsed:?}, налог {}", documents.len() + operations.len(), got.tax);
+    (documents, operations)
 }
