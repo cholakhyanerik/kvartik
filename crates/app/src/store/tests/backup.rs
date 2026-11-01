@@ -6,6 +6,7 @@
 use kvartik_core::format::backup::{
     DeviceKey, Header, KDF_ITERATIONS, KINDS, Kind, SALT_BYTES, open,
 };
+use kvartik_core::release::Version;
 use wasm_bindgen::JsCast;
 
 use super::*;
@@ -399,6 +400,34 @@ fn device_remembers_backups() {
     }
     assert_eq!(device.last_backup(), None);
     assert_eq!(device.backup_key(), None);
+    device.clear();
+}
+
+/// Устройство помнит версии: о какой человек знает и какую пробовали
+/// включить. Запись, которая не читается, — «нет», а не паника и не ноль:
+/// по ней окно решает, перезагружать ли страницу.
+#[wasm_bindgen_test]
+fn device_remembers_versions() {
+    let prefix = format!("kvartik-test-{}.", RecordId::random());
+    let device = Device::with_prefix(&prefix);
+    assert_eq!(device.seen_version(), None);
+    assert_eq!(device.update_tried(), None);
+    let version = Version::new(0, 0, 63);
+    assert!(device.set_seen_version(version));
+    assert!(device.set_update_tried(version));
+    assert_eq!(device.seen_version(), Some(version));
+    assert_eq!(device.update_tried(), Some(version));
+
+    let storage = web_sys::window()
+        .and_then(|window| window.local_storage().ok().flatten())
+        .expect("localStorage есть");
+    for name in ["seen_version", "update_tried"] {
+        storage
+            .set_item(&format!("{prefix}{name}"), "вчера")
+            .expect("записано");
+    }
+    assert_eq!(device.seen_version(), None);
+    assert_eq!(device.update_tried(), None);
     device.clear();
 }
 

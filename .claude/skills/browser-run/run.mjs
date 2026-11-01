@@ -171,10 +171,13 @@ async function offline() {
 
 /// Новая версия: копия `dist/` новой версией (`newVersion` — заметка «Что
 /// нового» новее, правка файла корня, `sw.js`, переписанный `kvartik-sw`) на
-/// том же порту. Пока открыта форма — слова над экраном; закрыли — окно
-/// «Что нового» поверх неактивной программы, снимки окна — на `--langs` ×
-/// `--widths` × `--themes` (перезагрузка снова показывает окно: новая
-/// версия ждёт); «Обновить» открывает новую сборку, прежний кэш удалён.
+/// том же порту. Пока открыта форма — слова над экраном; закрыли — новая
+/// сборка включается сама, прежний кэш удалён, и встаёт окно «Что нового»
+/// поверх неактивной программы. Снимки окна — на `--langs` × `--widths` ×
+/// `--themes` (перезагрузка снова показывает его: пока не закрыто, окно
+/// встаёт на каждом открытии); «Понятно» его закрывает. Копия — тот же wasm
+/// с теми же числами: окно встаёт, только если устройство помнит версию
+/// старше, и в нём — заметки до работающей версии.
 async function update() {
   const port = Number(opt.port ?? 8791);
   const next = newVersion(DIST, path.join(WORK, "v2"));
@@ -195,6 +198,7 @@ async function update() {
     checks.check("прежняя сборка правит страницей", await page.waitFor(CONTROLLER));
     await srv.stop();
     srv = await wrangler(next.dir, port, WORK);
+    await page.eval(`localStorage.setItem("kvartik.seen_version", "0.0.1"); window.__old = 1; return true;`);
 
     // Новая версия пришла, пока открыта форма: слова над экраном, а не окно.
     await page.eval(`location.hash = "#/clients"; return true;`);
@@ -206,14 +210,17 @@ async function update() {
     await page.eval(`scrollTo(0, 0); return true;`);
     await page.shot(path.join(OUT, `update-form-${opt.lang}-360.png`));
     await page.click(t("Back", opt.lang));
+    const reloaded = await page.waitFor(`return window.__old === undefined && document.readyState === "complete" ? true : null;`, 30000);
+    const cache = await page.waitFor(`const n = await caches.keys(); return n.length === 1 ? n[0] : null;`, 30000);
+    checks.check("форму закрыли — новая сборка сама, прежний кэш удалён", reloaded && cache === `kvartik-${next.build}`, cache);
     const shown = await page.waitFor(DIALOG, 10000);
-    checks.check(`форму закрыли — окно «Что нового» с заметкой ${next.version}`, shown?.includes(next.version), shown);
+    checks.check("после обновления — окно «Что нового»", shown?.includes(t("UpdateWhatsNew", opt.lang)), shown);
     checks.check("программа под окном неактивна", await page.eval(`return document.querySelector(".app").inert ? true : null;`));
 
     for (const lang of list(opt.langs)) {
       await page.setLang(lang);
       const text = await page.waitFor(DIALOG, 30000);
-      checks.check(`${lang}: окно новой версии после перезагрузки`, text?.includes(t("UpdateTitle", lang)), text);
+      checks.check(`${lang}: окно «Что нового» после перезагрузки`, text?.includes(t("UpdateTitle", lang)), text);
       for (const width of list(opt.widths).map(Number)) {
         for (const theme of list(opt.themes)) {
           await page.emulate(width, theme);
@@ -227,12 +234,9 @@ async function update() {
     await page.setLang(opt.lang);
     await page.waitFor(DIALOG, 30000);
     await page.emulate(360);
-    await page.eval(`window.__old = 1; return true;`);
-    await page.click(t("UpdateApply", opt.lang));
-    const reloaded = await page.waitFor(`return window.__old === undefined && document.readyState === "complete" ? true : null;`, 30000);
-    const cache = await page.waitFor(`const n = await caches.keys(); return n.length === 1 ? n[0] : null;`, 30000);
-    checks.check("после «Обновить» — новая сборка, прежний кэш удалён", reloaded && cache === `kvartik-${next.build}`, cache);
-    checks.check("рабочий экран новой сборки, окна нет", (await page.waitFor(BUILD_PAGE)) && !(await page.eval(DIALOG)));
+    await page.click(t("UpdateGotIt", opt.lang));
+    await sleep(300);
+    checks.check("«Понятно» — рабочий экран новой сборки, окна нет", (await page.waitFor(BUILD_PAGE)) && !(await page.eval(DIALOG)));
     await page.shot(path.join(OUT, "update-after.png"));
     reportErrors(page, "новая версия");
   } finally {

@@ -94,8 +94,8 @@ self.addEventListener("activate", (event) => {
 });
 
 // Новая версия ждёт («waiting»), пока работает старая, — и начинает
-// работать, только когда человек согласился: окно присылает «skip-waiting»
-// (Правило 6).
+// работать, когда окно решит, что это никому не мешает: оно присылает
+// «skip-waiting» (Правило 6).
 self.addEventListener("message", (event) => {
   if (event.data === "skip-waiting") {
     self.skipWaiting();

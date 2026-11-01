@@ -357,6 +357,7 @@ pub(super) fn LicensePage(ctx: tax::Ctx) -> impl IntoView {
         sources,
         base,
         licenses,
+        forms,
         today,
         ..
     } = ctx;
@@ -367,6 +368,7 @@ pub(super) fn LicensePage(ctx: tax::Ctx) -> impl IntoView {
     let typed = RwSignal::new(String::new());
     let said = RwSignal::new(None::<Said>);
     let busy = RwSignal::new(false);
+    forms.hold_while(move || busy.get() || typed.with(|text| !text.is_empty()));
 
     let submit = move |event: SubmitEvent| {
         event.prevent_default();

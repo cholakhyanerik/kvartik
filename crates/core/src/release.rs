@@ -1,17 +1,17 @@
 //! Выпуск программы: её версия и «Что нового» (задача 67).
 //!
-//! Новая версия сайта приходит в фоне и ждёт согласия (Правило 6). Окно
-//! говорит о ней одним обязательным окном — что в ней нового и «Обновить»,
-//! — а слова берёт из файла `notes.json` новой версии
-//! (`crates/app/public/notes.json`): заметка о каждой версии на трёх
-//! языках. Пишет её задача, поднявшая версию, вместе с `CHANGELOG.md`,
-//! а service worker новой версии кладёт файл в свой кэш вместе со всей
-//! программой — поэтому заметки есть и без сети.
+//! Новая версия сайта приходит в фоне и включается сама, как только не
+//! открыта ни одна форма (Правило 2). Что в ней нового, окно говорит уже
+//! после — словами из файла `notes.json` (`crates/app/public/notes.json`):
+//! заметка о каждой версии на трёх языках. Пишет её задача, поднявшая
+//! версию, вместе с `CHANGELOG.md`, а service worker кладёт файл в свой кэш
+//! вместе со всей программой — поэтому заметки есть и без сети.
 //!
 //! # Файл — договор между версиями
 //!
-//! Читает файл не та программа, что его принесла, а прежняя: она ещё
-//! работает, пока новая ждёт. Поэтому:
+//! Читает файл не только программа, что его принесла, но и прежняя: по
+//! заметкам она узнаёт, новее ли пришедшая сборка ([`Notes::newest`]),
+//! а версии до 0.0.63 ещё и показывают их в окне с «Обновить». Поэтому:
 //!
 //! - лишнего разбор не замечает: незнакомое поле и незнакомый язык
 //!   пропускает (здесь нет `deny_unknown_fields`, в отличие от записей
@@ -19,8 +19,9 @@
 //!   чисел, дату не из календаря, — откладывает и считает
 //!   ([`Notes::skipped`]). Сменить смысл поля нельзя: прежняя программа
 //!   прочтёт его по-старому;
-//! - не прочитался файл совсем — окно скажет о новой версии без списка, но
-//!   «Обновить» даст всё равно: обновление от слов о нём не зависит.
+//! - не прочитался файл совсем — прежняя программа не знает, новее ли
+//!   пришедшая, и сама страницу не перезагрузит: браузер включит новую
+//!   версию, когда закроют все вкладки.
 //!
 //! Свежие заметки — сверху, и в файле их не больше [`MAX_NOTES`]: кто долго
 //! не открывал программу, увидит изменения последних версий, а не историю
@@ -237,12 +238,15 @@ impl Notes {
         self.notes.iter().map(Note::version).max()
     }
 
-    /// Заметки версий новее `current` — того, что изменилось с работающей
-    /// версии, — в порядке файла и не больше [`MAX_NOTES`].
-    pub fn since(&self, current: Version) -> impl Iterator<Item = &Note> {
+    /// Заметки версий новее `seen` и не новее `running` — того, что
+    /// изменилось с версии, о которой человек знает, — в порядке файла и не
+    /// больше [`MAX_NOTES`]. В файле могут быть и версии новее работающей:
+    /// читается самый новый файл на устройстве, а новая сборка может уже
+    /// ждать включения.
+    pub fn between(&self, seen: Version, running: Version) -> impl Iterator<Item = &Note> {
         self.notes
             .iter()
-            .filter(move |note| note.version > current)
+            .filter(move |note| seen < note.version && note.version <= running)
             .take(MAX_NOTES)
     }
 }
@@ -305,18 +309,29 @@ mod tests {
         assert_eq!(Version::CURRENT.to_string(), env!("CARGO_PKG_VERSION"));
     }
 
-    /// Окно показывает версии новее работающей — в порядке файла, со словами
-    /// на языке окна, — а самая новая версия файла — наибольшая в нём.
+    /// Окно показывает версии новее той, что человек видел, и не новее
+    /// работающей — в порядке файла, со словами на языке окна, — а самая
+    /// новая версия файла — наибольшая в нём.
     #[test]
-    fn notes_since_the_running_version() {
+    fn notes_between_the_seen_and_the_running_version() {
         let text = file(&[note("0.0.47", "2026-10-20"), note("0.0.46", "2026-10-19"), note("0.0.45", "2026-10-18")]);
         let notes = Notes::parse(&text).expect("файл читается");
         assert_eq!(notes.skipped(), 0);
         assert_eq!(notes.newest(), Some(v("0.0.47")));
-        let shown: Vec<String> = notes.since(v("0.0.45")).map(|note| note.version().to_string()).collect();
+        let shown: Vec<String> = notes
+            .between(v("0.0.45"), v("0.0.47"))
+            .map(|note| note.version().to_string())
+            .collect();
         assert_eq!(shown, ["0.0.47", "0.0.46"]);
-        assert_eq!(notes.since(v("0.0.47")).count(), 0);
-        assert_eq!(notes.since(v("0.0.9")).count(), 3);
+        assert_eq!(notes.between(v("0.0.47"), v("0.0.47")).count(), 0);
+        assert_eq!(notes.between(v("0.0.9"), v("0.0.47")).count(), 3);
+        // Сборка новее работающей ждёт включения: её заметки — ещё не про
+        // то, что человек получил.
+        let waiting: Vec<String> = notes
+            .between(v("0.0.45"), v("0.0.46"))
+            .map(|note| note.version().to_string())
+            .collect();
+        assert_eq!(waiting, ["0.0.46"]);
         let newest = &notes.all()[0];
         assert_eq!(newest.date(), Date::new(2026, 10, 20).expect("день есть"));
         assert_eq!(newest.items(Lang::Am), ["Նոր 0.0.47"]);
@@ -373,14 +388,15 @@ mod tests {
     /// Сколько бы версий ни было новее, окно покажет не больше
     /// [`MAX_NOTES`] — свежие.
     #[test]
-    fn since_is_bounded() {
+    fn between_is_bounded() {
         let many: Vec<String> = (0..MAX_NOTES + 5)
             .rev()
             .map(|n| note(&format!("0.1.{n}"), "2026-10-18"))
             .collect();
         let notes = Notes::parse(&file(&many)).expect("файл читается");
-        let shown: Vec<Version> = notes.since(v("0.0.45")).map(Note::version).collect();
+        let newest = Version::new(0, 1, MAX_NOTES as u32 + 4);
+        let shown: Vec<Version> = notes.between(v("0.0.45"), newest).map(Note::version).collect();
         assert_eq!(shown.len(), MAX_NOTES);
-        assert_eq!(shown[0], Version::new(0, 1, MAX_NOTES as u32 + 4));
+        assert_eq!(shown[0], newest);
     }
 }

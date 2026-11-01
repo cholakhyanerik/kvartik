@@ -2479,6 +2479,7 @@ fn DocRate(
             .unwrap_or_default(),
     );
     let tried = RwSignal::new(false);
+    ctx.forms.hold_while(move || editing.get());
     // Сменили язык окна — курс в поле записывается по-новому (`retype`).
     Effect::watch(
         move || lang.get(),
@@ -2562,6 +2563,7 @@ fn DocActivity(
     let chosen = RwSignal::new(saved);
     let date = RwSignal::new(service.iso());
     let tried = RwSignal::new(false);
+    ctx.forms.hold_while(move || chosen.get() != saved);
     let activities = Memo::new(move |_| ctx.profiles.activities());
     let needed = Memo::new(move |_| ctx.profiles.with(|profile| turnover::activity_needed(profile, service)));
     let save = move |_| {
@@ -2722,6 +2724,8 @@ fn Payments(
             .unwrap_or_default(),
     );
     let tried = RwSignal::new(false);
+    let filled = (date.get_untracked(), amount.get_untracked());
+    ctx.forms.hold_while(move || date.with(|day| *day != filled.0) || amount.with(|sum| *sum != filled.1));
     // Сменили язык окна — сумма в поле записывается по-новому (`retype`).
     Effect::watch(
         move || lang.get(),
@@ -2842,6 +2846,8 @@ fn Signature(
     let act_date = document.data().date;
     let date = RwSignal::new(ctx.today.map(Date::iso).unwrap_or_default());
     let tried = RwSignal::new(false);
+    let filled = date.get_untracked();
+    ctx.forms.hold_while(move || date.with(|day| *day != filled));
     let mark = move |_| {
         tried.set(true);
         let Some(day) = Date::from_iso(&date.get_untracked()).filter(|day| *day >= act_date) else {
@@ -2919,6 +2925,8 @@ fn SettlementMark(
     let date = RwSignal::new(ctx.today.map(Date::iso).unwrap_or_default());
     let number = RwSignal::new(String::new());
     let tried = RwSignal::new(false);
+    let filled = date.get_untracked();
+    ctx.forms.hold_while(move || date.with(|day| *day != filled) || number.with(|text| !text.is_empty()));
     let save = move |_| {
         tried.set(true);
         let Some(day) = Date::from_iso(&date.get_untracked()) else {

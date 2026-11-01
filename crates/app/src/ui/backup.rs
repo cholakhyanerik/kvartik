@@ -24,7 +24,7 @@ use web_sys::HtmlInputElement;
 
 use super::form::Forms;
 use super::icon::{Icon, icon};
-use super::route::Screen;
+use super::route::{Router, Screen};
 use super::split::{Task, split};
 use super::storage::{Storage, error_key};
 use super::{Base, tr};
@@ -307,6 +307,7 @@ pub fn BackupSection(
     backups: Backups,
     storage: RwSignal<Storage>,
     forms: Forms,
+    router: Router,
 ) -> impl IntoView {
     let ready = move || matches!(storage.get(), Storage::Ready(_));
     // Дизайн «Kvartik Design»: щит в круге, зачем копия, когда была
@@ -332,14 +333,14 @@ pub fn BackupSection(
             </p>
             {if backups.has_data.get_untracked() {
                 view! {
-                    <MakeBackup lang backups />
+                    <MakeBackup lang backups forms router />
                     <RestoreBackup lang backups forms />
                 }
                 .into_any()
             } else {
                 view! {
                     <RestoreBackup lang backups forms />
-                    <MakeBackup lang backups />
+                    <MakeBackup lang backups forms router />
                 }
                 .into_any()
             }}
@@ -347,9 +348,13 @@ pub fn BackupSection(
     }
 }
 
-/// Сделать копию: пароль, сборка и шифр, потом ссылка на файл.
+/// Сделать копию: пароль, сборка и шифр, потом ссылка на файл. Введённый
+/// пароль, копию в работе и готовый файл, пока открыт экран копии, новая
+/// версия ждёт ([`Forms`]): ссылка на файл живёт, пока жива страница, а нажатие
+/// на неё копию ещё не заканчивает — Safari на iPhone сначала спрашивает
+/// о загрузке, и перезагрузка в этот миг оставила бы дату копии без файла.
 #[component]
-fn MakeBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
+fn MakeBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms, router: Router) -> impl IntoView {
     let password = RwSignal::new(String::new());
     let repeat = RwSignal::new(String::new());
     // «Забыли пароль?» — новый пароль поверх заданного.
@@ -360,6 +365,15 @@ fn MakeBackup(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
     let share_failed = RwSignal::new(false);
     let new_password = move || !backups.key_set.get() || resetting.get();
     let busy = move || matches!(making.get(), Making::Busy);
+    forms.hold_while(move || {
+        let typed = password.with(|text| !text.is_empty()) || repeat.with(|text| !text.is_empty());
+        typed
+            || making.with(|state| match state {
+                Making::Busy => true,
+                Making::Ready(_) => router.shows(Screen::Backup),
+                Making::Idle | Making::Failed(_) => false,
+            })
+    });
 
     let submit = move |event: SubmitEvent| {
         event.prevent_default();
@@ -590,10 +604,9 @@ async fn make(backups: Backups, typed: &str, repeat: Option<&str>) -> Result<Rea
 }
 
 /// Восстановить из копии: выбрать файл, ввести его пароль, слить.
-/// Пароль файла и само восстановление — открытая форма ([`Forms`]): окно
-/// новой версии их ждёт, а его «Обновить» оборвало бы восстановление —
-/// записано не было бы ничего, а человек мог бы решить, что было
-/// (задача 67).
+/// Пароль файла и само восстановление — открытая форма ([`Forms`]): новая
+/// версия их ждёт, а её перезагрузка оборвала бы восстановление — записано
+/// не было бы ничего, а человек мог бы решить, что было (задача 67).
 #[component]
 fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl IntoView {
     let restoring = RwSignal::new_local(Restoring::Idle);

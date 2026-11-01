@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.63",
+      "date": "2026-11-01",
+      "hy": [
+        "Թարմացումներն այժմ տեղադրվում են ինքնուրույն. «Թարմացնել» կոճակն այլևս սեղմել պետք չէ։ Հենց նոր տարբերակը ներբեռնվի, ծրագիրը կվերաբեռնվի նույն էկրանին և ցույց կտա, թե ինչ է փոխվել։",
+        "Եթե բաց է ձև կամ արդեն սկսել եք լրացնել դաշտը, նոր տարբերակը կսպասի, մինչև ավարտեք, և սկսածը չի կորչի։"
+      ],
+      "ru": [
+        "Обновления теперь ставятся сами: нажимать «Обновить» больше не нужно. Как только новая версия скачалась, программа перезагрузится на том же экране и покажет, что изменилось.",
+        "Если открыта форма или начат ввод, новая версия подождёт, пока вы закончите: начатое не пропадёт."
+      ],
+      "en": [
+        "Updates now install themselves: there's no need to press “Update” any more. Once a new version has downloaded, the app reloads on the same screen and shows what has changed.",
+        "If a form is open or you've started typing, the new version waits until you finish, so nothing you've started is lost."
+      ]
+    },
+    {
       "version": "0.0.62",
       "date": "2026-10-27",
       "hy": [

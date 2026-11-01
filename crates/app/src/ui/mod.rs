@@ -131,10 +131,10 @@ impl Base {
 /// меняют и тогда, когда часть не загрузилась.
 ///
 /// Над экранами — то, о чём окно обязано сказать, где бы человек ни был:
-/// беда с хранилищем и новая версия, пришедшая, пока открыта форма. Сама
-/// новая версия — окном поверх всего (задача 67): пока оно стоит, окно под
-/// ним — `inert`, ни нажать, ни встать фокусом. Формы окно считает
-/// ([`Forms`]): с открытой окно новой версии ждёт.
+/// беда с хранилищем и новая версия, пришедшая, пока открыта форма. Новая
+/// версия включается сама, а что в ней нового — окном поверх всего
+/// (задача 67): пока оно стоит, окно под ним — `inert`, ни нажать, ни встать
+/// фокусом. Формы окно считает ([`Forms`]): с открытой новая версия ждёт.
 /// Напоминание о копии — карточкой на главном экране и меткой под
 /// заголовком остальных: напоминать обязано каждое открытие (Правило 2).
 /// Установка — на главном экране, выше всего о данных: на iPhone программу
@@ -151,7 +151,8 @@ pub fn App() -> impl IntoView {
     // Service worker — до базы: работа без сети от неё не зависит.
     let program = Program::new();
     let forms = Forms::new();
-    let blocked = Memo::new(move |_| program.blocks(forms));
+    program.update_when_free(forms);
+    let blocked = Memo::new(move |_| program.blocks());
     let storage = RwSignal::new(Storage::Opening);
     // Открытая база живёт, пока живо окно (её держит `Base`): брошенное
     // соединение браузер может закрыть, а с ним и обработчик
@@ -172,7 +173,7 @@ pub fn App() -> impl IntoView {
     // Пробный период — с первого запуска на устройстве (задача 25); ключи
     // читают части, которым они нужны (`ui/license.rs`).
     let licenses = Licenses::start(clock::today());
-    let tax = tax::Ctx::new(lang, sources, base, backups, licenses);
+    let tax = tax::Ctx::new(lang, sources, base, backups, licenses, forms);
     leptos::task::spawn_local(async move {
         match Store::open(move |event| storage.update(|state| state.apply(event))).await {
             Ok(store) => {
@@ -215,7 +216,7 @@ pub fn App() -> impl IntoView {
     Effect::watch(move || router.screen(), |screen, _, _| route::shown(*screen), false);
 
     let hidden = move |screen: Screen| move || !router.shows(screen);
-    // Первый запуск и окно под окном новой версии неактивны: ни нажать,
+    // Первый запуск и окно под окном «Что нового» неактивны: ни нажать,
     // ни встать фокусом.
     let inert = move || blocked.get();
     view! {
@@ -280,7 +281,7 @@ pub fn App() -> impl IntoView {
                         <span>{tr(lang, Key::NavProfile)}</span>
                     </a>
                     <h1 tabindex="-1">{tr(lang, Key::BackupTitle)}</h1>
-                    <BackupSection lang backups storage forms />
+                    <BackupSection lang backups storage forms router />
                     <StorageSection lang storage />
                 </section>
                 <section id=Screen::License.id() class="screen" hidden=hidden(Screen::License)>
@@ -289,7 +290,7 @@ pub fn App() -> impl IntoView {
             </main>
             {panic::debug_trigger()}
         </div>
-        <UpdateDialog lang program forms />
+        <UpdateDialog lang program />
     }
 }
 

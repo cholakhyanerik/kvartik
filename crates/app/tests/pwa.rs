@@ -360,7 +360,7 @@ fn the_site_root_knows_the_app_folder() {
     }
 
     // `sw.js` корня — прежний service worker корня снимает себя, по
-    // согласию, как любая новая версия, и запросов не перехватывает.
+    // согласию, как любая версия той программы, и запросов не перехватывает.
     let sw = root("sw.js");
     for needed in ["\"skip-waiting\"", "self.skipWaiting()", "self.registration.unregister()"] {
         if !sw.contains(needed) {

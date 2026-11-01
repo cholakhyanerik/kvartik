@@ -1,14 +1,18 @@
-//! Программа как приложение (задача 8): окно новой версии и раздел
-//! «Установка».
+//! Программа как приложение (задача 8): новая версия и раздел «Установка».
 //!
-//! Новая версия включается только по согласию (Правило 6): страница
-//! перезагрузится, и несохранённый ввод на ней пропадёт, поэтому решает
-//! человек. Говорит о ней окно поверх всей программы — что в ней нового
-//! и «Обновить» (задача 67), — и оно обязательное: ни «Позже», ни крестика,
-//! а программа под ним неактивна, пока человек не обновит. Так у всех
-//! последняя версия — с последними правилами налога. Но пока открыта форма,
-//! окно ждёт, когда её сохранят или закроют, а до того над экраном — только
-//! слова (решение человека 2026-10-18): начатое в форме не пропадает.
+//! Новая версия включается сама (решение человека 2026-11-01): так у всех
+//! последняя версия — с последними правилами налога. Страница при этом
+//! перезагружается, поэтому пока открыта форма или начато что-то ещё
+//! ([`Forms`]), версия ждёт, а над экраном — слова (решение человека
+//! 2026-10-18): начатое не пропадает. Что в ней нового, окно говорит уже
+//! после, окном поверх программы (задача 67) — по записи устройства о версии,
+//! которую человек видел.
+//!
+//! Страницу здесь перезагружает код, а не нажатие. Поэтому включить версию
+//! окно пробует один раз на устройстве (`Device::update_tried`): сборка,
+//! которая по какой-то причине не заработала, иначе перезагружала бы страницу
+//! без конца, и открыть программу было бы нельзя. Такую версию браузер
+//! включит сам, когда закроют все вкладки.
 //!
 //! Установка — кнопкой «Установить» всегда, пока программа не установлена
 //! (задача 55): там, где браузер даёт свой вопрос (Chromium), она задаёт
@@ -22,20 +26,21 @@ use kvartik_core::i18n::{self, Key, Lang, fill, t};
 use kvartik_core::release::{Notes, Version};
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::HtmlElement;
+use web_sys::{HtmlElement, KeyboardEvent};
 
 use super::form::Forms;
 use super::tr;
 use crate::platform::pwa::{self as browser, Browser, Event, Pwa};
+use crate::store::device::Device;
 
 /// Новая версия программы.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum NewVersion {
     /// Работает последняя известная версия.
     Current,
-    /// Новая версия скачана и ждёт согласия.
+    /// Новая версия скачана и ждёт включения.
     Ready,
-    /// Человек согласился: страница вот-вот перезагрузится.
+    /// Включаем: страница вот-вот перезагрузится.
     Applying,
     /// Новую версию включили в другой вкладке: эта страница — ещё старая.
     Elsewhere,
@@ -43,8 +48,8 @@ pub enum NewVersion {
 
 impl NewVersion {
     /// Браузер сообщил о новой версии. «Включили в другой вкладке» сильнее
-    /// «ждёт согласия»: ждущая версия уже работает, и согласие здесь ничего
-    /// не включит — нужна перезагрузка.
+    /// «ждёт включения»: ждущая версия уже работает, и включать здесь нечего
+    /// — нужна перезагрузка.
     pub fn apply(&mut self, event: Event) {
         match event {
             Event::UpdateReady => {
@@ -61,39 +66,36 @@ impl NewVersion {
         }
     }
 
-    /// Новая версия пришла и ждёт, когда человек её включит — согласием или
-    /// перезагрузкой.
+    /// Новая версия пришла и ждёт, когда её включат или перезагрузят
+    /// страницу.
     const fn waits(self) -> bool {
         matches!(self, Self::Ready | Self::Elsewhere)
     }
-}
 
-/// Что нового в пришедшей версии.
-#[derive(Clone, PartialEq, Debug)]
-enum News {
-    /// Заметки ещё читаются — окно подождёт их: иначе список въехал бы
-    /// в него на глазах.
-    Reading,
-    /// Прочитаны; `None` — файла нет или он не читается: окно скажет
-    /// о новой версии без списка.
-    Read(Option<Arc<Notes>>),
-}
-
-impl News {
-    /// Новее ли пришедшая сборка работающей; `None` — заметки ещё читаются.
-    /// Новее — если в её заметках есть версия новее этой. Прочитались,
-    /// а новее нет — пришла прежняя сборка: хостинг ещё минуты после
-    /// выкладки отдаёт часть ответов прежней (Правило 6), и «обновление»
-    /// откатило бы программу назад, — или та же. Окно тогда не встаёт,
-    /// а новую сборку найдёт следующая проверка. Не прочитались вовсе —
-    /// новее: о новой версии лучше сказать без списка, чем промолчать.
-    fn newer(&self) -> Option<bool> {
+    /// Пора ли перейти на пришедшую версию: `target` — версия новее работающей
+    /// по заметкам, `tried` — та, которую на устройстве уже пробовали
+    /// включить. Заметок новее нет — пришла прежняя сборка: хостинг ещё
+    /// минуты после выкладки отдаёт часть ответов прежней (Правило 6),
+    /// и «обновление» откатило бы программу назад, — или та же, или заметки
+    /// не прочитались, и что пришло, неизвестно. Новую сборку найдёт
+    /// следующая проверка, а не знакомую браузер включит сам, когда закроют
+    /// все вкладки. Включённая в другой вкладке уже работает: здесь только
+    /// перезагрузка, а она второй раз сама не случится.
+    fn due(self, target: Option<Version>, tried: Option<Version>) -> bool {
         match self {
-            News::Reading => None,
-            News::Read(None) => Some(true),
-            News::Read(Some(notes)) => Some(notes.newest() > Some(Version::CURRENT)),
+            Self::Current | Self::Applying => false,
+            Self::Ready => target.is_some() && target != tried,
+            Self::Elsewhere => target.is_some(),
         }
     }
+}
+
+/// Что показать в окне «Что нового»: заметки на устройстве и версия, о которой
+/// человек уже знает.
+#[derive(Clone)]
+struct Updated {
+    seen: Version,
+    notes: Arc<Notes>,
 }
 
 /// Что предложить про установку. Кнопка «Установить» есть всегда, пока
@@ -205,7 +207,10 @@ pub(super) const fn manual_words(browser: Browser) -> (Key, Key) {
 #[derive(Clone, Copy)]
 pub struct Program {
     version: RwSignal<NewVersion>,
-    news: RwSignal<News>,
+    /// Заметки пришедшей версии; `None` — ещё читаются или не прочитались.
+    news: RwSignal<Option<Arc<Notes>>>,
+    /// Что нового в заработавшей версии; `None` — окна «Что нового» нет.
+    updated: RwSignal<Option<Updated>>,
     install: RwSignal<Install>,
     /// Где открыта страница — чьими словами объяснять установку руками.
     browser: Browser,
@@ -221,12 +226,14 @@ impl Program {
     /// Зарегистрировать service worker и слушать браузер.
     pub fn new() -> Self {
         let version = RwSignal::new(NewVersion::Current);
-        let news = RwSignal::new(News::Reading);
+        let news = RwSignal::new(None);
+        let updated = RwSignal::new(None);
         let install = RwSignal::new(Install::initial(browser::installed()));
         let serving = RwSignal::new(false);
+        read_updated(updated);
         let pwa = Pwa::start(move |event| {
             // Подписчикам — только перемена: событие установки или правки
-            // страницы service worker'ом окну новой версии ничего не меняет.
+            // страницы service worker'ом новой версии ничего не меняет.
             version.maybe_update(|state| {
                 let before = *state;
                 state.apply(event);
@@ -247,6 +254,7 @@ impl Program {
         Self {
             version,
             news,
+            updated,
             install,
             browser: Browser::detect(),
             steps: RwSignal::new(false),
@@ -261,29 +269,54 @@ impl Program {
         self.serving.get()
     }
 
-    /// Стоит ли на экране окно новой версии — отслеживаемое: программа под
-    /// ним неактивна (`ui/mod.rs`). Пришедшая версия ждёт, пока прочитаны
-    /// её заметки и не открыто ни одной формы, а не новее работающей — не
-    /// встаёт вовсе ([`News::newer`]); согласие окно уже не снимает.
-    pub fn blocks(&self, forms: Forms) -> bool {
-        match self.version.get() {
-            NewVersion::Current => false,
-            NewVersion::Applying => true,
-            NewVersion::Ready | NewVersion::Elsewhere => {
-                !forms.any() && self.news.with(News::newer) == Some(true)
-            }
+    /// Стоит ли на экране окно «Что нового» — отслеживаемое: программа под
+    /// ним неактивна (`ui/mod.rs`).
+    pub fn blocks(&self) -> bool {
+        self.updated.with(Option::is_some)
+    }
+
+    /// Версия, на которую пора перейти ([`NewVersion::due`]), — отслеживаемое.
+    fn due(&self) -> Option<Version> {
+        let target = self
+            .news
+            .with(|notes| notes.as_deref().and_then(Notes::newest))
+            .filter(|newest| *newest > Version::CURRENT);
+        let tried = Device::new().update_tried();
+        self.version.get().due(target, tried).then_some(target).flatten()
+    }
+
+    /// Слова над экраном о новой версии — отслеживаемое: она включается, или
+    /// её держит открытая форма.
+    fn notice(&self, forms: Forms) -> Option<Key> {
+        if self.version.get() == NewVersion::Applying {
+            return Some(Key::UpdateApplying);
         }
+        (forms.any() && self.due().is_some()).then_some(Key::UpdateAfterForm)
     }
 
-    /// Пришла версия новее, а открыта форма — окно ждёт её: слова над
-    /// экраном. Отслеживаемое.
-    fn waits_for_forms(&self, forms: Forms) -> bool {
-        self.version.get().waits() && forms.any() && self.news.with(News::newer) == Some(true)
+    /// Перейти на пришедшую версию, как только её не держит ни одна форма
+    /// (шапка модуля). Попытка запоминается до перезагрузки, а не запомнилась
+    /// — перезагрузки нет: без записи счесть попытки нечем. Программа тогда
+    /// работает дальше, а версию браузер включит сам, когда закроют все
+    /// вкладки.
+    pub fn update_when_free(self, forms: Forms) {
+        Effect::new(move |_| {
+            if forms.any() {
+                return;
+            }
+            if let Some(target) = self.due()
+                && Device::new().set_update_tried(target)
+            {
+                self.version.set(NewVersion::Applying);
+                self.pwa.with_value(Pwa::update);
+            }
+        });
     }
 
-    fn apply_update(&self) {
-        self.version.set(NewVersion::Applying);
-        self.pwa.with_value(Pwa::update);
+    /// Окно «Что нового» прочитано: о работающей версии человек теперь знает.
+    fn dismiss(&self) {
+        Device::new().set_seen_version(Version::CURRENT);
+        self.updated.set(None);
     }
 
     /// «Установить»: задать вопрос браузера, а нет его — раскрыть или
@@ -313,46 +346,86 @@ impl Program {
     #[cfg(all(test, target_arch = "wasm32"))]
     pub(super) fn pretend(&self, event: Event, notes: Option<Notes>) {
         self.version.update(|state| state.apply(event));
-        self.news.set(News::Read(notes.map(Arc::new)));
+        self.news.set(notes.map(Arc::new));
+    }
+
+    /// Как будто версия уже включается: браузерным тестам окна — настоящее
+    /// включение перезагрузило бы страницу тестов.
+    #[cfg(all(test, target_arch = "wasm32"))]
+    pub(super) fn pretend_applying(&self) {
+        self.version.set(NewVersion::Applying);
+    }
+
+    /// Как будто заработала версия новее `seen`, а на устройстве заметки
+    /// `notes`: браузерным тестам окна.
+    #[cfg(all(test, target_arch = "wasm32"))]
+    pub(super) fn pretend_updated(&self, seen: Version, notes: Notes) {
+        self.updated.set(Some(Updated {
+            seen,
+            notes: Arc::new(notes),
+        }));
     }
 }
 
-/// Прочитать заметки пришедшей версии — из её кэша, а не из сети: он полон,
-/// как только она установилась, и без сети тоже. На устройстве файлов
-/// несколько — работающей сборки и пришедших, — и новее тот, где версия
-/// больше: его и покажет окно, а пришла ли вообще версия новее, решает
-/// [`News::newer`]. Прочитанное прежде остаётся, пока не прочитано новое.
-fn read_news(news: RwSignal<News>) {
+/// Самый новый файл заметок на устройстве — из кэшей service worker, а не из
+/// сети: кэш полон, как только сборка установилась, и без сети тоже. Файлов
+/// бывает несколько — работающей сборки и пришедшей, — и новее тот, где
+/// версия больше. `None` — кэшей нет или ни один файл не читается.
+async fn notes_on_device() -> Option<Arc<Notes>> {
+    browser::cached_texts(browser::NOTES)
+        .await
+        .iter()
+        .filter_map(|text| Notes::parse(text).ok())
+        .max_by_key(Notes::newest)
+        .map(Arc::new)
+}
+
+/// Прочитать заметки пришедшей версии, чтобы узнать, новее ли она
+/// ([`NewVersion::due`]). Прочитанное прежде остаётся, пока не прочитано
+/// новое.
+fn read_news(news: RwSignal<Option<Arc<Notes>>>) {
     leptos::task::spawn_local(async move {
-        let notes = browser::cached_texts(browser::NOTES)
-            .await
-            .iter()
-            .filter_map(|text| Notes::parse(text).ok())
-            .max_by_key(Notes::newest);
-        news.set(News::Read(notes.map(Arc::new)));
+        news.set(notes_on_device().await);
     });
 }
 
-/// Окно новой версии на языке окна (задача 67): что нового и «Обновить»
-/// поверх всей программы. Обязательное — без «Позже» и крестика, и Escape
-/// его не закрывает; программа под ним неактивна (`inert`, `ui/mod.rs`).
-/// Пусто, пока новой версии нет или открыта форма.
-///
-/// Не `<dialog>`: модальный `<dialog>` закрывает запрос на закрытие —
-/// Escape, «Назад» на Android, жест закрытия диктора, — а не дать ему
-/// закрыться страница может только после свежего действия человека: второй
-/// запрос подряд закрывает его всегда (по спецификации HTML, «close
-/// watchers», Living Standard от 2026-10-16). `closedby="none"` это
-/// снимает, но он моложе самого `<dialog>`, и поддержку его пришлось бы
-/// сверять в каждом браузере. Слой с `inert` под ним, как у плашки сбоя,
-/// не закрывает ничто.
+/// Заработала версия новее той, о которой человек знает, — поднять окно «Что
+/// нового». Записи о ней нет — это первый запуск или переход с версии до
+/// 0.0.63: о том, что в этой нового, сказало окно прежней. На обычном
+/// открытии здесь только чтение записи: кэши читаются после обновления.
+fn read_updated(updated: RwSignal<Option<Updated>>) {
+    let Some(seen) = Device::new().seen_version() else {
+        Device::new().set_seen_version(Version::CURRENT);
+        return;
+    };
+    if seen >= Version::CURRENT {
+        return;
+    }
+    leptos::task::spawn_local(async move {
+        // Не прочитались — запись не тронута, и окно встанет при следующем
+        // открытии.
+        let Some(notes) = notes_on_device().await else {
+            return;
+        };
+        if notes.between(seen, Version::CURRENT).next().is_some() {
+            updated.set(Some(Updated { seen, notes }));
+        } else {
+            Device::new().set_seen_version(Version::CURRENT);
+        }
+    });
+}
+
+/// Окно «Что нового» на языке окна (задача 67): уже после обновления, поверх
+/// всей программы — программа под ним неактивна (`inert`, `ui/mod.rs`).
+/// Закрывают его «Понятно» или Escape; закрытое больше не встаёт, а не
+/// закрытое встанет при следующем открытии. Пусто, пока обновления не было.
 ///
 /// Рисуется заново, только когда окно встаёт или уходит (`Memo`): иначе
 /// любая весть браузера пересобрала бы его, и фокус с кнопки прыгал бы на
 /// заголовок.
 #[component]
-pub fn UpdateDialog(lang: ReadSignal<Lang>, program: Program, forms: Forms) -> impl IntoView {
-    let shown = Memo::new(move |_| program.blocks(forms));
+pub fn UpdateDialog(lang: ReadSignal<Lang>, program: Program) -> impl IntoView {
+    let shown = Memo::new(move |_| program.blocks());
     move || shown.get().then(|| view! { <UpdateCard lang program /> })
 }
 
@@ -369,50 +442,38 @@ fn UpdateCard(lang: ReadSignal<Lang>, program: Program) -> impl IntoView {
             let _ = title.unchecked_into::<HtmlElement>().focus();
         }
     });
-    let state = move || program.version.get();
+    let keydown = move |event: KeyboardEvent| {
+        if event.key() == "Escape" {
+            program.dismiss();
+        }
+    };
     view! {
-        <div class="update" role="dialog" aria-modal="true" aria-labelledby=TITLE>
+        <div class="update" role="dialog" aria-modal="true" aria-labelledby=TITLE on:keydown=keydown>
             <div class="update-card">
                 <h2 id=TITLE tabindex="-1">{tr(lang, Key::UpdateTitle)}</h2>
                 <UpdateNews lang program />
-                {move || (state() == NewVersion::Elsewhere).then(|| view! {
-                    <p class="update-elsewhere">{tr(lang, Key::UpdateElsewhere)}</p>
-                })}
-                {move || if state() == NewVersion::Applying {
-                    view! { <p class="update-applying" role="status">{tr(lang, Key::UpdateApplying)}</p> }
-                        .into_any()
-                } else {
-                    let label = if state() == NewVersion::Elsewhere { Key::Reload } else { Key::UpdateApply };
-                    view! {
-                        <button type="button" class="wide" on:click=move |_| program.apply_update()>
-                            {tr(lang, label)}
-                        </button>
-                    }
-                    .into_any()
-                }}
+                <button type="button" class="wide" on:click=move |_| program.dismiss()>
+                    {tr(lang, Key::UpdateGotIt)}
+                </button>
                 <p class="hint">{tr(lang, Key::UpdateKeepsData)}</p>
             </div>
         </div>
     }
 }
 
-/// `id` заголовка окна новой версии: по нему окно названо для диктора
-/// и на нём встаёт фокус.
+/// `id` заголовка окна «Что нового»: по нему окно названо для диктора и на
+/// нём встаёт фокус.
 const TITLE: &str = "update-title";
 
-/// «Что нового» — заметки версий новее работающей, свежие сверху, на языке
-/// окна: номер и день выпуска, под ними пункты. Не прочитались или новее
-/// нет ни одной — ничего: о новой версии говорит заголовок окна.
+/// Заметки версий новее той, что видел человек, и не новее работающей,
+/// свежие сверху, на языке окна: номер и день выпуска, под ними пункты.
 #[component]
 fn UpdateNews(lang: ReadSignal<Lang>, program: Program) -> impl IntoView {
     move || {
-        let notes = program.news.with(|news| match news {
-            News::Read(Some(notes)) => Some(Arc::clone(notes)),
-            News::Read(None) | News::Reading => None,
-        })?;
+        let Updated { seen, notes } = program.updated.get()?;
         let lang = lang.get();
         let versions: Vec<_> = notes
-            .since(Version::CURRENT)
+            .between(seen, Version::CURRENT)
             .filter(|note| !note.items(lang).is_empty())
             .map(|note| {
                 let heading = fill(
@@ -439,16 +500,16 @@ fn UpdateNews(lang: ReadSignal<Lang>, program: Program) -> impl IntoView {
     }
 }
 
-/// Новая версия пришла, пока открыта форма: окно с ней встанет, когда форму
-/// сохранят или закроют, а до того — только эти слова над экраном, без
-/// кнопки: нажатая, она стёрла бы начатое. Пусто в остальное время.
+/// Слова над экраном о новой версии: пришла, пока открыта форма, — и включится
+/// сама, когда форму сохранят или закроют; или включается прямо сейчас. Пусто
+/// в остальное время.
 #[component]
 pub fn UpdateNotice(lang: ReadSignal<Lang>, program: Program, forms: Forms) -> impl IntoView {
-    let shown = Memo::new(move |_| program.waits_for_forms(forms));
+    let shown = Memo::new(move |_| program.notice(forms));
     move || {
-        shown.get().then(|| view! {
+        shown.get().map(|key| view! {
             <div class="notice" role="status">
-                <p>{tr(lang, Key::UpdateAfterForm)}</p>
+                <p>{tr(lang, key)}</p>
             </div>
         })
     }
@@ -504,8 +565,7 @@ mod tests {
     use super::*;
 
     /// «Включили в другой вкладке» не теряется, что бы ни пришло потом,
-    /// а собственное согласие им не перебивается: страница и так
-    /// перезагрузится.
+    /// а своё включение им не перебивается: страница и так перезагрузится.
     #[test]
     fn update_states_follow_the_browser() {
         let mut version = NewVersion::Current;
@@ -524,8 +584,7 @@ mod tests {
         assert_eq!(applying, NewVersion::Applying);
     }
 
-    /// Ждёт включения только пришедшая версия: своя, согласие на которую уже
-    /// дано, — нет.
+    /// Ждёт включения только пришедшая версия: та, что уже включается, — нет.
     #[test]
     fn only_a_new_version_waits() {
         let waiting: Vec<NewVersion> = [
@@ -538,6 +597,34 @@ mod tests {
         .filter(|state| state.waits())
         .collect();
         assert_eq!(waiting, [NewVersion::Ready, NewVersion::Elsewhere]);
+    }
+
+    /// Версию включают, только когда она новее работающей и её ещё не
+    /// пробовали: сборка, которая не заработала, не перезагружает страницу
+    /// второй раз, и программа открывается прежней. Следующая версия — уже
+    /// новая попытка. Включённой в другой вкладке нужна только перезагрузка:
+    /// её держит прежняя страница, а не запись о попытке.
+    #[test]
+    fn a_version_is_switched_on_once() {
+        let next = Some(Version::new(9, 0, 1));
+        let later = Some(Version::new(9, 0, 2));
+        let mut wrong = Vec::new();
+        for (state, target, tried, due) in [
+            (NewVersion::Current, next, None, false),
+            (NewVersion::Applying, next, None, false),
+            (NewVersion::Ready, None, None, false),
+            (NewVersion::Ready, next, None, true),
+            (NewVersion::Ready, next, next, false),
+            (NewVersion::Ready, later, next, true),
+            (NewVersion::Elsewhere, None, None, false),
+            (NewVersion::Elsewhere, next, None, true),
+            (NewVersion::Elsewhere, next, next, true),
+        ] {
+            if state.due(target, tried) != due {
+                wrong.push(format!("{state:?}, цель {target:?}, пробовали {tried:?}: не {due}"));
+            }
+        }
+        assert!(wrong.is_empty(), "включение версии: {wrong:#?}");
     }
 
     /// Установленной программе установку не предлагают, даже если браузер

@@ -40,6 +40,7 @@ use super::annual::{AnnualCard, AnnualEntry, AnnualPage};
 use super::deadlines::{DeadlineReminder, DeadlinesEntry, DeadlinesPage};
 use super::backup::{BackupChip, Backups};
 use super::documents::{Documents, SettlementReminder};
+use super::form::Forms;
 use super::icon::{Icon, icon};
 use super::ledger::{Operations, tax_part};
 use super::license::{LicenseCard, LicensePage, Licenses};
@@ -385,6 +386,8 @@ pub struct Ctx {
     /// Ключи лицензии: числа для расчёта открыты по сроку (задача 25),
     /// а экран лицензии — в той же части.
     pub(super) licenses: Licenses,
+    /// Начатое на экранах — поле ключа лицензии — ждёт новая версия.
+    pub(super) forms: Forms,
     /// Сегодня — один раз (Архитектура, «Время — параметр»).
     pub(super) today: Option<Date>,
     /// Квартал экранов налога и чисел для расчёта — один на оба
@@ -399,6 +402,7 @@ impl Ctx {
         base: Base,
         backups: Backups,
         licenses: Licenses,
+        forms: Forms,
     ) -> Self {
         Self {
             lang,
@@ -406,6 +410,7 @@ impl Ctx {
             base,
             backups,
             licenses,
+            forms,
             today: clock::today(),
             quarter: RwSignal::new(None),
         }

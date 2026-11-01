@@ -24,10 +24,11 @@
 // 3. Сервер выключен: программа открывается из кэша service worker, и те же
 //    экраны, формы, карточка и PDF работают без сети.
 // 4. Новая версия (задача 67): на сервере — копия сборки новой версией. Пока
-//    открыта форма, над экраном только слова; форму закрыли — окно «Что
-//    нового» с заметкой новой версии поверх неактивной программы, а
-//    «Обновить» открывает новую сборку. Окно обязательное: сломанное, оно
-//    заперло бы программу у всех, кто получит следующую версию.
+//    открыта форма или начат ввод вне формы, над экраном только слова; всё
+//    закрыли — новая сборка включается сама, страница перезагружается,
+//    и встаёт окно «Что нового». Так же — при заходе на страницу. Сломанное,
+//    это заперло бы программу или стёрло бы начатое у всех, кто получит
+//    следующую версию.
 // Везде — без плашки сбоя и без ошибок в консоли.
 //
 // Почему так:
@@ -244,53 +245,151 @@ async function backup(page, password) {
 
 const NO_DIALOG = `return document.querySelector("[role=dialog]") ? null : true;`;
 
-/// Новая версия — на той же странице: сервер отдаёт копию сборки новой
-/// версией (`newVersion`), а проверку новой версии окно делает и само, при
-/// возвращении к нему (`platform/pwa.rs`) — здесь её зовёт проверка, пока
-/// открыта форма. Окно держит каждая форма сама: формы открываются по
-/// очереди, и следующая — раньше, чем закрыта прежняя, — так в каждый миг
-/// открыта одна, и окна быть не должно. Форма, которая окна не держит, —
-/// окно, вставшее над ней.
-async function update(page) {
-  const next = newVersion(DIST, path.join(WORK, "v2"));
-  const srv = own(next.dir, PORT, { quality: 5 });
-  const NOTICE = TEXT_IN("main", s("UpdateAfterForm"));
-  try {
-    page.errors.length = 0;
-    let open = null;
-    for (const f of FORMS) {
+/// Вписать текст в поле, как человек: со своим событием `input`.
+const TYPE = (selector, text) => `const input = document.querySelector(${JSON.stringify(selector)});
+  if (!input) return null;
+  input.value = ${JSON.stringify(text)}; input.dispatchEvent(new Event("input", { bubbles: true })); return true;`;
+
+/// Что держит новую версию, кроме форм: начатый ввод вне формы.
+const FIELDS = [
+  { name: "ключ лицензии", hash: "#/license", field: "#license textarea" },
+  { name: "пароль копии", hash: "#/backup", field: "#backup form.backup input[type=password]" },
+];
+
+/// Всё, что держит новую версию, — одним списком: начать и закончить.
+const HOLDS = [
+  ...FORMS.map((f) => ({
+    name: `форма экрана «${f.name}»`,
+    start: async (page) => {
       await go(page, f.hash);
       await page.waitFor(`return ${BUTTON(f.scope, s(f.open))} ? true : null;`);
       await press(page, f.scope, s(f.open));
-      checks.check(`новая версия: форма экрана «${f.name}» открыта`, await page.waitFor(f.shown));
+      return page.waitFor(f.shown);
+    },
+    finish: async (page) => {
+      await go(page, f.hash);
+      await press(page, f.scope, s(f.close));
+      return page.waitFor(f.gone);
+    },
+  })),
+  ...FIELDS.map((f) => ({
+    name: f.name,
+    start: async (page) => {
+      await go(page, f.hash);
+      return page.waitFor(TYPE(f.field, "начато"));
+    },
+    finish: async (page) => {
+      await go(page, f.hash);
+      return page.waitFor(TYPE(f.field, ""));
+    },
+  })),
+  // Готовый файл копии: держит, пока открыт её экран.
+  {
+    name: "файл копии на её экране",
+    start: async (page, password) => {
+      await backup(page, password);
+      return true;
+    },
+    finish: async (page) => {
+      await go(page, "#/");
+      return true;
+    },
+  },
+];
+
+/// Версия, о которой человек знает, — на устройстве. Копия сборки — тот же
+/// wasm с теми же числами (`newVersion`), поэтому после её включения окно
+/// «Что нового» встанет, только если устройство помнит версию старше.
+const SEEN = (version) => `localStorage.setItem("kvartik.seen_version", ${JSON.stringify(version)}); return true;`;
+
+/// Заработала сборка `next`: прежний кэш удалён, стоит окно «Что нового»
+/// с заметкой работающей версии, а не той, что в заметках копии сверху.
+/// Программа под окном неактивна, «Понятно» его закрывает, и перезагрузка его
+/// больше не показывает. Включение здесь доказывает кэш, а не метка на
+/// странице: при заходе на страницу она могла бы встать уже на новую сборку.
+/// Ждётся именно кэш новой сборки: до того, как браузер нашёл её, единственный
+/// кэш — прежний.
+async function switched(page, next, running, when) {
+  const name = `kvartik-${next.build}`;
+  const cache = await page.waitFor(`const n = await caches.keys();
+    return n.length === 1 && n[0] === ${JSON.stringify(name)} ? n[0] : null;`, 30000);
+  checks.check(`новая версия: ${when} — новая сборка, прежний кэш удалён`, cache === name, cache);
+  const dialog = await page.waitFor(`const d = document.querySelector("[role=dialog]");
+    return d && d.innerText.includes(${JSON.stringify(s("UpdateWhatsNew"))}) ? d.innerText : null;`, 10000);
+  checks.check(`новая версия: ${when} — окно «Что нового» с заметкой ${running}`,
+    dialog?.includes(running) && !dialog.includes(next.version), dialog);
+  checks.check("новая версия: программа под окном неактивна",
+    await page.eval(`return document.querySelector(".app").inert ? true : null;`));
+  checks.check("новая версия: «Понятно» в окне", await press(page, "[role=dialog]", s("UpdateGotIt")));
+  checks.check("новая версия: «Понятно» закрыло окно, программа работает",
+    (await page.waitFor(NO_DIALOG)) && (await page.waitFor(WORKING))
+      && (await page.eval(`return document.querySelector(".app").inert ? null : true;`)));
+  await page.fresh(`${ORIGIN}/app/#/`);
+  await page.waitFor(WORKING);
+  await sleep(300);
+  checks.check("новая версия: после перезагрузки окна больше нет", await page.eval(NO_DIALOG));
+}
+
+/// Новая версия — на той же странице: сервер отдаёт копию сборки новой
+/// версией (`newVersion`), а проверку новой версии окно делает и само, при
+/// возвращении к нему (`platform/pwa.rs`) — здесь её зовёт проверка, пока
+/// что-то начато. Новую версию держит каждая форма и поле сами: они
+/// открываются по очереди, и следующее — раньше, чем закончено прежнее, — так
+/// в каждый миг начато одно, и страница стоит. То, что версию не держит, —
+/// перезагрузка, а метка `__old` на странице её выдаёт. Потом — заход на
+/// страницу: браузер находит новую версию сам, и она включается без форм.
+/// И последнее: версию, которую на устройстве уже пробовали включить, окно
+/// второй раз не включает — иначе сборка, которая не заработала, перезагружала
+/// бы страницу без конца, и открыть программу было бы нельзя.
+async function update(page, password) {
+  const running = JSON.parse(fs.readFileSync(path.join(DIST, "app/notes.json"), "utf8")).notes[0].version;
+  const next = newVersion(DIST, path.join(WORK, "v2"));
+  const later = newVersion(next.dir, path.join(WORK, "v3"));
+  const refused = newVersion(later.dir, path.join(WORK, "v4"));
+  let srv = own(next.dir, PORT, { quality: 5 });
+  const NOTICE = TEXT_IN("main", s("UpdateAfterForm"));
+  try {
+    page.errors.length = 0;
+    await page.eval(SEEN("0.0.1"));
+    await page.eval(`window.__old = 1; return true;`);
+    let open = null;
+    for (const hold of HOLDS) {
+      checks.check(`новая версия: начато — ${hold.name}`, await hold.start(page, password));
       if (open) {
-        await go(page, open.hash);
-        await press(page, open.scope, s(open.close));
-        checks.check(`новая версия: форма экрана «${open.name}» закрыта`, await page.waitFor(open.gone));
+        checks.check(`новая версия: закончено — ${open.name}`, await open.finish(page));
       } else {
         await page.eval(`navigator.serviceWorker.getRegistration().then((r) => r.update()); return true;`);
       }
       const waiting = await page.waitFor(NOTICE, open ? 5000 : 30000);
       await sleep(300);
-      checks.check(`новая версия: открыта одна форма — «${f.name}»; над экраном слова, а не окно`,
-        waiting && (await page.eval(NO_DIALOG)));
-      open = f;
+      checks.check(`новая версия: начато одно — ${hold.name}; над экраном слова, страница стоит`,
+        waiting && (await page.eval(`return window.__old === 1 ? true : null;`)) && (await page.eval(NO_DIALOG)));
+      open = hold;
     }
-    await go(page, open.hash);
-    await press(page, open.scope, s(open.close));
-    const dialog = await page.waitFor(`const d = document.querySelector("[role=dialog]");
-      return d && d.innerText.includes(${JSON.stringify(s("UpdateWhatsNew"))}) ? d.innerText : null;`, 10000);
-    checks.check(`новая версия: форму закрыли — окно «Что нового» с заметкой ${next.version}`,
-      dialog?.includes(next.version), dialog);
-    checks.check("новая версия: программа под окном неактивна",
-      await page.eval(`return document.querySelector(".app").inert ? true : null;`));
-    await page.eval(`window.__old = 1; return true;`);
-    checks.check("новая версия: «Обновить» в окне", await press(page, "[role=dialog]", s("UpdateApply")));
-    const reloaded = await page.waitFor(`return window.__old === undefined && document.readyState === "complete" ? true : null;`, 30000);
-    const cache = await page.waitFor(`const n = await caches.keys(); return n.length === 1 ? n[0] : null;`, 30000);
-    checks.check("новая версия: «Обновить» — новая сборка, прежний кэш удалён",
-      reloaded && cache === `kvartik-${next.build}`, cache);
-    checks.check("новая версия: рабочий экран, окна больше нет", (await page.waitFor(WORKING)) && (await page.eval(NO_DIALOG)));
+    await open.finish(page);
+    checks.check("новая версия: всё закрыли — страница перезагрузилась сама",
+      await page.waitFor(`return window.__old === undefined && document.readyState === "complete" ? true : null;`, 30000));
+    await switched(page, next, running, "всё закрыли");
+
+    // Заход на страницу: новую версию находит сам браузер, форм нет.
+    await srv.stop();
+    srv = own(later.dir, PORT, { quality: 5 });
+    await page.eval(SEEN("0.0.1"));
+    await page.fresh(`${ORIGIN}/app/#/`);
+    await switched(page, later, running, "зашли на страницу");
+
+    // Попытка включить эту версию уже была: она ждёт, а страница стоит.
+    await srv.stop();
+    srv = own(refused.dir, PORT, { quality: 5 });
+    await page.eval(`localStorage.setItem("kvartik.update_tried", ${JSON.stringify(refused.version)});
+      window.__old = 1; return true;`);
+    await page.eval(`navigator.serviceWorker.getRegistration().then((r) => r.update()); return true;`);
+    const waiting = await page.waitFor(`const r = await navigator.serviceWorker.getRegistration();
+      return r.waiting ? true : null;`, 30000);
+    await sleep(1500);
+    checks.check("новая версия: уже пробовали — ждёт, страница не перезагрузилась",
+      waiting && (await page.eval(`return window.__old === 1 ? true : null;`)));
+
     checks.check("новая версия: без плашки сбоя", await page.eval(NO_PANIC));
     const errors = [...new Set(page.errors)];
     checks.check("новая версия: без ошибок в консоли", errors.length === 0, errors.slice(0, 8).join(" | "));
@@ -312,6 +411,8 @@ async function main() {
     await page.go(`${ORIGIN}/app/`);
     await page.setLang(opt.lang);
     checks.check("с сетью: рабочий экран", await page.waitFor(WORKING));
+    checks.check("первый запуск: версия запомнена, окна «Что нового» нет",
+      (await page.eval(`return localStorage.getItem("kvartik.seen_version");`)) && (await page.eval(NO_DIALOG)));
     const sample = await restore(page);
     checks.check("с сетью: страницей правит service worker", (await page.waitFor(CONTROLLER)) === `${ORIGIN}/app/sw.js`);
     await home(page);
@@ -339,7 +440,7 @@ async function main() {
     const offline = [...new Set(page.errors)];
     checks.check("без сети: без ошибок в консоли", offline.length === 0, offline.slice(0, 8).join(" | "));
 
-    await update(page);
+    await update(page, sample.password);
   } finally {
     browser.close();
     if (srv) await srv.stop();

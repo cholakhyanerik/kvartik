@@ -1,6 +1,7 @@
 //! Что знает это устройство: когда здесь в последний раз сделали копию,
-//! проверочное значение пароля копий (`DeviceKey`), выбранный язык окна
-//! и день начала пробного периода (задача 25).
+//! проверочное значение пароля копий (`DeviceKey`), выбранный язык окна,
+//! день начала пробного периода (задача 25) и что с новыми версиями: о какой
+//! человек уже знает и какую окно уже пробовало включить.
 //!
 //! Это не данные человека, а состояние устройства, поэтому оно лежит не
 //! в базе записей и не попадает в копию: перенесённая на новое устройство
@@ -23,6 +24,7 @@ use kvartik_core::format::backup::DeviceKey;
 use kvartik_core::i18n::Lang;
 use kvartik_core::model::date::Date;
 use kvartik_core::model::record::Timestamp;
+use kvartik_core::release::Version;
 
 /// Записи устройства под своим префиксом: программа — под [`Device::new`],
 /// браузерные тесты — каждый под своим, чтобы не мешать друг другу.
@@ -89,6 +91,29 @@ impl Device {
         self.set("trial", &day.iso())
     }
 
+    /// Версия, о которой человек уже знает: работала здесь первой или её
+    /// «Что нового» он закрыл. `None` — записи нет или она не читается.
+    pub fn seen_version(&self) -> Option<Version> {
+        Version::parse(&self.get("seen_version")?)
+    }
+
+    /// Запомнить версию, о которой человек знает. `false` — `localStorage`
+    /// отказал.
+    pub fn set_seen_version(&self, version: Version) -> bool {
+        self.set("seen_version", &version.to_string())
+    }
+
+    /// Версия, которую окно уже пробовало включить на этом устройстве
+    /// (`ui/pwa.rs`); `None` — не пробовало или запись не читается.
+    pub fn update_tried(&self) -> Option<Version> {
+        Version::parse(&self.get("update_tried")?)
+    }
+
+    /// Запомнить попытку включить версию. `false` — `localStorage` отказал.
+    pub fn set_update_tried(&self, version: Version) -> bool {
+        self.set("update_tried", &version.to_string())
+    }
+
     fn get(&self, name: &str) -> Option<String> {
         storage()?
             .get_item(&format!("{}{name}", self.prefix))
@@ -108,7 +133,7 @@ impl Device {
     #[cfg(all(test, target_arch = "wasm32"))]
     pub(super) fn clear(&self) {
         if let Some(storage) = storage() {
-            for name in ["last_backup", "backup_key", "lang", "trial"] {
+            for name in ["last_backup", "backup_key", "lang", "trial", "seen_version", "update_tried"] {
                 let _ = storage.remove_item(&format!("{}{name}", self.prefix));
             }
         }

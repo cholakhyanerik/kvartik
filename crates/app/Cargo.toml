@@ -72,6 +72,7 @@ web-sys = { version = "0.3.106", features = [
     "IdbVersionChangeEvent",
     "ImageBitmap",
     "ImageEncodeOptions",
+    "KeyboardEvent",
     "Location",
     "MediaQueryList",
     "MessageChannel",
@@ -103,7 +104,8 @@ web-sys = { version = "0.3.106", features = [
 # записи для проб. `NodeList` — тест плашки считает её копии,
 # `DataTransfer` — тест окна кладёт файл копии в поле выбора файла,
 # `HtmlSelectElement` — тест клиентов выбирает страну и валюту, `History` —
-# тест экранов нажимает «Назад»; фичи
+# тест экранов нажимает «Назад», `KeyboardEventInit` — тест окна «Что нового»
+# нажимает Escape; фичи
 # dev-зависимостей в сборку сайта не попадают (резолвер 3).
 # Машинные тесты окна (`tests/*.rs`): манифест программы — JSON, и тест
 # читает его разбором, а не поиском строк (`tests/pwa.rs`, `tests/tokens.rs`).
@@ -124,5 +126,6 @@ web-sys = { version = "0.3.106", features = [
     "DataTransferItemList",
     "History",
     "HtmlSelectElement",
+    "KeyboardEventInit",
     "NodeList",
 ] }

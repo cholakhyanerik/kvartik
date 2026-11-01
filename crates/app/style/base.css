@@ -587,7 +587,7 @@ section > .button + p {
 .panic {
   position: fixed;
   inset: 0;
-  /* Выше меню разделов и окна новой версии: их кнопки тоже больше не
+  /* Выше меню разделов и окна «Что нового»: их кнопки тоже больше не
      отвечают. */
   z-index: 3;
   overflow: auto;
@@ -608,7 +608,7 @@ section > .button + p {
   column-gap: var(--space-3);
 }
 
-/* Окно новой версии (задача 67): карточка посреди экрана, а программа под
+/* Окно «Что нового» (задача 67): карточка посреди экрана, а программа под
    ней неактивна (`inert`) и приглушена. Приглушает фильтр, а не цвет:
    прозрачных цветов в tokens.css нет — контраст под ними не посчитать, —
    а текст окна лежит на его собственной карточке (--text на
@@ -683,24 +683,9 @@ section > .button + p {
   margin-top: var(--space-2);
 }
 
-.update-elsewhere {
-  margin-top: var(--space-4);
-}
-
 .update button.wide {
   flex: none;
   margin-top: var(--space-5);
-}
-
-/* «Обновляем…» — на месте кнопки и её высотой: окно не прыгает. */
-.update-applying {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  min-height: var(--control);
-  margin-top: var(--space-5);
-  font-weight: var(--weight-strong);
 }
 
 .update .hint {
