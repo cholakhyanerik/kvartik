@@ -386,9 +386,13 @@ impl QuarterTax {
     /// налоге с оборота, и налог посчитан целиком: неполный снимок закрепил
     /// бы неверные числа, а снимок квартала с уходом с режима отдал бы
     /// перенос следующему году (ст. 264, ч. 4) — такой квартал считает
-    /// бухгалтер.
+    /// бухгалтер. Раньше правил налога закрывать нечего: такой снимок чтение
+    /// считает порчей (`tax::closing`).
     pub fn closable(&self, today: Date) -> bool {
-        self.quarter.last_day() < today && self.complete() && self.regime == Regime::Turnover
+        first_quarter().is_some_and(|first| self.quarter >= first)
+            && self.quarter.last_day() < today
+            && self.complete()
+            && self.regime == Regime::Turnover
     }
 
     /// Расходится ли расчёт со снимком закрытого квартала: данные квартала

@@ -1025,6 +1025,23 @@ fn the_latest_snapshot_is_the_one_compared() {
     assert_eq!((found.tax, closing.id()), (100_000, newer.id()));
 }
 
+/// Квартал раньше правил налога не закрывается: снимок такого квартала чтение
+/// считает порчей (`ClosingData::check`), и окно вечно говорило бы о нечитаемом
+/// закрытом квартале. Кончившийся пустой квартал рядом с правилами закрывается.
+#[test]
+fn a_quarter_before_the_rules_does_not_close() {
+    let profile = profile(&["74.10.0"]);
+    let today = day(2026, 11, 1);
+    let before = tax(Some(&profile), &[], &[], quarter(2024, 4));
+    assert!(!before.closable(today));
+    assert!(Closing::close(&before, today, at(1)).is_err());
+    let first = tax(Some(&profile), &[], &[], quarter(2025, 1));
+    assert!(first.closable(today));
+    let closing = Closing::close(&first, today, at(1)).expect("квартал правил закрывается");
+    let text = serde_json::to_string(&closing).expect("снимок пишется");
+    assert_eq!(serde_json::from_str::<Closing>(&text).ok(), Some(closing), "снимок читается обратно");
+}
+
 /// Закрыть можно только кончившийся и посчитанный целиком квартал.
 #[test]
 fn only_a_finished_complete_quarter_closes() {

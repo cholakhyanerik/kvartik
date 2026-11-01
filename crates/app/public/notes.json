@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.67",
+      "date": "2026-11-01",
+      "hy": [
+        "2025 թվականից առաջ եռամսյակն այլևս հնարավոր չէ փակել. այդպիսի եռամսյակը հետո չէր կարդացվում, և ծրագիրն անընդհատ հիշեցնում էր դրա մասին։"
+      ],
+      "ru": [
+        "Квартал раньше 2025 года больше нельзя закрыть: такой квартал потом не читался, и программа всё время об этом напоминала."
+      ],
+      "en": [
+        "A quarter before 2025 can no longer be closed: such a quarter couldn't be read afterwards, and the app kept reminding you about it."
+      ]
+    },
+    {
       "version": "0.0.66",
       "date": "2026-11-01",
       "hy": [
@@ -287,22 +300,6 @@
       ],
       "en": [
         "An invoice that has an act no longer offers the CBA rate and the activity: the ledger and the tax take the income from the act, so they are set on the act."
-      ]
-    },
-    {
-      "version": "0.0.47",
-      "date": "2026-10-20",
-      "hy": [
-        "Շրջանառության հարկը եռամսյակի համար. գլխավոր էկրանին՝ հարկի քարտը, իսկ «Հարկ» բաժնում՝ եկամուտն ըստ ամիսների, հաշվարկն ըստ ՊԵԿ ձևի տողերի, նվազեցման փոխանցումը և 115 մլն ֏ շեմի բաժինը։ Դրույքաչափը կախված է գործունեության տեսակից. պրոֆիլում յուրաքանչյուր կոդի համար նշված է հարկի տողը։",
-        "Հաշվարկը ներկայացրե՞լ եք՝ սեղմեք «Փակել եռամսյակը». թվերը կպահպանվեն, և հաջորդ եռամսյակ փոխանցումը կվերցվի դրանցից։ Մատյանում նոր ծախսի տեսակ կա՝ «Աշխատավարձ, հարկ, տուրք, բանկի ծառայություն»։"
-      ],
-      "ru": [
-        "Налог с оборота за квартал: карточка на главном экране, а во вкладке «Налог» — доход по месяцам, расчёт по строкам формы ՊԵԿ, перенос вычета и доля порога 115 млн ֏. Ставка зависит от вида деятельности: у каждого кода в профиле — своя строка налога.",
-        "Подали расчёт — нажмите «Закрыть квартал»: его числа сохранятся, и перенос в следующий квартал возьмётся из них. В книге — новый вид расхода «Зарплата, налог, пошлина, услуга банка»."
-      ],
-      "en": [
-        "Turnover tax for the quarter: a card on the home screen, and in the new “Tax” tab, income by month, the calculation line by line, as in the tax return, the deduction carried forward and your share of the 115 million ֏ threshold. The rate depends on the activity: each code in your profile has its own tax row.",
-        "Filed the return? Press “Close the quarter”: its numbers are kept, and the carry-forward to the next quarter comes from them. The ledger has a new expense kind, “Salary, tax, duty, bank service”."
       ]
     }
   ]
