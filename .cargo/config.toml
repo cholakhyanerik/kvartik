@@ -17,7 +17,7 @@ rustflags = ["-Clink-args=--emit-relocs"]
 
 # Предел времени браузерных тестов — на весь прогон в странице, а не на
 # один тест: по умолчанию 20 с (`WASM_BINDGEN_TEST_TIMEOUT`, по исходникам
-# wasm-bindgen-cli 0.2.129, `wasm_bindgen_test_runner.rs`). Прогон в Chrome
+# wasm-bindgen-cli 0.2.130, `wasm_bindgen_test_runner.rs`). Прогон в Chrome
 # в CI шёл уже 18,6 с, а Firefox в CI рисует программно, без видеокарты,
 # и предела не выдержал (задача 54, 2026-10-16): раннер тогда пишет
 # «Failed to detect test as having been run», и не понять, какой тест

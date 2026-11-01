@@ -1,0 +1,23 @@
+{
+  "about": "Торговля, 2025 год: пример ՊԵԿ с переносом 100 000 в поле x.7; перенос получен расходом прошлого квартала без дохода",
+  "checked": {
+    "by": "ՊԵԿ, ролик «Ինչպես օգտվել շրջանառության հարկի աջակցության ծրագրից», 2025-03-18 (src.am, видеогалерея, № 251): 5 000 000 × 10 % − 1 000 000 × 9,5 % − 100 000 = 305 000. Откуда перенос, ролик не говорит: I квартал дописан агентом — 1 052 632 × 9,5 % = 100 000 с отброшенными лумами, НК 258(7)",
+    "on": "2026-11-01",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["47.71.0"],
+    "kinds": {
+      "47.71.0": "trade"
+    }
+  },
+  "entries": [
+    {"flow": "expense", "date": "2025-02-01", "minor": 1052632, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"},
+    {"flow": "income", "date": "2025-05-10", "minor": 5000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "expense", "date": "2025-05-01", "minor": 1000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"}
+  ],
+  "expected": [
+    {"quarter": "2025-1", "tax": 0, "lines": [{"kind": "trade", "income": 0, "tax": 0, "carry_out": 100000}]},
+    {"quarter": "2025-2", "tax": 305000, "lines": [{"kind": "trade", "income": 5000000, "tax": 305000, "carry_out": 0}]}
+  ]
+}

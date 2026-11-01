@@ -1,0 +1,21 @@
+{
+  "about": "Торговля, I квартал 2026 года: пример самого ՊԵԿ",
+  "checked": {
+    "by": "ՊԵԿ, руководство «Շրջանառության հարկման համակարգ» (август 2026, https://online.fliphtml5.com/HVSV2027/gzpd/), с. 21: 5 000 000 × 10 % = 500 000; 4 000 000 × 9,5 % = 380 000; предел 1 % — 50 000; 500 000 − 380 000 = 120 000 > 50 000 — к уплате 120 000",
+    "on": "2026-11-01",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["47.71.0"],
+    "kinds": {
+      "47.71.0": "trade"
+    }
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-02-10", "minor": 5000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "expense", "date": "2026-02-01", "minor": 4000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"}
+  ],
+  "expected": [
+    {"quarter": "2026-1", "tax": 120000, "lines": [{"kind": "trade", "income": 5000000, "tax": 120000, "carry_out": 0}]}
+  ]
+}

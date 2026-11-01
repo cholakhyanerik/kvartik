@@ -1,8 +1,8 @@
 //! Тесты налога квартала. Ожидаемые числа посчитаны вручную по тексту
 //! закона — НК, ст. 258 и 260 — и формулам формы ՊԵԿ 299-Ն (прил. 1,
 //! п. 9–17), а не записаны кодом: код, записавший себе эталон, проверял бы
-//! сам себя (Правило 2). Посчитал агент 2026-10-19; сверка с бухгалтерами —
-//! задача 27 (`crates/core/tests/cases/`).
+//! сам себя (Правило 2). Посчитал агент 2026-10-19; чужие примеры ՊԵԿ
+//! и бухгалтеров — в `crates/core/tests/cases/`.
 
 use super::*;
 use crate::model::ledger::OperationData;
@@ -386,8 +386,8 @@ fn last_year_over_the_threshold_closes_this_year() {
     );
 }
 
-/// Какой расход идёт в вычет: платёжки хватает зарплате, налогам,
-/// пошлинам и услугам банка, а покупке — нет; без документа — нет;
+/// Какой расход идёт в вычет: платёжки хватает зарплате и услугам банка,
+/// а покупке — нет; без документа — нет;
 /// командировки — нет ни с каким документом (ст. 55, ч. 12; ст. 258, ч. 6).
 ///
 /// В вычет — только 50 000: 6 % — 3 000; 100 000 − 3 000 = 97 000.
@@ -408,9 +408,33 @@ fn only_documented_expenses_are_deducted() {
         Refused {
             no_document: 1,
             payment_only: 1,
-            excluded: 1
+            excluded: 1,
+            no_base: 0
         }
     );
+}
+
+/// Общий расход при доходе только IT: вес строки 10 — ноль, вычета нет,
+/// и окно это называет (ст. 260, ч. 3). С доходом дизайна в том же квартале
+/// расход делится по долям, и отказа нет. Расход, отнесённый к дизайну,
+/// переносится и без дохода (ст. 258, ч. 7) — случай `it-and-design-no-base`.
+#[test]
+fn shared_expense_without_a_deduction_row_is_named() {
+    let profile = profile(&["62.01.0", "74.10.0"]);
+    let accountant = expense(day(2026, 8, 1), 400_000, Proof::SettlementInvoice, Nature::Ordinary, None);
+    let it = income(day(2026, 7, 1), 3_000_000, Some("62.01.0"));
+    let design = income(day(2026, 7, 2), 1_000_000, Some("74.10.0"));
+    let only_it = tax(Some(&profile), &[it.clone(), accountant.clone()], &[], quarter(2026, 3));
+    assert_eq!(only_it.refused.no_base, 1);
+    assert_eq!(only_it.tax, 30_000);
+    assert_eq!(only_it.carry_out(), BTreeMap::new());
+    let both = tax(Some(&profile), &[it.clone(), design, accountant.clone()], &[], quarter(2026, 3));
+    assert_eq!(both.refused.no_base, 0);
+    // Только IT в профиле: вычета нет вовсе, и говорить не о чем.
+    let it_alone = self::profile(&["62.01.0"]);
+    let pure = tax(Some(&it_alone), &[income(day(2026, 7, 1), 3_000_000, None), accountant], &[], quarter(2026, 3));
+    assert_eq!(pure.refused.no_base, 0);
+    assert_eq!(pure.tax, 30_000);
 }
 
 /// Правило вычета — по каждому документу и виду расхода.

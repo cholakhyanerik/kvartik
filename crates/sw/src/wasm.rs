@@ -67,7 +67,7 @@ const MAIN: &str = "kvartik-app";
 /// под этим ключом их и передаёт. Файл получает имя с хэшем, а ключ
 /// остаётся.
 const LOADER: &str = "kvartik-split";
-/// Последняя строка клея wasm-bindgen 0.2.129: после неё встаёт запуск.
+/// Последняя строка клея wasm-bindgen 0.2.130: после неё встаёт запуск.
 /// Нет её — сменился вывод wasm-bindgen, и запуск надо писать заново.
 const GLUE_END: &str = "export { initSync, __wbg_init as default };";
 /// Запуск окна, который встаёт после [`GLUE_END`]; `{wasm}` — имя главного

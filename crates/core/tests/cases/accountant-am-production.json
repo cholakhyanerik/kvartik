@@ -1,0 +1,21 @@
+{
+  "about": "Производство с документированными расходами, выше нижнего предела",
+  "checked": {
+    "by": "пример бухгалтеров Accountant.am, 2026-04-10 (https://www.accountant.am/, «Շրջանառության հարկի հաշվարկման մի քանի օրինակներ»), пример 3: 2 000 000 × 7 % = 140 000; 1 200 000 × 5 % = 60 000; 80 000 > 3 % = 60 000",
+    "on": "2026-11-01",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["10.71.1"],
+    "kinds": {
+      "10.71.1": "production"
+    }
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-02-10", "minor": 2000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "expense", "date": "2026-02-01", "minor": 1200000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"}
+  ],
+  "expected": [
+    {"quarter": "2026-1", "tax": 80000, "lines": [{"kind": "production", "income": 2000000, "tax": 80000, "carry_out": 0}]}
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "about": "Торговля, расходы почти во весь оборот",
+  "checked": {
+    "by": "пример FinCore Consulting, 2026-03-21 (https://fincore.am/hy/shrjanarutyan-harki-popoxutyunner-mas-2/), пример 1: 15 000 000 × 10 % = 1 500 000; 13 000 000 × 9,5 % = 1 235 000; 265 000 > 150 000",
+    "on": "2026-11-01",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["47.71.0"],
+    "kinds": {
+      "47.71.0": "trade"
+    }
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-02-10", "minor": 15000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "expense", "date": "2026-02-01", "minor": 13000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"}
+  ],
+  "expected": [
+    {"quarter": "2026-1", "tax": 265000, "lines": [{"kind": "trade", "income": 15000000, "tax": 265000, "carry_out": 0}]}
+  ]
+}

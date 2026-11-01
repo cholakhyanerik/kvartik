@@ -19,7 +19,7 @@ kvartik-core = { path = "../core", features = ["js"] }
 # Реактивность и разметка окна. Только `csr`: сервера у нас нет, страница
 # собирается в браузере. API меняется между минорными версиями — сверять по
 # исходникам в реестре, а не по примерам из интернета (Правило 3).
-leptos = { version = "0.8.22", features = ["csr"] }
+leptos = { version = "0.8.23", features = ["csr"] }
 # Без него паника в wasm видна в консоли только как `unreachable`,
 # и причину не найти (Правило 6). Зовёт его свой хук паники
 # (`src/ui/panic.rs`), а потом показывает плашку словами.
@@ -38,9 +38,9 @@ console_error_panic_hook = "0.1.7"
 # интерфейсы: каждая лишняя — привязки, которые никто не зовёт. Будущее
 # Rust из `Promise` и `spawn_local` даёт сам `js-sys` (с 0.3.106 там живёт
 # то, что было `wasm-bindgen-futures`).
-wasm-bindgen = "0.2.129"
-js-sys = "0.3.106"
-web-sys = { version = "0.3.106", features = [
+wasm-bindgen = "0.2.130"
+js-sys = "0.3.107"
+web-sys = { version = "0.3.107", features = [
     "AesGcmParams",
     "Blob",
     "BlobPropertyBag",
@@ -99,7 +99,7 @@ web-sys = { version = "0.3.106", features = [
 # (`src/ui/panic.rs`): только под wasm32,
 # в сайт не попадают — Trunk зовёт `cargo build`, а он dev-зависимостей не
 # собирает. Версия `wasm-bindgen-test` идёт в паре с `wasm-bindgen`
-# (0.3.79 ↔ 0.2.129: в его Cargo.toml — точные `=`), и программа
+# (0.3.80 ↔ 0.2.130: в его Cargo.toml — точные `=`), и программа
 # `wasm-bindgen-test-runner` нужна той же версии (Правило 3). `serde` —
 # записи для проб. `NodeList` — тест плашки считает её копии,
 # `DataTransfer` — тест окна кладёт файл копии в поле выбора файла,
@@ -114,13 +114,13 @@ web-sys = { version = "0.3.106", features = [
 serde_json = "1.0.154"
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-wasm-bindgen-test = "0.3.79"
+wasm-bindgen-test = "0.3.80"
 serde = { version = "1.0.229", features = ["derive"] }
 # Браузерные тесты лицензии подписывают ключи парой проб (`ui/license.rs`):
 # закрытого ключа автора у них нет и быть не может (Правило 9). Крейт уже
 # в дереве через ядро, с теми же фичами.
 ed25519-dalek = { version = "3.0.0", default-features = false }
-web-sys = { version = "0.3.106", features = [
+web-sys = { version = "0.3.107", features = [
     "DataTransfer",
     "DataTransferItem",
     "DataTransferItemList",

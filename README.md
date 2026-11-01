@@ -136,11 +136,11 @@ cargo install trunk --locked --version 0.22.1
 
 Trunk нужен 0.22.1 или новее из 0.22: со старым сборка откажется работать.
 
-Ещё нужны две программы в PATH: `wasm-bindgen` **0.2.129** (та же версия,
+Ещё нужны две программы в PATH: `wasm-bindgen` **0.2.130** (та же версия,
 что крейт `wasm-bindgen` в `Cargo.lock`) и `wasm-opt` из binaryen
 **version_131**. Их берут готовыми из выпусков на GitHub —
-`wasm-bindgen-0.2.129-<система>.tar.gz` в
-[wasm-bindgen](https://github.com/wasm-bindgen/wasm-bindgen/releases/tag/0.2.129)
+`wasm-bindgen-0.2.130-<система>.tar.gz` в
+[wasm-bindgen](https://github.com/wasm-bindgen/wasm-bindgen/releases/tag/0.2.130)
 и `binaryen-version_131-<система>.tar.gz` в
 [binaryen](https://github.com/WebAssembly/binaryen/releases/tag/version_131),
 сверив сумму sha256 с файлом суммы рядом с архивом, — и кладут, например,

@@ -1,0 +1,25 @@
+{
+  "about": "Торговля с пустым кварталом: перенос идёт и через квартал без дохода",
+  "checked": {
+    "by": "агент вручную по НК 258(2), (7) и 299-Ն, п. 12–17. I квартал: 300 000 − 294 500 = 5 500 < 30 000 — к уплате 30 000, перенос 24 500. II квартал: дохода нет, 95 000 + 24 500 — перенос 119 500. III квартал: 200 000 − 119 500 = 80 500 ≥ 20 000",
+    "on": "2026-11-01",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["47.71.0"],
+    "kinds": {
+      "47.71.0": "trade"
+    }
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-02-10", "minor": 3000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "expense", "date": "2026-02-01", "minor": 3100000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"},
+    {"flow": "expense", "date": "2026-05-01", "minor": 1000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"},
+    {"flow": "income", "date": "2026-08-10", "minor": 2000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null}
+  ],
+  "expected": [
+    {"quarter": "2026-1", "tax": 30000, "lines": [{"kind": "trade", "income": 3000000, "tax": 30000, "carry_out": 24500}]},
+    {"quarter": "2026-2", "tax": 0, "lines": [{"kind": "trade", "income": 0, "tax": 0, "carry_out": 119500}]},
+    {"quarter": "2026-3", "tax": 80500, "lines": [{"kind": "trade", "income": 2000000, "tax": 80500, "carry_out": 0}]}
+  ]
+}

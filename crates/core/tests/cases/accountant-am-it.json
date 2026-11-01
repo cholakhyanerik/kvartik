@@ -1,0 +1,17 @@
+{
+  "about": "IT: 1 % без вычета",
+  "checked": {
+    "by": "пример бухгалтеров Accountant.am, 2026-04-10 (https://www.accountant.am/, «Շրջանառության հարկի հաշվարկման մի քանի օրինակներ»), пример 6: 3 000 000 × 1 % = 30 000",
+    "on": "2026-11-01",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["62.01.0"]
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-02-10", "minor": 3000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null}
+  ],
+  "expected": [
+    {"quarter": "2026-1", "tax": 30000, "lines": [{"kind": "high_tech", "income": 3000000, "tax": 30000}]}
+  ]
+}

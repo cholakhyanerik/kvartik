@@ -1,0 +1,22 @@
+{
+  "about": "Торговля и услуги: общие административные расходы делятся по долям оборота 60 и 40 %",
+  "checked": {
+    "by": "пример FinCore Consulting, 2026-03-21 (https://fincore.am/hy/shrjanarutyan-harki-popoxutyunner-mas-2/), пример долей: 12 000 000 и 8 000 000, общие 2 000 000 — 1 200 000 и 800 000. Налог строк — агент вручную по НК 258(2), (5), 260(3): торговля 1 200 000 − 9,5 % от 1 200 000 = 1 086 000 ≥ 120 000; услуги 800 000 − 6 % от 800 000 = 752 000 ≥ 360 000",
+    "on": "2026-11-01",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["47.71.0", "74.10.0"],
+    "kinds": {
+      "47.71.0": "trade"
+    }
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-02-10", "minor": 12000000, "currency": "AMD", "rate_e4": null, "activity": "47.71.0", "proof": null, "nature": null},
+    {"flow": "income", "date": "2026-02-11", "minor": 8000000, "currency": "AMD", "rate_e4": null, "activity": "74.10.0", "proof": null, "nature": null},
+    {"flow": "expense", "date": "2026-03-01", "minor": 2000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"}
+  ],
+  "expected": [
+    {"quarter": "2026-1", "tax": 1838000, "lines": [{"kind": "trade", "income": 12000000, "tax": 1086000, "carry_out": 0}, {"kind": "other", "income": 8000000, "tax": 752000, "carry_out": 0}]}
+  ]
+}

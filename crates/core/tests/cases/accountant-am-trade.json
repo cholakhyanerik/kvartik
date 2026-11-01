@@ -1,0 +1,26 @@
+{
+  "about": "Магазин: зарплата и покупки в двух кварталах — обычный и с высокими расходами, перенос 3 100",
+  "checked": {
+    "by": "пример бухгалтеров Accountant.am, 2026-04-10 (https://www.accountant.am/, «Շրջանառության հարկի հաշվարկման մի քանի օրինակներ»), примеры 1 и 2. I квартал: 1 000 000 × 10 % = 100 000; 800 000 × 9,5 % = 76 000; 24 000 > 10 000. II квартал: 980 000 × 9,5 % = 93 100; 6 900 < 10 000 — к уплате 10 000, перенос 3 100. Кварталы к примерам добавил агент",
+    "on": "2026-11-01",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["47.71.0"],
+    "kinds": {
+      "47.71.0": "trade"
+    }
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-02-10", "minor": 1000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "expense", "date": "2026-03-31", "minor": 330000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "bank_payment", "nature": "levy"},
+    {"flow": "expense", "date": "2026-02-01", "minor": 470000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"},
+    {"flow": "income", "date": "2026-05-10", "minor": 1000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "expense", "date": "2026-06-30", "minor": 330000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "bank_payment", "nature": "levy"},
+    {"flow": "expense", "date": "2026-05-01", "minor": 650000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"}
+  ],
+  "expected": [
+    {"quarter": "2026-1", "tax": 24000, "lines": [{"kind": "trade", "income": 1000000, "tax": 24000, "carry_out": 0}]},
+    {"quarter": "2026-2", "tax": 10000, "lines": [{"kind": "trade", "income": 1000000, "tax": 10000, "carry_out": 3100}]}
+  ]
+}

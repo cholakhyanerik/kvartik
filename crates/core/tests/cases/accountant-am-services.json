@@ -1,0 +1,18 @@
+{
+  "about": "Услуги местным клиентам с расходами",
+  "checked": {
+    "by": "пример бухгалтеров Accountant.am, 2026-04-10 (https://www.accountant.am/, «Շրջանառության հարկի հաշվարկման մի քանի օրինակներ»), пример 5: 500 000 × 10 % = 50 000; 200 000 × 6 % = 12 000; 38 000 > 4,5 % = 22 500",
+    "on": "2026-11-01",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["74.10.0"]
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-02-10", "minor": 500000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "expense", "date": "2026-02-01", "minor": 200000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"}
+  ],
+  "expected": [
+    {"quarter": "2026-1", "tax": 38000, "lines": [{"kind": "other", "income": 500000, "tax": 38000, "carry_out": 0}]}
+  ]
+}

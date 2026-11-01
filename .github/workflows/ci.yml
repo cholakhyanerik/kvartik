@@ -54,9 +54,9 @@ env:
   # с замком. Сумма архива
   # `wasm-bindgen-<версия>-x86_64-unknown-linux-musl.tar.gz` — из файла
   # `.tar.gz.sha256sum` рядом с ним; совпала с полем `digest` в API GitHub
-  # (2026-10-12).
-  WASM_BINDGEN_VERSION: 0.2.129
-  WASM_BINDGEN_SHA256: 82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e
+  # (2026-11-01).
+  WASM_BINDGEN_VERSION: 0.2.130
+  WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
   # wasm-opt для сборки сайта (`crates/sw/src/wasm.rs`, задача 58): та же
   # версия binaryen, что `WASM_OPT_VERSION` там, — меняются обе. Сумма
   # архива `binaryen-<версия>-x86_64-linux.tar.gz` — из файла `.sha256`
@@ -161,7 +161,7 @@ jobs:
       # зелёной в другом. Окно Firefox «Разрешить хранить данные?» на
       # `persist()` не дало бы ответа никогда: его снимают настройки профиля
       # из `crates/app/webdriver.json` (раннер читает файл из каталога
-      # пакета; по исходникам wasm-bindgen-cli 0.2.129, `headless.rs`).
+      # пакета; по исходникам wasm-bindgen-cli 0.2.130, `headless.rs`).
       # Драйвер — явно, а что тесты шли в Firefox, проверяет строка раннера.
       - name: cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app (Firefox)
         shell: bash

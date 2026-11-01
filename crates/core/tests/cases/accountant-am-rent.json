@@ -1,0 +1,20 @@
+{
+  "about": "Доход от аренды: 10 % без вычета",
+  "checked": {
+    "by": "пример бухгалтеров Accountant.am, 2026-04-10 (https://www.accountant.am/, «Շրջանառության հարկի հաշվարկման մի քանի օրինակներ»), пример 7: 400 000 × 10 % = 40 000",
+    "on": "2026-11-01",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["68.20.0"],
+    "kinds": {
+      "68.20.0": "rent"
+    }
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-02-10", "minor": 400000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null}
+  ],
+  "expected": [
+    {"quarter": "2026-1", "tax": 40000, "lines": [{"kind": "rent", "income": 400000, "tax": 40000}]}
+  ]
+}

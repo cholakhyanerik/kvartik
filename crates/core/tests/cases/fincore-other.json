@@ -1,0 +1,18 @@
+{
+  "about": "Прочая деятельность с расходами",
+  "checked": {
+    "by": "пример FinCore Consulting, 2026-03-21 (https://fincore.am/hy/shrjanarutyan-harki-popoxutyunner-mas-2/), пример 4: 4 000 000 × 10 % = 400 000; 1 700 000 × 6 % = 102 000; 298 000 > 180 000",
+    "on": "2026-11-01",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["74.10.0"]
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-02-10", "minor": 4000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "expense", "date": "2026-02-01", "minor": 1700000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"}
+  ],
+  "expected": [
+    {"quarter": "2026-1", "tax": 298000, "lines": [{"kind": "other", "income": 4000000, "tax": 298000, "carry_out": 0}]}
+  ]
+}

@@ -37,8 +37,8 @@ wasm-bindgen и программы разреза — и `tools/browser/check.mj
 ## Что сверять после обновления какого крейта
 
 - **Leptos** меняет API между минорными версиями: 0.7 переписала
-  реактивность и разметку целиком. На 2026-10-10 последняя стабильная —
-  0.8.22 (crates.io, от 2026-10-05), и рядом уже 0.9.0-beta2. Примеры из
+  реактивность и разметку целиком. На 2026-11-01 последняя стабильная —
+  0.8.23 (crates.io), и рядом уже 0.9.0-beta2. Примеры из
   интернета под 0.6 выглядят иначе, и копировать их нельзя. Фич по
   умолчанию у `leptos` нет: нужна ровно `csr`.
 - **wasm-bindgen:** версия крейта в `Cargo.lock` и версия программы
@@ -51,7 +51,7 @@ wasm-bindgen и программы разреза — и `tools/browser/check.mj
   (по исходникам, trunk 0.22.0-rc.2, `src/pipelines/rust/wasm_bindgen.rs`);
   закреплять её в `Trunk.toml` не надо: число разойдётся с замком при первом
   `cargo update`. С той же версией поднимаются `wasm-bindgen-test` (в его
-  Cargo.toml — точные `=`, пара 0.3.79 ↔ 0.2.129) и программы `wasm-bindgen`
+  Cargo.toml — точные `=`, пара 0.3.80 ↔ 0.2.130) и программы `wasm-bindgen`
   и `wasm-bindgen-test-runner` — на машине (ниже) и в CI
   (`WASM_BINDGEN_VERSION` и сумма в `ci.yml`; шаг сверяет её с замком).
   Раннер соседней версии может пройти молча: сверяется только номер схемы
@@ -65,12 +65,12 @@ wasm-bindgen и программы разреза — и `tools/browser/check.mj
   `-Clink-args=--emit-relocs` в `.cargo/config.toml`; переменная окружения
   `RUSTFLAGS` перебивает эту строку целиком, и сайт с ней не соберётся. Клей
   wasm-bindgen хук дописывает запуском после строки
-  `export { initSync, __wbg_init as default };` (0.2.129): сменит
+  `export { initSync, __wbg_init as default };` (0.2.130): сменит
   wasm-bindgen последнюю строку — хук скажет это и остановит сборку.
 - **На продолжении после `await` держится транзакция IndexedDB.** Хранилище
   окна ждёт свои запросы внутри транзакции и ставит следующий после
   `await`: это работает, только пока `js-sys` будит задачу Rust микрозадачей
-  (`queueMicrotask`, `src/futures/queue.rs` в js-sys 0.3.106; с 0.4.79
+  (`queueMicrotask`, `src/futures/queue.rs` в js-sys 0.3.107; с 0.4.79
   `wasm-bindgen-futures` — лишь оболочка над ним). Документацией
   wasm-bindgen это не обещано; сменится — сломаются браузерные тесты
   хранилища, и их зелёный прогон после обновления `js-sys` и обязателен.
@@ -150,16 +150,16 @@ wasm-bindgen и программы разреза — и `tools/browser/check.mj
 cargo-deny с этой машины скачивает: беды Trunk с DNS у него нет (проверено
 2026-10-10, 0.20.2).
 
-Для сборки сайта в `~/.cargo/bin` (он в PATH) лежат (2026-10-13)
-`wasm-bindgen` 0.2.129 — из того же архива, что раннер ниже, — и `wasm-opt`
+Для сборки сайта в `~/.cargo/bin` (он в PATH) лежат (2026-11-01)
+`wasm-bindgen` 0.2.130 — из того же архива, что раннер ниже, — и `wasm-opt`
 binaryen version_131 — из `binaryen-version_131-x86_64-windows.tar.gz`
 (github.com/WebAssembly/binaryen); суммы sha256 обоих архивов сверены
 с файлами выпуска и с полем `digest` в API GitHub. Без них `trunk build`
 останавливается и говорит, какой программы не хватает.
 
-Для браузерных тестов в `~/.cargo/bin` лежат (2026-10-12):
-`wasm-bindgen-test-runner` 0.2.129 — из архива выпуска wasm-bindgen
-`wasm-bindgen-0.2.129-x86_64-pc-windows-msvc.tar.gz` (github.com/
+Для браузерных тестов в `~/.cargo/bin` лежат (2026-11-01):
+`wasm-bindgen-test-runner` 0.2.130 — из архива выпуска wasm-bindgen
+`wasm-bindgen-0.2.130-x86_64-pc-windows-msvc.tar.gz` (github.com/
 wasm-bindgen/wasm-bindgen), сумма sha256 сверена с файлом выпуска;
 и chromedriver 155.0.8059.40 — из Chrome for Testing
 (`storage.googleapis.com/chrome-for-testing-public/<версия>/win64/

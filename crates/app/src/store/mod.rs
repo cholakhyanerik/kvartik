@@ -297,7 +297,7 @@ impl Store {
 extern "C" {
     /// Та же `IDBDatabase` — ради одного вызова, которого нет в стабильном
     /// `web-sys`: `transaction(имена, режим, параметры)` там закрыт флагом
-    /// `web_sys_unstable_apis` (по исходникам web-sys 0.3.106,
+    /// `web_sys_unstable_apis` (по исходникам web-sys 0.3.107,
     /// `gen_IdbDatabase.rs`), а нужен он ради `durability`.
     #[wasm_bindgen(js_name = IDBDatabase)]
     type DatabaseOptions;
@@ -562,7 +562,7 @@ impl Tx<Write> {
         }
         // Транзакция фиксируется сама, когда поставленные записи выполнены
         // и новых запросов нет. `IDBTransaction.commit()` ускорил бы это
-        // на долю задачи, но в web-sys 0.3.106 он помечен устаревшим.
+        // на долю задачи, но в web-sys 0.3.107 он помечен устаревшим.
         if done.await.is_err() {
             return Err(failure("commit", self.tx.error().map(JsValue::from)));
         }

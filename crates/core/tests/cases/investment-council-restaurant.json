@@ -1,0 +1,22 @@
+{
+  "about": "Ресторан: еда в вычете, посуда нет",
+  "checked": {
+    "by": "Совет по инвестициям Армении, ролик «Շրջանառության հարկի նոր փոփոխություններ», 2025-04-02 (youtube.com/watch?v=i9xOrKoH_u4): 8 000 000 × 12 % = 960 000; 3 000 000 × 9 % = 270 000, посуда 300 000 не вычитается; 690 000 > 3,5 %. Кухонный прибор из ролика не записан: его только собираются купить",
+    "on": "2026-11-01",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["56.10.1"],
+    "kinds": {
+      "56.10.1": "catering"
+    }
+  },
+  "entries": [
+    {"flow": "income", "date": "2025-05-10", "minor": 8000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "expense", "date": "2025-05-01", "minor": 3000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"},
+    {"flow": "expense", "date": "2025-05-02", "minor": 300000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "asset"}
+  ],
+  "expected": [
+    {"quarter": "2025-2", "tax": 690000, "lines": [{"kind": "catering", "income": 8000000, "tax": 690000, "carry_out": 0}]}
+  ]
+}

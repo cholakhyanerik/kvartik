@@ -1,0 +1,24 @@
+{
+  "about": "Производство, I квартал 2026 года: пример ՊԵԿ с нижним пределом и переносом 30 000; II квартал дописан агентом",
+  "checked": {
+    "by": "ՊԵԿ, руководство «Շրջանառության հարկման համակարգ» (август 2026, https://online.fliphtml5.com/HVSV2027/gzpd/), с. 22: 8 000 000 × 7 % = 560 000; (4 000 000 + 3 000 000) × 5 % = 350 000; 560 000 − 350 000 = 210 000 < 3 % = 240 000 — к уплате 240 000, перенос 30 000. II квартал — агент вручную по НК 258(3), (7): 1 000 000 × 7 % = 70 000; перенос 30 000; 70 000 − 30 000 = 40 000 ≥ 30 000",
+    "on": "2026-11-01",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["10.71.1"],
+    "kinds": {
+      "10.71.1": "production"
+    }
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-03-10", "minor": 8000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "expense", "date": "2026-02-01", "minor": 4000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"},
+    {"flow": "expense", "date": "2026-03-31", "minor": 3000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "bank_payment", "nature": "levy"},
+    {"flow": "income", "date": "2026-05-10", "minor": 1000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null}
+  ],
+  "expected": [
+    {"quarter": "2026-1", "tax": 240000, "lines": [{"kind": "production", "income": 8000000, "tax": 240000, "carry_out": 30000}]},
+    {"quarter": "2026-2", "tax": 40000, "lines": [{"kind": "production", "income": 1000000, "tax": 40000, "carry_out": 0}]}
+  ]
+}

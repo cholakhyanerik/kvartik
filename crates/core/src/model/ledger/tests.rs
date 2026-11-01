@@ -124,7 +124,7 @@ fn data_rejects_what_commands_never_write() {
 }
 
 /// С версии формата 8 у дохода — вид деятельности, а у расхода — вид
-/// «зарплата, налог, пошлина, услуга банка» (`levy`).
+/// «зарплата, комиссия банка» (`levy`).
 #[test]
 fn income_names_its_activity_and_levy_is_a_nature() {
     let income = INCOME.replacen(r#""activity":null"#, r#""activity":"62.01.0""#, 1);

@@ -1,0 +1,21 @@
+{
+  "about": "IT и дизайн, в квартале дохода по дизайну нет: общий расход пропадает, а расход дизайна переносится",
+  "checked": {
+    "by": "агент вручную по НК 258(7), 260(3): общий расход 400 000 при доходе только IT — вес строки 10 равен нулю, и вычета нет; расход, отнесённый к дизайну, 200 000 × 6 % = 12 000 — перенос. IV квартал: 100 000 − 12 000 = 88 000 ≥ 45 000. Это прочтение, а не пример ՊԵԿ (FEATURE_TASKS.md, вопросы разведки задачи 19)",
+    "on": "2026-11-01",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["62.01.0", "74.10.0"]
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-07-10", "minor": 3000000, "currency": "AMD", "rate_e4": null, "activity": "62.01.0", "proof": null, "nature": null},
+    {"flow": "expense", "date": "2026-08-01", "minor": 400000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"},
+    {"flow": "expense", "date": "2026-08-02", "minor": 200000, "currency": "AMD", "rate_e4": null, "activity": "74.10.0", "proof": "settlement_invoice", "nature": "ordinary"},
+    {"flow": "income", "date": "2026-11-10", "minor": 1000000, "currency": "AMD", "rate_e4": null, "activity": "74.10.0", "proof": null, "nature": null}
+  ],
+  "expected": [
+    {"quarter": "2026-3", "tax": 30000, "lines": [{"kind": "high_tech", "income": 3000000, "tax": 30000}, {"kind": "other", "income": 0, "tax": 0, "carry_out": 12000}]},
+    {"quarter": "2026-4", "tax": 88000, "lines": [{"kind": "other", "income": 1000000, "tax": 88000, "carry_out": 0}]}
+  ]
+}

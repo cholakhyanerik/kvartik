@@ -1,0 +1,21 @@
+{
+  "about": "Производство, половина оборота — расходы",
+  "checked": {
+    "by": "пример FinCore Consulting, 2026-03-21 (https://fincore.am/hy/shrjanarutyan-harki-popoxutyunner-mas-2/), пример 2: 12 000 000 × 7 % = 840 000; 6 000 000 × 5 % = 300 000; 540 000 > 360 000",
+    "on": "2026-11-01",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["10.71.1"],
+    "kinds": {
+      "10.71.1": "production"
+    }
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-02-10", "minor": 12000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "expense", "date": "2026-02-01", "minor": 6000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary"}
+  ],
+  "expected": [
+    {"quarter": "2026-1", "tax": 540000, "lines": [{"kind": "production", "income": 12000000, "tax": 540000, "carry_out": 0}]}
+  ]
+}
