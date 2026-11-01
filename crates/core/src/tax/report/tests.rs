@@ -100,6 +100,7 @@ fn books<'a>(profile: &'a ProfileData, operations: &'a [Operation], closings: &'
         operations,
         profile: Some(profile),
         closings,
+        openings: &[],
         unreadable: 0,
     }
 }
@@ -199,7 +200,7 @@ fn a_line_with_deduction_fills_its_section() {
     );
     // Квартал — первый с записями: перенос из расчётов до программы
     // неизвестен, и окно скажет это у 9.7.
-    assert_eq!(got.origin, Origin::Calculated { carry_unknown: true });
+    assert!(matches!(got.origin, Origin::Calculated { carry_unknown: Some(_) }));
     assert_eq!(got.rules, rules::armenia().version());
 }
 

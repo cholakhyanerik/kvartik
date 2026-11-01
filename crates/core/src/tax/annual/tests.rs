@@ -85,6 +85,7 @@ fn books<'a>(profile: Option<&'a ProfileData>, operations: &'a [Operation], clos
         operations,
         profile,
         closings,
+        openings: &[],
         unreadable: 0,
     }
 }

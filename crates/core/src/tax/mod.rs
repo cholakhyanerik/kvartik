@@ -19,6 +19,7 @@ pub mod annual;
 pub mod calendar;
 pub mod closing;
 pub mod deadlines;
+pub mod opening;
 pub mod report;
 pub mod rules;
 pub mod settlement;

@@ -10,13 +10,14 @@ use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::model::profile::{Profile, ProfileData};
 use kvartik_core::model::text::Line;
 use kvartik_core::tax::closing::Closing;
+use kvartik_core::tax::opening::Opening;
 use kvartik_core::tax::turnover::{self, Books};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::wasm_bindgen_test;
-use web_sys::HtmlElement;
+use web_sys::{HtmlElement, HtmlInputElement};
 
 use super::documents::{commit, forget_device, profile};
-use super::{button, mount_at, sleep, wait_for};
+use super::{button, mount_at, sleep, type_into, wait_for};
 use crate::platform::{clock, set_hash};
 use crate::store::device::Device;
 use crate::store::{Store, Writes};
@@ -62,6 +63,7 @@ async fn closed_then_changed(closed: Quarter, before: &[Operation], after: &[Ope
         operations: before,
         profile: Some(&data),
         closings: &[],
+        openings: &[],
         unreadable: 0,
     };
     let closing = Closing::close(&turnover::quarter(books, closed), today, now).expect("квартал кончился");
@@ -102,6 +104,13 @@ async fn closings() -> Vec<Closing> {
     let store = Store::open(|_| {}).await.expect("база открыта");
     let tx = store.read().expect("транзакция чтения");
     tx.list::<Closing>().await.expect("снимки читаются").records
+}
+
+/// Записи переноса из базы программы.
+async fn openings() -> Vec<Opening> {
+    let store = Store::open(|_| {}).await.expect("база открыта");
+    let tx = store.read().expect("транзакция чтения");
+    tx.list::<Opening>().await.expect("перенос читается").records
 }
 
 /// Текст карточки налога на главном экране; `None` — карточки нет.
@@ -398,6 +407,103 @@ async fn a_quarter_closed_empty_speaks_of_the_return() {
     set_hash("");
     forget_device();
     assert!(wrong.is_empty(), "квартал, закрытый пустым: {wrong:#?}");
+}
+
+/// Перенос с кварталов до программы. Прошлый квартал — первый с записями:
+/// 1 000 000 × 10 % = 100 000, и окно спрашивает о переносе. Указали 12 000 —
+/// налог 88 000, вопроса больше нет, запись в базе, и экран показывает её.
+/// Убрали сумму — налог снова 100 000: «переноса не было» — тоже ответ.
+#[wasm_bindgen_test]
+async fn the_carry_from_before_the_program_is_entered() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let today = clock::today().expect("часы с датой");
+    let quarter = today.quarter().previous().expect("прошлый квартал есть");
+    let mut data = profile();
+    data.activities = vec![ActivityCode::parse("74.10.0").expect("код")];
+    let saved = Profile::save(None, data, clock::now()).expect("годный профиль").expect("новый");
+    let mut writes = Writes::default();
+    writes.insert(&saved);
+    writes.insert(&operation(Flow::Income, quarter.first_day(), 1_000_000));
+    commit(writes).await;
+
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at("#/tax");
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::TaxOpeningAsk)).await {
+        wrong.push("окно не спросило о переносе".to_owned());
+    }
+    if !text(&host, "#tax").contains(t(lang, Key::TaxCarryUnknown)) {
+        wrong.push("нет слов о неизвестном переносе".to_owned());
+    }
+    match button(&host, &[t(lang, Key::TaxOpeningAsk)]) {
+        Some(ask) => ask.click(),
+        None => wrong.push("нет «Указать перенос»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::TaxOpeningSave)).await {
+        wrong.push("форма не открылась".to_owned());
+    }
+    let field = |host: &HtmlElement| -> Option<HtmlInputElement> {
+        let inputs = host.query_selector_all("#tax .tax-opening label input").ok()?;
+        (0..inputs.length()).filter_map(|at| inputs.item(at)).map(|node| node.unchecked_into::<HtmlInputElement>()).next_back()
+    };
+    match field(&host) {
+        Some(input) => type_into(&input, &i18n::amount(lang, Money::new(12_000, Currency::Amd))),
+        None => wrong.push("нет поля переноса".to_owned()),
+    }
+    match button(&host, &[t(lang, Key::TaxOpeningSave)]) {
+        Some(save) => save.click(),
+        None => wrong.push("нет «Сохранить перенос»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::TaxOpeningSaved)).await {
+        wrong.push("перенос не сохранился".to_owned());
+    }
+    sleep(100).await;
+    let hero = text(&host, "#tax .hero-card");
+    if !hero.contains(&drams(lang, 88_000)) {
+        wrong.push(format!("налог с переносом: «{hero}»"));
+    }
+    let screen = text(&host, "#tax");
+    if screen.contains(t(lang, Key::TaxCarryUnknown)) || !screen.contains(t(lang, Key::TaxOpeningShown)) {
+        wrong.push(format!("экран с переносом: «{screen}»"));
+    }
+    match openings().await.as_slice() {
+        [opening] if opening.quarter() == quarter && opening.carry().values().eq([&12_000]) => {}
+        other => wrong.push(format!("записи переноса: {other:?}")),
+    }
+
+    match button(&host, &[t(lang, Key::TaxOpeningChange)]) {
+        Some(change) => change.click(),
+        None => wrong.push("нет «Изменить»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::TaxOpeningSave)).await {
+        wrong.push("форма не открылась снова".to_owned());
+    }
+    match field(&host) {
+        Some(input) if input.value() == i18n::amount(lang, Money::new(12_000, Currency::Amd)) => type_into(&input, ""),
+        other => wrong.push(format!("поле не заполнено сохранённым: {:?}", other.map(|input| input.value()))),
+    }
+    match button(&host, &[t(lang, Key::TaxOpeningSave)]) {
+        Some(save) => save.click(),
+        None => wrong.push("нет «Сохранить перенос»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::TaxOpeningNone)).await {
+        wrong.push("окно не сказало, что переноса не было".to_owned());
+    }
+    sleep(100).await;
+    if !text(&host, "#tax .hero-card").contains(&drams(lang, 100_000)) {
+        wrong.push(format!("налог без переноса: «{}»", text(&host, "#tax .hero-card")));
+    }
+    match openings().await.as_slice() {
+        [opening] if opening.carry().is_empty() => {}
+        other => wrong.push(format!("записи после правки: {other:?}")),
+    }
+
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "перенос до программы: {wrong:#?}");
 }
 
 /// Второй код другой строки налога в профиле: доход без вида стал ничьим,

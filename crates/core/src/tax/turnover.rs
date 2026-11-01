@@ -53,14 +53,17 @@
 //! Перенос идёт цепочкой от первого квартала с записями — или от последнего
 //! закрытого (`tax::closing`): закрытый квартал отдаёт перенос из своего
 //! снимка, а не пересчитанный (Правило 2). Перенос из расчётов до первой
-//! записи в программе неизвестен, и окно говорит это ([`QuarterTax::carry_unknown`]).
-//! Закрытый квартал, чей расчёт разошёлся со снимком, находит [`drifted`].
+//! записи человек указывает сам (`tax::opening`), а пока не указал, он
+//! неизвестен, и окно говорит это на всей цепочке
+//! ([`QuarterTax::carry_unknown`]). Закрытый квартал, чей расчёт разошёлся со
+//! снимком, находит [`drifted`].
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
 use super::closing::Closing;
+use super::opening::{self, Opening};
 use super::rules::{self, Exclusion, Percent, Rate, Rule, Version};
 use crate::i18n::Key;
 use crate::model::activity::{ActivityCode, IncomeKind};
@@ -345,9 +348,10 @@ pub struct QuarterTax {
     pub year_turnover: i64,
     /// Порог оборота года; `None` — правила нет.
     pub threshold: Option<i64>,
-    /// Перенос из расчётов до первой записи в программе неизвестен: квартал
-    /// — первый с записями, и в нём есть строка с вычетом.
-    pub carry_unknown: bool,
+    /// Перенос из расчётов до первой записи в программе неизвестен: цепочка
+    /// идёт от этого квартала без снимка и без указанного переноса, а в этом
+    /// квартале есть строка, у которой он мог быть (`tax::opening`).
+    pub carry_unknown: Option<Quarter>,
     /// Коды профиля, которые закрывают налог с оборота, и с какого дня:
     /// ведёт ли их человек, программа не знает — окно говорит словами.
     pub excluded_codes: Vec<(ActivityCode, Date)>,
@@ -426,13 +430,15 @@ pub(crate) fn carry_of(lines: &[Line]) -> BTreeMap<IncomeKind, i64> {
 }
 
 /// Что нужно расчёту: все записи — документы и операции, включая удалённые
-/// (расчёт отбирает живые сам), профиль и снимки закрытых кварталов.
+/// (расчёт отбирает живые сам), профиль, снимки закрытых кварталов и перенос
+/// с кварталов до программы, если его указали.
 #[derive(Clone, Copy, Debug)]
 pub struct Books<'a> {
     pub documents: &'a [Document],
     pub operations: &'a [Operation],
     pub profile: Option<&'a ProfileData>,
     pub closings: &'a [Closing],
+    pub openings: &'a [Opening],
     /// Сколько документов и записей книги не читается.
     pub unreadable: usize,
 }
@@ -498,12 +504,16 @@ pub fn drifted<'a>(books: Books<'a>, today: Date) -> Option<(QuarterTax, &'a Clo
     })
 }
 
-/// Откуда идёт цепочка переноса: квартал, перенос на него и неизвестен ли он
-/// ([`QuarterTax::carry_unknown`]).
-type ChainStart = (Quarter, BTreeMap<IncomeKind, i64>, bool);
+/// Откуда идёт цепочка переноса: квартал, перенос на него и строки, у которых
+/// он неизвестен ([`QuarterTax::carry_unknown`]).
+type ChainStart = (Quarter, BTreeMap<IncomeKind, i64>, &'static [IncomeKind]);
 
 /// Начало цепочки квартала `quarter`: следующий за последним закрытым или
-/// первый квартал с записями (`earliest`, в пределах правил налога).
+/// квартал с указанным переносом — что из них позже, а на одном квартале
+/// указанное: человек взял его из поданного расчёта, а снимок мог закрыть
+/// квартал, ничего о переносе не зная. Так запись на экране квартала всегда
+/// действует. Иначе — первый квартал с записями (`earliest`, в пределах
+/// правил налога).
 fn chain_start(books: Books<'_>, earliest: Option<Quarter>, quarter: Quarter) -> ChainStart {
     let first = first_quarter();
     let earliest = earliest.map(|earliest| first.map_or(earliest, |first| earliest.max(first)));
@@ -512,12 +522,45 @@ fn chain_start(books: Books<'_>, earliest: Option<Quarter>, quarter: Quarter) ->
         .iter()
         .filter(|closing| !closing.is_deleted() && closing.quarter() < quarter)
         .max_by_key(|closing| (closing.quarter(), closing.modified()));
-    match (closed, earliest) {
-        // Следующий за закрытым есть: закрытый раньше `quarter`.
-        (Some(closing), _) => (closing.quarter().next().unwrap_or(quarter), closing.carry_out(), false),
-        (None, Some(earliest)) => (earliest, BTreeMap::new(), first.is_some_and(|first| earliest > first)),
-        (None, None) => (quarter, BTreeMap::new(), false),
+    let opening = books
+        .openings
+        .iter()
+        .filter(|opening| !opening.is_deleted() && opening.quarter() <= quarter)
+        .max_by_key(|opening| (opening.quarter(), opening.modified()));
+    // Следующий за закрытым есть: закрытый раньше `quarter`.
+    let after = closed.map(|closing| (closing.quarter().next().unwrap_or(quarter), closing));
+    let filed = books.closings.iter().any(|closing| {
+        !closing.is_deleted() && closing.quarter() < quarter && closing.data().lines.iter().any(|line| line.deduction.is_some())
+    });
+    match (opening, after, earliest) {
+        (Some(opening), after, _) if after.is_none_or(|(start, _)| opening.quarter() >= start) => {
+            (opening.quarter(), opening.carry().clone(), &[])
+        }
+        // Снимок без строк с вычетом о переносе не знает ничего: так закрывают
+        // кварталы до первой записи, о чём просит и напоминание о сроке. Пока
+        // ни снимок раньше, ни ответ переноса не знают, вопрос остаётся — и он
+        // о первом квартале с записями, а не о том, что за пустым снимком.
+        (opening, Some((start, closing)), earliest) => {
+            if opening.is_some() || filed {
+                (start, closing.carry_out(), &[])
+            } else {
+                let start = earliest.map_or(start, |earliest| earliest.max(start));
+                (start, closing.carry_out(), unknown_kinds(books, start))
+            }
+        }
+        (_, None, Some(earliest)) => (earliest, BTreeMap::new(), unknown_kinds(books, earliest)),
+        (_, None, None) => (quarter, BTreeMap::new(), &[]),
     }
+}
+
+/// Строки, у которых на начало квартала `start` мог быть неизвестный перенос.
+/// Кто зарегистрирован в этом квартале или позже, расчётов до него не подавал.
+fn unknown_kinds(books: Books<'_>, start: Quarter) -> &'static [IncomeKind] {
+    let registered = books.profile.and_then(|profile| profile.person.registered);
+    if registered.is_some_and(|day| day.quarter() >= start) {
+        return &[];
+    }
+    opening::kinds(start)
 }
 
 /// С какого дня цепочке от квартала `start` нужны строки книги: с прошлого
@@ -532,25 +575,34 @@ fn chain_from(start: Quarter) -> Date {
 
 /// Налог квартала `quarter` цепочкой от `start` по куску книги `span`.
 fn chain(books: Books<'_>, span: &Span<'_>, start: ChainStart, quarter: Quarter) -> QuarterTax {
-    let (start, mut carry, unknown) = start;
+    let (start, mut carry, mut unknown) = start;
     let mut incomplete = None;
     let mut current = start;
     while current < quarter {
-        let tax = compute(books, span, current, &carry, false);
+        let tax = compute(books, span, current, &carry);
         if incomplete.is_none() && !tax.complete() && tax.regime == Regime::Turnover {
             incomplete = Some(current);
         }
         carry = tax.carry_out();
+        // С уходом с режима цепочка кончилась: спрашивать больше не о чем.
+        if tax.regime != Regime::Turnover {
+            unknown = &[];
+        }
         match current.next() {
             Some(next) => current = next,
             None => break,
         }
     }
-    let mut tax = compute(books, span, quarter, &carry, unknown && start == quarter);
+    let mut tax = compute(books, span, quarter, &carry);
     // Перенос из неполного квартала — тоже неполный (ст. 258, ч. 7); важен
     // он только строкам с вычетом.
     if tax.lines.iter().any(|line| line.deduction.is_some()) {
         tax.gaps.previous = incomplete;
+    }
+    // Неизвестный перенос тянется по всей цепочке, а не только в её первом
+    // квартале: важен он только строкам, у которых мог быть.
+    if tax.lines.iter().any(|line| line.deduction.is_some() && unknown.contains(&line.kind)) {
+        tax.carry_unknown = Some(start);
     }
     tax
 }
@@ -765,7 +817,6 @@ fn compute(
     span: &Span<'_>,
     quarter: Quarter,
     carry_in: &BTreeMap<IncomeKind, i64>,
-    carry_unknown: bool,
 ) -> QuarterTax {
     let rules_version = rules::armenia().version();
     let excluded_codes = books
@@ -796,7 +847,7 @@ fn compute(
                 regime: Regime::Turnover,
                 year_turnover: 0,
                 threshold: None,
-                carry_unknown,
+                carry_unknown: None,
                 excluded_codes,
             };
         }
@@ -1012,7 +1063,6 @@ fn compute(
         });
     }
     let tax = lines.iter().fold(0_i64, |sum, line| sum.saturating_add(line.tax));
-    let has_deduction = lines.iter().any(|line| line.deduction.is_some());
     QuarterTax {
         quarter,
         rules: rules_version,
@@ -1024,7 +1074,7 @@ fn compute(
         regime: year.regime,
         year_turnover: year.turnover.drams(),
         threshold: year.threshold,
-        carry_unknown: carry_unknown && has_deduction,
+        carry_unknown: None,
         excluded_codes,
     }
 }

@@ -17,7 +17,9 @@
 //! нет, как и у клеток «X».
 
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
+use kvartik_core::model::activity::IncomeKind;
 use kvartik_core::model::date::Date;
+use kvartik_core::tax::opening;
 use kvartik_core::tax::report::{self, Activities, Missing, Origin, Ready, Section, Share, Value, What};
 use kvartik_core::tax::rules;
 use kvartik_core::tax::turnover::kind_key;
@@ -90,7 +92,7 @@ pub fn ReportPage(ctx: tax::Ctx) -> impl IntoView {
             .then(|| sources.with_books(|books| report::activities(books, quarter.get())))
             .flatten()
     });
-    let unreadable = Memo::new(move |_| sources.closings.with(|_, unreadable| unreadable));
+    let unreadable = Memo::new(move |_| sources.closings.with(|_, _, unreadable| unreadable));
     // Числа квартала — по сроку лицензии (задача 25): пока срок идёт —
     // любого, после — кончившегося в срок.
     ctx.licenses.watch(ctx.base);
@@ -176,7 +178,11 @@ fn Form(
     today: Option<Date>,
     last: RwSignal<Option<Copied>>,
 ) -> impl IntoView {
-    let carry_unknown = ready.origin == Origin::Calculated { carry_unknown: true };
+    // Строки, у которых перенос до программы мог быть: у их x.7 это и сказано.
+    let unknown: &'static [IncomeKind] = match ready.origin {
+        Origin::Calculated { carry_unknown: Some(start) } => opening::kinds(start),
+        Origin::Calculated { carry_unknown: None } | Origin::Closed { .. } => &[],
+    };
     // Перенос до программы неизвестен — это сказано у самого x.7.
     let notes = ready
         .notes(today)
@@ -224,7 +230,7 @@ fn Form(
         {numbers
             .sections
             .into_iter()
-            .map(|section| view! { <SectionCard lang section carry_unknown last /> })
+            .map(|section| view! { <SectionCard lang section unknown last /> })
             .collect_view()}
         <section class="report-section">
             <h2>{tr(lang, Key::ReportRows)}</h2>
@@ -270,7 +276,7 @@ fn Form(
 fn SectionCard(
     lang: ReadSignal<Lang>,
     section: Section,
-    carry_unknown: bool,
+    unknown: &'static [IncomeKind],
     last: RwSignal<Option<Copied>>,
 ) -> impl IntoView {
     let number_of = |what: What| {
@@ -293,7 +299,7 @@ fn SectionCard(
                     .fields
                     .into_iter()
                     .map(|field| {
-                        let note = (field.what == What::CarryIn && carry_unknown).then_some(Key::TaxCarryUnknown);
+                        let note = (field.what == What::CarryIn && unknown.contains(&kind)).then_some(Key::TaxCarryUnknown);
                         view! {
                             <FieldRow
                                 lang

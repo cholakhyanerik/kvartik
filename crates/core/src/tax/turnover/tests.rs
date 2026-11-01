@@ -114,6 +114,7 @@ fn quarter_of(
             operations,
             profile,
             closings,
+            openings: &[],
             unreadable: 0,
         },
         q,
@@ -207,11 +208,263 @@ fn the_floor_holds_and_the_rest_carries_over() {
     let third = tax(Some(&profile), &books, &[], quarter(2026, 3));
     assert_eq!(third.lines, [other(1_000_000, 100_000, 950_000, 57_000, 0, 45_000, 45_000, 2_000)]);
     assert_eq!(third.carry_out(), BTreeMap::from([(IncomeKind::Other, 2_000)]));
-    // Квартал — первый с записями: перенос из расчётов до программы неизвестен.
-    assert!(third.carry_unknown);
+    // Квартал — первый с записями: перенос из расчётов до программы неизвестен,
+    // и неизвестным он тянется дальше по цепочке.
+    assert_eq!(third.carry_unknown, Some(quarter(2026, 3)));
     let fourth = tax(Some(&profile), &books, &[], quarter(2026, 4));
     assert_eq!(fourth.lines, [other(1_000_000, 100_000, 0, 0, 2_000, 45_000, 98_000, 0)]);
-    assert!(!fourth.carry_unknown);
+    assert_eq!(fourth.carry_unknown, Some(quarter(2026, 3)));
+}
+
+/// Запись переноса на начало квартала `q`: прочая деятельность.
+fn carried(q: Quarter, drams: i64) -> Opening {
+    let carry = BTreeMap::from([(IncomeKind::Other, drams)]);
+    Opening::save(None, q, carry, at(1_770_000_000_000)).expect("годный перенос").expect("новая запись")
+}
+
+/// Налог квартала с указанным переносом.
+fn tax_from(profile: &ProfileData, operations: &[Operation], closings: &[Closing], opening: &Opening, q: Quarter) -> QuarterTax {
+    super::quarter(
+        Books {
+            openings: std::slice::from_ref(opening),
+            ..drift_books(profile, operations, closings)
+        },
+        q,
+    )
+}
+
+/// Цепочка начинает с поданного: 12 000 уменьшают налог III квартала, а окно
+/// больше не спрашивает. 60 000 упираются в предел: 100 000 − 60 000 = 40 000 —
+/// меньше 45 000, налог 45 000, дальше идут 60 000 − 55 000 = 5 000.
+#[test]
+fn the_chain_starts_from_the_carry_given() {
+    let profile = profile(&["74.10.0"]);
+    let (third, fourth) = (quarter(2026, 3), quarter(2026, 4));
+    let books = [income(day(2026, 7, 15), 1_000_000, None), income(day(2026, 10, 15), 1_000_000, None)];
+
+    let got = tax_from(&profile, &books, &[], &carried(third, 12_000), third);
+    assert_eq!(got.lines, [other(1_000_000, 100_000, 0, 0, 12_000, 45_000, 88_000, 0)]);
+    assert_eq!(got.carry_unknown, None);
+
+    let opening = carried(third, 60_000);
+    let got = tax_from(&profile, &books, &[], &opening, third);
+    assert_eq!(got.lines, [other(1_000_000, 100_000, 0, 0, 60_000, 45_000, 45_000, 5_000)]);
+    let got = tax_from(&profile, &books, &[], &opening, fourth);
+    assert_eq!(got.lines, [other(1_000_000, 100_000, 0, 0, 5_000, 45_000, 95_000, 0)]);
+    assert_eq!(got.carry_unknown, None);
+}
+
+/// «Переноса не было» — ответ: числа те же, а окно больше не спрашивает.
+#[test]
+fn no_carry_is_an_answer() {
+    let profile = profile(&["74.10.0"]);
+    let q = quarter(2026, 3);
+    let books = [income(day(2026, 7, 15), 1_000_000, None)];
+    let asked = tax(Some(&profile), &books, &[], q);
+    assert_eq!(asked.carry_unknown, Some(q));
+    let answered = tax_from(&profile, &books, &[], &carried(q, 0), q);
+    assert_eq!((answered.carry_unknown, &answered.lines), (None, &asked.lines));
+}
+
+/// Перенос указан раньше первой записи — он доходит через квартал без дохода
+/// (НК, ст. 258, ч. 7). Записи раньше него — своя цепочка, а квартал переноса
+/// берёт поданное: 12 000, а не 57 000, посчитанные из расхода I квартала.
+#[test]
+fn the_opening_passes_empty_quarters_and_ends_earlier_chains() {
+    let profile = profile(&["74.10.0"]);
+    let (first, second, third) = (quarter(2026, 1), quarter(2026, 2), quarter(2026, 3));
+    let books = [income(day(2026, 7, 15), 1_000_000, None)];
+    let got = tax_from(&profile, &books, &[], &carried(second, 12_000), third);
+    assert_eq!(got.lines, [other(1_000_000, 100_000, 0, 0, 12_000, 45_000, 88_000, 0)]);
+
+    let earlier = [ordinary(day(2026, 2, 10), 950_000), income(day(2026, 7, 15), 1_000_000, None)];
+    let opening = carried(third, 12_000);
+    let before = tax_from(&profile, &earlier, &[], &opening, second);
+    assert_eq!(before.carry_unknown, Some(first), "до указанного — своя цепочка");
+    let got = tax_from(&profile, &earlier, &[], &opening, third);
+    assert_eq!(got.lines, [other(1_000_000, 100_000, 0, 0, 12_000, 45_000, 88_000, 0)]);
+}
+
+/// Снимок и указанный перенос: цепочка идёт от более позднего, а на одном
+/// квартале — от указанного: снимок мог закрыть квартал, ничего о переносе
+/// не зная, а запись на экране квартала обязана действовать.
+#[test]
+fn the_later_of_snapshot_and_opening_starts_the_chain() {
+    let profile = profile(&["74.10.0"]);
+    let (first, second, third) = (quarter(2026, 1), quarter(2026, 2), quarter(2026, 3));
+    let books = [
+        income(day(2026, 1, 15), 1_000_000, None),
+        ordinary(day(2026, 2, 10), 950_000),
+        income(day(2026, 4, 15), 1_000_000, None),
+        income(day(2026, 7, 15), 1_000_000, None),
+    ];
+    // I квартал: 100 000 − 57 000 = 43 000 — меньше предела, налог 45 000,
+    // перенос 2 000.
+    let closings = [closed(&profile, &books, &[], first, 1_770_000_000_000)];
+    assert_eq!(closings[0].carry_out(), BTreeMap::from([(IncomeKind::Other, 2_000)]));
+
+    let on_the_same = tax_from(&profile, &books, &closings, &carried(second, 30_000), second);
+    assert_eq!(on_the_same.lines, [other(1_000_000, 100_000, 0, 0, 30_000, 45_000, 70_000, 0)]);
+    let older = tax_from(&profile, &books, &closings, &carried(first, 30_000), second);
+    assert_eq!(older.lines, [other(1_000_000, 100_000, 0, 0, 2_000, 45_000, 98_000, 0)]);
+    let later = tax_from(&profile, &books, &closings, &carried(third, 30_000), third);
+    assert_eq!(later.lines, [other(1_000_000, 100_000, 0, 0, 30_000, 45_000, 70_000, 0)]);
+}
+
+/// Снимок без строк с вычетом о переносе не знает ничего: человек закрыл
+/// пустой II квартал, как просит напоминание о сроке, а книгу начал с III.
+/// Вопрос остаётся, ответ на него действует и на закрытии заранее, и когда
+/// квартал закрыт уже после ответа: 100 000 − 12 000 = 88 000.
+#[test]
+fn an_empty_snapshot_does_not_answer_the_question() {
+    let profile = profile(&["74.10.0"]);
+    let (second, third) = (quarter(2026, 2), quarter(2026, 3));
+    let books = [income(day(2026, 7, 15), 1_000_000, None)];
+    let closings = [closed(&profile, &[], &[], second, 1_770_000_000_000)];
+    assert_eq!(closings[0].data().lines, []);
+    assert_eq!(tax(Some(&profile), &books, &closings, third).carry_unknown, Some(third));
+    let got = tax_from(&profile, &books, &closings, &carried(third, 12_000), third);
+    assert_eq!(got.lines, [other(1_000_000, 100_000, 0, 0, 12_000, 45_000, 88_000, 0)]);
+    assert_eq!(got.carry_unknown, None);
+
+    // Снимок со строкой с вычетом — поданный расчёт: дальше цепочка от него.
+    let fourth = quarter(2026, 4);
+    let filed = [closed(&profile, &books, &[], third, 1_770_000_000_000)];
+    let books = [income(day(2026, 7, 15), 1_000_000, None), income(day(2026, 10, 15), 1_000_000, None)];
+    assert_eq!(tax(Some(&profile), &books, &filed, fourth).carry_unknown, None);
+}
+
+/// Тихий квартал закрыт пустым, а I квартал уже закрыт со строкой с вычетом:
+/// перенос известен из того снимка, и спрашивать не о чем.
+#[test]
+fn a_quiet_closed_quarter_keeps_what_was_filed() {
+    let profile = profile(&["74.10.0"]);
+    let (first, second, third) = (quarter(2026, 1), quarter(2026, 2), quarter(2026, 3));
+    let books = [income(day(2026, 1, 15), 1_000_000, None), income(day(2026, 7, 15), 1_000_000, None)];
+    let mut closings = vec![closed(&profile, &books, &[], first, 1_770_000_000_000)];
+    closings.push(closed(&profile, &books, &closings, second, 1_770_000_000_001));
+    assert_eq!(closings[1].data().lines, []);
+    let got = tax(Some(&profile), &books, &closings, third);
+    assert_eq!(got.carry_unknown, None);
+    assert_eq!(got.lines, [other(1_000_000, 100_000, 0, 0, 0, 45_000, 100_000, 0)]);
+}
+
+/// Пустой снимок задолго до книги: вопрос — о первом квартале с записями,
+/// а не о том, что за снимком. Иначе человек вписал бы x.11 расчёта на
+/// квартал раньше и взял больше вычета, чем осталось к началу книги.
+#[test]
+fn the_question_is_about_the_first_quarter_with_records() {
+    let profile = profile(&["74.10.0"]);
+    let (first, third) = (quarter(2026, 1), quarter(2026, 3));
+    let books = [income(day(2026, 7, 15), 1_000_000, None)];
+    let closings = [closed(&profile, &[], &[], first, 1_770_000_000_000)];
+    assert_eq!(tax(Some(&profile), &books, &closings, third).carry_unknown, Some(third));
+}
+
+/// После ухода с режима спрашивать о переносе не о чем: в новом году от него
+/// ничего нет (НК, ст. 264, ч. 4). Квартал ухода ещё может о нём говорить.
+#[test]
+fn leaving_ends_the_question() {
+    let profile = profile(&["74.10.0", "70.22.0"]);
+    let books = [
+        income(day(2026, 7, 15), 1_000_000, Some("74.10.0")),
+        income(day(2026, 11, 20), 300_000, Some("70.22.0")),
+        income(day(2027, 1, 15), 1_000_000, Some("74.10.0")),
+    ];
+    assert_eq!(tax(Some(&profile), &books, &[], quarter(2026, 3)).carry_unknown, Some(quarter(2026, 3)));
+    assert_eq!(tax(Some(&profile), &books, &[], quarter(2027, 1)).carry_unknown, None);
+}
+
+/// Зарегистрированный в первом квартале книги или позже расчётов до него не
+/// подавал, и спрашивать незачем; раньше — вопрос остаётся.
+#[test]
+fn a_new_entrepreneur_is_not_asked() {
+    let q = quarter(2026, 3);
+    let books = [income(day(2026, 7, 15), 1_000_000, None)];
+    let mut fresh = profile(&["74.10.0"]);
+    fresh.person.registered = Some(day(2026, 7, 10));
+    assert_eq!(tax(Some(&fresh), &books, &[], q).carry_unknown, None);
+    fresh.person.registered = Some(day(2026, 6, 30));
+    assert_eq!(tax(Some(&fresh), &books, &[], q).carry_unknown, Some(q));
+}
+
+/// Записи двух кварталов не мешают друг другу: ответ о квартале раньше не
+/// стирает поданное позже, а после слияния копий с разными началами
+/// работают обе. II квартал: 30 000 из его записи, III: 12 000 из своей.
+#[test]
+fn records_of_two_quarters_both_stand() {
+    let profile = profile(&["74.10.0"]);
+    let (second, third) = (quarter(2026, 2), quarter(2026, 3));
+    let books = [income(day(2026, 5, 15), 1_000_000, None), income(day(2026, 7, 15), 1_000_000, None)];
+    let openings = [carried(third, 12_000), carried(second, 30_000)];
+    let of = |q| {
+        super::quarter(
+            Books {
+                openings: &openings,
+                ..drift_books(&profile, &books, &[])
+            },
+            q,
+        )
+    };
+    assert_eq!(of(second).lines, [other(1_000_000, 100_000, 0, 0, 30_000, 45_000, 70_000, 0)]);
+    assert_eq!(of(third).lines, [other(1_000_000, 100_000, 0, 0, 12_000, 45_000, 88_000, 0)]);
+}
+
+/// Уход с режима обрывает перенос и указанный (НК, ст. 264, ч. 4): в новом
+/// году от него ничего не остаётся.
+#[test]
+fn leaving_drops_the_carry_given() {
+    let profile = profile(&["74.10.0", "70.22.0"]);
+    let books = [
+        income(day(2026, 7, 15), 1_000_000, Some("74.10.0")),
+        income(day(2026, 11, 20), 300_000, Some("70.22.0")),
+        income(day(2027, 1, 15), 1_000_000, Some("74.10.0")),
+    ];
+    let opening = carried(quarter(2026, 3), 60_000);
+    let got = tax_from(&profile, &books, &[], &opening, quarter(2026, 3));
+    assert_eq!(got.lines, [other(1_000_000, 100_000, 0, 0, 60_000, 45_000, 45_000, 5_000)]);
+    let left = tax_from(&profile, &books, &[], &opening, quarter(2026, 4));
+    assert!(matches!(left.regime, Regime::Left { .. }));
+    let next = tax_from(&profile, &books, &[], &opening, quarter(2027, 1));
+    assert_eq!(next.lines, [other(1_000_000, 100_000, 0, 0, 0, 45_000, 100_000, 0)]);
+}
+
+/// На начало 2025 года перенос мог быть только у торговли (ՀՕ-285-Ն, ст. 16,
+/// ч. 3), поэтому спрашивать о нём других незачем. Позже — у всех строк
+/// с вычетом, а у строки без вычета — никогда.
+#[test]
+fn the_carry_is_asked_only_where_it_could_be() {
+    let design = profile(&["74.10.0"]);
+    let mut trade = design.clone();
+    trade.kinds.insert(code("74.10.0"), IncomeKind::Trade);
+    let first = quarter(2025, 1);
+    let books = [income(day(2025, 1, 15), 1_000_000, None)];
+    assert_eq!(tax(Some(&design), &books, &[], first).carry_unknown, None);
+    assert_eq!(tax(Some(&trade), &books, &[], first).carry_unknown, Some(first));
+
+    let later = quarter(2025, 2);
+    let books = [income(day(2025, 4, 15), 1_000_000, None)];
+    assert_eq!(tax(Some(&design), &books, &[], later).carry_unknown, Some(later));
+    let it = profile(&["62.01.0"]);
+    assert_eq!(tax(Some(&it), &books, &[], later).carry_unknown, None);
+}
+
+/// Перенос указали после закрытия — расчёт закрытого квартала разошёлся со
+/// снимком: 100 000 − 12 000 = 88 000 вместо поданных 100 000.
+#[test]
+fn a_carry_given_after_closing_is_a_drift() {
+    let profile = profile(&["74.10.0"]);
+    let q = quarter(2026, 3);
+    let books = [income(day(2026, 7, 15), 1_000_000, None)];
+    let closings = [closed(&profile, &books, &[], q, 1_770_000_000_000)];
+    assert_eq!(scan(drift_books(&profile, &books, &closings)), None);
+    let opening = carried(q, 12_000);
+    let with_carry = Books {
+        openings: std::slice::from_ref(&opening),
+        ..drift_books(&profile, &books, &closings)
+    };
+    let (found, closing) = scan(with_carry).expect("квартал разошёлся");
+    assert_eq!((found.tax, closing.data().tax), (88_000, 100_000));
 }
 
 /// Квартал без дохода: вычет за расходы целиком переносится (ст. 258,
@@ -572,6 +825,7 @@ fn drift_books<'a>(profile: &'a ProfileData, operations: &'a [Operation], closin
         operations,
         profile: Some(profile),
         closings,
+        openings: &[],
         unreadable: 0,
     }
 }
@@ -851,6 +1105,7 @@ fn unreadable_records_leave_the_quarter_incomplete() {
             operations: &books,
             profile: Some(&profile),
             closings: &[],
+            openings: &[],
             unreadable: 1,
         },
         quarter(2026, 3),
@@ -1019,6 +1274,7 @@ fn drift_timing() {
         operations: &operations,
         profile: Some(&profile),
         closings: &closings,
+        openings: &[],
         unreadable: 0,
     };
     let started = std::time::Instant::now();

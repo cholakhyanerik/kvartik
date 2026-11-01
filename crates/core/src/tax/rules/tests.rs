@@ -60,6 +60,7 @@ fn file(exclusions: &[Value], pensions: &[Value]) -> String {
         "high_tech": [],
         "turnover_threshold": [],
         "turnover_expenses": [],
+        "turnover_carry": [],
         "turnover_form": [],
         "profit_tax": [],
         "social_payment": [],
@@ -514,7 +515,7 @@ fn version_parse_is_strict() {
 
 /// Отпечаток значений текущей версии правил: её запись и FNV-1a значений
 /// файла ([`values`]).
-const PINNED: (&str, u64) = ("2026.6", 0x98b9_2c53_1ab2_f6ad);
+const PINNED: (&str, u64) = ("2026.7", 0x7ed2_1698_ad5b_779a);
 
 /// Значения файла правил одной строкой: всё, кроме версии и источников, —
 /// JSON с ключами по алфавиту. Источник — когда сверили и где лежит
@@ -609,7 +610,7 @@ fn values_see_rules_not_sources() {
     let reordered = format!(
         r#"{{"days_off": [], "deadline_shift": [], "funded_pension": [{}], "health_insurance": [], "high_tech": [],
             "holidays": [], "income_declaration": [], "profit_tax": [], "settlement_due": [], "social_payment": [], "stamp_duty": [], "turnover_application": [],
-            "turnover_due": [], "turnover_exclusions": [{}], "turnover_expenses": [], "turnover_form": [], "turnover_rates": [],
+            "turnover_carry": [], "turnover_due": [], "turnover_exclusions": [{}], "turnover_expenses": [], "turnover_form": [], "turnover_rates": [],
             "turnover_threshold": [], "version": "2026.1"}}"#,
         pension("2014-01-01", None),
         exclusion(&["69"], "2025-07-01", None),
@@ -1169,4 +1170,44 @@ fn the_form_is_checked() {
         }
     }
     assert!(wrong.is_empty(), "форма расчёта: {wrong:#?}");
+}
+
+const CARRY: &str = "turnover_carry";
+
+/// Запись о переносе с кварталов до программы (задача 69).
+fn carry(kinds: &[&str], from: &str, until: Option<&str>) -> Value {
+    timed(json!({ "kinds": kinds }), from, until)
+}
+
+/// Перенос (задача 69): запись ищут по первому дню квартала, поэтому её дни —
+/// целые кварталы, строки есть и не повторяются; две записи на один день не
+/// действуют. Незнакомая строка налога — ошибка разбора.
+#[test]
+fn the_carry_rule_is_checked() {
+    let mut wrong = Vec::new();
+    let sound = [carry(&["trade"], "2025-01-01", Some("2025-03-31")), carry(&["trade", "other"], "2025-04-01", None)];
+    if let Err(error) = Rules::parse(&file_of(CARRY, &sound)) {
+        wrong.push(format!("годные записи: {error:?}"));
+    }
+    for (case, record) in [
+        ("нет строк", carry(&[], "2025-01-01", None)),
+        ("строка дважды", carry(&["trade", "trade"], "2025-01-01", None)),
+        ("с середины квартала", carry(&["trade"], "2025-02-01", None)),
+        ("конец не в конце квартала", carry(&["trade"], "2025-01-01", Some("2025-03-30"))),
+    ] {
+        let got = Rules::parse(&file_of(CARRY, &[record]));
+        if got != Err(RulesError::Unusable(at(CARRY, 0))) {
+            wrong.push(format!("{case}: {got:?}"));
+        }
+    }
+    let both = [carry(&["trade"], "2025-01-01", None), carry(&["other"], "2025-04-01", None)];
+    let got = Rules::parse(&file_of(CARRY, &both));
+    if got != Err(RulesError::Overlap { kind: CARRY, first: 0, second: 1 }) {
+        wrong.push(format!("две записи на один день: {got:?}"));
+    }
+    let got = Rules::parse(&file_of(CARRY, &[carry(&["barter"], "2025-01-01", None)]));
+    if !matches!(got, Err(RulesError::Malformed(_))) {
+        wrong.push(format!("незнакомая строка: {got:?}"));
+    }
+    assert!(wrong.is_empty(), "перенос: {wrong:#?}");
 }

@@ -44,6 +44,7 @@ fn shift_rules() -> Rules {
         "high_tech": [],
         "turnover_threshold": [],
         "turnover_expenses": [],
+        "turnover_carry": [],
         "turnover_form": [],
         "profit_tax": [],
         "social_payment": [],
@@ -224,6 +225,7 @@ fn books<'a>(profile: Option<&'a ProfileData>, closings: &'a [Closing]) -> Books
         operations,
         profile,
         closings,
+        openings: &[],
         unreadable: 0,
     }
 }
@@ -454,6 +456,7 @@ fn review_cases() {
         operations: &operations,
         profile: Some(&coded),
         closings: &[],
+        openings: &[],
         unreadable: 0,
     };
     if let Some(deadline) = overdue(left, day(2026, 10, 25)) {

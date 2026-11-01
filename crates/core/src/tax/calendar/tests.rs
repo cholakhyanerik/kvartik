@@ -374,6 +374,7 @@ fn the_personal_calendar_has_my_amounts() {
         operations: &operations,
         profile: Some(&profile),
         closings: &[],
+        openings: &[],
         unreadable: 0,
     };
     let today = day(2026, 10, 5);
@@ -420,6 +421,7 @@ fn the_personal_calendar_has_my_amounts() {
     let closed = [Closing::close(&tax, today, Timestamp::from_unix_millis(1_760_000_000_000)).expect("квартал закрывается")];
     let closed_books = Books {
         closings: &closed,
+        openings: &[],
         ..books
     };
     if personal_events(closed_books, today)
@@ -446,6 +448,7 @@ fn the_personal_calendar_says_what_it_cannot_count() {
         operations: &operations,
         profile: Some(&profile),
         closings: &[],
+        openings: &[],
         unreadable: 0,
     };
     let text = personal(books, day(2026, 10, 5), Lang::Ru, APP_URL).expect("сроки есть");
@@ -503,6 +506,7 @@ fn look_ics() {
         operations: &operations,
         profile: Some(&profile),
         closings: &[],
+        openings: &[],
         unreadable: 0,
     };
     for lang in Lang::ALL {

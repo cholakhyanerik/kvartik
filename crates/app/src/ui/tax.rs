@@ -37,6 +37,7 @@ use kvartik_core::model::record::{RecordId, Timestamp};
 use kvartik_core::tax::annual::{self, Annual};
 use kvartik_core::tax::closing::Closing;
 use kvartik_core::tax::deadlines;
+use kvartik_core::tax::opening::Opening;
 use kvartik_core::tax::report;
 use kvartik_core::tax::rules::{self, Percent};
 use kvartik_core::tax::turnover::{self, Books, Leaving, Line, QuarterTax, Regime, kind_key};
@@ -50,6 +51,7 @@ use super::form::Forms;
 use super::icon::{Icon, icon};
 use super::ledger::{Operations, tax_part};
 use super::license::{LicenseCard, LicensePage, Licenses};
+use super::opening::OpeningEntry;
 use super::profile::Profiles;
 use super::report::ReportPage;
 use super::route::{Router, Screen};
@@ -65,7 +67,8 @@ const FALLBACK_QUARTER: Quarter = match Quarter::new(2026, 1) {
     None => panic!("первый квартал 2026 года существует"),
 };
 
-/// Закрытые кварталы — снимки (`tax::closing`), одни на окно.
+/// Закрытые кварталы — снимки (`tax::closing`) — и перенос с кварталов до
+/// программы (`tax::opening`), одни на окно: цепочка переноса начинается с них.
 #[derive(Clone, Copy)]
 pub struct Closings {
     state: RwSignal<State>,
@@ -77,10 +80,13 @@ pub struct Closings {
 #[derive(Clone, PartialEq, Debug)]
 enum State {
     Loading,
-    /// Прочитаны — все, включая открытые снова, — и сколько не читается.
+    /// Прочитаны — все, включая открытые снова, — снимки и перенос, и сколько
+    /// тех и других не читается.
     Ready {
         closings: Arc<Vec<Closing>>,
+        openings: Arc<Vec<Opening>>,
         unreadable: usize,
+        unreadable_openings: usize,
     },
     Failed(StoreError),
 }
@@ -116,13 +122,20 @@ impl Closings {
         );
     }
 
-    /// Прочитать снимки.
-    async fn load(&self, store: &Store) {
-        let read = async { store.read()?.list::<Closing>().await };
+    /// Прочитать снимки и перенос.
+    pub(super) async fn load(&self, store: &Store) {
+        let read = async {
+            let tx = store.read()?;
+            let closings = tx.list::<Closing>().await?;
+            let openings = tx.list::<Opening>().await?;
+            Ok::<_, StoreError>((closings, openings))
+        };
         self.state.set(match read.await {
-            Ok(listed) => State::Ready {
-                closings: Arc::new(listed.records),
-                unreadable: listed.unreadable,
+            Ok((closings, openings)) => State::Ready {
+                closings: Arc::new(closings.records),
+                openings: Arc::new(openings.records),
+                unreadable: closings.unreadable,
+                unreadable_openings: openings.unreadable,
             },
             Err(error) => State::Failed(error),
         });
@@ -141,6 +154,27 @@ impl Closings {
         });
     }
 
+    /// Записанный перенос — на место прежнего или в конец списка.
+    pub(super) fn put_opening(&self, opening: Opening) {
+        self.state.update(|state| {
+            if let State::Ready { openings, .. } = state {
+                let list = Arc::make_mut(openings);
+                match list.iter_mut().find(|known| known.id() == opening.id()) {
+                    Some(known) => *known = opening,
+                    None => list.push(opening),
+                }
+            }
+        });
+    }
+
+    /// Сколько записей переноса не читается — отслеживаемое.
+    pub(super) fn unreadable_openings(&self) -> usize {
+        self.state.with(|state| match state {
+            State::Ready { unreadable_openings, .. } => *unreadable_openings,
+            State::Loading | State::Failed(_) => 0,
+        })
+    }
+
     /// Почему снимки не прочитались — отслеживаемое.
     fn failure(&self) -> Option<StoreError> {
         self.state.with(|state| match state {
@@ -149,11 +183,11 @@ impl Closings {
         })
     }
 
-    /// Что-то, посчитанное по снимкам; пока их нет — значение по умолчанию.
-    /// Отслеживаемое.
-    pub(super) fn with<T: Default>(&self, read: impl FnOnce(&[Closing], usize) -> T) -> T {
+    /// Что-то, посчитанное по снимкам и переносу; пока их нет — значение по
+    /// умолчанию. Отслеживаемое.
+    pub(super) fn with<T: Default>(&self, read: impl FnOnce(&[Closing], &[Opening], usize) -> T) -> T {
         self.state.with(|state| match state {
-            State::Ready { closings, unreadable } => read(closings, *unreadable),
+            State::Ready { closings, openings, unreadable, .. } => read(closings, openings, *unreadable),
             State::Loading | State::Failed(_) => T::default(),
         })
     }
@@ -197,12 +231,13 @@ impl Sources {
         documents.with(|documents, _, documents_unreadable| {
             operations.with(|operations, operations_unreadable| {
                 profiles.with(|profile| {
-                    closings.with(|closings, _| {
+                    closings.with(|closings, openings, _| {
                         Some(read(Books {
                             documents,
                             operations,
                             profile,
                             closings,
+                            openings,
                             unreadable: documents_unreadable + operations_unreadable,
                         }))
                     })
@@ -218,7 +253,12 @@ impl Sources {
 
     /// Снимок квартала, если он закрыт. Отслеживаемое.
     pub(super) fn closing(&self, quarter: Quarter) -> Option<Closing> {
-        self.closings.with(|closings, _| Closing::current(closings, quarter).cloned())
+        self.closings.with(|closings, _, _| Closing::current(closings, quarter).cloned())
+    }
+
+    /// Перенос на начало квартала, если его указали. Отслеживаемое.
+    pub(super) fn opening(&self, quarter: Quarter) -> Option<Opening> {
+        self.closings.with(|_, openings, _| Opening::current(openings, quarter).cloned())
     }
 
     /// Первый закрытый квартал, чей расчёт разошёлся со снимком, и снимок —
@@ -642,7 +682,7 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
             .with_books(|books| deadlines::quarter_deadline(books, quarter.get()))
             .flatten()
     });
-    let unreadable = Memo::new(move |_| sources.closings.with(|_, unreadable| unreadable));
+    let unreadable = Memo::new(move |_| sources.closings.with(|_, _, unreadable| unreadable));
     let busy = RwSignal::new(false);
     let notice = RwSignal::new(None::<Notice>);
     let failure = RwSignal::new(None::<StoreError>);
@@ -798,6 +838,7 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
             </div>
         })}
         {move || tax.get().map(|tax| view! { <Quarterly lang tax closing=closing.get() /> })}
+        <OpeningEntry ctx quarter tax />
         {move || numbers.get().then(|| view! {
             <a class="button report-open" href=Screen::Report.href()>
                 {icon(Icon::Copy)}
@@ -805,7 +846,12 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
             </a>
         })}
         {move || (ended() && closing.with(Option::is_none) && tax.with(Option::is_some)).then(|| {
-            let closable = move || tax.with(|tax| tax.as_ref().zip(ctx.today).is_some_and(|(tax, today)| tax.closable(today)));
+            // Нечитаемая запись переноса: налог без неё мог бы быть другим, и
+            // закрывать нельзя, а о ней окно говорит своими словами (`ui/opening.rs`).
+            let closable = move || {
+                sources.closings.unreadable_openings() == 0
+                    && tax.with(|tax| tax.as_ref().zip(ctx.today).is_some_and(|(tax, today)| tax.closable(today)))
+            };
             view! {
                 <div class="tax-close">
                     {move || if closable() {
@@ -1103,7 +1149,7 @@ impl Hint {
 
 fn hints(tax: &QuarterTax) -> Vec<Hint> {
     let mut hints = Vec::new();
-    if tax.carry_unknown {
+    if tax.carry_unknown.is_some() {
         hints.push(Hint::CarryUnknown);
     }
     let refused = tax.refused;

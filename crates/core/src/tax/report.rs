@@ -343,10 +343,10 @@ pub enum Origin {
     /// Снимок закрытого квартала — поданный расчёт; `changed` — расчёт по
     /// данным сейчас с ним расходится, и нужен уточнённый.
     Closed { changed: bool },
-    /// Расчёт по данным сейчас; `carry_unknown` — перенос из расчётов до
-    /// первой записи в программе ей неизвестен (`QuarterTax::carry_unknown`),
-    /// и x.7 может быть больше.
-    Calculated { carry_unknown: bool },
+    /// Расчёт по данным сейчас; `carry_unknown` — квартал, с начала которого
+    /// перенос из расчётов до программы ей неизвестен
+    /// (`QuarterTax::carry_unknown`), и x.7 может быть больше.
+    Calculated { carry_unknown: Option<Quarter> },
 }
 
 /// Почему чисел нет.
@@ -397,7 +397,7 @@ impl Ready {
                 if today.is_some_and(|today| self.quarter.last_day() >= today) {
                     notes.push(Key::ReportOngoing);
                 }
-                if carry_unknown {
+                if carry_unknown.is_some() {
                     notes.push(Key::TaxCarryUnknown);
                 }
                 notes

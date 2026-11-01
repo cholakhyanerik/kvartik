@@ -96,6 +96,7 @@ use crate::model::profile::Profile;
 use crate::model::record::{RecordMeta, Timestamp};
 use crate::model::recurring::Recurring;
 use crate::tax::closing::Closing;
+use crate::tax::opening::Opening;
 
 /// Метка файла копии: по ней свой файл отличается от чужого JSON. Часть
 /// формата — не меняется и при смене имени программы (задача 16).
@@ -278,6 +279,7 @@ pub const KINDS: &[Kind] = &[
     Kind::of::<Attachment>(),
     Kind::of::<Closing>(),
     Kind::of::<License>(),
+    Kind::of::<Opening>(),
 ];
 
 fn find(kinds: &[Kind], name: &str) -> Option<Kind> {

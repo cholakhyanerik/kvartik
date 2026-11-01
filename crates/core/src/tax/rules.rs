@@ -46,7 +46,8 @@
 //!   расчётного документа (задача 23) — любое число дней, ноль — тот же
 //!   день; у формы расчёта налога с оборота (задача 24) номера полей —
 //!   числа через точку, без повторов, строки налога — по разу, а дни —
-//!   целые кварталы;
+//!   целые кварталы; у переноса с кварталов до программы (задача 69) —
+//!   строки есть и без повторов, дни — целые кварталы;
 //! - незнакомых полей нет: опечатка в имени поля — ошибка, а не молча
 //!   пропущенное правило.
 //!
@@ -619,6 +620,49 @@ impl Rule for Expenses {
             && unique(&self.payment_only)
             && unique(&self.excluded)
             && !self.payment_only.iter().any(|nature| self.excluded.contains(nature))
+    }
+}
+
+/// У каких строк налога мог быть перенос вычета на начало квартала
+/// (`tax::opening`): его человек берёт из расчётов до программы. С кварталов
+/// 2025 года — у всех строк с вычетом (НК, ст. 258, ч. 7), а из расчётов до
+/// 2025 года — только у торговли (ՀՕ-285-Ն, ст. 16, ч. 3). Запись ищут по
+/// первому дню квартала, поэтому её дни — целые кварталы.
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Carry {
+    /// Строки налога.
+    pub kinds: Vec<IncomeKind>,
+    pub from: Date,
+    /// Ключ обязателен, как у [`Exclusion::until`].
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub until: Option<Date>,
+    pub source: Source,
+}
+
+impl Rule for Carry {
+    fn period(&self) -> Period {
+        Period {
+            from: self.from,
+            until: self.until,
+        }
+    }
+
+    fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// Правило одно на всех: две записи — всегда об одном.
+    fn same_subject(&self, _: &Self) -> bool {
+        true
+    }
+
+    /// Строки есть и не повторяются, дни — целые кварталы.
+    fn usable(&self) -> bool {
+        let unique = self.kinds.iter().enumerate().all(|(i, a)| !self.kinds[..i].contains(a));
+        let quarters = self.from.quarter().first_day() == self.from
+            && self.until.is_none_or(|until| until.quarter().last_day() == until);
+        !self.kinds.is_empty() && unique && quarters
     }
 }
 
@@ -1300,6 +1344,7 @@ pub struct Rules {
     high_tech: Vec<HighTech>,
     turnover_threshold: Vec<Threshold>,
     turnover_expenses: Vec<Expenses>,
+    turnover_carry: Vec<Carry>,
     turnover_form: Vec<TurnoverForm>,
     profit_tax: Vec<Monthly>,
     social_payment: Vec<Monthly>,
@@ -1354,6 +1399,7 @@ impl Rules {
         check("high_tech", &rules.high_tech)?;
         check("turnover_threshold", &rules.turnover_threshold)?;
         check("turnover_expenses", &rules.turnover_expenses)?;
+        check("turnover_carry", &rules.turnover_carry)?;
         check("turnover_form", &rules.turnover_form)?;
         check("profit_tax", &rules.profit_tax)?;
         check("social_payment", &rules.social_payment)?;
@@ -1391,6 +1437,7 @@ impl Rules {
             high_tech,
             turnover_threshold,
             turnover_expenses,
+            turnover_carry,
             turnover_form,
             profit_tax,
             social_payment,
@@ -1411,6 +1458,7 @@ impl Rules {
             latest(high_tech),
             latest(turnover_threshold),
             latest(turnover_expenses),
+            latest(turnover_carry),
             latest(turnover_form),
             latest(profit_tax),
             latest(social_payment),
@@ -1458,6 +1506,11 @@ impl Rules {
     /// Какие расходы идут в вычет.
     pub fn turnover_expenses(&self) -> &[Expenses] {
         &self.turnover_expenses
+    }
+
+    /// У каких строк мог быть перенос с кварталов до программы.
+    pub fn turnover_carry(&self) -> &[Carry] {
+        &self.turnover_carry
     }
 
     /// Номера полей формы расчёта налога с оборота.

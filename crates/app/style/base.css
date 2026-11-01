@@ -2036,7 +2036,8 @@ dl.months dd,
   margin-bottom: var(--space-4);
 }
 
-.tax-close {
+.tax-close,
+.tax-opening {
   margin-top: var(--space-5);
 }
 

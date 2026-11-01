@@ -150,6 +150,7 @@ fn every_case_holds() {
             operations: &operations,
             profile: Some(&profile),
             closings: &[],
+            openings: &[],
         };
         for expected in &case.expected {
             let got = turnover::quarter(books, quarter(&expected.quarter));

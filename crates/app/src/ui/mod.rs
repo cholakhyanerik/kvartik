@@ -23,6 +23,7 @@ pub mod panic;
 mod paper;
 mod profile;
 mod pwa;
+mod opening;
 mod report;
 mod route;
 mod split;
