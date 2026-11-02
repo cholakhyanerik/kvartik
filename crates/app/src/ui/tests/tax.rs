@@ -3,7 +3,7 @@
 //! ядра — их формы проверяют свои тесты; число налога посчитано вручную.
 
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
-use kvartik_core::model::activity::ActivityCode;
+use kvartik_core::model::activity::{ActivityCode, IncomeKind};
 use kvartik_core::model::date::{Date, Quarter};
 use kvartik_core::model::ledger::{Flow, Nature, Operation, OperationData, Proof};
 use kvartik_core::model::money::{Currency, Money};
@@ -506,6 +506,70 @@ async fn the_carry_from_before_the_program_is_entered() {
     set_hash("");
     forget_device();
     assert!(wrong.is_empty(), "перенос до программы: {wrong:#?}");
+}
+
+/// Общепит и аренда в одном квартале: экран налога спрашивает о заявлении об
+/// общепите, называя строку 7, а квартал 2025 года с общепитом говорит, что
+/// посчитан по правилам Еревана. Числа те же: это слова, а не другой расчёт.
+#[wasm_bindgen_test]
+async fn catering_quarters_say_what_the_app_does_not_know() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let today = clock::today().expect("часы с датой");
+    let now = clock::now();
+    let code = ActivityCode::parse("56.10.1").expect("код");
+    let mut data: ProfileData = profile();
+    data.activities = vec![code];
+    data.kinds.insert(code, IncomeKind::Catering);
+    let meal = operation(Flow::Income, today.quarter().first_day(), 1_000_000);
+    let rent = Operation::create(
+        OperationData {
+            income_kind: Some(IncomeKind::Rent),
+            ..meal.data().clone()
+        },
+        now,
+    )
+    .expect("годная запись");
+    let saved = Profile::save(None, data.clone(), now).expect("годный профиль").expect("новый");
+    let mut writes = Writes::default();
+    writes.insert(&saved);
+    writes.insert(&meal);
+    writes.insert(&rent);
+    commit(writes).await;
+
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at("#/tax");
+    let mut wrong = Vec::new();
+    let declared = fill(t(lang, Key::TaxCateringDeclared), &[t(lang, Key::KindCateringOther)]);
+    if !wait_for(&host, &declared).await {
+        wrong.push("экран не спросил о заявлении об общепите".to_owned());
+    }
+    if text(&host, "#tax").contains(t(lang, Key::TaxCateringPlace)) {
+        wrong.push("о месте деятельности говорит квартал не 2025 года".to_owned());
+    }
+
+    let q = Quarter::new(2025, 2).expect("квартал есть");
+    let books = [operation(Flow::Income, q.first_day(), 1_000_000)];
+    let tax = turnover::quarter(
+        Books {
+            documents: &[],
+            operations: &books,
+            profile: Some(&data),
+            closings: &[],
+            openings: &[],
+            unreadable: 0,
+        },
+        q,
+    );
+    if !crate::ui::tax::alerts(&tax).iter().any(|alert| alert.text(lang) == t(lang, Key::TaxCateringPlace)) {
+        wrong.push("квартал 2025 года не сказал о месте деятельности".to_owned());
+    }
+
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "слова об общепите: {wrong:#?}");
 }
 
 /// Второй код другой строки налога в профиле: доход без вида стал ничьим,

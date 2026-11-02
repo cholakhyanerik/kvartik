@@ -623,14 +623,21 @@ impl Rule for Expenses {
     }
 }
 
-/// У каких строк налога мог быть перенос вычета на начало квартала
+/// Строки налога на целые кварталы — запись двух списков файла: её ищут по
+/// первому дню квартала.
+///
+/// `turnover_carry` — у каких строк мог быть перенос вычета на начало квартала
 /// (`tax::opening`): его человек берёт из расчётов до программы. С кварталов
 /// 2025 года — у всех строк с вычетом (НК, ст. 258, ч. 7), а из расчётов до
-/// 2025 года — только у торговли (ՀՕ-285-Ն, ст. 16, ч. 3). Запись ищут по
-/// первому дню квартала, поэтому её дни — целые кварталы.
+/// 2025 года — только у торговли (ՀՕ-285-Ն, ст. 16, ч. 3).
+///
+/// `turnover_place` — у каких строк правило квартала зависело от места
+/// деятельности, а места программа не спрашивает (`tax::turnover`, шапка):
+/// общепит только вне Еревана до 2026 года — прежняя редакция кодекса
+/// (ՀՕ-285-Ն, ст. 16, ч. 6; форма 299-Ն, раздел 8).
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Carry {
+pub struct QuarterKinds {
     /// Строки налога.
     pub kinds: Vec<IncomeKind>,
     pub from: Date,
@@ -640,7 +647,7 @@ pub struct Carry {
     pub source: Source,
 }
 
-impl Rule for Carry {
+impl Rule for QuarterKinds {
     fn period(&self) -> Period {
         Period {
             from: self.from,
@@ -1344,7 +1351,8 @@ pub struct Rules {
     high_tech: Vec<HighTech>,
     turnover_threshold: Vec<Threshold>,
     turnover_expenses: Vec<Expenses>,
-    turnover_carry: Vec<Carry>,
+    turnover_carry: Vec<QuarterKinds>,
+    turnover_place: Vec<QuarterKinds>,
     turnover_form: Vec<TurnoverForm>,
     profit_tax: Vec<Monthly>,
     social_payment: Vec<Monthly>,
@@ -1400,6 +1408,7 @@ impl Rules {
         check("turnover_threshold", &rules.turnover_threshold)?;
         check("turnover_expenses", &rules.turnover_expenses)?;
         check("turnover_carry", &rules.turnover_carry)?;
+        check("turnover_place", &rules.turnover_place)?;
         check("turnover_form", &rules.turnover_form)?;
         check("profit_tax", &rules.profit_tax)?;
         check("social_payment", &rules.social_payment)?;
@@ -1438,6 +1447,7 @@ impl Rules {
             turnover_threshold,
             turnover_expenses,
             turnover_carry,
+            turnover_place,
             turnover_form,
             profit_tax,
             social_payment,
@@ -1459,6 +1469,7 @@ impl Rules {
             latest(turnover_threshold),
             latest(turnover_expenses),
             latest(turnover_carry),
+            latest(turnover_place),
             latest(turnover_form),
             latest(profit_tax),
             latest(social_payment),
@@ -1509,8 +1520,13 @@ impl Rules {
     }
 
     /// У каких строк мог быть перенос с кварталов до программы.
-    pub fn turnover_carry(&self) -> &[Carry] {
+    pub fn turnover_carry(&self) -> &[QuarterKinds] {
         &self.turnover_carry
+    }
+
+    /// У каких строк правило квартала зависело от места деятельности.
+    pub fn turnover_place(&self) -> &[QuarterKinds] {
+        &self.turnover_place
     }
 
     /// Номера полей формы расчёта налога с оборота.

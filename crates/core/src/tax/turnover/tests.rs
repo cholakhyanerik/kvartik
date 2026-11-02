@@ -1496,6 +1496,78 @@ fn a_catering_declaration_leaves_only_its_two_rows() {
     assert_eq!(got.lines, [plain(IncomeKind::Assets, 1_000_000, "10", 100_000)]);
 }
 
+/// Общепит в 2025 году: только вне Еревана считали по прежним правилам
+/// (ՀՕ-285-Ն, ст. 16, ч. 6), и места программа не спрашивает — окно говорит
+/// это, а квартал закрывается, потому что у ресторана в Ереване расчёт верен.
+/// С 2026 года и у других строк слов нет.
+#[test]
+fn catering_before_2026_says_the_place_matters() {
+    let mut catering = profile(&["56.10.1"]);
+    catering.kinds.insert(code("56.10.1"), IncomeKind::Catering);
+    let cases = [
+        ("IV квартал 2025 года", &catering, day(2025, 12, 31), quarter(2025, 4), true),
+        ("I квартал 2026 года", &catering, day(2026, 1, 1), quarter(2026, 1), false),
+    ];
+    let other = profile(&["74.10.0"]);
+    let mut wrong = Vec::new();
+    for (case, data, date, q, expected) in cases {
+        let got = tax(Some(data), &[income(date, 1_000_000, None)], &[], q);
+        if got.place_unknown() != expected {
+            wrong.push(format!("{case}: {:?}", got.lines));
+        }
+        if !got.closable(day(2026, 11, 2)) {
+            wrong.push(format!("{case}: квартал не закрывается: {:?}", got.gaps));
+        }
+    }
+    if tax(Some(&other), &[income(day(2025, 6, 1), 1_000_000, None)], &[], quarter(2025, 2)).place_unknown() {
+        wrong.push("прочая деятельность в 2025 году".to_owned());
+    }
+    if tax(Some(&catering), &[], &[], quarter(2025, 2)).place_unknown() {
+        wrong.push("квартал без дохода".to_owned());
+    }
+    assert!(wrong.is_empty(), "место общепита: {wrong:#?}");
+}
+
+/// Заявление об общепите программа видит только по строке 7 у кода (ст. 258,
+/// ч. 8): рядом с общепитом другая строка — окно спрашивает о заявлении, и у
+/// заявителя с кодом другой строки тоже, а без общепита, с одним общепитом или
+/// когда весь прочий доход уже в строке 7 — не спрашивает.
+#[test]
+fn a_second_row_next_to_catering_asks_about_the_declaration() {
+    let mut catering = profile(&["56.10.1"]);
+    catering.kinds.insert(code("56.10.1"), IncomeKind::Catering);
+    let mut declared = catering.clone();
+    declared.activities.push(code("47.91.0"));
+    declared.kinds.insert(code("47.91.0"), IncomeKind::CateringOther);
+    let books = [
+        income(day(2026, 8, 1), 1_000_000, Some("56.10.1")),
+        income_as(day(2026, 8, 2), 500_000, IncomeKind::Rent),
+        income(day(2026, 8, 3), 200_000, Some("47.91.0")),
+    ];
+    let mut wrong = Vec::new();
+    let q = quarter(2026, 3);
+    if !tax(Some(&catering), &books[..2], &[], q).declaration_unknown() {
+        wrong.push("общепит и аренда: слов нет");
+    }
+    if tax(Some(&catering), &books[..1], &[], q).declaration_unknown() {
+        wrong.push("один общепит: слова есть");
+    }
+    if tax(Some(&declared), &books, &[], q).declaration_unknown() {
+        wrong.push("строка 7 уже есть: слова есть");
+    }
+    let mut third = declared.clone();
+    third.activities.push(code("74.10.0"));
+    let design = [income(day(2026, 8, 4), 300_000, Some("74.10.0"))];
+    let all: Vec<Operation> = books.iter().chain(&design).cloned().collect();
+    if !tax(Some(&third), &all, &[], q).declaration_unknown() {
+        wrong.push("заявитель с кодом другой строки: слов нет");
+    }
+    if tax(Some(&profile(&["74.10.0"])), &books[1..2], &[], q).declaration_unknown() {
+        wrong.push("аренда без общепита: слова есть");
+    }
+    assert!(wrong.is_empty(), "заявление об общепите: {wrong:#?}");
+}
+
 /// Строку дохода выбрали после закрытия квартала — расчёт разошёлся со снимком:
 /// 1 000 000 × 1 % = 10 000 поданных против 100 000 по строке 5.
 #[test]

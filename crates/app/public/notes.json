@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.70",
+      "date": "2026-11-02",
+      "hy": [
+        "Հանրային սնունդով 2025 թվականի եռամսյակն այժմ ասում է, որ հաշվարկված է Երևանի կանոններով. եթե աշխատել եք միայն Երևանից դուրս, հաշվարկեք այն հաշվապահի հետ։",
+        "Եթե հանրային սննդի կողքին այլ եկամուտ ունեք, հարկի էկրանը հիշեցնում է հանրային սննդի հայտարարության մասին։"
+      ],
+      "ru": [
+        "Квартал 2025 года с общепитом теперь говорит, что посчитан по правилам Еревана: если вы работали только вне Еревана, считайте его с бухгалтером.",
+        "Если рядом с общепитом есть другой доход, экран налога напоминает о заявлении об общепите."
+      ],
+      "en": [
+        "A 2025 quarter with catering now says it's calculated by the rules for Yerevan: if you worked only outside Yerevan, calculate it with your accountant.",
+        "If you have other income next to catering, the tax screen reminds you about the catering declaration."
+      ]
+    },
+    {
       "version": "0.0.69",
       "date": "2026-11-02",
       "hy": [
@@ -293,19 +309,6 @@
       ],
       "en": [
         "In Armenian, the list of changes in the new version window is now titled “Ինչն է թարմացվել կամ ավելացել”."
-      ]
-    },
-    {
-      "version": "0.0.50",
-      "date": "2026-10-20",
-      "hy": [
-        "Գլխավոր էկրանին «Տեղադրել» կոճակն այլևս չի կպչում ներքևի հարկի քարտին։"
-      ],
-      "ru": [
-        "На главном экране кнопка «Установить» больше не прилипает к карточке налога под ней."
-      ],
-      "en": [
-        "On Home, the Install button no longer sticks to the tax card below it."
       ]
     }
   ]

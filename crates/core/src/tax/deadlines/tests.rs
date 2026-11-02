@@ -45,6 +45,7 @@ fn shift_rules() -> Rules {
         "turnover_threshold": [],
         "turnover_expenses": [],
         "turnover_carry": [],
+        "turnover_place": [],
         "turnover_form": [],
         "profit_tax": [],
         "social_payment": [],

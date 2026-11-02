@@ -61,6 +61,7 @@ fn file(exclusions: &[Value], pensions: &[Value]) -> String {
         "turnover_threshold": [],
         "turnover_expenses": [],
         "turnover_carry": [],
+        "turnover_place": [],
         "turnover_form": [],
         "profit_tax": [],
         "social_payment": [],
@@ -515,7 +516,7 @@ fn version_parse_is_strict() {
 
 /// Отпечаток значений текущей версии правил: её запись и FNV-1a значений
 /// файла ([`values`]).
-const PINNED: (&str, u64) = ("2026.7", 0x7ed2_1698_ad5b_779a);
+const PINNED: (&str, u64) = ("2026.8", 0xf8c5_ff75_6439_fdb0);
 
 /// Значения файла правил одной строкой: всё, кроме версии и источников, —
 /// JSON с ключами по алфавиту. Источник — когда сверили и где лежит
@@ -610,7 +611,7 @@ fn values_see_rules_not_sources() {
     let reordered = format!(
         r#"{{"days_off": [], "deadline_shift": [], "funded_pension": [{}], "health_insurance": [], "high_tech": [],
             "holidays": [], "income_declaration": [], "profit_tax": [], "settlement_due": [], "social_payment": [], "stamp_duty": [], "turnover_application": [],
-            "turnover_carry": [], "turnover_due": [], "turnover_exclusions": [{}], "turnover_expenses": [], "turnover_form": [], "turnover_rates": [],
+            "turnover_carry": [], "turnover_due": [], "turnover_exclusions": [{}], "turnover_expenses": [], "turnover_form": [], "turnover_place": [], "turnover_rates": [],
             "turnover_threshold": [], "version": "2026.1"}}"#,
         pension("2014-01-01", None),
         exclusion(&["69"], "2025-07-01", None),
@@ -1210,4 +1211,19 @@ fn the_carry_rule_is_checked() {
         wrong.push(format!("незнакомая строка: {got:?}"));
     }
     assert!(wrong.is_empty(), "перенос: {wrong:#?}");
+}
+
+const PLACE: &str = "turnover_place";
+
+/// Запись о месте деятельности (задача 71) проверяется, как запись о переносе:
+/// незнакомую правку разбор не примет. Общепит вне Еревана по прежней редакции
+/// — по 31 декабря 2025 года (ՀՕ-285-Ն, ст. 16, ч. 6).
+#[test]
+fn the_place_rule_is_checked() {
+    let got = Rules::parse(&file_of(PLACE, &[carry(&["catering"], "2025-02-01", None)]));
+    assert_eq!(got, Err(RulesError::Unusable(at(PLACE, 0))));
+    let last = day(2025, 12, 31);
+    let rule = on(armenia().turnover_place(), last).expect("запись на конец 2025 года");
+    assert_eq!(rule.kinds, [IncomeKind::Catering]);
+    assert!(on(armenia().turnover_place(), day(2026, 1, 1)).is_none());
 }

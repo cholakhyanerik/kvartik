@@ -1932,6 +1932,16 @@ strings! {
         "Для строки «{}» правила на этот квартал у программы нет\u{A0}— посчитайте её с бухгалтером.",
         "The app has no rule for “{}” in this quarter\u{A0}— calculate it with your accountant.",
         "«{}» տողի համար այս եռամսյակի կանոն ծրագիրը չունի. հաշվարկեք այն հաշվապահի հետ։";
+    /// Строка общепита без места деятельности (`QuarterTax::place_unknown`).
+    TaxCateringPlace =
+        "Общепит посчитан по правилам Еревана. Кто работал только вне Еревана, в этом квартале считал по прежним правилам (ՀՕ-285-Ն, ст.\u{A0}16, ч.\u{A0}6): программа их не знает\u{A0}— считайте такой квартал с бухгалтером.",
+        "Catering is calculated by the rules for Yerevan. If you worked only outside Yerevan, the previous rules applied in this quarter (ՀՕ-285-Ն, Art.\u{A0}16(6)): the app doesn't have them\u{A0}— calculate such a quarter with your accountant.",
+        "Հանրային սնունդը հաշվարկված է Երևանի կանոններով։ Եթե աշխատել եք միայն Երևանից դուրս, այս եռամսյակում գործել են նախկին կանոնները (ՀՕ-285-Ն, հոդված\u{A0}16, մաս\u{A0}6). ծրագիրը դրանք չգիտի, այդպիսի եռամսյակը հաշվարկեք հաշվապահի հետ։";
+    /// Шаблон: название строки 7 (`QuarterTax::declaration_unknown`).
+    TaxCateringDeclared =
+        "Если вы подали заявление об общепите (НК, ст.\u{A0}254, ч.\u{A0}6 и\u{A0}7), весь доход вне общепита идёт одной строкой (ст.\u{A0}258, ч.\u{A0}8), а не как здесь. Выберите у его кода в профиле строку «{}», а если кода для него нет, считайте квартал с бухгалтером.",
+        "If you filed a catering declaration (Tax Code, Art.\u{A0}254(6) and\u{A0}(7)), all your non-catering income goes under one row (Art.\u{A0}258(8)), not as shown here. Choose the row “{}” for its code in your profile; if there's no code for it, calculate the quarter with your accountant.",
+        "Եթե ներկայացրել եք հանրային սննդի հայտարարություն (Հարկային օրենսգիրք, հոդված\u{A0}254, մասեր\u{A0}6 և\u{A0}7), հանրային սննդից դուրս ամբողջ եկամուտը մեկ տողով է (հոդված\u{A0}258, մաս\u{A0}8), ոչ թե ինչպես այստեղ։ Պրոֆիլում դրա կոդի մոտ ընտրեք «{}» տողը, իսկ եթե դրա համար կոդ չկա, եռամսյակը հաշվարկեք հաշվապահի հետ։";
     TaxCarryUnknown =
         "Если в расчёте, поданном до начала работы в программе, был перенос вычета (строки 5.11, 6.11, 7.11 или 9.11), программа его не знает\u{A0}— вычет может быть больше. Сверьте с бухгалтером.",
         "If a return filed before you started using the app carried a deduction forward (lines 5.11, 6.11, 7.11 or 9.11), the app doesn't know it\u{A0}— the deduction may be larger. Check with your accountant.",

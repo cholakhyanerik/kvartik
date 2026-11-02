@@ -202,8 +202,25 @@ fn a_line_with_deduction_fills_its_section() {
     );
     // Квартал — первый с записями: перенос из расчётов до программы
     // неизвестен, и окно скажет это у 9.7.
-    assert!(matches!(got.origin, Origin::Calculated { carry_unknown: Some(_) }));
+    assert!(matches!(got.origin, Origin::Calculated { carry_unknown: Some(_), .. }));
     assert_eq!(got.rules, rules::armenia().version());
+}
+
+/// Числа общепита за 2025 год говорят, что посчитаны без места деятельности:
+/// раздел 7 формы, а вне Еревана был бы раздел 8. За 2026 год раздел один.
+#[test]
+fn catering_numbers_speak_of_the_place() {
+    let mut data = profile(&["56.10.1"]);
+    data.kinds.insert(code("56.10.1"), IncomeKind::Catering);
+    let today = Some(day(2026, 11, 2));
+    let mut wrong = Vec::new();
+    for (date, q, expected) in [(day(2025, 6, 1), quarter(2025, 2), true), (day(2026, 6, 1), quarter(2026, 2), false)] {
+        let notes = ready(&tax(&data, &[income(date, 1_000_000, None)], &[], q), None).notes(today);
+        if notes.contains(&Key::TaxCateringPlace) != expected {
+            wrong.push(format!("{q:?}: {} заметок", notes.len()));
+        }
+    }
+    assert!(wrong.is_empty(), "место общепита в числах: {wrong:#?}");
 }
 
 /// Строки без вычета — только в сводке, со своей ставкой в [Բ]: IT — 19,

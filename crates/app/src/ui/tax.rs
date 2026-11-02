@@ -1046,6 +1046,7 @@ pub(super) enum Alert {
     Unallocated(usize),
     NoRule(IncomeKind),
     Excluded(String, Date),
+    CateringPlace,
 }
 
 impl Alert {
@@ -1073,6 +1074,7 @@ impl Alert {
             Self::Excluded(code, from) => {
                 fill(t(lang, Key::ActivityExcluded), &[code, &i18n::date(lang, *from)])
             }
+            Self::CateringPlace => t(lang, Key::TaxCateringPlace).to_owned(),
         }
     }
 }
@@ -1109,6 +1111,9 @@ pub(super) fn alerts(tax: &QuarterTax) -> Vec<Alert> {
     }
     alerts.extend(gaps.no_rule.iter().map(|kind| Alert::NoRule(*kind)));
     alerts.extend(tax.excluded_codes.iter().map(|(code, from)| Alert::Excluded(code.to_string(), *from)));
+    if tax.place_unknown() {
+        alerts.push(Alert::CateringPlace);
+    }
     alerts
 }
 
@@ -1122,6 +1127,7 @@ enum Hint {
     Excluded(usize),
     NoBase(usize),
     Split(usize),
+    CateringDeclared,
     Threshold { year: u16, turnover: i64, threshold: i64 },
 }
 
@@ -1135,6 +1141,7 @@ impl Hint {
             Self::Excluded(rows) => fill(t(lang, Key::TaxRefusedExcluded), &[&count(*rows)]),
             Self::NoBase(rows) => fill(t(lang, Key::TaxRefusedNoBase), &[&count(*rows)]),
             Self::Split(rows) => fill(t(lang, Key::TaxRefusedSplit), &[&count(*rows)]),
+            Self::CateringDeclared => fill(t(lang, Key::TaxCateringDeclared), &[t(lang, Key::KindCateringOther)]),
             Self::Threshold { year, turnover, threshold } => {
                 // Доля порога — целыми процентами, с отбросом: «99 %»
                 // у 114,9 млн не обещает лишнего.
@@ -1169,6 +1176,9 @@ fn hints(tax: &QuarterTax) -> Vec<Hint> {
     }
     if refused.split > 0 {
         hints.push(Hint::Split(refused.split));
+    }
+    if tax.declaration_unknown() {
+        hints.push(Hint::CateringDeclared);
     }
     if let Some(threshold) = tax.threshold
         && tax.regime == Regime::Turnover

@@ -345,8 +345,12 @@ pub enum Origin {
     Closed { changed: bool },
     /// Расчёт по данным сейчас; `carry_unknown` — квартал, с начала которого
     /// перенос из расчётов до программы ей неизвестен
-    /// (`QuarterTax::carry_unknown`), и x.7 может быть больше.
-    Calculated { carry_unknown: Option<Quarter> },
+    /// (`QuarterTax::carry_unknown`), и x.7 может быть больше; `place_unknown`
+    /// — строка посчитана без места деятельности (`QuarterTax::place_unknown`).
+    Calculated {
+        carry_unknown: Option<Quarter>,
+        place_unknown: bool,
+    },
 }
 
 /// Почему чисел нет.
@@ -382,7 +386,7 @@ impl Ready {
 
     /// Что сказать о числах словами — на экране и в тексте: квартал закрыт,
     /// его данные изменились после закрытия, квартал ещё идёт на день
-    /// `today`, перенос до программы неизвестен.
+    /// `today`, перенос до программы неизвестен, места деятельности нет.
     pub fn notes(&self, today: Option<Date>) -> Vec<Key> {
         match self.origin {
             Origin::Closed { changed } => {
@@ -392,13 +396,19 @@ impl Ready {
                 }
                 notes
             }
-            Origin::Calculated { carry_unknown } => {
+            Origin::Calculated {
+                carry_unknown,
+                place_unknown,
+            } => {
                 let mut notes = Vec::new();
                 if today.is_some_and(|today| self.quarter.last_day() >= today) {
                     notes.push(Key::ReportOngoing);
                 }
                 if carry_unknown.is_some() {
                     notes.push(Key::TaxCarryUnknown);
+                }
+                if place_unknown {
+                    notes.push(Key::TaxCateringPlace);
                 }
                 notes
             }
@@ -434,6 +444,7 @@ pub fn report(tax: &QuarterTax, closing: Option<&Closing>) -> Result<Ready, Miss
                 numbers,
                 origin: Origin::Calculated {
                     carry_unknown: tax.carry_unknown,
+                    place_unknown: tax.place_unknown(),
                 },
             })
         }

@@ -180,8 +180,8 @@ fn Form(
 ) -> impl IntoView {
     // Строки, у которых перенос до программы мог быть: у их x.7 это и сказано.
     let unknown: &'static [IncomeKind] = match ready.origin {
-        Origin::Calculated { carry_unknown: Some(start) } => opening::kinds(start),
-        Origin::Calculated { carry_unknown: None } | Origin::Closed { .. } => &[],
+        Origin::Calculated { carry_unknown: Some(start), .. } => opening::kinds(start),
+        Origin::Calculated { carry_unknown: None, .. } | Origin::Closed { .. } => &[],
     };
     // Перенос до программы неизвестен — это сказано у самого x.7.
     let notes = ready
