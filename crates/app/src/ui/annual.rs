@@ -469,8 +469,14 @@ enum Note {
     Left(Date),
     SocialLaw(u16),
     SocialVoluntary,
+    /// Вступил сам — день заявления.
+    SocialJoined(Date),
+    /// Заявление подано так поздно, что за год платежа нет, — его день.
+    SocialLater(Date),
+    SocialPensionAge,
     SocialNotJoined(u16),
     SocialNoStatus,
+    SocialEaeu,
     SocialStops,
     NoRule,
     StampScale(u16),
@@ -494,6 +500,7 @@ enum Note {
     HealthStoppedInForce(Date),
     HealthStoppedMaybe(Date),
     HealthElderly(u8),
+    HealthStatePays(u8),
     HealthNoStatus,
     HealthNoPrevious { year: u16, over: i64, amount: i64, due: Date },
     HealthPreviousUnrated { year: u16, rows: usize, income: i64, over: i64, amount: i64, due: Date },
@@ -533,8 +540,12 @@ impl Note {
             Self::Left(day) => fill(t(lang, Key::AnnualLeft), &[&date(day)]),
             Self::SocialLaw(year) => fill(t(lang, Key::AnnualSocialLaw), &[&year.to_string()]),
             Self::SocialVoluntary => t(lang, Key::AnnualSocialVoluntary).to_owned(),
+            Self::SocialJoined(day) => fill(t(lang, Key::AnnualSocialJoined), &[&date(day)]),
+            Self::SocialLater(day) => fill(t(lang, Key::AnnualSocialLater), &[&date(day)]),
+            Self::SocialPensionAge => t(lang, Key::AnnualSocialPensionAge).to_owned(),
             Self::SocialNotJoined(year) => fill(t(lang, Key::AnnualSocialNotJoined), &[&year.to_string()]),
             Self::SocialNoStatus => t(lang, Key::AnnualSocialNoStatus).to_owned(),
+            Self::SocialEaeu => t(lang, Key::AnnualSocialEaeu).to_owned(),
             Self::SocialStops => t(lang, Key::AnnualSocialStops).to_owned(),
             Self::NoRule => t(lang, Key::AnnualNoRule).to_owned(),
             Self::StampScale(year) => fill(t(lang, Key::AnnualStampScale), &[&scale(lang, year)]),
@@ -564,6 +575,7 @@ impl Note {
             Self::HealthStoppedInForce(day) => fill(t(lang, Key::AnnualHealthStoppedInForce), &[&date(day)]),
             Self::HealthStoppedMaybe(day) => fill(t(lang, Key::AnnualHealthStoppedMaybe), &[&date(day)]),
             Self::HealthElderly(age) => fill(t(lang, Key::AnnualHealthElderly), &[&age.to_string()]),
+            Self::HealthStatePays(age) => fill(t(lang, Key::AnnualHealthStatePays), &[&age.to_string()]),
             Self::HealthNoStatus => t(lang, Key::AnnualHealthNoStatus).to_owned(),
             Self::HealthNoPrevious { year, over, amount, due } => fill(
                 t(lang, Key::AnnualHealthNoPrevious),
@@ -742,10 +754,12 @@ fn social_card(annual: &Annual) -> Card {
                 due,
             },
             voluntary,
+            applied,
         } => {
             let mut notes = Vec::new();
             if voluntary {
-                notes.push(Note::SocialVoluntary);
+                notes.push(applied.map_or(Note::SocialVoluntary, Note::SocialJoined));
+                notes.push(Note::SocialPensionAge);
             } else if let Some(year) = mandatory {
                 notes.push(Note::SocialLaw(year));
             }
@@ -759,7 +773,8 @@ fn social_card(annual: &Annual) -> Card {
             None,
             mandatory.map(Note::SocialNotJoined).into_iter().collect(),
         ),
-        Social::Out(SocialOut::NoStatus) => (Amount::Nothing, None, vec![Note::SocialNoStatus]),
+        Social::Out(SocialOut::NoStatus) => (Amount::Nothing, None, vec![Note::SocialNoStatus, Note::SocialEaeu]),
+        Social::Out(SocialOut::Later(day)) => (Amount::Nothing, None, vec![Note::SocialLater(day)]),
         Social::Unknown(_) => (Amount::Unknown, None, Vec::new()),
         Social::Due {
             payment: Fixed::NoRule,
@@ -893,6 +908,7 @@ fn health_card(annual: &Annual, residency: Option<Residency>) -> Card {
                 },
                 HealthOut::Stopped(day) => Note::HealthStopped(day),
                 HealthOut::NoStatus => Note::HealthNoStatus,
+                HealthOut::StatePays(age) => Note::HealthStatePays(age),
             };
             (Amount::Nothing, None, vec![note])
         }

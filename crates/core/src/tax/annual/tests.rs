@@ -30,7 +30,9 @@ fn person() -> Person {
     Person {
         birth_year: Some(1990),
         pension_joined: None,
+        pension_applied: None,
         residency: Some(Residency::Citizen),
+        resident: None,
         registered: Some(day(2022, 5, 12)),
         stops: Vec::new(),
     }
@@ -107,6 +109,18 @@ fn born_in_1974_is_mandatory() {
     assert!(pension_is_a_choice(1973, today));
     assert!(!pension_is_a_choice(1974, today));
     assert!(!pension_is_a_choice(1990, today));
+}
+
+/// О резидентстве спрашивают с года до 65-летия: в 2026 году — родившегося
+/// в 1962-м (65 в 2027-м), и не родившегося в 1963-м.
+#[test]
+fn residence_is_asked_a_year_before_the_age() {
+    let today = day(2026, 11, 2);
+    assert!(residence_matters(1950, today));
+    assert!(residence_matters(1961, today));
+    assert!(residence_matters(1962, today));
+    assert!(!residence_matters(1963, today));
+    assert!(!residence_matters(1990, today));
 }
 
 /// Без исключений правило действует с 1 июля 2018 года: до того тот, кто
@@ -289,7 +303,12 @@ fn an_ordinary_year() {
     if got.profit != fixed {
         wrong.push(format!("налог на прибыль: {:?}", got.profit));
     }
-    if got.social != (Social::Due { payment: fixed, voluntary: false }) {
+    let social = Social::Due {
+        payment: fixed,
+        voluntary: false,
+        applied: None,
+    };
+    if got.social != social {
         wrong.push(format!("соцплатёж: {:?}", got.social));
     }
     let stamp = Stamp::Due {
@@ -575,9 +594,14 @@ fn social_payment_by_birth_year_and_choice() {
         amount: 60_000,
         due: day(2027, 4, 20),
     };
+    let paying = |voluntary: bool| Social::Due {
+        payment: due,
+        voluntary,
+        applied: None,
+    };
     let cases = [
-        ("1974 — обязательно", with(Some(1974), None), Social::Due { payment: due, voluntary: false }),
-        ("1970, вступил", with(Some(1970), Some(true)), Social::Due { payment: due, voluntary: true }),
+        ("1974 — обязательно", with(Some(1974), None), paying(false)),
+        ("1970, вступил", with(Some(1970), Some(true)), paying(true)),
         ("1970, не вступал", with(Some(1970), Some(false)), Social::Out(SocialOut::NotJoined)),
         (
             "1970, без ответа",
@@ -604,6 +628,94 @@ fn social_payment_by_birth_year_and_choice() {
         }
     }
     assert!(wrong.is_empty(), "соцплатёж: {wrong:#?}");
+}
+
+/// Вступивший сам платит с месяца после дня заявления (ՀՕ-244-Ն, ст. 6, ч. 4,
+/// п. 4). Числа — вручную по закону: заявление 10 марта — с апреля, 9 месяцев
+/// по 5 000 = 45 000; 31 декабря — со следующего января; в декабре — за этот
+/// год платежа нет. Целые месяцы остановки и месяцы до регистрации считаются
+/// как у всех, а день заявления у того, кто участвует по закону, ничего не
+/// значит.
+#[test]
+fn social_payment_starts_the_month_after_the_application() {
+    let with = |birth_year: u16, joined: bool, applied: Date| Person {
+        birth_year: Some(birth_year),
+        pension_joined: Some(joined),
+        pension_applied: Some(applied),
+        ..person()
+    };
+    let march = day(2026, 3, 10);
+    let due = |months: u8, applied: Option<Date>| Social::Due {
+        payment: Fixed::Due {
+            monthly: 5_000,
+            months,
+            amount: 5_000 * i64::from(months),
+            due: day(2027, 4, 20),
+        },
+        voluntary: true,
+        applied,
+    };
+    let december = day(2026, 12, 5);
+    let cases = [
+        ("март этого года", with(1970, true, march), due(9, Some(march))),
+        ("прошлый год", with(1970, true, day(2024, 2, 1)), due(12, Some(day(2024, 2, 1)))),
+        ("31 декабря прошлого года", with(1970, true, day(2025, 12, 31)), due(12, Some(day(2025, 12, 31)))),
+        ("ноябрь: остался декабрь", with(1970, true, day(2026, 11, 30)), due(1, Some(day(2026, 11, 30)))),
+        ("декабрь: за год нет", with(1970, true, december), Social::Out(SocialOut::Later(december))),
+        ("следующий год", with(1970, true, day(2027, 2, 1)), Social::Out(SocialOut::Later(day(2027, 2, 1)))),
+        (
+            "с остановкой мая и июня",
+            Person {
+                stops: vec![stop(day(2026, 5, 1), Some(day(2026, 7, 1)))],
+                ..with(1970, true, march)
+            },
+            due(7, Some(march)),
+        ),
+        (
+            "остановка раньше месяца начала не вычитается дважды",
+            Person {
+                stops: vec![stop(day(2026, 1, 1), Some(day(2026, 3, 1)))],
+                ..with(1970, true, march)
+            },
+            due(9, Some(march)),
+        ),
+        (
+            "зарегистрирован позже заявления",
+            Person {
+                registered: Some(day(2026, 6, 15)),
+                ..with(1970, true, march)
+            },
+            due(7, Some(march)),
+        ),
+        ("не вступал", with(1970, false, march), Social::Out(SocialOut::NotJoined)),
+        (
+            "по закону: день не значит ничего",
+            with(1974, true, march),
+            Social::Due {
+                payment: Fixed::Due {
+                    monthly: 5_000,
+                    months: 12,
+                    amount: 60_000,
+                    due: day(2027, 4, 20),
+                },
+                voluntary: false,
+                applied: None,
+            },
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (case, data, expected) in cases {
+        let got = annual(Some(&profile(data)), &[], 2026).social;
+        if got != expected {
+            wrong.push(format!("{case}: {got:?}"));
+        }
+    }
+    let later = annual(Some(&profile(with(1970, true, december))), &[], 2026);
+    let total = Total::of(&later);
+    if total.sum != Some(72_000) || !total.complete {
+        wrong.push(format!("итог без соцплатежа: {total:?}"));
+    }
+    assert!(wrong.is_empty(), "соцплатёж с месяца после заявления: {wrong:#?}");
 }
 
 /// Закрытые кварталы 2025 года — по профилю с кодом (иначе квартал не
@@ -808,10 +920,11 @@ fn health_insurance_from_2027_is_monthly() {
     assert!(wrong.is_empty(), "медстраховка с 2027 года: {wrong:#?}");
 }
 
-/// Гражданин, которому уже исполнилось 65, — «нет значения»: если он
-/// резидент, взнос платит государство, а резидентство профиль не знает;
-/// в год, когда исполняется 65, — тоже не известно; иностранец со статусом
-/// платит в любом возрасте; без года рождения у гражданина — не известно.
+/// Гражданин, которому уже исполнилось 65, без ответа о резидентстве —
+/// «нет значения», с ответом — точно: за резидента платит государство,
+/// нерезидент платит сам; в год, когда исполняется 65, не известно, только
+/// если он не сказал, что нерезидент; иностранец со статусом платит в любом
+/// возрасте; без года рождения у гражданина — не известно.
 #[test]
 fn health_insurance_and_age() {
     let with = |birth_year: Option<u16>, residency: Residency| {
@@ -821,20 +934,34 @@ fn health_insurance_and_age() {
             ..person()
         })
     };
+    let answered = |birth_year: u16, resident: bool| {
+        profile(Person {
+            birth_year: Some(birth_year),
+            resident: Some(resident),
+            ..person()
+        })
+    };
+    let month = Health::Month {
+        monthly: 10_800,
+        due_day: 20,
+        months: 12,
+        amount: 129_600,
+        after: None,
+    };
     let cases = [
         ("гражданин 1960 года", with(Some(1960), Residency::Citizen), Health::Unclear(HealthUnclear::Elderly(65))),
         ("гражданин 1961 года", with(Some(1961), Residency::Citizen), Health::Unclear(HealthUnclear::TurnsAge(65))),
+        ("резидент 1960 года", answered(1960, true), Health::Out(HealthOut::StatePays(65))),
+        ("резидент 1961 года", answered(1961, true), Health::Unclear(HealthUnclear::TurnsAge(65))),
         (
-            "иностранец 1950 года",
-            with(Some(1950), Residency::ForeignWithStatus),
-            Health::Month {
-                monthly: 10_800,
-                due_day: 20,
-                months: 12,
-                amount: 129_600,
-                after: None,
-            },
+            "иностранец с ответом «резидент»",
+            profile(Person {
+                resident: Some(true),
+                ..with(Some(1950), Residency::ForeignWithStatus).person
+            }),
+            month,
         ),
+        ("иностранец 1950 года", with(Some(1950), Residency::ForeignWithStatus), month),
         (
             "гражданин без года рождения",
             with(None, Residency::Citizen),
@@ -851,6 +978,23 @@ fn health_insurance_and_age() {
         if got != expected {
             wrong.push(format!("{case}: {got:?}"));
         }
+    }
+    // Нерезидент платит сам в любом возрасте: и уже в 65, и в год 65-летия.
+    for (case, data) in [("1960", answered(1960, false)), ("1962", answered(1962, false))] {
+        let got = annual(Some(&data), &[], 2027).health;
+        if got != month {
+            wrong.push(format!("нерезидент {case}: {got:?}"));
+        }
+    }
+    // Взнос, который платит государство, ни в какой итог и срок не идёт.
+    let data = answered(1960, true);
+    let got = annual(Some(&data), &[], 2027).health;
+    if got != Health::Out(HealthOut::StatePays(65)) {
+        wrong.push(format!("резидент в 2027 году: {got:?}"));
+    }
+    let due = deadlines::between(books(Some(&data), &[], &[]), day(2026, 11, 2), day(2027, 12, 31));
+    if due.iter().any(|deadline| matches!(deadline.kind, deadlines::Kind::HealthMonth { .. })) {
+        wrong.push(format!("сроки взноса у того, за кого платит государство: {due:?}"));
     }
     assert!(wrong.is_empty(), "медстраховка и возраст: {wrong:#?}");
 }

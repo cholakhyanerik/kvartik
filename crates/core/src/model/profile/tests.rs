@@ -32,8 +32,8 @@ const SAMPLE: &str = concat!(
     r#""accounts":[{"currency":"USD","number":"127027482877","bank":"Ameriabank CJSC","#,
     r#""swift":"ARMIAM22","correspondent":"Citibank N.A., New York\nSWIFT: CITIUS33"}],"#,
     r#""activities":["62.01.0","70.22.0"],"kinds":{"70.22.0":"other"},"regime":"turnover","#,
-    r#""person":{"birth_year":1970,"pension_joined":true,"residency":"foreign_with_status","#,
-    r#""registered":"2022-05-12","#,
+    r#""person":{"birth_year":1970,"pension_joined":true,"pension_applied":"2019-03-14","#,
+    r#""residency":"foreign_with_status","resident":false,"registered":"2022-05-12","#,
     r#""stops":[{"from":"2026-03-01","until":"2026-06-01"},{"from":"2026-09-15","until":null}]}"#,
     r#"}}"#
 );
@@ -44,7 +44,8 @@ const EMPTY: &str = concat!(
     r#""data":{"name":{"hy":"","ru":"","en":""},"tin":null,"registration":"","#,
     r#""address":{"hy":"","ru":"","en":""},"phone":"","email":null,"accounts":[],"#,
     r#""activities":[],"kinds":{},"regime":null,"#,
-    r#""person":{"birth_year":null,"pension_joined":null,"residency":null,"registered":null,"stops":[]}}}"#
+    r#""person":{"birth_year":null,"pension_joined":null,"pension_applied":null,"residency":null,"#,
+    r#""resident":null,"registered":null,"stops":[]}}}"#
 );
 
 /// Образцы читаются в ожидаемые значения, а их запись — слово в слово
@@ -70,7 +71,9 @@ fn data_shape_is_pinned() {
     assert_eq!(data.regime, Some(Regime::Turnover));
     assert_eq!(data.person.birth_year, Some(1970));
     assert_eq!(data.person.pension_joined, Some(true));
+    assert_eq!(data.person.pension_applied, Some(day(2019, 3, 14)));
     assert_eq!(data.person.residency, Some(Residency::ForeignWithStatus));
+    assert_eq!(data.person.resident, Some(false));
     assert_eq!(data.person.registered, Some(day(2022, 5, 12)));
     assert_eq!(
         data.person.stops,
@@ -105,6 +108,20 @@ fn profiles_without_registration_day_still_read() {
     assert!(!old.contains("registered"), "{old}");
     let profile: Profile = serde_json::from_str(&old).expect("профиль версии 8 читается");
     assert_eq!(profile.data().person.registered, None);
+}
+
+/// Профиль версии формата 13 — без дня заявления о фонде и ответа
+/// о резидентстве — читается с «не указано» (Правило 2): `None`, а не «нет»
+/// (Правило 6).
+#[test]
+fn profiles_without_pension_day_and_residence_still_read() {
+    let old = SAMPLE
+        .replacen(r#""pension_applied":"2019-03-14","#, "", 1)
+        .replacen(r#""resident":false,"#, "", 1);
+    assert!(!old.contains("pension_applied") && !old.contains("resident"), "{old}");
+    let profile: Profile = serde_json::from_str(&old).expect("профиль версии 13 читается");
+    assert_eq!(profile.data().person.pension_applied, None);
+    assert_eq!(profile.data().person.resident, None);
 }
 
 /// Строка налога выбирается только коду из профиля: у кода, которого нет,

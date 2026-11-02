@@ -495,7 +495,10 @@ struct Form {
     regime: RwSignal<Option<Regime>>,
     birth_year: RwSignal<String>,
     pension_joined: RwSignal<Option<bool>>,
+    /// День заявления о фонде — записью ISO, как и день регистрации.
+    pension_applied: RwSignal<String>,
     residency: RwSignal<Option<Residency>>,
+    resident: RwSignal<Option<bool>>,
     /// День регистрации ИП — записью ISO, как его отдаёт `<input type="date">`.
     registered: RwSignal<String>,
     stops: RwSignal<Vec<StopRow>>,
@@ -562,7 +565,9 @@ impl Form {
                 data.person.birth_year.map(|year| year.to_string()).unwrap_or_default(),
             ),
             pension_joined: RwSignal::new(data.person.pension_joined),
+            pension_applied: RwSignal::new(data.person.pension_applied.map(Date::iso).unwrap_or_default()),
             residency: RwSignal::new(data.person.residency),
+            resident: RwSignal::new(data.person.resident),
             registered: RwSignal::new(data.person.registered.map(Date::iso).unwrap_or_default()),
             stops: RwSignal::new(Vec::new()),
             logo: RwSignal::new(LogoChoice::Keep),
@@ -670,6 +675,15 @@ impl Form {
         let registered = optional(&self.registered.get_untracked(), |text| {
             registered(text, today).ok_or(())
         })?;
+        // Спрятанное поле не мешает сохранить: ошибки под ним не видно, а день
+        // остаётся как был — что он значит, решает расчёт (`tax::annual`).
+        let pension_day_shown = self.pension_joined.get_untracked() == Some(true)
+            && self.birth_year.with_untracked(|text| asks_pension(text, today));
+        let pension_applied = if pension_day_shown {
+            optional(&self.pension_applied.get_untracked(), |text| past_day(text, today).ok_or(()))?
+        } else {
+            Date::from_iso(self.pension_applied.get_untracked().trim())
+        };
         Some(ProfileData {
             name: Localized {
                 hy: line(self.name.hy)?,
@@ -692,12 +706,23 @@ impl Form {
             person: Person {
                 birth_year,
                 pension_joined: self.pension_joined.get_untracked(),
+                pension_applied,
                 residency: self.residency.get_untracked(),
+                resident: self.resident.get_untracked(),
                 registered,
                 stops,
             },
         })
     }
+}
+
+/// Спрашивать ли о накопительной пенсии — только тех, для кого она по выбору
+/// (`tax::annual`): родившихся раньше, чем начинается обязательное участие
+/// по правилу на сегодня. `text` — поле года рождения.
+fn asks_pension(text: &str, today: Option<Date>) -> bool {
+    birth_year(text, today)
+        .zip(today)
+        .is_some_and(|(year, today)| annual::pension_is_a_choice(year, today))
 }
 
 /// Самый ранний год рождения, который программа принимает: человеку,
@@ -716,9 +741,14 @@ fn birth_year(text: &str, today: Option<Date>) -> Option<u16> {
     (FIRST_BIRTH_YEAR..=last).contains(&year).then_some(year)
 }
 
-/// День регистрации ИП из поля даты: не позже сегодняшнего дня. Часы без
-/// даты — без верхней границы.
+/// День регистрации ИП из поля даты: не позже сегодняшнего дня.
 fn registered(text: &str, today: Option<Date>) -> Option<Date> {
+    past_day(text, today)
+}
+
+/// День из поля даты: не позже сегодняшнего. Часы без даты — без верхней
+/// границы.
+fn past_day(text: &str, today: Option<Date>) -> Option<Date> {
     Date::from_iso(text.trim()).filter(|day| today.is_none_or(|today| *day <= today))
 }
 
@@ -1312,15 +1342,19 @@ where
 #[component]
 fn PersonFields(lang: ReadSignal<Lang>, form: Form, today: Option<Date>) -> impl IntoView {
     let tried = form.tried;
-    // Вопрос о накопительной пенсии — только тем, для кого она по выбору
-    // (`tax::annual`): родившимся раньше, чем начинается обязательное
-    // участие по правилу на сегодня.
-    let asks_pension = move || {
-        form.birth_year
-            .with(|text| birth_year(text, today))
-            .zip(today)
-            .is_some_and(|(year, today)| annual::pension_is_a_choice(year, today))
+    let pension_asked = move || form.birth_year.with(|text| asks_pension(text, today));
+    let pension_day_asked = move || pension_asked() && form.pension_joined.get() == Some(true);
+    // Вопрос о резидентстве — гражданину в возрасте, с которого за резидента
+    // взнос медстраховки платит государство.
+    let resident_asked = move || {
+        form.residency.get() == Some(Residency::Citizen)
+            && form
+                .birth_year
+                .with(|text| birth_year(text, today))
+                .zip(today)
+                .is_some_and(|(year, today)| annual::residence_matters(year, today))
     };
+    let state_pays_from = today.and_then(annual::state_pays_from_age).unwrap_or_default();
     let full = move || form.stops.with(|rows| rows.len() >= ProfileData::MAX_STOPS);
     view! {
         <fieldset id=Part::Person.id()>
@@ -1357,12 +1391,27 @@ fn PersonFields(lang: ReadSignal<Lang>, form: Form, today: Option<Date>) -> impl
                         .then_some(Key::RegisteredDayInvalid)
                 })
             />
-            <Show when=asks_pension>
+            <Show when=pension_asked>
                 <fieldset class="group">
                     <legend>{tr(lang, Key::PensionJoined)}</legend>
                     <Choice lang name="pension" label=Key::Yes value=true chosen=form.pension_joined />
                     <Choice lang name="pension" label=Key::No value=false chosen=form.pension_joined />
                 </fieldset>
+            </Show>
+            <Show when=pension_day_asked>
+                <label>
+                    {tr(lang, Key::PensionApplied)}
+                    <input type="date" bind:value=form.pension_applied />
+                </label>
+                <p class="hint">{tr(lang, Key::PensionAppliedHint)}</p>
+                <FieldError
+                    lang
+                    tried
+                    error=move || form.pension_applied.with(|text| {
+                        (!text.trim().is_empty() && past_day(text, today).is_none())
+                            .then_some(Key::PensionAppliedInvalid)
+                    })
+                />
             </Show>
             <fieldset class="group">
                 <legend>{tr(lang, Key::ProfileResidency)}</legend>
@@ -1382,6 +1431,16 @@ fn PersonFields(lang: ReadSignal<Lang>, form: Form, today: Option<Date>) -> impl
                     chosen=form.residency
                 />
             </fieldset>
+            <Show when=resident_asked>
+                <fieldset class="group">
+                    <legend>{tr(lang, Key::ResidentQuestion)}</legend>
+                    <p class="hint">
+                        {move || fill(t(lang.get(), Key::ResidentHint), &[&state_pays_from.to_string()])}
+                    </p>
+                    <Choice lang name="resident" label=Key::Yes value=true chosen=form.resident />
+                    <Choice lang name="resident" label=Key::No value=false chosen=form.resident />
+                </fieldset>
+            </Show>
             <fieldset class="group">
                 <legend>{tr(lang, Key::ProfileStops)}</legend>
                 <p class="hint">{tr(lang, Key::ProfileStopsHint)}</p>

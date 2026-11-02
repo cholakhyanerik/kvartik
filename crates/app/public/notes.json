@@ -1,6 +1,25 @@
 {
   "notes": [
     {
+      "version": "0.0.69",
+      "date": "2026-11-02",
+      "hy": [
+        "Եթե ծնվել եք մինչև 1974 թվականը և ինքներդ եք միացել կուտակային կենսաթոշակային համակարգին, պրոֆիլում նշեք դիմումի օրը. սոցիալական վճարը կհաշվվի դրան հաջորդող ամսից։",
+        "65 և բարձր տարիքի քաղաքացուն պրոֆիլն այժմ հարցնում է՝ Հայաստանի ռեզիդե՞նտ է։ Պատասխանով տարեկան վճարների էկրանը ճշգրիտ ասում է՝ առողջության ապահովագրավճարը վճարում է պետությո՞ւնը, թե՞ դուք։",
+        "Առանց կացության կարգավիճակի ԵԱՏՄ երկրների քաղաքացիներին տարեկան վճարների էկրանն այժմ ասում է, որ սոցիալական վճարի հարցը բաց է. պարզաբանում չկա, ճշտեք հաշվապահի հետ։"
+      ],
+      "ru": [
+        "Если вы родились до 1974 года и вступили в накопительную пенсию сами, укажите в профиле день заявления: соцплатёж посчитается с месяца после него.",
+        "Гражданина 65 лет и старше профиль теперь спрашивает, резидент ли он Армении: с ответом экран годовых платежей говорит точно, платит взнос медстраховки государство или вы сами.",
+        "Гражданам стран ЕАЭС без вида на жительство экран годовых платежей теперь говорит, что вопрос о соцплатеже открыт: разъяснения нет, сверьте с бухгалтером."
+      ],
+      "en": [
+        "If you were born before 1974 and joined the funded pension yourself, add your application day to the profile: the social payment will count from the month after it.",
+        "Citizens aged 65 and over are now asked in the profile whether they're Armenian residents: with the answer, the annual payments screen says exactly whether the state or you pay the health insurance premium.",
+        "For citizens of EAEU countries without residence status, the annual payments screen now says the social payment is an open question: there's no clarification, so check with your accountant."
+      ]
+    },
+    {
       "version": "0.0.68",
       "date": "2026-11-01",
       "hy": [
@@ -287,22 +306,6 @@
       ],
       "en": [
         "On Home, the Install button no longer sticks to the tax card below it."
-      ]
-    },
-    {
-      "version": "0.0.49",
-      "date": "2026-10-20",
-      "hy": [
-        "Տարեկան վճարներ՝ «Հարկ» բաժնում և գլխավոր էկրանին քարտով. տարվա շահութահարկը, սոցիալական վճարը և դրոշմանիշային վճարը, ժամկետը՝ ապրիլի 20-ը, և ամսական որքան մի կողմ դնել, որ ժամկետին հավաքվի ամբողջ գումարը։",
-        "Այնտեղ է նաև առողջության ապահովագրավճարը՝ 2026 թվականի համար և 2027-ից՝ ամսական։ Պրոֆիլում հայտնվել է ԱՁ-ի գրանցման ամսաթիվը. շահութահարկը և սոցիալական վճարը հաշվվում են դրա ամսից։"
-      ],
-      "ru": [
-        "Годовые платежи — во вкладке «Налог» и карточкой на главном экране: налог на прибыль, соцплатёж и гербовый сбор за год, срок — 20 апреля, и сколько откладывать в месяц, чтобы к сроку набралась вся сумма.",
-        "Там же — взнос медстраховки: за 2026 год и с 2027 года помесячно. В профиле появилась дата регистрации ИП: с её месяца считаются налог на прибыль и соцплатёж."
-      ],
-      "en": [
-        "Annual payments, on the Tax tab and as a card on Home: profit tax, the social payment and stamp duty for the year, due by April 20, and how much to set aside each month to have the full amount by then.",
-        "The health insurance premium is there too: for 2026, and monthly from 2027. Your profile now has the IE registration date: profit tax and the social payment count from its month."
       ]
     }
   ]

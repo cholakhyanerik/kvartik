@@ -300,6 +300,8 @@ fn programmer() -> ProfileData {
         person: Person {
             birth_year: Some(1990),
             pension_joined: None,
+            pension_applied: None,
+            resident: None,
             residency: Some(Residency::Citizen),
             registered: Some(day(2022, 5, 12)),
             stops: Vec::new(),

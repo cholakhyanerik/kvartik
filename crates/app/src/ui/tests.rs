@@ -294,7 +294,9 @@ async fn choosing_a_language_translates_the_whole_window() {
     data.person = Person {
         birth_year: Some(1990),
         pension_joined: None,
+        pension_applied: None,
         residency: Some(Residency::ForeignWithStatus),
+        resident: None,
         registered: None,
         stops: Vec::new(),
     };

@@ -86,7 +86,11 @@ use crate::model::record::RecordMeta;
 /// - 13 (0.0.68) — у документа и операции книги поле `income_kind` (строка
 ///   налога дохода, если она не та, что у кода, `#[serde(default)]`), задача
 ///   70. Записи версий 1–12 читаются как есть: без поля строка — по коду.
-pub const FORMAT_VERSION: u32 = 13;
+/// - 14 (0.0.69) — у профиля поля `person.pension_applied` (день заявления
+///   о выборе пенсионного фонда) и `person.resident` (резидент ли Армении; оба
+///   `#[serde(default)]`), задача 73. Записи версий 1–13 читаются как есть:
+///   без полей — не указано.
+pub const FORMAT_VERSION: u32 = 14;
 
 /// Первая версия формата: старше не бывает.
 pub(crate) const FIRST_VERSION: u32 = 1;
@@ -404,11 +408,23 @@ mod tests {
         r#"}}"#
     );
 
-    /// Та же запись в версии 13 — так её пишет эта программа. Выписана
+    /// Та же запись в версии 13 — так её писала 0.0.68. Выписана
     /// человеком: версия 13 прибавила поле документу и операции, а не этой
     /// записи, и запись отличается только номером.
     const SAMPLE_V13: &str = concat!(
         r#"{"format_version":13,"record":{"#,
+        r#""meta":{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":1760000000000,"deleted":null},"#,
+        r#""day":"2026-10-12","#,
+        r#""sum":{"minor":150000,"currency":"USD"},"#,
+        r#""rate":{"currency":"USD","per_unit_e4":3619300,"date":"2026-10-09","source":"central_bank"}"#,
+        r#"}}"#
+    );
+
+    /// Та же запись в версии 14 — так её пишет эта программа. Выписана
+    /// человеком: версия 14 прибавила поля профилю, а не этой записи,
+    /// и запись отличается только номером.
+    const SAMPLE_V14: &str = concat!(
+        r#"{"format_version":14,"record":{"#,
         r#""meta":{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":1760000000000,"deleted":null},"#,
         r#""day":"2026-10-12","#,
         r#""sum":{"minor":150000,"currency":"USD"},"#,
@@ -432,8 +448,8 @@ mod tests {
     /// значений — слово в слово образец. Поменялась запись — это новая
     /// версия формата с миграцией (Правило 5), а не правка образца.
     #[test]
-    fn sample_v13_is_pinned() {
-        let record: Probe = decode(SAMPLE_V13).expect("образец версии 13 читается");
+    fn sample_v14_is_pinned() {
+        let record: Probe = decode(SAMPLE_V14).expect("образец версии 14 читается");
         assert_eq!(
             record.meta.id().to_string(),
             "0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a"
@@ -446,14 +462,14 @@ mod tests {
         assert_eq!(record.day, day(2026, 10, 12));
         assert_eq!(record.sum, Money::new(150_000, Currency::Usd));
         assert_eq!(record.rate, probe().rate);
-        assert_eq!(encode(&record), SAMPLE_V13);
+        assert_eq!(encode(&record), SAMPLE_V14);
     }
 
-    /// Записи версий 1–12 читаются той же записью, а пишутся уже версией 13:
+    /// Записи версий 1–13 читаются той же записью, а пишутся уже версией 14:
     /// данные прошлых версий не теряются (Правило 2).
     #[test]
     fn older_samples_still_read() {
-        let current: Probe = decode(SAMPLE_V13).expect("образец версии 13 читается");
+        let current: Probe = decode(SAMPLE_V14).expect("образец версии 14 читается");
         let older = [
             (1, SAMPLE_V1),
             (2, SAMPLE_V2),
@@ -467,12 +483,13 @@ mod tests {
             (10, SAMPLE_V10),
             (11, SAMPLE_V11),
             (12, SAMPLE_V12),
+            (13, SAMPLE_V13),
         ];
         for (version, sample) in older {
             let old: Probe = decode(sample)
                 .unwrap_or_else(|error| panic!("образец версии {version}: {error:?}"));
             assert_eq!(old, current, "версия {version}");
-            assert_eq!(encode(&old), SAMPLE_V13, "версия {version}");
+            assert_eq!(encode(&old), SAMPLE_V14, "версия {version}");
         }
     }
 

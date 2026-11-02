@@ -14,7 +14,7 @@ use wasm_bindgen_test::wasm_bindgen_test;
 use web_sys::{Element, HtmlElement};
 
 use super::documents::{commit, forget_device, profile};
-use super::{mount_at, sleep, wait_for};
+use super::{button, field, mount_at, sleep, stored_profile, type_into, wait_for};
 use crate::platform::{clock, set_hash};
 use crate::store::Writes;
 use crate::store::device::Device;
@@ -124,7 +124,9 @@ async fn annual_payments_are_shown_on_home_and_their_screen() {
     let year = seed(Person {
         birth_year: Some(1990),
         pension_joined: None,
+        pension_applied: None,
         residency: Some(Residency::Citizen),
+        resident: None,
         registered: Date::new(2022, 5, 12),
         stops: Vec::new(),
     })
@@ -214,6 +216,157 @@ async fn annual_payments_are_shown_on_home_and_their_screen() {
     assert!(wrong.is_empty(), "годовые платежи: {wrong:#?}");
 }
 
+/// Нажать ответ `answer` в группе полей с заголовком `legend`; `false` —
+/// такой группы или ответа нет.
+fn choose(host: &HtmlElement, legend: &str, answer: &str) -> bool {
+    let Ok(groups) = host.query_selector_all("fieldset.group") else {
+        return false;
+    };
+    let group = (0..groups.length())
+        .filter_map(|at| groups.item(at))
+        .map(JsCast::unchecked_into::<HtmlElement>)
+        .find(|group| text_of(group, "legend").as_deref() == Some(legend));
+    let choice = group.and_then(|group| {
+        let choices = group.query_selector_all("label.choice").ok()?;
+        (0..choices.length())
+            .filter_map(|at| choices.item(at))
+            .map(JsCast::unchecked_into::<Element>)
+            .find(|choice| choice.text_content().as_deref() == Some(answer))
+            .and_then(|choice| choice.query_selector("input").ok().flatten())
+    });
+    match choice {
+        Some(input) => {
+            input.unchecked_into::<HtmlElement>().click();
+            true
+        }
+        None => false,
+    }
+}
+
+/// Гражданин 1950 года рождения, ИП с 2022 года: вопросы профиля решают то,
+/// что без них было словами. Форма спрашивает день заявления о фонде, только
+/// когда вступил сам, а резидентство — только у гражданина; ответы ложатся
+/// в базу, а экран платежей называет день заявления и говорит, что взнос
+/// платит государство.
+#[wasm_bindgen_test]
+async fn profile_answers_settle_annual_payments() {
+    let year = seed(Person {
+        birth_year: Some(1950),
+        pension_joined: None,
+        pension_applied: None,
+        residency: Some(Residency::Citizen),
+        resident: None,
+        registered: Date::new(2022, 5, 12),
+        stops: Vec::new(),
+    })
+    .await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at(ANNUAL);
+    let mut wrong = Vec::new();
+    if !wait_for(&host, &fill(t(lang, Key::AnnualHealthElderly), &["65"])).await {
+        wrong.push("нет просьбы ответить о резидентстве".to_owned());
+    }
+
+    set_hash("#/profile");
+    if !wait_for(&host, t(lang, Key::ProfilePerson)).await {
+        wrong.push("экран профиля не открылся".to_owned());
+    }
+    let rows = host.query_selector_all("#profile button.entry").expect("селектор годен");
+    let row = (0..rows.length())
+        .filter_map(|at| rows.item(at))
+        .map(JsCast::unchecked_into::<HtmlElement>)
+        .find(|row| row.text_content().is_some_and(|text| text.contains(t(lang, Key::ProfilePerson))));
+    match row {
+        Some(row) => row.click(),
+        None => wrong.push("в итоге профиля нет строки «О вас»".to_owned()),
+    }
+    sleep(100).await;
+
+    let (joined, day_label) = (t(lang, Key::PensionJoined), t(lang, Key::PensionApplied));
+    let (question, yes, no) = (t(lang, Key::ResidentQuestion), t(lang, Key::Yes), t(lang, Key::No));
+    let text = || host.text_content().unwrap_or_default();
+    if text().contains(day_label) {
+        wrong.push("день заявления спрашивают до ответа о вступлении".to_owned());
+    }
+    if !choose(&host, joined, yes) {
+        wrong.push("нет вопроса о вступлении в накопительную пенсию".to_owned());
+    }
+    sleep(50).await;
+    if !text().contains(day_label) {
+        wrong.push("вступившего сам не спрашивают о дне заявления".to_owned());
+    }
+    if !choose(&host, joined, no) {
+        wrong.push("нет ответа «нет» о вступлении".to_owned());
+    }
+    sleep(50).await;
+    if text().contains(day_label) {
+        wrong.push("о дне заявления спрашивают того, кто не вступал".to_owned());
+    }
+    choose(&host, joined, yes);
+    sleep(50).await;
+    let applied = Date::new(year - 1, 3, 10).expect("день есть");
+    match field(&host, day_label, 0) {
+        Some(input) => type_into(&input, &applied.iso()),
+        None => wrong.push("нет поля дня заявления".to_owned()),
+    }
+    // Вопрос о резидентстве — только гражданину.
+    if !choose(&host, t(lang, Key::ProfileResidency), t(lang, Key::ResidencyForeignWithStatus)) {
+        wrong.push("нет выбора гражданства".to_owned());
+    }
+    sleep(50).await;
+    if text().contains(question) {
+        wrong.push("о резидентстве спрашивают иностранца".to_owned());
+    }
+    choose(&host, t(lang, Key::ProfileResidency), t(lang, Key::ResidencyCitizen));
+    sleep(50).await;
+    if !choose(&host, question, yes) {
+        wrong.push("гражданина 1950 года не спрашивают о резидентстве".to_owned());
+    }
+    match button(&host, &[t(lang, Key::ProfileSave)]) {
+        Some(save) => save.click(),
+        None => wrong.push("в форме нет «Сохранить»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::ProfileSaved)).await {
+        wrong.push("сохранение не подтвердилось".to_owned());
+    }
+    match stored_profile().await {
+        Ok(Some(saved)) => {
+            let person = &saved.data().person;
+            if person.pension_joined != Some(true)
+                || person.pension_applied != Some(applied)
+                || person.resident != Some(true)
+            {
+                wrong.push(format!("в базе не то: {person:?}"));
+            }
+        }
+        other => wrong.push(format!("в базе профиля нет: {other:?}")),
+    }
+
+    set_hash(ANNUAL);
+    let joined_note = fill(t(lang, Key::AnnualSocialJoined), &[&i18n::date(lang, applied)]);
+    if !wait_for(&host, &joined_note).await {
+        wrong.push("экран платежей не называет день заявления".to_owned());
+    }
+    if !text().contains(&fill(t(lang, Key::AnnualHealthStatePays), &["65"])) {
+        wrong.push("экран платежей не говорит, что взнос платит государство".to_owned());
+    }
+    let months = fill(
+        t(lang, Key::AnnualTimes),
+        &[&fill(t(lang, Key::MonthsMany), &["12"]), &drams(lang, 5_000)],
+    );
+    let social = pairs(&host, t(lang, Key::AnnualSocial)).unwrap_or_default();
+    if social.first() != Some(&(months, drams(lang, 60_000))) {
+        wrong.push(format!("соцплатёж: {social:?}"));
+    }
+
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "ответы профиля: {wrong:#?}");
+}
+
 /// Без даты регистрации и года рождения: месяцы — с января, соцплатёж не
 /// известен. Итог — то, что известно: налог на прибыль 60 000 и гербовый
 /// сбор 12 000, 72 000 ֏ (вручную), — и каждое место говорит, что посчитано
@@ -223,7 +376,9 @@ async fn annual_payments_say_what_is_missing() {
     let year = seed(Person {
         birth_year: None,
         pension_joined: None,
+        pension_applied: None,
         residency: Some(Residency::Citizen),
+        resident: None,
         registered: None,
         stops: Vec::new(),
     })

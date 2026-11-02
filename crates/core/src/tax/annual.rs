@@ -31,11 +31,11 @@
 //! остановки не заполняют (вопрос 3.3; практика) — он считается за те же
 //! месяцы.
 //!
-//! Остановка освобождает с дня в заявлении, но не раньше дня его подачи,
-//! а день подачи профиль не хранит: окно говорит это словами. Доход
-//! в месяце остановки окно называет: начатая без заявления работа
-//! возобновляет деятельность с этого дня (НК, ст. 53, ч. 8), но переносить
-//! это на налог на прибыль — толкование.
+//! Остановка освобождает с дня в заявлении, но не раньше дня его подачи:
+//! дни профиля — те, с которых она считается (`model::profile::Stop`), и форма
+//! просит вписать день подачи, если он позже. Доход в месяце остановки окно
+//! называет: начатая без заявления работа возобновляет деятельность с этого
+//! дня (НК, ст. 53, ч. 8), но переносить это на налог на прибыль — толкование.
 //!
 //! # Гербовый сбор и медстраховка
 //!
@@ -52,7 +52,11 @@
 //! о накопительной пенсии, статуса проживания и дня регистрации платёж или
 //! итог не известны ([`Missing`], [`Total::complete`]), а не «не платится»;
 //! ушедшему с налога с оборота месяцы общего режима считает бухгалтер
-//! ([`Months::left`]), и итог года тогда не полон.
+//! ([`Months::left`]), и итог года тогда не полон. Без дня заявления о фонде
+//! соцплатёж считается с начала года: так сумма не меньше настоящей, а окно
+//! просит указать день. Без ответа о резидентстве взнос гражданина в возрасте,
+//! с которого за резидента платит государство, не посчитан
+//! ([`HealthUnclear::Elderly`]).
 
 use std::collections::BTreeMap;
 
@@ -75,7 +79,9 @@ use crate::model::profile::{Person, ProfileData, Residency, Stop};
 /// родившиеся «մինչև 1974 թվականը» — если подали заявление о выборе фонда
 /// (п. 2); решение не пересматривается (ч. 2). Иностранец и лицо без
 /// гражданства с правом проживания (статусом проживания) платят на общих
-/// основаниях, если международный договор не говорит иное (ч. 3).
+/// основаниях, если международный договор не говорит иное (ч. 3): договора,
+/// который их от этого освобождал бы, разведка задачи 73 не нашла (2026-11-02,
+/// FEATURE_TASKS.md, «Соцплатёж иностранца и договоры»).
 ///
 /// Текст ч. 1–3 — с 2014-07-01 (ՀՕ-67-Ն от 21.06.2014; поправки после него
 /// правили только ч. 5–11), но до 2018-07-01 тот, кто уже был ИП, мог
@@ -96,6 +102,22 @@ pub fn funded_pension(on: Date) -> Option<&'static FundedPension> {
 /// участие обязательно или правила на этот день нет: спрашивать не о чем.
 pub fn pension_is_a_choice(birth_year: u16, on: Date) -> bool {
     funded_pension(on).is_some_and(|rule| birth_year < rule.mandatory_born_from.year())
+}
+
+/// Спросить ли гражданина, резидент ли он: до конца следующего года ему
+/// исполняется столько лет, с которых взнос медстраховки за резидента платит
+/// государство (закон ՀՕ-459-Ն, ст. 11, ч. 2, п. 2), — по правилу на день `on`.
+/// Следующий год — потому что его взнос уже виден на экранах годовых платежей
+/// и сроков. `false` — правила на этот день нет: спрашивать не о чем.
+pub fn residence_matters(birth_year: u16, on: Date) -> bool {
+    state_pays_from_age(on)
+        .is_some_and(|age| i32::from(on.year()) + 1 - i32::from(birth_year) >= i32::from(age))
+}
+
+/// Возраст, с которого взнос медстраховки за гражданина-резидента платит
+/// государство, — по правилу на день `on`; `None` — правила нет.
+pub fn state_pays_from_age(on: Date) -> Option<u8> {
+    rules::on(rules::armenia().health_insurance(), on).map(|rule| rule.state_pays_from_age)
 }
 
 /// Месяцы года, за которые ИП на налоге с оборота платит налог на прибыль
@@ -127,6 +149,19 @@ impl Months {
         };
         // Целые месяцы остановки — внутри `span`: их не больше его длины.
         (last - first + 1).saturating_sub(self.stopped.len() as u8)
+    }
+
+    /// Сколько из них — с месяца `from` этого года.
+    fn count_from(&self, from: u8) -> u8 {
+        let Some((first, last)) = self.span else {
+            return 0;
+        };
+        let first = first.max(from);
+        if first > last {
+            return 0;
+        }
+        let stopped = self.stopped.iter().filter(|month| **month >= first).count();
+        (last - first + 1).saturating_sub(stopped as u8)
     }
 
     /// Ушёл ли ИП с налога с оборота посреди года: месяцы после ухода —
@@ -218,16 +253,15 @@ impl Fixed {
     }
 }
 
-/// Платёж по записи `rule` за месяцы `months`.
-fn fixed(rule: Option<&Monthly>, year: u16, months: &Months) -> Fixed {
+/// Платёж по записи `rule` за `months` месяцев года.
+fn fixed(rule: Option<&Monthly>, year: u16, months: u8) -> Fixed {
     let Some((rule, due)) = rule.and_then(|rule| Some((rule, rule.due.after(year)?))) else {
         return Fixed::NoRule;
     };
-    let count = months.count();
     Fixed::Due {
         monthly: rule.monthly,
-        months: count,
-        amount: rule.monthly.saturating_mul(i64::from(count)),
+        months,
+        amount: rule.monthly.saturating_mul(i64::from(months)),
         due,
     }
 }
@@ -261,17 +295,30 @@ pub enum SocialOut {
     /// Иностранец или лицо без гражданства без статуса проживания: платят
     /// только со статусом (ст. 5, ч. 3; закон о персонифицированном учёте
     /// ՀՕ-247-Ն на таких не распространяется — ст. 1, ч. 2). Что без статуса
-    /// не платят — вывод.
+    /// не платят — вывод, а у граждан ЕАЭС ещё и спорный: соглашение
+    /// о пенсиях трудящихся от 20.12.2019, ст. 3, ч. 1, говорит о тех же
+    /// условиях, что у граждан страны работы, а разъяснений об ИП нет (разведка
+    /// задачи 73, 2026-11-02). Страну гражданства профиль не спрашивает: с ответом
+    /// число осталось бы спорным, поэтому окно говорит это словами, а вопрос —
+    /// в задаче 82.
     NoStatus,
+    /// Вступил сам, но заявление подано в этот день — так поздно, что месяцы
+    /// этого года до него не доходят (ст. 6, ч. 4, п. 4).
+    Later(Date),
 }
 
 /// Соцплатёж за год.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Social {
     /// Платит за месяцы года. `voluntary` — вступил сам по заявлению:
-    /// платит с месяца после дня заявления (ст. 6, ч. 4, п. 4), а его месяц
-    /// профиль не хранит — счёт с первого месяца года, и окно говорит это.
-    Due { payment: Fixed, voluntary: bool },
+    /// платит с месяца после дня заявления (ст. 6, ч. 4, п. 4). `applied` —
+    /// этот день из профиля; `None` — не указан: счёт с первого месяца года,
+    /// и окно просит указать день.
+    Due {
+        payment: Fixed,
+        voluntary: bool,
+        applied: Option<Date>,
+    },
     /// Не участвует.
     Out(SocialOut),
     /// Участвует ли, не известно: в профиле нет ответа.
@@ -320,9 +367,22 @@ fn social(person: Option<&Person>, year: u16, months: &Months) -> Social {
     if !missing.is_empty() {
         return Social::Unknown(missing);
     }
-    match fixed(Some(rule), year, months) {
+    let applied = person.and_then(|person| person.pension_applied).filter(|_| voluntary);
+    let count = match applied.and_then(|day| day.last_of_month().add_days(1)) {
+        Some(start) if start.year() > year => 0,
+        Some(start) if start.year() == year => months.count_from(start.month()),
+        Some(_) | None => months.count(),
+    };
+    if let Some(day) = applied.filter(|_| count == 0 && months.count() > 0) {
+        return Social::Out(SocialOut::Later(day));
+    }
+    match fixed(Some(rule), year, count) {
         Fixed::NoRule => Social::NoRule,
-        payment => Social::Due { payment, voluntary },
+        payment => Social::Due {
+            payment,
+            voluntary,
+            applied,
+        },
     }
 }
 
@@ -520,6 +580,9 @@ pub enum HealthOut {
     /// страхованию не подлежит — закрытый список ст. 11, ч. 1 называет
     /// только граждан и иностранцев со статусом.
     NoStatus,
+    /// Гражданин-резидент, которому уже исполнилось столько лет: взнос за
+    /// него платит государство (ст. 11, ч. 2, п. 2; ч. 3; ст. 14, ч. 2).
+    StatePays(u8),
 }
 
 /// Чего не хватает расчёту взноса, кроме ответов в профиле: число тут —
@@ -541,12 +604,13 @@ pub enum HealthUnclear {
     },
     /// Гражданину уже исполнилось столько лет: если он резидент Армении
     /// (183 дня и больше за 12 месяцев, ст. 2, ч. 1, п. 30), взнос за него
-    /// платит государство (ст. 11, ч. 2, п. 2; ч. 3; ст. 14, ч. 2), а
-    /// резидентство профиль не хранит.
+    /// платит государство (ст. 11, ч. 2, п. 2; ч. 3; ст. 14, ч. 2), а на
+    /// вопрос профиля о резидентстве ответа нет.
     Elderly(u8),
     /// В этом году гражданину исполняется столько лет, с которых взнос
-    /// платит государство: с какого месяца — зависит от дня рождения, а за
-    /// 2026 год — ещё и от дня подачи расчёта за 2025-й (ст. 46, ч. 20.2).
+    /// платит государство, и он не сказал, что нерезидент: с какого месяца —
+    /// зависит от дня рождения, а за 2026 год — ещё и от дня подачи расчёта
+    /// за 2025-й (ст. 46, ч. 20.2).
     TurnsAge(u8),
     /// В день, когда закон начал действовать для ИП, деятельность была
     /// остановлена, а возобновлена в этом году — в этот день: закон для него
@@ -662,7 +726,8 @@ fn health(books: Books<'_>, person: Option<&Person>, year: u16, previous: Result
         Some(Residency::ForeignWithoutStatus) => return Health::Out(HealthOut::NoStatus),
         // За гражданина-резидента 65 лет и старше платит государство,
         // а иностранец в этой группе не состоит (ст. 11, ч. 1, п. 2; ч. 2,
-        // п. 2): возраст смотрится только у гражданина.
+        // п. 2): возраст смотрится только у гражданина, а нерезидент платит сам
+        // в любом возрасте.
         Some(Residency::Citizen) => {
             let Some(born) = birth_year else {
                 return Health::Unknown(Missing {
@@ -672,11 +737,17 @@ fn health(books: Books<'_>, person: Option<&Person>, year: u16, previous: Result
             };
             let age = i32::from(year) - i32::from(born);
             let limit = i32::from(rule.state_pays_from_age);
-            if age > limit {
-                return Health::Unclear(HealthUnclear::Elderly(rule.state_pays_from_age));
-            }
-            if age == limit {
-                return Health::Unclear(HealthUnclear::TurnsAge(rule.state_pays_from_age));
+            let resident = person.and_then(|person| person.resident);
+            if resident != Some(false) {
+                if age > limit {
+                    return match resident {
+                        Some(_) => Health::Out(HealthOut::StatePays(rule.state_pays_from_age)),
+                        None => Health::Unclear(HealthUnclear::Elderly(rule.state_pays_from_age)),
+                    };
+                }
+                if age == limit {
+                    return Health::Unclear(HealthUnclear::TurnsAge(rule.state_pays_from_age));
+                }
             }
         }
         Some(Residency::ForeignWithStatus) => {}
@@ -995,7 +1066,7 @@ pub fn year(books: Books<'_>, year: u16) -> Annual {
         year,
         rules: all.version(),
         status,
-        profit: fixed(rules::for_year(all.profit_tax(), year), year, &months),
+        profit: fixed(rules::for_year(all.profit_tax(), year), year, months.count()),
         social: social(person, year, &months),
         stamp: stamp(person, year, &months, base.unwrap_or_default()),
         health: health(books, person, year, previous),
