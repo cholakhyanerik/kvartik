@@ -263,6 +263,19 @@ impl Program {
         }
     }
 
+    /// Ставить ли программу до данных: на iPhone, iPad и Mac установленная
+    /// не видит данных браузера (Правило 6), а здесь она ещё не установлена.
+    pub fn install_first(&self) -> bool {
+        self.browser.install_first() && self.install.get_untracked() != Install::Installed
+    }
+
+    /// Та же программа в другом браузере — браузерным тестам окна: настоящий
+    /// там всегда один (`ui/tests/onboarding.rs`).
+    #[cfg(all(test, target_arch = "wasm32"))]
+    pub(super) fn in_browser(self, browser: Browser) -> Self {
+        Self { browser, ..self }
+    }
+
     /// Правит ли страницей service worker — отслеживаемое: части wasm
     /// окно загружает заранее, только когда они придут из его кэша.
     pub fn serving(&self) -> bool {

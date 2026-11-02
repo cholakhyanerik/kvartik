@@ -494,6 +494,12 @@ pub enum Browser {
 }
 
 impl Browser {
+    /// Установленная программа здесь не видит данных браузера (Правило 6):
+    /// сначала установка, потом данные.
+    pub const fn install_first(self) -> bool {
+        matches!(self, Self::SafariTouch | Self::OtherTouch | Self::SafariMac)
+    }
+
     /// Браузер этой страницы.
     pub fn detect() -> Self {
         let Some(window) = web_sys::window() else {

@@ -122,6 +122,23 @@ impl Documents {
         self.mode.set(Mode::New(DocKind::Invoice));
     }
 
+    /// Прочитаны ли документы — отслеживаемое: окно читает их последними,
+    /// и первые шаги (`ui/onboarding.rs`) знают всё, когда прочитаны они.
+    pub fn ready(&self) -> bool {
+        self.state.with(|state| matches!(state, State::Ready { .. }))
+    }
+
+    /// Сколько документов выпущено и первый из них — отслеживаемое.
+    pub fn issued(&self) -> (usize, Option<RecordId>) {
+        self.with(|documents, _, _| {
+            let mut issued = documents
+                .iter()
+                .filter(|document| !document.meta().is_deleted() && document.issued().is_some());
+            let first = issued.next().map(Document::id);
+            (first.map_or(0, |_| 1 + issued.count()), first)
+        })
+    }
+
     /// Показывать в списке только документы без отметки о расчётном
     /// документе — из напоминания на главном экране. Открытую форму это не
     /// закрывает: начатое в ней не пропадает, а список станет таким, когда
@@ -1637,6 +1654,7 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                     } else {
                         notice.set(Some(Notice::Saved));
                         mode.set(Mode::List);
+                        ctx.router.form_closed();
                     }
                 }
                 Err(problem) => failure.set(Some(problem)),
@@ -1651,7 +1669,10 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
             });
         }
     };
-    let leave = move || mode.set(Mode::List);
+    let leave = move || {
+        mode.set(Mode::List);
+        ctx.router.form_closed();
+    };
     // Шаг сменился — прежняя жалоба к нему не относится.
     Effect::watch(move || step.get(), move |_, _, _| invalid.set(false), false);
     // «Как будет выглядеть» (задача 12): страницы черновика — снимок полей

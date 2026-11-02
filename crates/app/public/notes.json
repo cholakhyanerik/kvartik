@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.71",
+      "date": "2026-11-03",
+      "hy": [
+        "Գլխավոր էկրանին հայտնվել են «Առաջին քայլերը»՝ վավերապայմաններից մինչև առաջին հաշիվը և դրա PDF-ը։ Եթե դրանք պետք չեն, կարող եք թաքցնել։",
+        "Պրոֆիլում կոդի տակ այժմ երևում են դրույքաչափը և հաշվարկի ու հարկի վերջին օրը։"
+      ],
+      "ru": [
+        "На главном экране появились «Первые шаги»: от реквизитов до первого счёта и его PDF. Если они не нужны, их можно скрыть.",
+        "В профиле под кодом деятельности теперь видно ставку и последний день расчёта и налога."
+      ],
+      "en": [
+        "Home now has “First steps”: from your business details to your first invoice and its PDF. If you don't need them, you can hide them.",
+        "In the profile, the rate and the last day for the return and tax now appear under the activity code."
+      ]
+    },
+    {
       "version": "0.0.70",
       "date": "2026-11-02",
       "hy": [
@@ -296,19 +312,6 @@
       "en": [
         "The Install button on Home is now always there until the app is installed. Where the browser doesn't install the app itself, the button explains how to do it from that browser's menu: in Safari on iPhone, iPad and Mac, and in Chrome, Edge, Firefox and Samsung Internet.",
         "On a Mac, as on iPhone, install the app before entering any data: the app in the Dock doesn't see Safari's data."
-      ]
-    },
-    {
-      "version": "0.0.51",
-      "date": "2026-10-20",
-      "hy": [
-        "Նոր տարբերակի պատուհանում փոփոխությունների ցանկն այժմ վերնագրված է «Ինչն է թարմացվել կամ ավելացել»։"
-      ],
-      "ru": [
-        "В окне новой версии на армянском список изменений теперь озаглавлен «Ինչն է թարմացվել կամ ավելացել»."
-      ],
-      "en": [
-        "In Armenian, the list of changes in the new version window is now titled “Ինչն է թարմացվել կամ ավելացել”."
       ]
     }
   ]

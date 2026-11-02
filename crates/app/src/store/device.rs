@@ -1,7 +1,8 @@
 //! Что знает это устройство: когда здесь в последний раз сделали копию,
 //! проверочное значение пароля копий (`DeviceKey`), выбранный язык окна,
-//! день начала пробного периода (задача 25) и что с новыми версиями: о какой
-//! человек уже знает и какую окно уже пробовало включить.
+//! день начала пробного периода (задача 25), что с новыми версиями: о какой
+//! человек уже знает и какую окно уже пробовало включить, — и скрыты ли
+//! первые шаги на главном экране (задача 28).
 //!
 //! Это не данные человека, а состояние устройства, поэтому оно лежит не
 //! в базе записей и не попадает в копию: перенесённая на новое устройство
@@ -114,6 +115,17 @@ impl Device {
         self.set("update_tried", &version.to_string())
     }
 
+    /// Скрыты ли первые шаги на главном экране (`ui/onboarding.rs`).
+    pub fn steps_hidden(&self) -> bool {
+        self.get("steps_hidden").is_some()
+    }
+
+    /// Скрыть первые шаги на этом устройстве. `false` — `localStorage`
+    /// отказал: при следующем открытии они появятся снова.
+    pub fn set_steps_hidden(&self) -> bool {
+        self.set("steps_hidden", "1")
+    }
+
     fn get(&self, name: &str) -> Option<String> {
         storage()?
             .get_item(&format!("{}{name}", self.prefix))
@@ -133,7 +145,7 @@ impl Device {
     #[cfg(all(test, target_arch = "wasm32"))]
     pub(super) fn clear(&self) {
         if let Some(storage) = storage() {
-            for name in ["last_backup", "backup_key", "lang", "trial", "seen_version", "update_tried"] {
+            for name in ["last_backup", "backup_key", "lang", "trial", "seen_version", "update_tried", "steps_hidden"] {
                 let _ = storage.remove_item(&format!("{}{name}", self.prefix));
             }
         }

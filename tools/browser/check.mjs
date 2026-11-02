@@ -398,6 +398,16 @@ async function update(page, password) {
   }
 }
 
+/// Первые шаги нового человека: карточка приходит частью профиля, ведёт
+/// в короткую форму той же части, а «Отмена» возвращает на главный экран.
+async function firstSteps(page) {
+  checks.check("первые шаги: карточка из части", await page.waitFor(VISIBLE("#home .first-steps")));
+  checks.check("первые шаги: кнопка шага", await press(page, "#home", s("StepsFillRequisites")));
+  checks.check("первые шаги: короткая форма", await page.waitFor(TEXT_IN("#profile", s("ProfileBriefAbout"))));
+  checks.check("первые шаги: «Отмена» в форме", await press(page, "#profile", s("Cancel")));
+  checks.check("первые шаги: снова на главном экране", await page.waitFor(VISIBLE("#home .first-steps")));
+}
+
 async function main() {
   const parts = fs.readdirSync(path.join(DIST, "app")).filter((n) => /^split_\w+-\w+\.wasm$/.test(n));
   checks.check("в сборке есть части wasm", parts.length > 0, parts.join(", "));
@@ -413,9 +423,12 @@ async function main() {
     checks.check("с сетью: рабочий экран", await page.waitFor(WORKING));
     checks.check("первый запуск: версия запомнена, окна «Что нового» нет",
       (await page.eval(`return localStorage.getItem("kvartik.seen_version");`)) && (await page.eval(NO_DIALOG)));
+    await firstSteps(page);
     const sample = await restore(page);
     checks.check("с сетью: страницей правит service worker", (await page.waitFor(CONTROLLER)) === `${ORIGIN}/app/sw.js`);
     await home(page);
+    await go(page, "#/");
+    checks.check("первые шаги: у копии с документами карточки нет", await page.waitFor(HIDDEN("#home .first-steps")));
     await forms(page, "с сетью");
     await screens(page, "с сетью");
     await card(page, "с сетью");

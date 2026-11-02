@@ -158,7 +158,13 @@ pub fn shown(screen: Screen) {
 
 /// Какой экран открыт — один на всё окно.
 #[derive(Clone, Copy)]
-pub struct Router(RwSignal<Screen>);
+pub struct Router {
+    screen: RwSignal<Screen>,
+    /// Экран, на который привели первые шаги (`ui/onboarding.rs`): его форма,
+    /// закрывшись, вернёт на главный экран ([`Router::form_closed`]). Ушёл
+    /// человек с него сам — больше не ведём.
+    guided: RwSignal<Option<Screen>>,
+}
 
 impl Router {
     /// Экран из адреса, и дальше — за адресом: ссылки меню, «Назад»
@@ -167,30 +173,51 @@ impl Router {
     /// много раз.
     pub fn start() -> Self {
         let screen = RwSignal::new(Screen::from_hash(&platform::hash()));
+        let guided = RwSignal::new(None);
         let listener = window_event_listener(ev::hashchange, move |_| {
-            screen.set(Screen::from_hash(&platform::hash()));
+            let next = Screen::from_hash(&platform::hash());
+            if guided.get_untracked() != Some(next) {
+                guided.set(None);
+            }
+            screen.set(next);
         });
         on_cleanup(move || listener.remove());
-        Self(screen)
+        Self { screen, guided }
     }
 
     /// Открытый экран — отслеживаемое.
     pub fn screen(self) -> Screen {
-        self.0.get()
+        self.screen.get()
     }
 
     /// Видна ли страница экрана — отслеживаемое: документ открыт на
     /// странице документов.
     pub fn shows(self, page: Screen) -> bool {
-        self.0.with(|open| open.page() == page)
+        self.screen.with(|open| open.page() == page)
     }
 
     /// Перейти на экран из кода (кнопка «Новый счёт», выпуск документа):
     /// адрес меняется, и «Назад» вернёт прежний экран.
     pub fn go(self, screen: Screen) {
-        if self.0.get_untracked() != screen {
+        self.guided.set(None);
+        if self.screen.get_untracked() != screen {
             platform::set_hash(&screen.href());
-            self.0.set(screen);
+            self.screen.set(screen);
+        }
+    }
+
+    /// Перейти на экран по первым шагам: его форма, закрывшись, вернёт на
+    /// главный экран к следующему шагу.
+    pub fn guide(self, screen: Screen) {
+        self.go(screen);
+        self.guided.set(Some(screen));
+    }
+
+    /// Форма закрылась — сохранили или передумали. Если на её экран привели
+    /// первые шаги, дальше главный экран: следующий шаг там.
+    pub fn form_closed(self) {
+        if self.guided.get_untracked() == Some(self.screen.get_untracked()) {
+            self.go(Screen::Home);
         }
     }
 }

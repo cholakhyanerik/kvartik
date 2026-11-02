@@ -28,6 +28,7 @@ mod documents;
 mod install;
 mod ledger;
 pub(super) mod license;
+mod onboarding;
 mod report;
 mod share;
 mod tax;
@@ -701,7 +702,7 @@ async fn hidden_screens_are_drawn_on_first_show() {
     if !wait_for(&host, t(lang, Key::BackupChooseFile)).await {
         wrong.push("база не открылась".to_owned());
     }
-    if section_text(&host, "home").contains(t(lang, Key::HomeProfileMissing)) {
+    if section_text(&host, "home").contains(t(lang, Key::StepsFillRequisites)) {
         wrong.push("главный экран не знает профиля, пока экран профиля не показан".to_owned());
     }
     let drawn = |host: &HtmlElement, wrong: &mut Vec<String>, step: &str, expected: [bool; 3]| {
@@ -771,7 +772,7 @@ async fn restoring_a_backup_shows_its_profile() {
     device.set_ui_lang(lang);
     let (host, mounted) = mount();
     let mut wrong = Vec::new();
-    if !wait_for(&host, t(lang, Key::ProfileFill)).await {
+    if !wait_for(&host, t(lang, Key::StepsFillRequisites)).await {
         wrong.push("пустая база — а профиль не предлагают заполнить".to_owned());
     }
     // Раздел копии появляется позже профиля: после ответа браузера
@@ -809,7 +810,7 @@ async fn restoring_a_backup_shows_its_profile() {
     }
     // Экран профиля ещё ни разу не показан (`split::screen`), а главный
     // экран обязан узнать профиль копии и без него.
-    let missing = t(lang, Key::HomeProfileMissing);
+    let missing = t(lang, Key::StepsFillRequisites);
     for _ in 0..100 {
         if !section_text(&host, "home").contains(missing) {
             break;

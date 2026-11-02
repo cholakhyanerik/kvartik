@@ -25,9 +25,10 @@ use kvartik_core::model::profile::{
 };
 use kvartik_core::model::text::{Line, Lines};
 use kvartik_core::model::tin::Tin;
-use kvartik_core::tax::{annual, turnover};
+use kvartik_core::tax::{annual, deadlines, turnover};
 use leptos::ev::{Event, SubmitEvent};
 use leptos::prelude::*;
+use leptos::wasm_split::SplitLoaderError;
 use web_sys::HtmlInputElement;
 
 use super::avatar;
@@ -37,6 +38,7 @@ use super::form::{
 };
 use super::icon::{Icon, icon};
 use super::license::Licenses;
+use super::onboarding::{Card, StepsCard};
 use super::route::{Router, Screen};
 use super::split::{screen, split};
 use super::storage::error_key;
@@ -52,6 +54,13 @@ pub struct Profiles {
     state: RwSignal<State>,
     /// Сохранённый логотип — картинкой для показа.
     picture: RwSignal<Option<Arc<Picture>>>,
+    /// Открыта ли форма — здесь, а не в разделе: первые шаги открывают её
+    /// короткой (`open_brief`).
+    editing: RwSignal<bool>,
+    /// На какой группе полей открыть форму.
+    focus: RwSignal<Option<Part>>,
+    /// Форма — короткая: только то, что нужно первому счёту.
+    brief: RwSignal<bool>,
 }
 
 /// Где профиль.
@@ -71,6 +80,20 @@ impl Profiles {
         Self {
             state: RwSignal::new(State::Loading),
             picture: RwSignal::new(None),
+            editing: RwSignal::new(false),
+            focus: RwSignal::new(None),
+            brief: RwSignal::new(false),
+        }
+    }
+
+    /// Открыть короткую форму — из первых шагов (`ui/onboarding.rs`): на
+    /// реквизитах или на кодах деятельности. Открытую форму это не трогает:
+    /// начатое в ней не пропадает.
+    pub fn open_brief(&self, activities: bool) {
+        if !self.editing.get_untracked() {
+            self.brief.set(true);
+            self.focus.set(activities.then_some(Part::Activities));
+            self.editing.set(true);
         }
     }
 
@@ -170,7 +193,7 @@ impl Part {
 
 /// Общее у частей раздела.
 #[derive(Clone, Copy)]
-struct Ctx {
+pub(super) struct Ctx {
     lang: ReadSignal<Lang>,
     profiles: Profiles,
     base: Base,
@@ -188,6 +211,7 @@ struct Ctx {
     /// Сегодня — один раз (Архитектура, «Время — параметр»): по нему
     /// проверяется год рождения и берутся правила налога.
     today: Option<Date>,
+    router: Router,
 }
 
 /// Раздел на языке окна — под заголовком экрана, частью wasm с первого
@@ -207,12 +231,13 @@ pub fn ProfileSection(
         profiles,
         base,
         backups,
-        editing: RwSignal::new(false),
+        editing: profiles.editing,
         saved: RwSignal::new(false),
-        focus: RwSignal::new(None),
+        focus: profiles.focus,
         forms,
         licenses,
         today: clock::today(),
+        router,
     };
     // Копию восстановили — профиль в базе мог стать другим или появиться.
     // Здесь, а не в части экрана: профиль нужен и главному экрану, и книге,
@@ -228,14 +253,33 @@ pub fn ProfileSection(
         },
         false,
     );
-    screen(lang, router, Screen::Profile, move || profile_screen(ctx))
+    screen(lang, router, Screen::Profile, move || profile_screen(ProfilePart::Screen(ctx)))
+}
+
+/// Первые шаги — из части профиля. В тестах функция части видна только своему
+/// модулю (`split!`).
+pub(super) async fn steps_part(card: Card) -> Result<AnyView, SplitLoaderError> {
+    profile_screen(ProfilePart::Steps(card)).await
+}
+
+/// Что рисует часть профиля.
+#[derive(Clone, Copy)]
+pub(super) enum ProfilePart {
+    /// Итог или форму экрана.
+    Screen(Ctx),
+    /// Первые шаги на главном экране (`ui/onboarding.rs`): ведут сюда же.
+    Steps(Card),
 }
 
 split! {
     /// Итог или форма экрана «Профиль» — своей частью wasm (`ui/split.rs`):
-    /// первому заходу нужен только главный экран.
-    pub(super) fn profile_screen(ctx: Ctx) -> AnyView, preload preload_screen {
-        view! { <ProfileBody ctx /> }.into_any()
+    /// первому заходу нужен только главный экран. Первые шаги — в ней же:
+    /// своя часть умножала бы общие куски (там же).
+    pub(super) fn profile_screen(part: ProfilePart) -> AnyView, preload preload_screen {
+        match part {
+            ProfilePart::Screen(ctx) => view! { <ProfileBody ctx /> }.into_any(),
+            ProfilePart::Steps(card) => view! { <StepsCard card /> }.into_any(),
+        }
     }
 }
 
@@ -255,6 +299,7 @@ fn ProfileBody(ctx: Ctx) -> impl IntoView {
         forms,
         licenses,
         today,
+        router,
     } = ctx;
     let open = move |part: Option<Part>| {
         saved.set(false);
@@ -272,7 +317,8 @@ fn ProfileBody(ctx: Ctx) -> impl IntoView {
             State::Ready(profile) if editing.get() => {
                 let data = profile.map(|profile| profile.data().clone());
                 let focus = focus.get_untracked();
-                view! { <ProfileForm lang data profiles licenses base backups editing saved forms today focus /> }
+                let brief = profiles.brief.get_untracked();
+                view! { <ProfileForm lang data profiles licenses base backups editing saved forms today focus brief router /> }
                     .into_any()
             }
             State::Ready(Some(profile)) => view! {
@@ -815,9 +861,25 @@ fn ProfileForm(
     forms: Forms,
     today: Option<Date>,
     focus: Option<Part>,
+    brief: bool,
+    router: Router,
 ) -> impl IntoView {
     forms.hold();
     let form = Form::new(data.as_ref(), profiles.picture);
+    // Короткая форма сразу со строками счёта и кода: пустые не сохраняются.
+    if brief {
+        if form.accounts.with_untracked(Vec::is_empty) {
+            form.accounts.set(vec![form.account_row(Currency::Amd)]);
+        }
+        if form.activities.with_untracked(Vec::is_empty) {
+            form.activities.set(vec![form.code_row(String::new(), None)]);
+        }
+    }
+    let close = move || {
+        profiles.brief.set(false);
+        editing.set(false);
+        router.form_closed();
+    };
     let saved_tin = data.as_ref().and_then(|data| data.tin.clone());
     licenses.watch(base);
     // Открыли по строке итога — к её группе полей; после кадра: к нему
@@ -868,7 +930,7 @@ fn ProfileForm(
                     profiles.state.set(State::Ready(Some(Arc::new(profile))));
                     backups.data_saved();
                     saved.set(true);
-                    editing.set(false);
+                    close();
                 }
                 Err(error) => failure.set(Some(error)),
             }
@@ -877,10 +939,11 @@ fn ProfileForm(
 
     view! {
         <form class="profile" on:submit=submit novalidate>
-            <Requisites lang form licenses saved_tin />
+            {brief.then(|| view! { <p class="hint">{tr(lang, Key::ProfileBriefAbout)}</p> })}
+            <Requisites lang form licenses saved_tin brief />
             <Accounts lang form />
             <Activities lang form today />
-            <PersonFields lang form today />
+            {(!brief).then(|| view! { <PersonFields lang form today /> })}
             {move || invalid.get().then(|| view! {
                 <p role="alert">{tr(lang, Key::ProfileFix)}</p>
             })}
@@ -895,7 +958,7 @@ fn ProfileForm(
                     type="button"
                     class="secondary"
                     disabled=move || form.busy.get()
-                    on:click=move |_| editing.set(false)
+                    on:click=move |_| close()
                 >
                     {tr(lang, Key::Cancel)}
                 </button>
@@ -954,9 +1017,17 @@ async fn save(store: &Store, data: ProfileData, choice: &LogoChoice) -> Result<P
 /// Реквизиты: имя и адрес на трёх языках, ՀՎՀՀ, регистрация, связь,
 /// логотип. Под ՀՎՀՀ — сразу при вводе: ключ лицензии выдан на сохранённый
 /// ИНН, и с другим он не откроет выпуск (задача 25); сохранить это не мешает
-/// — данные не запираются (Правило 2).
+/// — данные не запираются (Правило 2). Короткая форма без номера регистрации,
+/// связи и логотипа: в счёт они не обязательны, а сигналы их остаются в форме
+/// и сохраняются как были.
 #[component]
-fn Requisites(lang: ReadSignal<Lang>, form: Form, licenses: Licenses, saved_tin: Option<Tin>) -> impl IntoView {
+fn Requisites(
+    lang: ReadSignal<Lang>,
+    form: Form,
+    licenses: Licenses,
+    saved_tin: Option<Tin>,
+    brief: bool,
+) -> impl IntoView {
     let tried = form.tried;
     let tin_license = move || {
         let saved = saved_tin.clone()?;
@@ -989,28 +1060,32 @@ fn Requisites(lang: ReadSignal<Lang>, form: Form, licenses: Licenses, saved_tin:
                 check=|text| (!text.trim().is_empty() && Tin::parse(text).is_err()).then_some(Key::TinInvalid)
             />
             {tin_license}
-            <TextField
-                lang
-                label=Key::ProfileRegistration
-                value=form.registration
-                tried
-                autocomplete="off"
-            />
+            {(!brief).then(|| view! {
+                <TextField
+                    lang
+                    label=Key::ProfileRegistration
+                    value=form.registration
+                    tried
+                    autocomplete="off"
+                />
+            })}
             <AreaField lang label=Key::ProfileAddressHy value=form.address.hy tried autocomplete="street-address" />
             <AreaField lang label=Key::ProfileAddressRu value=form.address.ru tried />
             <AreaField lang label=Key::ProfileAddressEn value=form.address.en tried />
-            <TextField lang label=Key::ProfilePhone value=form.phone tried kind="tel" autocomplete="tel" />
-            <TextField
-                lang
-                label=Key::ProfileEmail
-                value=form.email
-                tried
-                kind="email"
-                autocomplete="email"
-                max=Email::MAX_CHARS
-                check=|text| (!text.trim().is_empty() && Email::parse(text).is_err()).then_some(Key::EmailInvalid)
-            />
-            <LogoField lang form />
+            {(!brief).then(|| view! {
+                <TextField lang label=Key::ProfilePhone value=form.phone tried kind="tel" autocomplete="tel" />
+                <TextField
+                    lang
+                    label=Key::ProfileEmail
+                    value=form.email
+                    tried
+                    kind="email"
+                    autocomplete="email"
+                    max=Email::MAX_CHARS
+                    check=|text| (!text.trim().is_empty() && Email::parse(text).is_err()).then_some(Key::EmailInvalid)
+                />
+                <LogoField lang form />
+            })}
         </fieldset>
     }
 }
@@ -1281,6 +1356,29 @@ fn Activities(lang: ReadSignal<Lang>, form: Form, today: Option<Date>) -> impl I
                     {move || {
                         let code = ActivityCode::parse(&row.text.get()).ok()?;
                         excluded_warning(lang, code, today)
+                    }}
+                    // Что значит этот код: ставка и ближайший срок (задача 28).
+                    {move || {
+                        let day = today?;
+                        let code = ActivityCode::parse(&row.text.get()).ok()?;
+                        if turnover::excluded(&code, day).is_some() {
+                            return None;
+                        }
+                        let kind = row.kind.get().unwrap_or_else(|| turnover::default_kind(&code, day));
+                        let rate = turnover::rate(kind, day)?.rate;
+                        let quarter = day.quarter();
+                        let due = deadlines::turnover(quarter)?.day;
+                        Some(view! {
+                            <p class="hint">
+                                {move || {
+                                    let lang = lang.get();
+                                    fill(
+                                        t(lang, Key::ActivityRateDue),
+                                        &[&tax::percent(lang, rate), &i18n::quarter(lang, quarter), &i18n::date(lang, due)],
+                                    )
+                                }}
+                            </p>
+                        })
                     }}
                     <button
                         type="button"

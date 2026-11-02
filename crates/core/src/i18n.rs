@@ -230,6 +230,31 @@ strings! {
     WelcomeLang = "Выберите язык", "Choose a language", "Ընտրեք լեզուն";
     WelcomeContinue = "Продолжить", "Continue", "Շարունակել";
     WelcomeHaveBackup = "У меня есть копия", "I have a backup", "Ունեմ պահուստային պատճեն";
+    /// Шаблон: срок пробного периода — «14 дней».
+    WelcomeTrial = "{} бесплатно, без регистрации.", "{} free, no sign-up.", "{} անվճար, առանց գրանցման։";
+    /// Шаг установки на экране первого запуска (`ui/onboarding.rs`).
+    WelcomeInstallLater =
+        "Продолжить без установки",
+        "Continue without installing",
+        "Շարունակել առանց տեղադրման";
+    /// Первые шаги на главном экране (задача 28, `ui/onboarding.rs`).
+    StepsTitle = "Первые шаги", "First steps", "Առաջին քայլերը";
+    StepsAbout =
+        "Около десяти минут до первого счёта. Всё сохраняется на этом устройстве: можно прерваться и вернуться.",
+        "About ten minutes to your first invoice. Everything is saved on this device, so you can stop and come back.",
+        "Մոտ տասը րոպե՝ մինչև առաջին հաշիվը։ Ամեն ինչ պահվում է այս սարքում. կարող եք ընդհատել և վերադառնալ։";
+    StepRequisites = "Реквизиты ИП", "Your business details", "ԱՁ-ի վավերապայմանները";
+    StepActivity = "Вид деятельности", "Type of activity", "Գործունեության տեսակը";
+    StepClient = "Первый клиент", "First client", "Առաջին հաճախորդը";
+    StepInvoice = "Первый счёт", "First invoice", "Առաջին հաշիվը";
+    StepPdf = "PDF счёта", "Invoice PDF", "Հաշվի PDF";
+    /// Для экранного диктора: у пройденного шага глазу видна галочка.
+    StepDone = "готово", "done", "պատրաստ է";
+    StepsFillRequisites = "Заполнить реквизиты", "Fill in your details", "Լրացնել վավերապայմանները";
+    StepsFillActivity = "Указать вид деятельности", "Add your type of activity", "Նշել գործունեության տեսակը";
+    StepsOpenInvoice = "Открыть счёт", "Open the invoice", "Բացել հաշիվը";
+    StepsHide = "Скрыть первые шаги", "Hide first steps", "Թաքցնել առաջին քայլերը";
+    StepsFinish = "Готово", "Done", "Պատրաստ է";
     /// Формы по шагам (дизайн «Kvartik Design»): «назад» кружком — для
     /// экранного диктора, номер шага — «1 / 2» глазу и словами диктору.
     Back = "Назад", "Back", "Հետ";
@@ -787,6 +812,11 @@ strings! {
         "Չպահպանվեց. ուղղեք այն դաշտերը, որոնց տակ գրված է՝ ինչն է սխալ։";
     /// Группа полей: имя, ՀՎՀՀ, адрес, связь, логотип.
     ProfileRequisites = "Реквизиты", "Business details", "Վավերապայմաններ";
+    /// Над короткой формой первых шагов.
+    ProfileBriefAbout =
+        "Здесь только то, что нужно первому счёту: заполните языки, на которых выставляете счета. Остальное можно добавить потом в профиле.",
+        "Only what your first invoice needs: fill in the languages you invoice in. You can add the rest to your profile later.",
+        "Այստեղ միայն առաջին հաշվի համար անհրաժեշտն է. լրացրեք այն լեզուները, որոնցով հաշիվներ եք դուրս գրում։ Մնացածը կարող եք ավելացնել հետո՝ պրոֆիլում։";
     /// Имя ИП на трёх языках — каждое для документов на своём языке.
     ProfileNameHint =
         "Имя ИП\u{A0}— как его писать в счёте и акте на этом языке, например «ИП Арам Петросян». По-английски\u{A0}— латиницей.",
@@ -1797,6 +1827,11 @@ strings! {
     /// Шаблон: строка по умолчанию, пока человек не выбрал свою. Не «по
     /// закону»: по коду закон узнаёт только высокие технологии.
     ActivityKindDefault = "По умолчанию: {}", "Default: {}", "Լռելյայն՝ {}";
+    /// Шаблон под кодом: ставка, квартал и последний день (задача 28).
+    ActivityRateDue =
+        "Ставка\u{A0}— {}. Расчёт и налог за {}\u{A0}— до {}.",
+        "Rate: {}. The return and tax for {} are due by {}.",
+        "Դրույքաչափը՝ {}։ {}-ի հաշվարկը և հարկը՝ մինչև {}։";
     ActivityKindHint =
         "По коду закон узнаёт только IT из списка правительства\u{A0}— 1\u{A0}%. Торговлю, производство, общепит, аренду и роялти выберите сами и сверьте с бухгалтером.",
         "By code, the law only recognises IT on the government list\u{A0}— 1%. Choose trade, production, catering, rent or royalties yourself and check with your accountant.",

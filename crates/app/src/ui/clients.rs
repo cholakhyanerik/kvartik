@@ -48,6 +48,9 @@ use crate::store::{Store, StoreError, Writes};
 #[derive(Clone, Copy)]
 pub struct Clients {
     state: RwSignal<State>,
+    /// Что показывает раздел — здесь, а не в самом разделе: первые шаги
+    /// открывают форму нового клиента (`new_client`).
+    mode: RwSignal<Mode>,
 }
 
 /// Где клиенты.
@@ -69,7 +72,13 @@ impl Clients {
     pub fn new() -> Self {
         Self {
             state: RwSignal::new(State::Loading),
+            mode: RwSignal::new(Mode::List),
         }
+    }
+
+    /// Открыть форму нового клиента — из первых шагов (`ui/onboarding.rs`).
+    pub fn new_client(&self) {
+        self.mode.set(Mode::New);
     }
 
     /// Прочитать клиентов из базы: когда она открылась и когда её
@@ -179,6 +188,7 @@ struct Ctx {
     notice: RwSignal<Option<Notice>>,
     /// Открытые формы окна: форма клиента отмечается в них, пока открыта.
     forms: Forms,
+    router: Router,
 }
 
 /// Раздел на языке окна — под заголовком экрана, частью wasm с первого
@@ -199,9 +209,10 @@ pub fn ClientsSection(
         documents,
         base,
         backups,
-        mode: RwSignal::new(Mode::List),
+        mode: clients.mode,
         notice: RwSignal::new(None),
         forms,
+        router,
     };
     // Копию восстановили — клиенты в базе могли стать другими. Здесь, а не
     // в части экрана: клиенты нужны и счетам на главном экране, а экран мог
@@ -692,6 +703,7 @@ fn ClientForm(ctx: Ctx, existing: Option<Client>) -> impl IntoView {
         mode,
         notice,
         forms,
+        router,
         ..
     } = ctx;
     forms.hold();
@@ -751,12 +763,16 @@ fn ClientForm(ctx: Ctx, existing: Option<Client>) -> impl IntoView {
                     backups.data_saved();
                     notice.set(Some(Notice::Saved));
                     mode.set(Mode::List);
+                    router.form_closed();
                 }
                 Err(error) => failure.set(Some(error)),
             }
         });
     };
-    let leave = move || mode.set(Mode::List);
+    let leave = move || {
+        mode.set(Mode::List);
+        router.form_closed();
+    };
     // Шаг сменился — прежняя жалоба к нему не относится.
     Effect::watch(move || step.get(), move |_, _, _| invalid.set(false), false);
 

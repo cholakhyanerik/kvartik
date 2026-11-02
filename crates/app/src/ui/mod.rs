@@ -223,7 +223,7 @@ pub fn App() -> impl IntoView {
     view! {
         {move || welcome.get().then(|| view! {
             <div inert=inert>
-                <Welcome window_lang open=welcome router />
+                <Welcome window_lang open=welcome router program />
             </div>
         })}
         <div class="app" hidden=move || welcome.get() inert=inert>
@@ -232,7 +232,7 @@ pub fn App() -> impl IntoView {
                 <UpdateNotice lang program forms />
                 <StorageAlert lang storage />
                 <section id=Screen::Home.id() class="screen" hidden=hidden(Screen::Home)>
-                    <Home lang router program backups profiles documents clients tax />
+                    <Home lang router program backups profiles documents clients tax welcome />
                 </section>
                 <section id=Screen::Documents.id() class="screen" hidden=hidden(Screen::Documents)>
                     <DocumentsScreen lang documents clients profiles licenses base backups router forms />
