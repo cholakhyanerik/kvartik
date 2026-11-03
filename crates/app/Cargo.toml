@@ -32,7 +32,10 @@ console_error_panic_hook = "0.1.7"
 # в DOM (`src/ui/panic.rs`, задача 48), шрифты документа у своего сайта
 # (`fetch`, `Response`; задача 12), файл с именем для «Поделиться»
 # (`FilePropertyBag`; задача 13 — сам Web Share в `web-sys` нестабилен,
-# привязки к нему свои, `src/platform/share.rs`). Все три крейта уже
+# привязки к нему свои, `src/platform/share.rs`), папка автокопии
+# (`FileSystem…`, `WritableStream`; задача 29 — выбор папки и разрешения
+# в `web-sys` нестабильны, привязки к ним свои,
+# `src/platform/autobackup.rs`). Все три крейта уже
 # были в дереве через Leptos — новых авторов
 # нет; версии — те же, что в замке. Фичи `web-sys` — ровно нужные
 # интерфейсы: каждая лишняя — привязки, которые никто не зовёт. Будущее
@@ -58,6 +61,13 @@ web-sys = { version = "0.3.107", features = [
     "File",
     "FileList",
     "FilePropertyBag",
+    "FileSystemDirectoryHandle",
+    "FileSystemFileHandle",
+    "FileSystemGetDirectoryOptions",
+    "FileSystemGetFileOptions",
+    "FileSystemHandle",
+    "FileSystemHandleKind",
+    "FileSystemWritableFileStream",
     "HtmlCollection",
     "HtmlElement",
     "HtmlInputElement",
@@ -93,6 +103,7 @@ web-sys = { version = "0.3.107", features = [
     "Url",
     "VisibilityState",
     "Window",
+    "WritableStream",
 ] }
 
 # Браузерные тесты хранилища (`src/store/tests.rs`) и плашки сбоя
@@ -124,6 +135,7 @@ web-sys = { version = "0.3.107", features = [
     "DataTransfer",
     "DataTransferItem",
     "DataTransferItemList",
+    "FileSystemRemoveOptions",
     "History",
     "HtmlSelectElement",
     "KeyboardEventInit",

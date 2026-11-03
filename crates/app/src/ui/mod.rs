@@ -176,7 +176,13 @@ pub fn App() -> impl IntoView {
     let licenses = Licenses::start(clock::today());
     let tax = tax::Ctx::new(lang, sources, base, backups, licenses, forms);
     leptos::task::spawn_local(async move {
-        match Store::open(move |event| storage.update(|state| state.apply(event))).await {
+        // Запись в базу — дело автокопии, а не состояния хранилища: сигнал
+        // хранилища на каждое сохранение будил бы всех, кто его читает.
+        let on_event = move |event| match event {
+            store::Event::Written => backups.written(),
+            event => storage.update(|state| state.apply(event)),
+        };
+        match Store::open(on_event).await {
             Ok(store) => {
                 let store = Rc::new(store);
                 base.opened(Rc::clone(&store));

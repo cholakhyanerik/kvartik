@@ -28,9 +28,9 @@ wasm-bindgen и программы разреза — и `tools/browser/check.mj
 подбирает зависимости под `rust-version`), проверки, адаптировать код, а не
 глушить `allow`.
 
-**Что `cargo outdated` показывает, а поднимать не надо** (2026-10-16): у
-`kvartik-sw` — `wasmparser` и `wasm-encoder` 0.262, `sha2` 0.11, `base64`
-0.23. Их версия — та, что уже в дереве через `wasm_split_cli_support`
+**Что `cargo outdated` показывает, а поднимать не надо** (2026-10-16, снова
+2026-11-03): у `kvartik-sw` — `wasmparser` и `wasm-encoder` 0.263, `sha2` 0.11,
+`base64` 0.23. Их версия — та, что уже в дереве через `wasm_split_cli_support`
 и Leptos (комментарии в `crates/sw/Cargo.toml`): своя новее дала бы второй
 экземпляр крейта в сборке. Поднимаются вместе с тем, кто их тянет.
 

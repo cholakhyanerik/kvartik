@@ -17,6 +17,7 @@ use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
 use super::*;
 
+pub(crate) mod autobackup;
 mod backup;
 
 wasm_bindgen_test_configure!(run_in_browser);
@@ -103,6 +104,11 @@ impl Probe {
 
     fn events(&self) -> Vec<Event> {
         self.events.borrow().clone()
+    }
+
+    /// Сколько раз хранилище сказало, что действие записано.
+    fn written(&self) -> usize {
+        self.events.borrow().iter().filter(|event| **event == Event::Written).count()
     }
 
     /// Удалить базу. Соединения к этому времени закрыты (`Store` брошен).
@@ -248,6 +254,8 @@ async fn failed_action_leaves_previous_state() {
     let tx = store.read().expect("транзакция чтения");
     assert_eq!(tx.get::<Note>(first.meta.id()).await, Ok(Some(first)));
     assert_eq!(tx.get::<Note>(second.meta.id()).await, Ok(None));
+    // Несохранённое действие автокопию не зовёт (задача 29).
+    assert_eq!(probe.written(), 1, "события: {:?}", probe.events());
 
     drop(store);
     probe.delete().await;
@@ -290,6 +298,7 @@ async fn waiting_on_something_else_writes_nothing() {
     let tx = store.read().expect("транзакция чтения");
     assert_eq!(tx.get::<Note>(first.meta.id()).await, Ok(Some(first)));
     assert_eq!(tx.get::<Note>(second.meta.id()).await, Ok(None));
+    assert_eq!(probe.written(), 1, "события: {:?}", probe.events());
 
     drop(store);
     probe.delete().await;
@@ -482,7 +491,8 @@ async fn blocked_open_waits_and_then_opens() {
 }
 
 /// Первая запись в сессии просит постоянное хранение, и ответ браузера
-/// приходит событием; вторая — уже не просит.
+/// приходит событием; вторая — уже не просит. О каждой записи хранилище
+/// говорит само (`Event::Written`, задача 29): по нему пишется автокопия.
 #[wasm_bindgen_test]
 async fn first_write_asks_for_persistence_once() {
     let probe = Probe::new();
@@ -498,17 +508,19 @@ async fn first_write_asks_for_persistence_once() {
             .expect("запись сохранена");
     }
     for _ in 0..100 {
-        if !probe.events().is_empty() {
+        if probe.events().iter().any(|event| matches!(event, Event::Persistence(_))) {
             break;
         }
         sleep(20).await;
     }
     sleep(100).await;
     let events = probe.events();
+    let asked: Vec<&Event> = events.iter().filter(|event| **event != Event::Written).collect();
     assert!(
-        matches!(events.as_slice(), [Event::Persistence(_)]),
+        matches!(asked.as_slice(), [Event::Persistence(_)]),
         "события: {events:?}"
     );
+    assert_eq!(probe.written(), 2, "события: {events:?}");
 
     drop(store);
     probe.delete().await;

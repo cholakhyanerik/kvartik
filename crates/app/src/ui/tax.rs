@@ -45,7 +45,7 @@ use leptos::prelude::*;
 
 use super::annual::{AnnualCard, AnnualEntry, AnnualPage};
 use super::deadlines::{DeadlineReminder, DeadlinesEntry, DeadlinesPage};
-use super::backup::{BackupChip, Backups};
+use super::backup::{AutoCards, BackupChip, Backups};
 use super::documents::{Documents, SettlementReminder};
 use super::form::Forms;
 use super::icon::{Icon, icon};
@@ -372,7 +372,8 @@ impl Note {
 /// из части книги, где считается налог и разобран файл правил. Часть грузится, когда в базе есть данные: на пустой
 /// карточке сказать нечего, и первый заход её не качает. Пока часть
 /// грузится или если не загрузилась — карточек нет: о сбое скажет экран
-/// налога, а налог открывается и вкладкой.
+/// налога, а налог открывается и вкладкой. Там же — карточки автокопии
+/// (`ui/backup.rs`, задача 29): с ними часть её и запускает.
 #[component]
 pub fn TaxCard(ctx: Ctx) -> impl IntoView {
     let wanted = Memo::new(move |_| ctx.backups.has_data());
@@ -604,6 +605,7 @@ pub(super) enum Part {
 pub(super) fn content(ctx: Ctx, part: Part) -> AnyView {
     match part {
         Part::Card => view! {
+            <AutoCards lang=ctx.lang backups=ctx.backups />
             <LicenseCard ctx />
             <DeadlineReminder ctx />
             <SettlementReminder lang=ctx.lang documents=ctx.sources.documents today=ctx.today />

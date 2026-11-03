@@ -531,11 +531,7 @@ impl Browser {
                 Self::Other
             };
         }
-        // Планшет на Android в режиме «версия для компьютера» называет себя
-        // Linux'ом — так у Firefox на планшете по умолчанию (по исходникам
-        // Firefox 158, 2026-10-20). Его выдаёт касание: у компьютера на
-        // Linux экран обычно без него, а Chromebook — `CrOS`, а не Linux.
-        let android = has("Android") || (touch && has("Linux"));
+        let android = android_agent(agent, touch);
         if has("SamsungBrowser/") {
             Self::Samsung
         } else if has("Firefox/") {
@@ -558,6 +554,25 @@ impl Browser {
             Self::Chrome
         }
     }
+}
+
+/// Android — в любом браузере и во встроенном окне другой программы
+/// (WebView): автокопии там нет (`platform::autobackup::available`).
+pub fn android() -> bool {
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let navigator = window.navigator();
+    android_agent(&navigator.user_agent().unwrap_or_default(), navigator.max_touch_points() > 0)
+}
+
+/// Android по строке `User-Agent` и касанию. Планшет на Android в режиме
+/// «версия для компьютера» называет себя Linux'ом — так у Firefox на
+/// планшете по умолчанию (по исходникам Firefox 158, 2026-10-20). Его
+/// выдаёт касание: у компьютера на Linux экран обычно без него, а
+/// Chromebook — `CrOS`, а не Linux.
+fn android_agent(agent: &str, touch: bool) -> bool {
+    agent.contains("Android") || (touch && agent.contains("Linux"))
 }
 
 /// iPhone или iPad — в браузере или программой с экрана «Домой».

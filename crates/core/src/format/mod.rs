@@ -29,6 +29,7 @@
 //! ломается громко, а не стирает поле у того, кто откроет данные старой
 //! версией.
 
+pub mod autobackup;
 pub mod backup;
 pub(crate) mod base64;
 

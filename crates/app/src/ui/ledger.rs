@@ -38,7 +38,7 @@ use leptos::prelude::*;
 use leptos::wasm_split::SplitLoaderError;
 use web_sys::HtmlInputElement;
 
-use super::backup::{BackupChip, Backups};
+use super::backup::{self, AutoView, BackupChip, Backups};
 use super::clients::Clients;
 use super::documents::{DateField, Documents, kind_key, number_problem, retype, shown_problem};
 use super::form::{CURRENCIES, Forms, TextField, currency_code, currency_key, optional};
@@ -124,6 +124,8 @@ pub(super) enum BookView {
     Ledger(Ctx),
     /// Карточка налога на главном экране или содержимое экрана налога.
     Tax(tax::Ctx, tax::Part),
+    /// Автокопия на экране копии (`ui/backup.rs`, задача 29).
+    Auto(AutoView),
 }
 
 split! {
@@ -131,10 +133,13 @@ split! {
     /// считается из книги, а своей частью он делил общий код почти со всеми
     /// частями: правила — с формами, книгу — с копией, — и программа разреза
     /// завела бы 28 лишних кусков (замер 0.0.47; CLAUDE.md, Правило 6).
+    /// Автокопия на экране копии — тоже здесь: своя часть у неё завела 13
+    /// лишних кусков (замер задачи 29).
     pub(super) fn book_part(view: BookView) -> AnyView, preload preload_book {
         match view {
             BookView::Ledger(ctx) => view! { <LedgerBody ctx /> }.into_any(),
             BookView::Tax(ctx, part) => tax::content(ctx, part),
+            BookView::Auto(view) => backup::auto_view(view),
         }
     }
 }
@@ -143,6 +148,11 @@ split! {
 /// функция части видна только своему модулю (`split!`).
 pub(super) async fn tax_part(ctx: tax::Ctx, part: tax::Part) -> Result<AnyView, SplitLoaderError> {
     book_part(BookView::Tax(ctx, part)).await
+}
+
+/// Автокопия на экране копии — из части книги.
+pub(super) async fn auto_part(view: AutoView) -> Result<AnyView, SplitLoaderError> {
+    book_part(BookView::Auto(view)).await
 }
 
 /// Где записи книги.

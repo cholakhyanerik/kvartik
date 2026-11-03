@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.72",
+      "date": "2026-11-03",
+      "hy": [
+        "Ավտոմատ պատճեն. համակարգչի Chrome-ում և Edge-ում պատճենի էկրանին կարող եք ընտրել OneDrive-ի, Google Drive-ի կամ Dropbox-ի թղթապանակ, և փոփոխություններից հետո պատճենն ինքը կպահվի դրա «Kvartik» թղթապանակում՝ պատճենների գաղտնաբառով։",
+        "Դրա համար գաղտնաբառը մուտքագրվում է մեկ անգամ, իսկ ամիսը մեկ անգամ ծրագիրը կխնդրի նորից մուտքագրել այն, որպեսզի չմոռացվի։ Արված ավտոմատ պատճենը համարվում է պատճեն։"
+      ],
+      "ru": [
+        "Автокопия: в Chrome и Edge на компьютере на экране копии можно выбрать папку OneDrive, Google Drive или Dropbox, и после изменений копия сама ляжет в её папку «Kvartik» под паролем копий.",
+        "Пароль для неё вводится один раз, а раз в месяц программа попросит ввести его снова, чтобы он не забылся. Сделанная автокопия считается копией."
+      ],
+      "en": [
+        "Automatic backup: in Chrome and Edge on a computer, you can choose a OneDrive, Google Drive or Dropbox folder on the Backup screen, and after changes a backup will be saved to its “Kvartik” folder on its own, under your backup password.",
+        "You enter the password for it once, and once a month the app will ask for it again so you don't forget it. An automatic backup counts as a backup."
+      ]
+    },
+    {
       "version": "0.0.71",
       "date": "2026-11-03",
       "hy": [
@@ -296,22 +312,6 @@
       "en": [
         "Deadlines, a new screen on the Tax tab: the last day to file the quarterly return and pay the tax, file the turnover tax application, pay the annual payments and the health insurance premium, and, for citizens, file the universal income declaration.",
         "A deadline that falls on a weekend or a holiday moves to the next working day. A week before a deadline, the app reminds you about it on Home."
-      ]
-    },
-    {
-      "version": "0.0.52",
-      "date": "2026-10-20",
-      "hy": [
-        "Գլխավոր էկրանին «Տեղադրել» կոճակն այժմ միշտ կա, քանի դեռ ծրագիրը տեղադրված չէ։ Որտեղ դիտարկիչն ինքը չի տեղադրում ծրագիրը, կոճակը բացատրում է, թե ինչպես դա անել այդ դիտարկիչի ցանկից՝ Safari-ում iPhone-ի, iPad-ի և Mac-ի վրա, Chrome-ում, Edge-ում, Firefox-ում և Samsung Internet-ում։",
-        "Mac-ում, ինչպես iPhone-ում, ծրագիրը լավ է տեղադրել նախքան տվյալներ մուտքագրելը. Dock-ի ծրագիրը չի տեսնում Safari-ի տվյալները։"
-      ],
-      "ru": [
-        "Кнопка «Установить» на главном экране теперь есть всегда, пока программа не установлена. Где браузер не ставит программу сам, она объясняет, как поставить её из меню этого браузера: в Safari на iPhone, iPad и Mac, в Chrome, Edge, Firefox и Samsung Internet.",
-        "На Mac, как и на iPhone, программу лучше установить до того, как вводить данные: программа из Dock не видит данных Safari."
-      ],
-      "en": [
-        "The Install button on Home is now always there until the app is installed. Where the browser doesn't install the app itself, the button explains how to do it from that browser's menu: in Safari on iPhone, iPad and Mac, and in Chrome, Edge, Firefox and Samsung Internet.",
-        "On a Mac, as on iPhone, install the app before entering any data: the app in the Dock doesn't see Safari's data."
       ]
     }
   ]

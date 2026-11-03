@@ -1192,6 +1192,11 @@ impl DeviceKey {
         self.check == check
     }
 
+    /// Проверочное значение — SHA-256 ключа.
+    pub fn check(&self) -> &[u8] {
+        &self.check
+    }
+
     /// Запись для хранилища устройства.
     pub fn to_text(&self) -> String {
         serde_json::to_string(&DeviceKeyFields {

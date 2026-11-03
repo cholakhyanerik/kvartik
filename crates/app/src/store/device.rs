@@ -1,8 +1,11 @@
 //! Что знает это устройство: когда здесь в последний раз сделали копию,
 //! проверочное значение пароля копий (`DeviceKey`), выбранный язык окна,
 //! день начала пробного периода (задача 25), что с новыми версиями: о какой
-//! человек уже знает и какую окно уже пробовало включить, — и скрыты ли
-//! первые шаги на главном экране (задача 28).
+//! человек уже знает и какую окно уже пробовало включить, — скрыты ли
+//! первые шаги на главном экране (задача 28) и что с автокопией (задача 29):
+//! когда была последняя, когда в последний раз менялись данные, метка
+//! устройства и когда вводили пароль. Папку и ключ автокопии `localStorage`
+//! не держит — это объекты браузера, они в своей базе (`store/autobackup.rs`).
 //!
 //! Это не данные человека, а состояние устройства, поэтому оно лежит не
 //! в базе записей и не попадает в копию: перенесённая на новое устройство
@@ -21,6 +24,7 @@
 //! кончилось: тогда чтение даёт «нет», а запись — `false`, и окно живёт
 //! дальше без них.
 
+use kvartik_core::format::autobackup::DeviceTag;
 use kvartik_core::format::backup::DeviceKey;
 use kvartik_core::i18n::Lang;
 use kvartik_core::model::date::Date;
@@ -48,9 +52,7 @@ impl Device {
     /// Когда на этом устройстве сделана последняя копия; `None` — не
     /// делалась или запись не читается.
     pub fn last_backup(&self) -> Option<Timestamp> {
-        let millis: i64 = self.get("last_backup")?.parse().ok()?;
-        (millis.unsigned_abs() <= Timestamp::MAX_MILLIS.unsigned_abs())
-            .then(|| Timestamp::from_unix_millis(millis))
+        self.moment("last_backup")
     }
 
     /// Запомнить момент копии. `false` — `localStorage` отказал.
@@ -126,6 +128,58 @@ impl Device {
         self.set("steps_hidden", "1")
     }
 
+    /// Когда последняя удавшаяся автокопия (задача 29) начала читать базу;
+    /// `None` — не было или запись не читается.
+    pub fn last_auto(&self) -> Option<Timestamp> {
+        self.moment("last_auto")
+    }
+
+    /// Запомнить момент автокопии. `false` — `localStorage` отказал.
+    pub fn set_last_auto(&self, at: Timestamp) -> bool {
+        self.set("last_auto", &at.unix_millis().to_string())
+    }
+
+    /// Когда в базу в последний раз что-то записали — для автокопии: есть ли
+    /// изменения, которых нет в её файле. Помнится между открытиями:
+    /// закрытая до автокопии вкладка оставляет её на следующее открытие.
+    pub fn changed(&self) -> Option<Timestamp> {
+        self.moment("changed")
+    }
+
+    /// Запомнить момент записи. `false` — `localStorage` отказал.
+    pub fn set_changed(&self, at: Timestamp) -> bool {
+        self.set("changed", &at.unix_millis().to_string())
+    }
+
+    /// Метка этого устройства в именах файлов автокопии; `None` — ещё нет.
+    pub fn auto_tag(&self) -> Option<DeviceTag> {
+        DeviceTag::parse(&self.get("auto_tag")?)
+    }
+
+    /// Запомнить метку устройства. `false` — `localStorage` отказал: метка
+    /// будет новой, и файлы прежней метки останутся в папке, как чужие.
+    pub fn set_auto_tag(&self, tag: DeviceTag) -> bool {
+        self.set("auto_tag", tag.as_str())
+    }
+
+    /// Когда человек в последний раз ввёл пароль копий этого устройства
+    /// и тот подошёл; `None` — неизвестно.
+    pub fn password_entered(&self) -> Option<Timestamp> {
+        self.moment("password_entered")
+    }
+
+    /// Запомнить ввод пароля. `false` — `localStorage` отказал.
+    pub fn set_password_entered(&self, at: Timestamp) -> bool {
+        self.set("password_entered", &at.unix_millis().to_string())
+    }
+
+    /// Момент под этим именем — как у [`Self::last_backup`].
+    fn moment(&self, name: &str) -> Option<Timestamp> {
+        let millis: i64 = self.get(name)?.parse().ok()?;
+        (millis.unsigned_abs() <= Timestamp::MAX_MILLIS.unsigned_abs())
+            .then(|| Timestamp::from_unix_millis(millis))
+    }
+
     fn get(&self, name: &str) -> Option<String> {
         storage()?
             .get_item(&format!("{}{name}", self.prefix))
@@ -145,7 +199,19 @@ impl Device {
     #[cfg(all(test, target_arch = "wasm32"))]
     pub(super) fn clear(&self) {
         if let Some(storage) = storage() {
-            for name in ["last_backup", "backup_key", "lang", "trial", "seen_version", "update_tried", "steps_hidden"] {
+            for name in [
+                "last_backup",
+                "backup_key",
+                "lang",
+                "trial",
+                "seen_version",
+                "update_tried",
+                "steps_hidden",
+                "last_auto",
+                "changed",
+                "auto_tag",
+                "password_entered",
+            ] {
                 let _ = storage.remove_item(&format!("{}{name}", self.prefix));
             }
         }
