@@ -31,6 +31,7 @@
 
 pub mod autobackup;
 pub mod backup;
+pub mod export;
 pub(crate) mod base64;
 
 use serde::de::DeserializeOwned;

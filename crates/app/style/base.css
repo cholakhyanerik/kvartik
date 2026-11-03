@@ -1938,6 +1938,13 @@ legend.question {
   font-variant-numeric: tabular-nums;
 }
 
+/* Выгрузка для бухгалтера (задача 30) — под списком книги: она нужна раз
+   в квартал, а список — каждый день. Выбор периода — над ссылками. */
+.export .seg,
+.export .actions {
+  margin-top: var(--space-3);
+}
+
 /* «Добавить доход» и «Добавить расход» — поровну в ряд. */
 .ledger-add button {
   flex: 1 1 0;

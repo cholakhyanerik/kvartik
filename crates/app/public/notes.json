@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.73",
+      "date": "2026-11-03",
+      "hy": [
+        "Մատյանում հայտնվեց արտահանում հաշվապահի համար. ցուցակի տակ կարող եք ներբեռնել եռամսյակը կամ ամբողջ տարին Excel ֆայլով (XLSX)՝ եկամուտների և ծախսերի ու փաստաթղթերի թերթերով, կամ երկու CSV ֆայլով։",
+        "Excel-ում և Google Sheets-ում գումարները թվեր են, իսկ ամսաթվերը՝ ամսաթվեր. դրանք կարելի է գումարել և դասավորել։ Արտահանումն աշխատում է նաև առանց լիցենզիայի։"
+      ],
+      "ru": [
+        "В книге появилась выгрузка для бухгалтера: под списком можно скачать квартал или весь год файлом Excel (XLSX) с листами доходов и расходов и документов или двумя файлами CSV.",
+        "Суммы в Excel и Google Таблицах — числа, а даты — даты: их можно складывать и сортировать. Выгрузка работает и без лицензии."
+      ],
+      "en": [
+        "The ledger can now export for your accountant: below the list, download a quarter or the whole year as an Excel file (XLSX) with income and expenses and documents sheets, or as two CSV files.",
+        "In Excel and Google Sheets, amounts are numbers and dates are dates, so you can add them up and sort them. Export works without a license too."
+      ]
+    },
+    {
       "version": "0.0.72",
       "date": "2026-11-03",
       "hy": [
@@ -296,22 +312,6 @@
       "en": [
         "You can now add your deadlines to your phone or email calendar: on the Deadlines screen, “Download my deadlines” gives you a calendar file with your deadlines for the year ahead and today's amounts, with reminders a week and a day before each deadline.",
         "You can also subscribe there to a shared deadline calendar for IEs on turnover tax; it updates itself."
-      ]
-    },
-    {
-      "version": "0.0.53",
-      "date": "2026-10-20",
-      "hy": [
-        "Ժամկետներ՝ նոր էկրան «Հարկ» բաժնում. մինչև որ օրը ներկայացնել եռամսյակի հաշվարկը և վճարել հարկը, ներկայացնել շրջանառության հարկի հայտարարությունը, վճարել տարեկան վճարները և առողջության ապահովագրավճարը, իսկ քաղաքացիներին՝ ներկայացնել եկամուտների համընդհանուր հայտարարագիրը։",
-        "Հանգստյան կամ տոնական օրն ընկած ժամկետը տեղափոխվում է հաջորդ աշխատանքային օր։ Ժամկետից մեկ շաբաթ առաջ ծրագիրը հիշեցնում է դրա մասին գլխավոր էկրանին։"
-      ],
-      "ru": [
-        "Сроки — новый экран во вкладке «Налог»: до какого дня подать расчёт и заплатить налог за квартал, подать заявление о налоге с оборота, заплатить годовые платежи и медстраховку, а гражданам — подать всеобщую декларацию о доходах.",
-        "Срок, выпавший на выходной или праздник, переносится на следующий рабочий день. За неделю до срока программа напоминает о нём на главном экране."
-      ],
-      "en": [
-        "Deadlines, a new screen on the Tax tab: the last day to file the quarterly return and pay the tax, file the turnover tax application, pay the annual payments and the health insurance premium, and, for citizens, file the universal income declaration.",
-        "A deadline that falls on a weekend or a holiday moves to the next working day. A week before a deadline, the app reminds you about it on Home."
       ]
     }
   ]

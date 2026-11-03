@@ -137,8 +137,9 @@ impl Clients {
     }
 
     /// Что-то из списка, посчитанное по прочитанным клиентам; пока их нет —
-    /// значение по умолчанию.
-    fn with<T: Default>(&self, read: impl FnOnce(&[Client], usize) -> T) -> T {
+    /// значение по умолчанию. Выгрузка книги (`ui/ledger/export.rs`) берёт
+    /// отсюда имена клиентов записей.
+    pub(super) fn with<T: Default>(&self, read: impl FnOnce(&[Client], usize) -> T) -> T {
         self.state.with(|state| match state {
             State::Ready {
                 clients,

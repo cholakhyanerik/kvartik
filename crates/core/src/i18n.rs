@@ -1714,6 +1714,66 @@ strings! {
         "Գրառումը ջնջվեց։ Այն կարելի է վերականգնել։";
     LedgerRestoredNotice = "Запись восстановлена.", "Entry restored.", "Գրառումը վերականգնվեց։";
 
+    /// Выгрузка для бухгалтера (задача 30, `ui/ledger/export.rs`). CSV — по
+    /// RFC 4180: запятая и точка (решение человека 2026-11-03,
+    /// `format::export`); Excel с русскими или армянскими настройками Windows
+    /// открыл бы такой файл одной колонкой, а таблица с русскими настройками
+    /// может прочесть `12.10` датой, и подпись ведёт их к XLSX.
+    ExportTitle = "Выгрузка для бухгалтера", "Export for your accountant", "Արտահանում հաշվապահի համար";
+    ExportAbout =
+        "Доходы и расходы и выпущенные документы за период\u{A0}— для бухгалтера или для себя. XLSX открывают Excel и Google Таблицы, а CSV\u{A0}— программы учёта: поля в нём через запятую, дробная часть через точку.",
+        "Income and expenses and issued documents for the period, for your accountant or for yourself. Excel and Google Sheets open XLSX; CSV is for accounting software, with commas between fields and a point before decimals.",
+        "Ժամանակահատվածի եկամուտներն ու ծախսերը և թողարկված փաստաթղթերը՝ հաշվապահի կամ ձեզ համար։ XLSX-ը բացում են Excel-ը և Google Sheets-ը, իսկ CSV-ն՝ հաշվապահական ծրագրերը. դրանում դաշտերը բաժանված են ստորակետով, տասնորդական մասը՝ կետով։";
+    /// Выбор периода — для экранного диктора: сами кнопки — квартал и год.
+    ExportPeriod = "За какой период", "Which period", "Որ ժամանակահատվածի համար";
+    ExportXlsx = "Файл Excel (XLSX)", "Excel file (XLSX)", "Excel ֆայլ (XLSX)";
+    ExportCsvLedger = "CSV доходов и расходов", "Income and expenses CSV", "Եկամուտների և ծախսերի CSV";
+    ExportCsvDocuments = "CSV документов", "Documents CSV", "Փաստաթղթերի CSV";
+    ExportFailed =
+        "Файл не собрался: документы или записи книги не прочитаны, или браузеру не хватило памяти. Перезагрузите страницу и попробуйте снова.",
+        "The file couldn't be made: documents or ledger records aren't read, or the browser ran out of memory. Reload the page and try again.",
+        "Ֆայլը չհավաքվեց. փաստաթղթերը կամ մատյանի գրառումները կարդացված չեն, կամ դիտարկիչին հիշողություն չբավարարեց։ Վերաբեռնեք էջը և նորից փորձեք։";
+    /// Шаблон: сколько строк выгрузки в валюте без курса — их сумма в драмах
+    /// пустая (Правило 2); говорится после того, как файл отдан.
+    ExportUnrated =
+        "Строк в валюте без курса ЦБ в выгрузке: {}. Сумма в драмах у них пустая\u{A0}— укажите курс в книге или в карточке документа.",
+        "Foreign-currency lines without a CBA rate in the export: {}. Their amount in drams is empty\u{A0}— enter the rate in the ledger or on the document card.",
+        "Արտահանման մեջ արժույթով տողեր առանց ԿԲ փոխարժեքի՝ {}։ Դրանց դրամով գումարը դատարկ է. նշեք փոխարժեքը մատյանում կամ փաստաթղթի քարտում։";
+    /// Шаблон: сколько нечитаемых документов и записей книги.
+    ExportUnreadable =
+        "Нечитаемые записи ({}) в выгрузку не вошли: восстановите их из резервной копии.",
+        "Unreadable records ({}) aren't in the export: restore them from a backup.",
+        "Չկարդացվող գրառումները ({}) արտահանման մեջ չեն մտել. վերականգնեք դրանք պահուստային պատճենից։";
+    /// Столбцы выгрузки, которых нет среди подписей форм (`format::export`).
+    /// Дата строки книги — та, по которой она в квартале: оказания услуги
+    /// у дохода, получения у расхода (НК, ст. 257 и 258; CLAUDE.md, Правило 2).
+    ExportDate = "Дата оказания или получения", "Date of supply or receipt", "Մատուցման կամ ստացման ամսաթիվը";
+    ExportFlow = "Доход или расход", "Income or expense", "Եկամուտ կամ ծախս";
+    ExportDocument = "Документ", "Document", "Փաստաթուղթ";
+    ExportCounterparty = "Клиент или продавец", "Client or seller", "Հաճախորդ կամ վաճառող";
+    ExportRate = "Курс ЦБ, драмов за единицу", "CBA rate, drams per unit", "ԿԲ փոխարժեքը, դրամ՝ միավորի դիմաց";
+    ExportAmd = "Сумма в драмах", "Amount in drams", "Գումարը դրամով";
+    /// Лист документов: доход в драмах — только у документа дохода (у счёта
+    /// с действующим актом доход — акт, у аннулированного дохода нет).
+    ExportIncomeAmd = "Доход в драмах", "Income in drams", "Եկամուտը դրամով";
+    ExportPaid = "Дата оплаты", "Payment date", "Վճարման ամսաթիվը";
+    ExportDocumentsSheet = "Документы", "Documents", "Փաստաթղթեր";
+    ExportKind = "Вид документа", "Document type", "Փաստաթղթի տեսակը";
+    ExportNumber = "Номер", "Number", "Համարը";
+    ExportClientTin = "ИНН (ՀՎՀՀ) или налоговый номер", "TIN (ՀՎՀՀ) or tax ID", "ՀՎՀՀ կամ հարկային համար";
+    ExportPaidSum = "Оплачено", "Paid", "Վճարված է";
+    ExportLeft = "Осталось оплатить", "Left to pay", "Մնացել է վճարել";
+    ExportStatus = "Статус", "Status", "Կարգավիճակը";
+    ExportBasis = "Основание", "Based on", "Հիմքը";
+    ExportSettlementDay =
+        "Расчётный документ ՊԵԿ: дата выписки",
+        "SRC settlement document: date issued",
+        "ՊԵԿ հաշվարկային փաստաթուղթ՝ դուրս գրման ամսաթիվը";
+    ExportSettlementNumber =
+        "Расчётный документ ՊԵԿ: серия и номер",
+        "SRC settlement document: series and number",
+        "ՊԵԿ հաշվարկային փաստաթուղթ՝ սերիա-համարը";
+
     /// Форма записи книги.
     OpNewIncome = "Новый доход", "New income", "Նոր եկամուտ";
     OpNewExpense = "Новый расход", "New expense", "Նոր ծախս";

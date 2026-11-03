@@ -180,6 +180,41 @@ async function card(page, when) {
   checks.check(`${when}: PDF собран`, await page.waitFor(TEXT_IN("#documents", s("PdfDownload")), 30000));
 }
 
+/// Выгрузка для бухгалтера (задача 30) — под списком книги, из её части:
+/// ссылка получает файл по адресу `blob:` в самом нажатии, XLSX — пакет ZIP
+/// («PK»), CSV — с BOM UTF-8. Браузерные тесты частей не видят, а файл
+/// собирает код части книги.
+async function exported(page, when) {
+  await go(page, "#/ledger");
+  const shown = await page.waitFor(VISIBLE("#ledger section.export"));
+  if (!checks.check(`${when}: выгрузка под книгой`, shown)) return;
+  for (const [key, head, extension] of [["ExportXlsx", "504b0304", ".xlsx"], ["ExportCsvDocuments", "efbbbf", ".csv"]]) {
+    const file = await page.eval(`const a = [...document.querySelectorAll("#ledger section.export a")]
+        .find((a) => a.textContent.trim() === ${JSON.stringify(s(key))} && a.getClientRects().length > 0);
+      if (!a) return { error: "нет ссылки" };
+      a.click();
+      if (!a.href.startsWith("blob:")) return { error: "адрес не blob: " + a.href };
+      const bytes = new Uint8Array(await (await fetch(a.href)).arrayBuffer());
+      return { name: a.getAttribute("download"), size: bytes.length,
+        head: [...bytes.subarray(0, 4)].map((b) => b.toString(16).padStart(2, "0")).join("") };`);
+    checks.check(`${when}: файл «${s(key)}»`,
+      file?.head?.startsWith(head) && file.name.endsWith(extension) && file.size > 100, JSON.stringify(file));
+  }
+  checks.check(`${when}: выгрузка без слов о сбое`, await page.eval(`return document.querySelector("#ledger section.export [role=alert]") ? null : true;`));
+  // Адрес прежнего файла снимается: нажата соседняя ссылка — у XLSX его нет,
+  // выбран год — нет ни у одной, а имя файла — года (ревью задачи 30).
+  const links = `[...document.querySelectorAll("#ledger section.export a")]`;
+  checks.check(`${when}: соседняя ссылка сняла адрес прежнего файла`,
+    await page.eval(`return ${links}[0].href.startsWith("blob:") ? null : true;`));
+  const year = await page.eval(`[...document.querySelectorAll("#ledger section.export .seg button")][1].click();
+    await new Promise((r) => setTimeout(r, 300));
+    const all = ${links};
+    return { blobs: all.filter((a) => a.href.startsWith("blob:")).length, name: all[0].getAttribute("download") };`);
+  checks.check(`${when}: выбран год — адресов прежних файлов нет, имя года`,
+    year?.blobs === 0 && /^kvartik-\d{4}\.xlsx$/.test(year?.name ?? ""), JSON.stringify(year));
+  await page.eval(`[...document.querySelectorAll("#ledger section.export .seg button")][0].click(); return true;`);
+}
+
 /// Часть не загрузилась — слова и «Отмена»; снятая блокировка — экран.
 async function blocked(browser) {
   const page = await browser.page({ context: true });
@@ -432,6 +467,7 @@ async function main() {
     await forms(page, "с сетью");
     await screens(page, "с сетью");
     await card(page, "с сетью");
+    await exported(page, "с сетью");
     await backup(page, sample.password);
     const loaded = await page.eval(`return performance.getEntriesByType("resource").map((e) => e.name);`);
     const missing = parts.filter((p) => !loaded.some((u) => u.endsWith(`/app/${p}`)));
@@ -449,6 +485,7 @@ async function main() {
     await forms(page, "без сети");
     await screens(page, "без сети");
     await card(page, "без сети");
+    await exported(page, "без сети");
     checks.check("без сети: без плашки сбоя", await page.eval(NO_PANIC));
     const offline = [...new Set(page.errors)];
     checks.check("без сети: без ошибок в консоли", offline.length === 0, offline.slice(0, 8).join(" | "));

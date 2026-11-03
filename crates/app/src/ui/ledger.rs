@@ -53,6 +53,9 @@ use crate::platform::{clock, file, image};
 use crate::platform::file::Download;
 use crate::store::{Store, StoreError, Writes};
 
+mod export;
+use export::Export;
+
 /// Сколько строк список показывает сразу и прибавляет по «Показать ещё»:
 /// у торговли за квартал их сотни, а рисовать окну — только то, что видно
 /// (Правило 1).
@@ -732,6 +735,7 @@ fn LedgerList(ledger: Ledger) -> impl IntoView {
                 </ul>
             </Show>
         </Show>
+        <Export ctx quarter />
     }
 }
 
