@@ -1721,20 +1721,24 @@ strings! {
     /// может прочесть `12.10` датой, и подпись ведёт их к XLSX.
     ExportTitle = "Выгрузка для бухгалтера", "Export for your accountant", "Արտահանում հաշվապահի համար";
     ExportAbout =
-        "Доходы и расходы и выпущенные документы за период\u{A0}— для бухгалтера или для себя. XLSX открывают Excel и Google Таблицы, а CSV\u{A0}— программы учёта: поля в нём через запятую, дробная часть через точку.",
-        "Income and expenses and issued documents for the period, for your accountant or for yourself. Excel and Google Sheets open XLSX; CSV is for accounting software, with commas between fields and a point before decimals.",
-        "Ժամանակահատվածի եկամուտներն ու ծախսերը և թողարկված փաստաթղթերը՝ հաշվապահի կամ ձեզ համար։ XLSX-ը բացում են Excel-ը և Google Sheets-ը, իսկ CSV-ն՝ հաշվապահական ծրագրերը. դրանում դաշտերը բաժանված են ստորակետով, տասնորդական մասը՝ կետով։";
+        "Доходы и расходы, выпущенные документы и закрытые кварталы за период\u{A0}— для бухгалтера или для себя. XLSX открывают Excel и Google Таблицы. CSV\u{A0}— для программ учёта: в нём только книга и документы, поля через запятую, дробная часть через точку.",
+        "Income and expenses, issued documents and closed quarters for the period, for your accountant or for yourself. Excel and Google Sheets open XLSX. CSV is for accounting software: it holds only the ledger and the documents, with commas between fields and a point before decimals.",
+        "Ժամանակահատվածի եկամուտներն ու ծախսերը, թողարկված փաստաթղթերը և փակված եռամսյակները՝ հաշվապահի կամ ձեզ համար։ XLSX-ը բացում են Excel-ը և Google Sheets-ը։ CSV-ն հաշվապահական ծրագրերի համար է. դրանում միայն մատյանն ու փաստաթղթերն են, դաշտերը բաժանված են ստորակետով, տասնորդական մասը՝ կետով։";
     /// Выбор периода — для экранного диктора: сами кнопки — квартал и год.
     ExportPeriod = "За какой период", "Which period", "Որ ժամանակահատվածի համար";
     ExportXlsx = "Файл Excel (XLSX)", "Excel file (XLSX)", "Excel ֆայլ (XLSX)";
     ExportCsvLedger = "CSV доходов и расходов", "Income and expenses CSV", "Եկամուտների և ծախսերի CSV";
     ExportCsvDocuments = "CSV документов", "Documents CSV", "Փաստաթղթերի CSV";
+    /// Файл не собрался: что-то из данных выгрузки — документы, книга,
+    /// клиенты, а у XLSX ещё профиль и снимки закрытых кварталов — не
+    /// прочитано, или браузер не дал памяти.
     ExportFailed =
-        "Файл не собрался: документы или записи книги не прочитаны, или браузеру не хватило памяти. Перезагрузите страницу и попробуйте снова.",
-        "The file couldn't be made: documents or ledger records aren't read, or the browser ran out of memory. Reload the page and try again.",
-        "Ֆայլը չհավաքվեց. փաստաթղթերը կամ մատյանի գրառումները կարդացված չեն, կամ դիտարկիչին հիշողություն չբավարարեց։ Վերաբեռնեք էջը և նորից փորձեք։";
+        "Файл не собрался: данные программы ещё не прочитаны или не прочитались, или браузеру не хватило памяти. Перезагрузите страницу и попробуйте снова.",
+        "The file couldn't be made: the app's data isn't read yet or couldn't be read, or the browser ran out of memory. Reload the page and try again.",
+        "Ֆայլը չհավաքվեց. ծրագրի տվյալները դեռ կարդացված չեն կամ չկարդացվեցին, կամ դիտարկիչին հիշողություն չբավարարեց։ Վերաբեռնեք էջը և նորից փորձեք։";
     /// Шаблон: сколько строк выгрузки в валюте без курса — их сумма в драмах
-    /// пустая (Правило 2); говорится после того, как файл отдан.
+    /// пустая (Правило 2); говорится до нажатия, рядом с остальным, что
+    /// выгрузка сказать обязана (задача 83).
     ExportUnrated =
         "Строк в валюте без курса ЦБ в выгрузке: {}. Сумма в драмах у них пустая\u{A0}— укажите курс в книге или в карточке документа.",
         "Foreign-currency lines without a CBA rate in the export: {}. Their amount in drams is empty\u{A0}— enter the rate in the ledger or on the document card.",
@@ -1773,6 +1777,54 @@ strings! {
         "Расчётный документ ՊԵԿ: серия и номер",
         "SRC settlement document: series and number",
         "ՊԵԿ հաշվարկային փաստաթուղթ՝ սերիա-համարը";
+    /// Шаблон: закрытый квартал периода выгрузки, чей полный расчёт разошёлся
+    /// со снимком (задача 83, `QuarterTax::drifted_from`). Причину окно не
+    /// знает (`TaxDrift`), а бухгалтер видит файл, а не окно, — поэтому
+    /// слова ведут к листу закрытых кварталов.
+    ExportDrift =
+        "{} закрыт, а расчёт по книге сейчас с ним расходится. Выгрузка отдаёт книгу такой, какая она сейчас, а числа закрытого расчёта\u{A0}— на листе «Закрытые кварталы» в XLSX.",
+        "{} is closed, but the calculation from the ledger now differs from it. The export gives the ledger as it is now; the closed return's numbers are on the “Closed quarters” sheet of the XLSX file.",
+        "{}-ը փակված է, բայց մատյանով հաշվարկը հիմա տարբերվում է դրանից։ Արտահանումը տալիս է մատյանն այնպես, ինչպես այն հիմա է, իսկ փակված հաշվարկի թվերը XLSX ֆայլի «Փակված եռամսյակներ» թերթում են։";
+    /// Шаблон: закрытый квартал периода, чей расчёт сейчас неполон: с поданным
+    /// он не сравнивается (`turnover::drifted`), и окно не говорит ни
+    /// «совпадает», ни «расходится».
+    ExportDriftUnknown =
+        "{} закрыт, а сравнить с ним книгу сейчас нельзя: расчёту не хватает данных\u{A0}— каких, сказано на экране налога.",
+        "{} is closed, but the ledger can't be compared with it now: the calculation lacks data\u{A0}— the tax screen says which.",
+        "{}-ը փակված է, բայց մատյանը հիմա հնարավոր չէ համեմատել դրա հետ. հաշվարկին տվյալներ չեն բավարարում՝ որոնք, նշված է հարկի էկրանին։";
+    ExportDriftOpen = "Открыть на экране налога", "Open on the tax screen", "Բացել հարկի էկրանին";
+    /// Лист закрытых кварталов периода (задача 83,
+    /// `format::export::closings_sheet`) — только в XLSX: CSV — для программ
+    /// учёта. Суммы — драмы: расчёт подают в драмах.
+    ExportClosingsSheet = "Закрытые кварталы", "Closed quarters", "Փակված եռամսյակներ";
+    ExportQuarter = "Квартал", "Quarter", "Եռամսյակ";
+    ExportClosedRules = "Закрыт по правилам", "Closed under rules", "Փակված է կանոններով";
+    /// Версия правил расчёта «сейчас»: другая — часть расхождения от неё,
+    /// а не от книги (`TaxClosedRulesChanged`).
+    ExportNowRules = "Правила сейчас", "Rules now", "Կանոնները հիմա";
+    ExportClosedIncome = "Доход в закрытом расчёте", "Income in the closed return", "Եկամուտը փակված հաշվարկում";
+    ExportClosedTax = "Налог в закрытом расчёте", "Tax in the closed return", "Հարկը փակված հաշվարկում";
+    ExportNowIncome = "Доход по книге сейчас", "Income from the ledger now", "Եկամուտը՝ ըստ մատյանի հիմա";
+    ExportNowTax = "Налог по книге сейчас", "Tax from the ledger now", "Հարկը՝ ըստ մատյանի հիմա";
+    ExportClosingCheck = "Сверка с закрытым расчётом", "Against the closed return", "Համեմատումը փակված հաշվարկի հետ";
+    ExportClosingSame = "Совпадает", "Matches", "Համընկնում է";
+    ExportClosingDrift = "Расходится", "Differs", "Տարբերվում է";
+    /// Налог тот же, а поля формы другие — перенос или расходы: из двух сумм
+    /// листа этого не видно (`TaxDriftSameTax`).
+    ExportClosingSameTax =
+        "Расходится: налог тот же, а строки расчёта другие",
+        "Differs: the tax is the same, but the return's lines differ",
+        "Տարբերվում է. հարկը նույնն է, բայց հաշվարկի տողերը տարբեր են";
+    /// Шаблон: день ухода с налога с оборота — с него квартал считает
+    /// бухгалтер (`TaxLeftShort`), и суммы «сейчас» у листа нет.
+    ExportClosingLeft =
+        "Расходится: с {}\u{A0}— общий режим",
+        "Differs: from {}, the general regime",
+        "Տարբերվում է. {}-ից՝ ընդհանուր համակարգ";
+    ExportClosingUnknown =
+        "Не сравнить: расчёту по книге не хватает данных",
+        "Can't compare: the ledger calculation lacks data",
+        "Հնարավոր չէ համեմատել. մատյանով հաշվարկին տվյալներ չեն բավարարում";
 
     /// Форма записи книги.
     OpNewIncome = "Новый доход", "New income", "Նոր եկամուտ";

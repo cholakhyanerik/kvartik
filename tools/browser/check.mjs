@@ -17,7 +17,8 @@
 //    блокировка открывает экран (CLAUDE.md, Правило 2, «Формы и действия по
 //    нажатию — частями wasm»).
 // 2. С сетью: восстановление образца копии, экраны и их формы, карточка
-//    выпущенного документа, PDF, новая копия — каждая из девяти частей;
+//    выпущенного документа, PDF, выгрузка с закрытым кварталом, разошедшимся
+//    с поданным, новая копия — каждая из девяти частей;
 //    и все части `dist/app/split_*.wasm` загружены. «Установить» на
 //    главном экране — и без вопроса браузера, и раскладка, которую видно
 //    только с настоящим CSS: кнопка не вплотную к карточке налога под ней.
@@ -202,8 +203,9 @@ async function exported(page, when) {
   }
   checks.check(`${when}: выгрузка без слов о сбое`, await page.eval(`return document.querySelector("#ledger section.export [role=alert]") ? null : true;`));
   // Адрес прежнего файла снимается: нажата соседняя ссылка — у XLSX его нет,
-  // выбран год — нет ни у одной, а имя файла — года (ревью задачи 30).
-  const links = `[...document.querySelectorAll("#ledger section.export a")]`;
+  // выбран год — нет ни у одной, а имя файла — года (ревью задачи 30). Ссылки
+  // файлов — в `.actions`: над ними бывает ссылка на экран налога (задача 83).
+  const links = `[...document.querySelectorAll("#ledger section.export .actions a")]`;
   checks.check(`${when}: соседняя ссылка сняла адрес прежнего файла`,
     await page.eval(`return ${links}[0].href.startsWith("blob:") ? null : true;`));
   const year = await page.eval(`[...document.querySelectorAll("#ledger section.export .seg button")][1].click();
@@ -213,6 +215,38 @@ async function exported(page, when) {
   checks.check(`${when}: выбран год — адресов прежних файлов нет, имя года`,
     year?.blobs === 0 && /^kvartik-\d{4}\.xlsx$/.test(year?.name ?? ""), JSON.stringify(year));
   await page.eval(`[...document.querySelectorAll("#ledger section.export .seg button")][0].click(); return true;`);
+  await drifted(page, when);
+}
+
+/// В образце III квартал 2026 закрыт, а книгу поправили после закрытия
+/// (задача 83): выгрузка за 2026 год говорит о нём до нажатия, а XLSX несёт
+/// лист закрытых кварталов с его сверкой. Книга открыта на сегодняшнем
+/// квартале — к 2026 году ведёт «Предыдущий квартал», и проверка не устареет
+/// с календарём. Слова и лист рисует код части книги. Что образец обязан для
+/// этого держать — в шапке `crates/core/tests/backups/samples.rs`: провал
+/// здесь после нового образца — сначала туда.
+async function drifted(page, when) {
+  const name = `[...document.querySelectorAll("#ledger .quarter-name")].find((e) => e.getClientRects().length > 0)?.textContent ?? ""`;
+  for (let i = 0; i < 40 && !(await page.eval(`return ${name};`)).endsWith("2026"); i++) {
+    await press(page, "#ledger", s("LedgerPrevQuarter"));
+    await sleep(100);
+  }
+  const seg = `[...document.querySelectorAll("#ledger section.export .seg button")]`;
+  await page.eval(`${seg}[1].click(); return true;`);
+  const words = s("ExportDrift").split("{}")[1].slice(0, 40);
+  checks.check(`${when}: выгрузка за 2026 год говорит о разошедшемся закрытом квартале`,
+    await page.waitFor(`return [...document.querySelectorAll("#ledger section.export p[role=alert]")]
+      .some((p) => p.textContent.includes(${JSON.stringify(words)})) ? true : null;`), words);
+  const sheet = await page.eval(`const a = [...document.querySelectorAll("#ledger section.export a")]
+      .find((a) => a.textContent.trim() === ${JSON.stringify(s("ExportXlsx"))} && a.getClientRects().length > 0);
+    if (!a) return { error: "нет ссылки" };
+    a.click();
+    const text = new TextDecoder().decode(await (await fetch(a.href)).arrayBuffer());
+    return { sheet: text.includes(${JSON.stringify(s("ExportClosingsSheet"))}),
+      drift: text.includes(${JSON.stringify(s("ExportClosingDrift"))}) };`);
+  checks.check(`${when}: в XLSX лист закрытых кварталов, сверка — «${s("ExportClosingDrift")}»`,
+    sheet?.sheet && sheet?.drift, JSON.stringify(sheet));
+  await page.eval(`${seg}[0].click(); return true;`);
 }
 
 /// Часть не загрузилась — слова и «Отмена»; снятая блокировка — экран.

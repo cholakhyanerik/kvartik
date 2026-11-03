@@ -2,13 +2,17 @@
 //! выписаны руками, а не посчитаны тем же кодом (Правило 2).
 
 use super::*;
+use crate::model::activity::ActivityCode;
 use crate::model::client::ClientData;
 use crate::model::country::Country;
+use crate::model::date::Quarter;
 use crate::model::document::{DocumentData, Item, Payment, Settlement};
+use crate::model::ledger::OperationData;
 use crate::model::money::{ExchangeRate, RateSource};
 use crate::model::profile::ProfileData;
 use crate::model::record::Timestamp;
 use crate::model::text::{Line, Lines};
+use crate::tax::turnover::Books;
 
 fn day(year: u16, month: u8, day: u8) -> Date {
     Date::new(year, month, day).expect("в тесте — существующая дата")
@@ -469,6 +473,190 @@ fn documents_sheet_lists_issued_documents_of_the_period() {
     // Часы без даты: «просрочен» не узнать, и статуса нет ни у кого.
     let unknown = documents_sheet(lang, &documents, day(2026, 10, 1), day(2026, 12, 31), None);
     assert!(unknown.rows.iter().all(|row| row[13] == Cell::Empty), "{:#?}", unknown.rows);
+}
+
+/// Доход книги — запись в валюте `currency` без курса, по коду профиля.
+fn income(date: Date, minor: i64, currency: Currency) -> Operation {
+    let data = OperationData {
+        flow: Flow::Income,
+        date,
+        paid: None,
+        amount: Money::new(minor, currency),
+        rate: None,
+        text: line("Услуга"),
+        client: None,
+        supplier: Line::default(),
+        proof: None,
+        nature: None,
+        activity: None,
+        income_kind: None,
+        attachments: Vec::new(),
+    };
+    Operation::create(data, at(1_000)).expect("годная запись")
+}
+
+/// Запись `base` с поправленными полями — та же сумма и день.
+fn changed(base: &Operation, change: impl FnOnce(&mut OperationData)) -> Operation {
+    let mut data = base.data().clone();
+    change(&mut data);
+    Operation::create(data, at(1_000)).expect("годная запись")
+}
+
+/// Профиль ИП с этими кодами деятельности.
+fn coded(codes: &[&str]) -> ProfileData {
+    let mut data = profile();
+    data.activities = codes.iter().map(|code| ActivityCode::parse(code).expect("код")).collect();
+    data
+}
+
+/// Книга налога: только эти записи, профиль и снимки.
+fn books<'a>(profile: &'a ProfileData, operations: &'a [Operation], closings: &'a [Closing]) -> Books<'a> {
+    Books {
+        documents: &[],
+        operations,
+        profile: Some(profile),
+        closings,
+        openings: &[],
+        unreadable: 0,
+    }
+}
+
+/// День, когда все кварталы тестов кончились.
+const LATER: (u16, u8, u8) = (2030, 1, 2);
+
+/// Закрыть кварталы `quarters` по записям, как «Закрыть квартал» на экране
+/// налога: каждый следующий — со снимками прежних.
+fn close(profile: &ProfileData, operations: &[Operation], quarters: &[Quarter]) -> Vec<Closing> {
+    let mut closings = Vec::new();
+    for quarter in quarters {
+        let tax = turnover::quarter(books(profile, operations, &closings), *quarter);
+        let today = day(LATER.0, LATER.1, LATER.2);
+        closings.push(Closing::close(&tax, today, at(5_000)).expect("квартал кончился и посчитан"));
+    }
+    closings
+}
+
+/// Лист закрытых кварталов по записям и снимкам — как его собирает окно.
+fn sheet_of(lang: Lang, profile: &ProfileData, operations: &[Operation], closings: &[Closing]) -> Sheet {
+    let today = day(LATER.0, LATER.1, LATER.2);
+    let closed = turnover::closed_in(books(profile, operations, closings), today, ..);
+    closings_sheet(lang, closed.iter().map(|(tax, closing)| (tax, *closing)))
+}
+
+/// Лист закрытых кварталов (задача 83): у каждого — правила снимка
+/// и нынешние, доход и налог в снимке и по книге сейчас и сверка. I квартал
+/// совпадает: 1 000 000 × 10 % = 100 000. Во II забыли 200 000: в снимке
+/// 500 000 и 50 000, сейчас 700 000 и 70 000. В III после закрытия внесли
+/// доход в долларах без курса: расчёт неполон, чисел сейчас нет, и сверка не
+/// говорит ни «совпадает», ни «расходится» (Правило 6).
+#[test]
+fn closings_sheet_sets_each_closed_quarter_beside_the_ledger() {
+    let profile = coded(&["74.10.0"]);
+    let quarter = |number| Quarter::new(2026, number).expect("квартал");
+    let mut operations = vec![
+        income(day(2026, 1, 15), 1_000_000, Currency::Amd),
+        income(day(2026, 4, 15), 500_000, Currency::Amd),
+        income(day(2026, 7, 15), 700_000, Currency::Amd),
+    ];
+    let closings = close(&profile, &operations, &[quarter(1), quarter(2), quarter(3)]);
+    operations.push(income(day(2026, 6, 1), 200_000, Currency::Amd));
+    operations.push(income(day(2026, 8, 1), 10_000, Currency::Usd));
+    let sheet = sheet_of(Lang::Ru, &profile, &operations, &closings);
+    assert_eq!(sheet.name, "Закрытые кварталы");
+    assert_eq!(sheet.columns.len(), 8);
+    let rules = text(&closings[0].data().rules.to_string());
+    assert_eq!(
+        sheet.rows,
+        [
+            vec![
+                text("I\u{A0}квартал 2026"),
+                rules.clone(),
+                rules.clone(),
+                number(1_000_000, 0),
+                number(100_000, 0),
+                number(1_000_000, 0),
+                number(100_000, 0),
+                text("Совпадает"),
+            ],
+            vec![
+                text("II\u{A0}квартал 2026"),
+                rules.clone(),
+                rules.clone(),
+                number(500_000, 0),
+                number(50_000, 0),
+                number(700_000, 0),
+                number(70_000, 0),
+                text("Расходится"),
+            ],
+            vec![
+                text("III\u{A0}квартал 2026"),
+                rules.clone(),
+                rules,
+                number(700_000, 0),
+                number(70_000, 0),
+                Cell::Empty,
+                Cell::Empty,
+                text("Не сравнить: расчёту по книге не хватает данных"),
+            ],
+        ]
+    );
+    // Закрытых кварталов нет — лист пустой, но на месте: файл одного вида.
+    let empty = closings_sheet(Lang::En, []);
+    assert_eq!((empty.name.as_str(), empty.rows.len(), empty.columns.len()), ("Closed quarters", 0, 8));
+}
+
+/// Сверка называет то, чего из двух сумм не видно (ревью задачи 83), как
+/// экран налога. I квартал 2026: доход 100 000, расход 2 000 000 — вычет
+/// 2 000 000 × 6 % = 120 000 больше налога 10 000, и налог — нижний предел
+/// 100 000 × 4,5 % = 4 500; забытый расход 500 000 вычет и перенос меняет,
+/// а налог — нет. IV квартал 2026 у ИП с кодами 74.10.0 и 70.22.0: доход
+/// 1 000 000 по первому — 100 000; после закрытия внесли доход 20 декабря по
+/// второму, закрывающему налог с оборота: с этого дня — общий режим, и сумм
+/// «сейчас» нет (`QuarterTax::known`).
+#[test]
+fn closings_sheet_names_what_two_sums_hide() {
+    let profile = coded(&["74.10.0"]);
+    let first = Quarter::new(2026, 1).expect("квартал");
+    let spent = changed(&income(day(2026, 2, 10), 2_000_000, Currency::Amd), |data| {
+        data.flow = Flow::Expense;
+        data.proof = Some(Proof::SettlementInvoice);
+        data.nature = Some(Nature::Ordinary);
+    });
+    let mut operations = vec![income(day(2026, 1, 15), 100_000, Currency::Amd), spent.clone()];
+    let closings = close(&profile, &operations, &[first]);
+    operations.push(changed(&spent, |data| data.amount = Money::new(500_000, Currency::Amd)));
+    let row = &sheet_of(Lang::Ru, &profile, &operations, &closings).rows[0];
+    assert_eq!(
+        row[3..],
+        [
+            number(100_000, 0),
+            number(4_500, 0),
+            number(100_000, 0),
+            number(4_500, 0),
+            text("Расходится: налог тот же, а строки расчёта другие"),
+        ]
+    );
+
+    let two = coded(&["74.10.0", "70.22.0"]);
+    let fourth = Quarter::new(2026, 4).expect("квартал");
+    fn by(code: &'static str) -> impl FnOnce(&mut OperationData) {
+        move |data| data.activity = Some(ActivityCode::parse(code).expect("код"))
+    }
+    let mut operations = vec![changed(&income(day(2026, 10, 5), 1_000_000, Currency::Amd), by("74.10.0"))];
+    let closings = close(&two, &operations, &[fourth]);
+    operations.push(changed(&income(day(2026, 12, 20), 300_000, Currency::Amd), by("70.22.0")));
+    let mut wrong = Vec::new();
+    for (lang, check) in [
+        (Lang::Ru, "Расходится: с 20.12.2026\u{A0}— общий режим"),
+        (Lang::En, "Differs: from Dec 20, 2026, the general regime"),
+    ] {
+        let row = &sheet_of(lang, &two, &operations, &closings).rows[0];
+        let want = [number(1_000_000, 0), number(100_000, 0), Cell::Empty, Cell::Empty, text(check)];
+        if row[3..] != want {
+            wrong.push(format!("{lang:?}: {:?}", &row[3..]));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
 #[test]

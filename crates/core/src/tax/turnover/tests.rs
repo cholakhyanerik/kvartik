@@ -891,6 +891,50 @@ fn the_first_drifted_quarter_is_found() {
     assert_eq!(found.quarter, second);
 }
 
+/// Выгрузка за период (задача 83) видит каждый закрытый квартал периода,
+/// а не только первый разошедшийся: II совпадает, I и III разошлись. Расчёт
+/// каждого — тот же, что у `quarter`; кварталы вне периода и не кончившиеся на
+/// сегодня не идут.
+///
+/// I: 1 000 000 × 10 % = 100 000. II: 500 000 × 10 % = 50 000. III: 700 000 ×
+/// 10 % = 70 000. Забытые 100 000 в I: 110 000; забытые 200 000 в III:
+/// 900 000 × 10 % = 90 000. Расходов нет — переносу неоткуда взяться.
+#[test]
+fn every_closed_quarter_of_a_period_is_listed() {
+    let profile = profile(&["74.10.0"]);
+    let (first, second, third) = (quarter(2026, 1), quarter(2026, 2), quarter(2026, 3));
+    let mut books = vec![
+        income(day(2026, 1, 15), 1_000_000, None),
+        income(day(2026, 4, 15), 500_000, None),
+        income(day(2026, 7, 15), 700_000, None),
+    ];
+    let mut closings = vec![closed(&profile, &books, &[], first, 1_770_000_000_000)];
+    closings.push(closed(&profile, &books, &closings, second, 1_770_000_000_001));
+    closings.push(closed(&profile, &books, &closings, third, 1_770_000_000_002));
+    books.push(income(day(2026, 3, 1), 100_000, None));
+    books.push(income(day(2026, 9, 1), 200_000, None));
+    let books = drift_books(&profile, &books, &closings);
+    let today = day(2030, 1, 2);
+
+    let year = closed_in(books, today, first..=quarter(2026, 4));
+    let got: Vec<(Quarter, i64, i64, bool)> = year
+        .iter()
+        .map(|(now, closing)| (now.quarter, now.tax, closing.data().tax, now.drifted_from(closing)))
+        .collect();
+    assert_eq!(
+        got,
+        [(first, 110_000, 100_000, true), (second, 50_000, 50_000, false), (third, 90_000, 70_000, true)]
+    );
+    for (now, _) in &year {
+        assert_eq!(*now, super::quarter(books, now.quarter), "расчёт {:?} — как у quarter", now.quarter);
+    }
+    let quarters = |list: &[(QuarterTax, &Closing)]| list.iter().map(|(now, _)| now.quarter).collect::<Vec<_>>();
+    assert_eq!(quarters(&closed_in(books, today, second..=third)), [second, third], "период — II и III");
+    assert!(quarters(&closed_in(books, today, quarter(2026, 4)..=quarter(2026, 4))).is_empty(), "IV не закрыт");
+    assert_eq!(quarters(&closed_in(books, day(2026, 9, 30), ..)), [first, second], "III ещё идёт");
+    assert_eq!(scan(books).map(|(now, _)| now.quarter), Some(first), "первый разошедшийся — I");
+}
+
 /// Цепочка идёт от предыдущего снимка и сквозь открытые кварталы между
 /// снимками, а правка раньше снимка до следующего закрытого не доходит.
 /// Расчёт может разойтись и при том же налоге: у снимка важен и перенос.

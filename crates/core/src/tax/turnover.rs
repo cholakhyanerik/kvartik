@@ -91,9 +91,11 @@
 //! записи человек указывает сам (`tax::opening`), а пока не указал, он
 //! неизвестен, и окно говорит это на всей цепочке
 //! ([`QuarterTax::carry_unknown`]). Закрытый квартал, чей расчёт разошёлся со
-//! снимком, находит [`drifted`].
+//! снимком, находит [`drifted`], а закрытые кварталы периода с их расчётом
+//! даёт выгрузке [`closed_in`].
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::RangeBounds;
 
 use serde::{Deserialize, Serialize};
 
@@ -479,6 +481,13 @@ impl QuarterTax {
             || data.lines.len() != self.lines.len()
             || !data.lines.iter().zip(&self.lines).all(|(filed, now)| same_in_form(filed, now))
     }
+
+    /// Разошёлся ли с поданным расчёт, который можно с ним сравнить: полный
+    /// ([`Self::complete`]) и отличный от снимка ([`Self::differs_from`]).
+    /// Неполный не сравнивается — почему, сказано у [`drifted`].
+    pub fn drifted_from(&self, closing: &Closing) -> bool {
+        self.complete() && self.differs_from(closing)
+    }
 }
 
 /// Одинаковы ли строки в форме расчёта. Расходы, отнесённые к строке,
@@ -563,7 +572,7 @@ pub fn quarter(books: Books<'_>, quarter: Quarter) -> QuarterTax {
 }
 
 /// Первый по календарю закрытый квартал, чей расчёт разошёлся со снимком
-/// ([`QuarterTax::differs_from`]), — расчёт и снимок. С первого, потому что
+/// ([`QuarterTax::drifted_from`]), — расчёт и снимок. С первого, потому что
 /// уточнённый расчёт поправит перенос на следующие и может свести или
 /// развести их.
 ///
@@ -577,26 +586,48 @@ pub fn quarter(books: Books<'_>, quarter: Quarter) -> QuarterTax {
 /// а снимок 9999 года из чужой копии растянул бы цепочку на десятки тысяч
 /// кварталов на каждое изменение данных (Правило 13).
 ///
+/// Считается всё, что даёт [`closed_in`]: и без расхождения проходятся все
+/// закрытые кварталы, а это и есть обычный случай.
+pub fn drifted<'a>(books: Books<'a>, today: Date) -> Option<(QuarterTax, &'a Closing)> {
+    closed_in(books, today, ..)
+        .into_iter()
+        .find(|(tax, closing)| tax.drifted_from(closing))
+}
+
+/// Закрытые кварталы в пределах `within`, кончившиеся до дня `today`, —
+/// по календарю, у каждого расчёт и снимок. Выгрузка (задача 83) говорит
+/// о каждом, чей расчёт разошёлся с поданным ([`QuarterTax::drifted_from`]),
+/// и кладёт все в свой лист: бухгалтер видит файл, а не окно.
+///
 /// Считает то же, что [`quarter`] каждого закрытого квартала, но одним
 /// проходом по книге: цепочка каждого идёт от предыдущего снимка, и кварталы
 /// считаются по разу на все. Отдельные [`quarter`] на каждое изменение данных
 /// прошли бы всю книгу по разу на квартал (Правило 1, замер — `drift_timing`).
-pub fn drifted<'a>(books: Books<'a>, today: Date) -> Option<(QuarterTax, &'a Closing)> {
+/// Квартал не кончился — не сверяется (шапка [`drifted`]).
+pub fn closed_in<'a>(
+    books: Books<'a>,
+    today: Date,
+    within: impl RangeBounds<Quarter>,
+) -> Vec<(QuarterTax, &'a Closing)> {
     let closed: BTreeSet<Quarter> = books
         .closings
         .iter()
         .filter(|closing| !closing.is_deleted())
         .map(Closing::quarter)
-        .filter(|quarter| quarter.last_day() < today)
+        .filter(|quarter| quarter.last_day() < today && within.contains(quarter))
         .collect();
-    let (first, last) = (*closed.first()?, *closed.last()?);
+    let (Some(&first), Some(&last)) = (closed.first(), closed.last()) else {
+        return Vec::new();
+    };
     let earliest = earliest(books);
     let span = Span::new(books, chain_from(chain_start(books, earliest, first).0), last.last_day());
-    closed.into_iter().find_map(|quarter| {
-        let closing = Closing::current(books.closings, quarter)?;
-        let tax = chain(books, &span, chain_start(books, earliest, quarter), quarter);
-        (tax.complete() && tax.differs_from(closing)).then_some((tax, closing))
-    })
+    closed
+        .into_iter()
+        .filter_map(|quarter| {
+            let closing = Closing::current(books.closings, quarter)?;
+            Some((chain(books, &span, chain_start(books, earliest, quarter), quarter), closing))
+        })
+        .collect()
 }
 
 /// Откуда идёт цепочка переноса: квартал, перенос на него и строки, у которых

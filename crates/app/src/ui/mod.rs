@@ -244,7 +244,7 @@ pub fn App() -> impl IntoView {
                     <DocumentsScreen lang documents clients profiles licenses base backups router forms />
                 </section>
                 <section id=Screen::Ledger.id() class="screen" hidden=hidden(Screen::Ledger)>
-                    <LedgerScreen lang documents clients profiles operations base backups router forms />
+                    <LedgerScreen lang documents clients profiles operations base backups router forms tax />
                 </section>
                 <section id=Screen::Clients.id() class="screen" hidden=hidden(Screen::Clients)>
                     <h1 tabindex="-1">{tr(lang, Key::ClientsTitle)}</h1>

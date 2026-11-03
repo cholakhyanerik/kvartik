@@ -86,6 +86,23 @@ pub(super) struct Ctx {
     forms: Forms,
     /// Сегодня — один раз (Архитектура, «Время — параметр»).
     today: Option<Date>,
+    /// Снимки закрытых кварталов и квартал экрана налога — выгрузке, которая
+    /// говорит о разошедшихся с поданным (задача 83). Не весь `tax::Ctx`:
+    /// с ним вариант `BookView::Ledger` вырос бы вдвое.
+    closings: tax::Closings,
+    tax_quarter: RwSignal<Option<Quarter>>,
+}
+
+impl Ctx {
+    /// Откуда налог берёт расчёт — те же документы, книга и профиль.
+    fn sources(&self) -> tax::Sources {
+        tax::Sources {
+            documents: self.documents,
+            operations: self.operations,
+            profiles: self.profiles,
+            closings: self.closings,
+        }
+    }
 }
 
 /// Экран книги на языке окна: заголовок — сразу, остальное — частью wasm
@@ -101,6 +118,7 @@ pub fn LedgerScreen(
     backups: Backups,
     router: Router,
     forms: Forms,
+    tax: tax::Ctx,
 ) -> impl IntoView {
     let ctx = Ctx {
         lang,
@@ -112,6 +130,8 @@ pub fn LedgerScreen(
         backups,
         forms,
         today: clock::today(),
+        closings: tax.sources.closings,
+        tax_quarter: tax.quarter,
     };
     view! {
         <h1 tabindex="-1">{tr(lang, Key::LedgerTitle)}</h1>
@@ -372,7 +392,12 @@ fn LedgerBody(ctx: Ctx) -> impl IntoView {
         mode: RwSignal::new(Mode::List),
         notice: RwSignal::new(None),
     };
-    ctx.operations.watch(ctx.base);
+    // Книгу и снимки закрытых кварталов (выгрузка, задача 83) — читать.
+    // Отсюда, а не из выгрузки: следит тот, кто позвал первым, и он обязан
+    // жить до конца окна (`tax::Closings::watch`), а список с выгрузкой
+    // пересоздаётся при каждой форме и восстановлении — его слежение умерло
+    // бы с ним, и восстановленные снимки не перечитались бы (ревью задачи 83).
+    ctx.sources().watch(ctx.base);
     // Копию восстановили — открытая форма показала бы прежнюю запись:
     // экран возвращается к списку, а записи перечитывает `Operations::watch`.
     Effect::watch(

@@ -270,6 +270,21 @@ impl Sources {
             .flatten()
     }
 
+    /// Закрытые кварталы с `first` по `last` с их расчётом — для выгрузки
+    /// (`ui/ledger/export.rs`, задача 83). Отслеживаемое; `None` — документы,
+    /// книга, профиль или снимки ещё читаются или не прочитались, или часы
+    /// без даты: пустой список читался бы «закрытых кварталов нет» (ревью
+    /// задачи 83).
+    pub(super) fn closed_in(&self, today: Option<Date>, first: Quarter, last: Quarter) -> Option<Vec<(QuarterTax, Closing)>> {
+        let today = today?;
+        self.with_books(|books| {
+            turnover::closed_in(books, today, first..=last)
+                .into_iter()
+                .map(|(tax, closing)| (tax, closing.clone()))
+                .collect()
+        })
+    }
+
     /// Годовые платежи года — отслеживаемое; `None` — как у
     /// [`Self::with_books`].
     pub(super) fn annual(&self, year: u16) -> Option<Annual> {

@@ -474,6 +474,7 @@ li button,
 li .button,
 .row button,
 .notice-row button,
+.notice-row .button,
 fieldset > button,
 .repeat button,
 .langs button,
@@ -1082,7 +1083,8 @@ ul.items li.payment button {
   margin-top: var(--space-3);
 }
 
-.notice-row button {
+.notice-row button,
+.notice-row .button {
   margin-top: 0;
 }
 

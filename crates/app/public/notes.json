@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.74",
+      "date": "2026-11-03",
+      "hy": [
+        "Հաշվապահի համար արտահանումն ասում է այն ամենը, ինչով ֆայլը տարբերվում է ներկայացվածից. եթե ժամանակահատվածի եռամսյակը փակված է, իսկ մատյանն այդ ընթացքում փոխվել է, հղումների վերևում երևում է, թե որ եռամսյակն է, և հղումը տանում է դրան հարկի էկրանին։",
+        "Excel ֆայլում հայտնվեց «Փակված եռամսյակներ» թերթը. փակված հաշվարկի եկամուտն ու հարկը՝ մատյանով հիմա ստացվածի կողքին, և արդյոք դրանք համընկնում են։ Հաշվապահն էլ դա կտեսնի։"
+      ],
+      "ru": [
+        "Выгрузка для бухгалтера говорит обо всём, в чём файл расходится с поданным: если квартал периода закрыт, а книгу с тех пор поправили, над ссылками видно, какой это квартал, и ссылка ведёт к нему на экран налога.",
+        "В файле Excel появился лист «Закрытые кварталы»: доход и налог закрытого расчёта рядом с тем, что даёт книга сейчас, и совпадают ли они. Бухгалтер увидит это и сам."
+      ],
+      "en": [
+        "The accountant export now tells you everything in which the file differs from what you filed: if a quarter of the period is closed and the ledger has changed since, you'll see which quarter above the links, with a link to it on the Tax screen.",
+        "The Excel file has a new “Closed quarters” sheet: income and tax from the closed return next to what the ledger gives now, and whether they match, so your accountant sees it too."
+      ]
+    },
+    {
       "version": "0.0.73",
       "date": "2026-11-03",
       "hy": [
@@ -296,22 +312,6 @@
         "Settlement documents in the SRC system: an invoice or act card shows the day to issue one by, and once you've issued it there, mark it here with its date and number. The app doesn't issue it or send it anywhere.",
         "Above the document list you can see how many have no such mark and show only them, and on Home the app reminds you when the day to issue one has come.",
         "For documents issued earlier, the app doesn't assume the settlement document is missing: it doesn't know, so it doesn't remind you, but you can mark them on their card."
-      ]
-    },
-    {
-      "version": "0.0.54",
-      "date": "2026-10-21",
-      "hy": [
-        "Ժամկետներն այժմ նաև հեռախոսի և փոստի օրացույցում են. ժամկետների էկրանին «Ներբեռնել իմ ժամկետները» կոճակը տալիս է օրացույցի ֆայլ՝ ձեր ժամկետներով մեկ տարի առաջ և այսօրվա գումարներով, իսկ իրադարձություններում հիշեցումներ կան ժամկետից մեկ շաբաթ և մեկ օր առաջ։",
-        "Այնտեղ կարելի է նաև բաժանորդագրվել շրջանառության հարկ վճարող ԱՁ-ների ժամկետների ընդհանուր օրացույցին. այն ինքն է թարմանում։"
-      ],
-      "ru": [
-        "Сроки теперь можно добавить в календарь телефона и почты: на экране сроков кнопка «Скачать мои сроки» отдаёт файл календаря с вашими сроками на год вперёд и суммами на сегодня, а в событиях — напоминания за неделю и за день до срока.",
-        "Там же можно подписаться на общий календарь сроков ИП на налоге с оборота — он обновляется сам."
-      ],
-      "en": [
-        "You can now add your deadlines to your phone or email calendar: on the Deadlines screen, “Download my deadlines” gives you a calendar file with your deadlines for the year ahead and today's amounts, with reminders a week and a day before each deadline.",
-        "You can also subscribe there to a shared deadline calendar for IEs on turnover tax; it updates itself."
       ]
     }
   ]

@@ -4,9 +4,10 @@
 //! Листы собирает ядро из тех же строк, что показывает окно: книга —
 //! `model::ledger::between` (доход из документов и записи, с курсом и суммой
 //! в драмах), документы — выпущенные счета и акты периода со статусом на
-//! день выгрузки. Слова — на языке окна, а суммы и даты — числами и датами:
-//! XLSX хранит их типами, и Excel показывает их по настройкам Windows
-//! человека.
+//! день выгрузки, закрытые кварталы периода — снимок рядом с расчётом по
+//! книге сейчас ([`closings_sheet`], только в XLSX). Слова — на языке окна,
+//! а суммы и даты — числами и датами: XLSX хранит их типами, и Excel
+//! показывает их по настройкам Windows человека.
 //!
 //! # CSV — по RFC 4180
 //!
@@ -34,14 +35,15 @@ mod zip;
 
 use std::collections::BTreeSet;
 
-use crate::i18n::{Key, Lang, fill, t};
+use crate::i18n::{self, Key, Lang, fill, t};
 use crate::model::client::Client;
 use crate::model::date::Date;
 use crate::model::document::{DocKind, Document, Number, Status};
 use crate::model::record::RecordId;
 use crate::model::ledger::{self, Flow, Nature, Operation, Proof, Source};
 use crate::model::money::{Currency, Money};
-use crate::tax::turnover;
+use crate::tax::closing::Closing;
+use crate::tax::turnover::{self, Line, QuarterTax, Regime};
 
 pub use xlsx::xlsx;
 
@@ -502,6 +504,66 @@ pub fn documents_sheet(lang: Lang, documents: &[Document], from: Date, until: Da
     ];
     Sheet {
         name: t(lang, Key::ExportDocumentsSheet).to_owned(),
+        columns: columns.iter().map(|key| t(lang, *key).to_owned()).collect(),
+        rows,
+    }
+}
+
+/// Лист закрытых кварталов периода (задача 83): у каждого — версия правил
+/// снимка и нынешняя, доход и налог в закрытом расчёте и по книге сейчас
+/// и сверка их. Выгрузка отдаёт книгу такой, какая она сейчас, а бухгалтер
+/// видит файл, а не окно: что квартал поправили после закрытия, он узнаёт
+/// отсюда (решение человека 2026-11-03). `closed` — кварталы и их расчёт,
+/// как их даёт `turnover::closed_in`.
+///
+/// Числа сейчас — только у полного расчёта на налоге с оборота
+/// (`QuarterTax::known`): часть суммы или ноль выглядели бы расчётом
+/// (Правило 6). Неполный расчёт с поданным не сравнивается
+/// (`turnover::drifted`) — сверка так и говорит, а не «совпадает». Чем
+/// расхождение не видно из двух сумм, сверка называет, как экран налога:
+/// налог тот же, а строки другие (перенос, расходы), или с какого дня —
+/// общий режим; другие правила видны по двум версиям рядом.
+pub fn closings_sheet<'a>(lang: Lang, closed: impl IntoIterator<Item = (&'a QuarterTax, &'a Closing)>) -> Sheet {
+    let drams = |value: i64| Cell::Number { minor: value, places: 0 };
+    // Доход расчёта — x.1 всех строк. Сложить не вышло — только от
+    // испорченных данных, и ячейка пустая, а не неверное число.
+    let income = |lines: &[Line]| lines.iter().try_fold(0_i64, |sum, line| sum.checked_add(line.income));
+    let rows = closed
+        .into_iter()
+        .map(|(now, closing)| {
+            let filed = closing.data();
+            let known = now.known();
+            let check = match now.regime {
+                _ if !now.complete() => t(lang, Key::ExportClosingUnknown).to_owned(),
+                Regime::Left { from, .. } => fill(t(lang, Key::ExportClosingLeft), &[&i18n::date(lang, from)]),
+                Regime::Turnover if !now.differs_from(closing) => t(lang, Key::ExportClosingSame).to_owned(),
+                Regime::Turnover if now.tax == filed.tax => t(lang, Key::ExportClosingSameTax).to_owned(),
+                Regime::Turnover => t(lang, Key::ExportClosingDrift).to_owned(),
+            };
+            vec![
+                Cell::Text(i18n::quarter(lang, closing.quarter())),
+                Cell::Text(filed.rules.to_string()),
+                Cell::Text(now.rules.to_string()),
+                income(&filed.lines).map_or(Cell::Empty, drams),
+                drams(filed.tax),
+                known.and_then(|_| income(&now.lines)).map_or(Cell::Empty, drams),
+                known.map_or(Cell::Empty, drams),
+                Cell::Text(check),
+            ]
+        })
+        .collect();
+    let columns = [
+        Key::ExportQuarter,
+        Key::ExportClosedRules,
+        Key::ExportNowRules,
+        Key::ExportClosedIncome,
+        Key::ExportClosedTax,
+        Key::ExportNowIncome,
+        Key::ExportNowTax,
+        Key::ExportClosingCheck,
+    ];
+    Sheet {
+        name: t(lang, Key::ExportClosingsSheet).to_owned(),
         columns: columns.iter().map(|key| t(lang, *key).to_owned()).collect(),
         rows,
     }

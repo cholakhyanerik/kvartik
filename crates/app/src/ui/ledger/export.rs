@@ -1,7 +1,7 @@
 //! Выгрузка для бухгалтера (задача 30) — под списком книги: квартал книги
-//! или весь его год файлом XLSX (два листа: доходы и расходы, документы)
-//! и двумя CSV. Листы и байты файлов собирает ядро
-//! (`kvartik_core::format::export`), здесь — выбор периода и ссылки.
+//! или весь его год файлом XLSX (три листа: доходы и расходы, документы,
+//! закрытые кварталы) и двумя CSV. Листы и байты файлов собирает ядро
+//! (`kvartik_core::format::export`), здесь — выбор периода, ссылки и слова.
 //!
 //! Файл собирается в самом нажатии на ссылку, как файл сроков
 //! (`ui/deadlines.rs`): он нужен раз в квартал, и собирать его на каждое
@@ -16,11 +16,22 @@
 //! «Сохранить ссылку как…», которое нажатия не вызывает, сохранило бы файл
 //! прошлого периода под именем нового (ревью задачи 30).
 //!
+//! Всё, в чём файл расходится с поданным или неполон, блок говорит до
+//! нажатия, одним местом (задача 83, решение человека 2026-11-03: «надо обо
+//! всём информировать»): закрытые кварталы периода, чей расчёт по книге
+//! сейчас разошёлся со снимком или неполон, строки в валюте без курса
+//! и нечитаемые записи. Чего не хватает расчёту налога открытых кварталов,
+//! говорит экран налога: в книге этого нет, и файл с поданным не расходится.
+//! Закрытые кварталы считаются `Memo` от данных и периода одним проходом по
+//! цепочке (`turnover::closed_in`), как карточка на главном.
+//!
 //! Лицензия выгрузку не запирает: это данные человека (Правило 2).
 
 use kvartik_core::format::export;
 use kvartik_core::i18n::{self, Key, fill, t};
 use kvartik_core::model::date::{Date, Quarter};
+use kvartik_core::tax::closing::Closing;
+use kvartik_core::tax::turnover::QuarterTax;
 use leptos::ev::MouseEvent;
 use leptos::html::A;
 use leptos::prelude::*;
@@ -52,7 +63,7 @@ enum Period {
 /// Какой файл.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum What {
-    /// XLSX: оба листа.
+    /// XLSX: все три листа.
     Book,
     /// CSV доходов и расходов.
     Ledger,
@@ -82,22 +93,26 @@ impl What {
     }
 }
 
+/// Первый и последний квартал периода.
+fn quarters(quarter: Quarter, period: Period) -> (Quarter, Quarter) {
+    match period {
+        Period::Quarter => (quarter, quarter),
+        Period::Year => {
+            let year = quarter.year();
+            (Quarter::new(year, 1).unwrap_or(quarter), Quarter::new(year, 4).unwrap_or(quarter))
+        }
+    }
+}
+
 /// Первый и последний день периода и его имя в имени файла: `2026-Q3`
 /// или `2026`.
 fn span(quarter: Quarter, period: Period) -> (Date, Date, String) {
-    match period {
-        Period::Quarter => (
-            quarter.first_day(),
-            quarter.last_day(),
-            format!("{}-Q{}", quarter.year(), quarter.number()),
-        ),
-        Period::Year => {
-            let year = quarter.year();
-            let first = Quarter::new(year, 1).unwrap_or(quarter);
-            let last = Quarter::new(year, 4).unwrap_or(quarter);
-            (first.first_day(), last.last_day(), year.to_string())
-        }
-    }
+    let (first, last) = quarters(quarter, period);
+    let name = match period {
+        Period::Quarter => format!("{}-Q{}", quarter.year(), quarter.number()),
+        Period::Year => quarter.year().to_string(),
+    };
+    (first.first_day(), last.last_day(), name)
 }
 
 /// Имя файла — латиницей, одно на всех языках.
@@ -107,15 +122,23 @@ fn file_name(quarter: Quarter, period: Period, what: What) -> String {
     export::file_name(&name, part, extension)
 }
 
-/// Файл выгрузки из прочитанных документов, записей книги и клиентов —
-/// и сколько в нём строк в валюте без курса. `None` — что-то из них ещё не
-/// прочитано или не прочиталось, или браузер не дал собрать файл: тогда окно
-/// говорит это словами, а не отдаёт неполную выгрузку молча.
+/// Файл выгрузки из прочитанных документов, записей книги и клиентов,
+/// а XLSX — и из закрытых кварталов периода `closed` (`None` — снимки или
+/// профиль не прочитаны). `None` — что-то из них ещё не прочитано или не
+/// прочиталось, или браузер не дал собрать файл: тогда окно говорит это
+/// словами, а не отдаёт неполную выгрузку молча — пустой лист закрытых
+/// кварталов читался бы «ничего не закрыто» (ревью задачи 83).
 ///
 /// «Сегодня» для статуса документов — у часов в самом нажатии, а не день
 /// открытия программы: установленная живёт открытой неделями (ревью
 /// задачи 30; Архитектура, «Время — параметр»).
-fn build(ctx: Ctx, quarter: Quarter, period: Period, what: What) -> Option<(Download, usize)> {
+fn build(
+    ctx: Ctx,
+    quarter: Quarter,
+    period: Period,
+    what: What,
+    closed: Memo<Option<Vec<(QuarterTax, Closing)>>>,
+) -> Option<Download> {
     let lang = ctx.lang.get_untracked();
     let today = clock::today();
     let (from, until, _) = span(quarter, period);
@@ -130,20 +153,25 @@ fn build(ctx: Ctx, quarter: Quarter, period: Period, what: What) -> Option<(Down
                     let ledger = || export::ledger_sheet(lang, documents, operations, clients, from, until);
                     let issued = || export::documents_sheet(lang, documents, from, until, today);
                     let bytes = match what {
-                        What::Book => export::xlsx(&[ledger(), issued()]),
+                        What::Book => {
+                            let closings = closed.with(|closed| {
+                                let closed = closed.as_ref()?;
+                                Some(export::closings_sheet(lang, closed.iter().map(|(tax, closing)| (tax, closing))))
+                            })?;
+                            export::xlsx(&[ledger(), issued(), closings])
+                        }
                         What::Ledger => export::csv(&ledger()),
                         What::Documents => export::csv(&issued()),
                     };
-                    let unrated = export::unrated(documents, operations, from, until);
-                    Download::bytes(&bytes, &name, mime).map(|download| (download, unrated))
+                    Download::bytes(&bytes, &name, mime)
                 })
             })
         })
     })
 }
 
-/// Выгрузка под списком книги: заголовок, что в файлах, выбор периода
-/// и три ссылки на файлы.
+/// Выгрузка под списком книги: заголовок, что в файлах, выбор периода, что
+/// в выгрузке расходится с поданным или неполно, и три ссылки на файлы.
 #[component]
 pub(super) fn Export(ctx: Ctx, quarter: Memo<Quarter>) -> impl IntoView {
     let lang = ctx.lang;
@@ -152,8 +180,6 @@ pub(super) fn Export(ctx: Ctx, quarter: Memo<Quarter>) -> impl IntoView {
     // скачивание адрес уже разобрало (`platform::file::Download`).
     let file = StoredValue::new_local(None::<Download>);
     let failed = RwSignal::new(false);
-    // Сколько строк без курса в отданном файле; 0 — говорить не о чем.
-    let unrated = RwSignal::new(0_usize);
     // Ссылки — по `NodeRef`, а не `currentTarget` события: Leptos слушает
     // нажатия выше по дереву (`ui/deadlines.rs`).
     let nodes = [NodeRef::<A>::new(), NodeRef::<A>::new(), NodeRef::<A>::new()];
@@ -172,13 +198,33 @@ pub(super) fn Export(ctx: Ctx, quarter: Memo<Quarter>) -> impl IntoView {
         move |_, _, _| {
             reset();
             failed.set(false);
-            unrated.set(0);
         },
         false,
     );
-    // Нечитаемые записи в выгрузку не попадают, и окно говорит, сколько их.
+    // Закрытые кварталы периода с их расчётом: о разошедшихся и неполных —
+    // словами до нажатия, а в XLSX — своим листом (задача 83). Снимки читать
+    // велит экран книги (`LedgerBody`): он живёт до конца окна.
+    let sources = ctx.sources();
+    let closed = Memo::new(move |_| {
+        let (first, last) = quarters(quarter.get(), period.get());
+        sources.closed_in(ctx.today, first, last)
+    });
+    // Строки периода в валюте без курса: сумма в драмах у них в файле пустая.
+    let unrated = Memo::new(move |_| {
+        let (from, until, _) = span(quarter.get(), period.get());
+        ctx.documents.with(|documents, _, _| {
+            ctx.operations.with(|operations, _| export::unrated(documents, operations, from, until))
+        })
+    });
+    // Нечитаемые записи в выгрузку не попадают, и окно говорит, сколько их:
+    // документы и книга, а ещё снимки закрытых кварталов — их квартала нет
+    // в листе — и перенос с кварталов до программы, без которого расчёт
+    // «сейчас» мог выйти другим.
     let unreadable = Memo::new(move |_| {
-        ctx.documents.with(|_, _, unreadable| unreadable) + ctx.operations.with(|_, unreadable| unreadable)
+        ctx.documents.with(|_, _, unreadable| unreadable)
+            + ctx.operations.with(|_, unreadable| unreadable)
+            + ctx.closings.with(|_, _, unreadable| unreadable)
+            + ctx.closings.unreadable_openings()
     });
     let choice = move |value: Period| {
         view! {
@@ -198,16 +244,47 @@ pub(super) fn Export(ctx: Ctx, quarter: Memo<Quarter>) -> impl IntoView {
             </button>
         }
     };
+    // Закрытый квартал, о котором есть что сказать: разошёлся с поданным —
+    // тревогой, расчёт неполон — спокойно, совпал — ничего. Ссылка открывает
+    // экран налога на этом квартале, как карточка на главном. Сменился файл
+    // правил — часть расхождения от него, а не от книги, и окно говорит это
+    // словами экрана налога.
+    let drift = move |(now, closing): &(QuarterTax, Closing)| {
+        let (key, role) = if now.drifted_from(closing) {
+            (Key::ExportDrift, "alert")
+        } else if !now.complete() {
+            (Key::ExportDriftUnknown, "status")
+        } else {
+            return None;
+        };
+        let shown = closing.quarter();
+        let chosen = ctx.tax_quarter;
+        let (then, rules) = (closing.data().rules, now.rules);
+        let versions = (role == "alert" && rules != then).then(|| (then.to_string(), rules.to_string()));
+        Some(view! {
+            <div class="notice-row">
+                <p role=role>{move || {
+                    let lang = lang.get();
+                    fill(t(lang, key), &[&i18n::quarter(lang, shown)])
+                }}</p>
+                <a class="button link" href=Screen::Tax.href() on:click=move |_| chosen.set(Some(shown))>
+                    {tr(lang, Key::ExportDriftOpen)}
+                </a>
+            </div>
+            {versions.map(|(then, now)| view! {
+                <p class="hint">{move || fill(t(lang.get(), Key::TaxClosedRulesChanged), &[&then, &now])}</p>
+            })}
+        })
+    };
     let link = move |at: usize| {
         let what = FILES[at];
         let node = nodes[at];
         let click = move |event: MouseEvent| {
             reset();
-            let made = build(ctx, quarter.get_untracked(), period.get_untracked(), what);
+            let made = build(ctx, quarter.get_untracked(), period.get_untracked(), what, closed);
             match (made, node.get_untracked()) {
-                (Some((download, count)), Some(node)) if node.set_attribute("href", download.url()).is_ok() => {
+                (Some(download), Some(node)) if node.set_attribute("href", download.url()).is_ok() => {
                     failed.set(false);
-                    unrated.set(count);
                     file.set_value(Some(download));
                 }
                 _ => {
@@ -238,12 +315,7 @@ pub(super) fn Export(ctx: Ctx, quarter: Memo<Quarter>) -> impl IntoView {
                 {choice(Period::Quarter)}
                 {choice(Period::Year)}
             </div>
-            <div class="actions">
-                {link(0)}
-                {link(1)}
-                {link(2)}
-            </div>
-            {move || failed.get().then(|| view! { <p role="alert">{tr(lang, Key::ExportFailed)}</p> })}
+            {move || closed.with(|closed| closed.iter().flatten().filter_map(drift).collect_view())}
             {move || (unrated.get() > 0).then(|| view! {
                 <p role="status">{move || {
                     let lang = lang.get();
@@ -256,6 +328,12 @@ pub(super) fn Export(ctx: Ctx, quarter: Memo<Quarter>) -> impl IntoView {
                     fill(t(lang, Key::ExportUnreadable), &[&i18n::integer(lang, unreadable.get() as i64)])
                 }}</p>
             })}
+            <div class="actions">
+                {link(0)}
+                {link(1)}
+                {link(2)}
+            </div>
+            {move || failed.get().then(|| view! { <p role="alert">{tr(lang, Key::ExportFailed)}</p> })}
         </section>
     }
 }
