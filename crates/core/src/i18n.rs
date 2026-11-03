@@ -1370,6 +1370,50 @@ strings! {
     DocActFromInvoice = "Акт по этому счёту", "Act for this invoice", "Ակտ այս հաշվի համար";
     /// Шаблон: основание акта — номер счёта.
     DocBasis = "Основание: счёт №\u{A0}{}", "Based on invoice No.\u{A0}{}", "Հիմք՝ հաշիվ №\u{A0}{}";
+    /// Акты-этапы (задача 84, `Document::acts`). Шаблон карточки счёта: сумма
+    /// его выпущенных действующих актов и сумма самого счёта.
+    DocActsSoFar =
+        "Акты по этому счёту\u{A0}— на {}, а сам счёт\u{A0}— на {}.",
+        "Acts for this invoice come to {}; the invoice is for {}.",
+        "Այս հաշվով ակտերը՝ {}, իսկ հաշիվը՝ {}։";
+    /// Шаблон: на сколько акты счёта больше него — так выпускалось до 0.0.75,
+    /// а доход в книге и налоге идёт по каждому акту.
+    DocActsOver =
+        "Акты по этому счёту вместе больше счёта на {}: доход в книге и в налоге по ним больше суммы счёта. Если акт выпущен дважды по ошибке, аннулируйте лишний.",
+        "Together the acts for this invoice exceed it by {}, so the ledger and the tax count more income than the invoice. If an act was issued twice by mistake, cancel the extra one.",
+        "Այս հաշվով ակտերը միասին գերազանցում են հաշիվը {}-ով. դրանցով եկամուտը մատյանում և հարկում ավելին է հաշվի գումարից։ Եթե ակտը սխալմամբ երկու անգամ է թողարկվել, չեղարկեք ավելորդը։";
+    /// Среди актов счёта есть акт в другой валюте — так выпускалось до
+    /// 0.0.75: сумму актов со счётом не сравнить, и новый акт по нему выпуск
+    /// не пустит (`DocError::ActCurrency`).
+    DocActsMixed =
+        "Среди актов этого счёта есть акт в другой валюте: сумму актов со счётом не сравнить, и нового акта по нему не выпустить. Аннулируйте акт в другой валюте и выпустите его заново в валюте счёта.",
+        "One of the acts for this invoice is in another currency: the acts can't be compared with the invoice, and no new act can be issued for it. Cancel the act in the other currency and issue it again in the invoice's currency.",
+        "Այս հաշվի ակտերից մեկն այլ արժույթով է. ակտերի գումարը հաշվի հետ հնարավոր չէ համեմատել, և դրանով նոր ակտ թողարկել հնարավոր չէ։ Չեղարկեք այլ արժույթով ակտը և նորից թողարկեք այն հաշվի արժույթով։";
+    /// Шаблон формы акта по счёту, у которого уже есть действующие акты:
+    /// сколько выпущено и сколько осталось до суммы счёта. День этапа почти
+    /// всегда другой, чем у счёта, а по нему доход идёт в квартал и берётся
+    /// курс ЦБ (НК, ст. 16), — подсказка о них напоминает.
+    DocActStage =
+        "По этому счёту уже выпущены акты на {}. Этот акт\u{A0}— следующий этап: доход по счёту станет суммой актов, поэтому укажите в нём только сделанное на этом этапе и дату оказания этого этапа, а у суммы в валюте\u{A0}— курс ЦБ для неё. До суммы счёта осталось {}.",
+        "Acts for {} have already been issued for this invoice. This act is the next stage: the invoice's income becomes the sum of its acts, so put in it only what was done at this stage and the stage's date of service, and for a foreign currency the CBA rate for that date. Up to the invoice total, {} is left.",
+        "Այս հաշվով արդեն թողարկված են ակտեր {} գումարով։ Այս ակտը հաջորդ փուլն է. հաշվով եկամուտը կդառնա ակտերի գումարը, ուստի դրանում նշեք միայն այս փուլում արվածը և այս փուլի մատուցման ամսաթիվը, իսկ արժույթով գումարի դեպքում՝ ԿԲ փոխարժեքն այդ օրվա համար։ Մինչև հաշվի գումարը մնացել է {}։";
+    /// Аннулированный акт не вернуть (`DocError::ReturnOverInvoice`): пока он
+    /// был аннулирован, по счёту выпустили другой.
+    DocReturnOverInvoice =
+        "Вернуть акт нельзя: пока он был аннулирован, по этому счёту выпустили другой акт, и вместе они были бы больше счёта. Если нужен именно этот акт, аннулируйте выпущенный вместо него и верните этот.",
+        "The act can't be restored: while it was cancelled, another act was issued for this invoice, and together they'd exceed it. If you need this act, cancel the one issued instead and restore this one.",
+        "Ակտը հետ բերել հնարավոր չէ. մինչ այն չեղարկված էր, այս հաշվով թողարկվել է մեկ այլ ակտ, և միասին դրանք կգերազանցեին հաշիվը։ Եթե պետք է հենց այս ակտը, չեղարկեք դրա փոխարեն թողարկվածը և հետ բերեք սա։";
+    /// Акт по счёту больше остатка (`DocError::ActsOverInvoice`) — под итогом
+    /// формы и словами отказа выпуска.
+    DocActsOverInvoice =
+        "Акт больше, чем осталось по счёту: акты по одному счёту вместе не больше него. Укажите в акте только оставшееся, а если сделано больше, чем в счёте, выпустите на разницу новый счёт.",
+        "This act is more than what's left on the invoice: the acts for one invoice together can't exceed it. Put in the act only what's left, and if more was done than the invoice covers, issue a new invoice for the difference.",
+        "Ակտը մեծ է հաշվով մնացածից. մեկ հաշվի ակտերը միասին չեն կարող գերազանցել այն։ Ակտում նշեք միայն մնացածը, իսկ եթե արվել է ավելին, քան հաշվում է, տարբերության համար թողարկեք նոր հաշիվ։";
+    /// Акт по счёту в другой валюте (`DocError::ActCurrency`).
+    DocActCurrency =
+        "Акт по счёту\u{A0}— в валюте счёта, как и все акты по нему: это та же услуга, и иначе акты со счётом не сравнить. Если по счёту уже есть акт в другой валюте, аннулируйте его и выпустите заново.",
+        "An act for an invoice is in the invoice's currency, like all its acts: it's the same service, and otherwise the acts can't be compared with the invoice. If the invoice already has an act in another currency, cancel it and issue it again.",
+        "Հաշվով ակտը հաշվի արժույթով է, ինչպես դրա բոլոր ակտերը. դա նույն ծառայությունն է, այլապես ակտերը հաշվի հետ հնարավոր չէ համեմատել։ Եթե հաշվով արդեն կա այլ արժույթով ակտ, չեղարկեք այն և նորից թողարկեք։";
 
     /// Ошибки полей документа — словами под полем.
     DocClientMissing = "Выберите клиента.", "Choose a client.", "Ընտրեք հաճախորդին։";

@@ -720,7 +720,8 @@ fn number_text_is_the_number_as_written() {
 }
 
 /// День оплаты дохода по акту — у его счёта, оплаченного целиком, и только
-/// когда акт у счёта один: актов-этапов два — чьи деньги пришли, не узнать.
+/// когда акт у счёта один: актов-этапов два — на разработку и на хостинг
+/// (задача 84), — и чьи деньги пришли, не узнать.
 #[test]
 fn act_payment_day_needs_its_only_act() {
     let client = client();
@@ -734,8 +735,15 @@ fn act_payment_day_needs_its_only_act() {
     documents.push(single.clone());
     let staged = paid(invoice_data(&client, day(2026, 10, 2), day(2026, 10, 2)), &documents);
     documents.push(staged.clone());
-    for (invoice, date) in [(&single, day(2026, 10, 3)), (&staged, day(2026, 10, 4)), (&staged, day(2026, 10, 5))] {
-        let act = issue(invoice.act_data(date).expect("акт по счёту"), &client, &documents);
+    // Этап — одна строка счёта: `None` — акт на весь счёт.
+    for (invoice, date, line) in
+        [(&single, day(2026, 10, 3), None), (&staged, day(2026, 10, 4), Some(0)), (&staged, day(2026, 10, 5), Some(1))]
+    {
+        let mut data = invoice.act_data(date).expect("акт по счёту");
+        if let Some(line) = line {
+            data.items = vec![data.items[line].clone()];
+        }
+        let act = issue(data, &client, &documents);
         documents.push(act);
     }
     let sheet = ledger_sheet(Lang::Ru, &documents, &[], std::slice::from_ref(&client), day(2026, 10, 1), day(2026, 12, 31));

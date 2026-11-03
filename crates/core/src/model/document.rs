@@ -31,6 +31,18 @@
 //! нет, поэтому у выпущенного документа его можно указать и поправить
 //! ([`Document::set_rate`]): текст документа от этого не меняется.
 //!
+//! **Акты-этапы** (задача 84). По одному счёту бывает несколько актов: услуга
+//! оказана, когда исполнитель её завершил, «в том числе по этапам,
+//! предусмотренным договором» (НК, ст. 40, ч. 4, п. 1 «բ»; для налога
+//! с оборота — через ст. 257, ч. 2 и ст. 109, ч. 3, п. 2; по закону, сверено
+//! по тексту arlis 230455 2026-11-03), и доход по счёту — сумма его
+//! действующих актов, каждый по своему дню оказания (`ledger::income_documents`).
+//! Поэтому выпуск акта по счёту ([`Document::issue`]) не пускает акт в другой
+//! валюте и акт, с которым акты счёта стали бы больше счёта: второй акт
+//! с теми же строками удвоил бы доход молча (решение человека 2026-11-03).
+//! Акты, выпущенные раньше, читаются как есть, а о сумме сверх счёта окно
+//! говорит словами.
+//!
 //! **Подпись акта** (задача 62) — день, когда клиент подписал акт и вернул
 //! экземпляр ИП ([`Document::sign`]): пока подпись не вернулась, услуга не
 //! принята. Налога она не меняет: доход по акту — по дате оказания услуги
@@ -317,6 +329,17 @@ pub enum DocError {
     /// Курс не годится: не больше нуля, у документа в драмах или другой
     /// валюты, чем документ.
     Rate,
+    /// Акт по счёту — в другой валюте, чем счёт, или такой уже есть среди
+    /// актов счёта: сумму актов со счётом не сравнить (задача 84).
+    ActCurrency,
+    /// С выпущенными действующими актами по тому же счёту этот акт больше
+    /// счёта: доход посчитался бы сверх суммы услуги (задача 84).
+    ActsOverInvoice,
+    /// Аннулированный акт не вернуть: пока он был аннулирован, по счёту
+    /// выпустили другой, и с действующими актами он был бы больше счёта
+    /// (задача 84). Строк выпущенного акта не поправить — человеку нужны
+    /// другие слова, чем у [`DocError::ActsOverInvoice`].
+    ReturnOverInvoice,
 }
 
 impl DocumentData {
@@ -731,6 +754,13 @@ impl Document {
         if unreadable > 0 {
             return Err(DocError::NumbersUnknown);
         }
+        let basis = self
+            .data
+            .basis
+            .and_then(|basis| documents.iter().find(|known| known.id() == basis));
+        if let Some(invoice) = basis {
+            self.fits(invoice, documents)?;
+        }
         let number = Self::next_number(documents, self.data.kind, self.data.date.year())
             .ok_or(DocError::NumbersExhausted)?;
         let mut document = self.clone();
@@ -740,10 +770,6 @@ impl Document {
             seller: Seller::from_profile(profile),
             buyer: client.data().clone(),
         });
-        let basis = self
-            .data
-            .basis
-            .and_then(|basis| documents.iter().find(|known| known.id() == basis));
         // Без этого акт, ставший документом дохода вместо отмеченного счёта,
         // снова ждал бы расчётного документа, уже выписанного, а акт по
         // счёту, выпущенному до 0.0.55, — того, о чём программа не знает.
@@ -756,6 +782,49 @@ impl Document {
             document.data.income_kind = document.data.income_kind.or(invoice.data.income_kind);
         }
         Ok(document)
+    }
+
+    /// Помещается ли этот акт в счёт-основание `invoice` рядом с его
+    /// выпущенными действующими актами (шапка модуля, «Акты-этапы»): валюта
+    /// та же, и все вместе не больше счёта. Счёт без своих актов вмещает акт
+    /// на всю сумму, а аннулированный акт места не занимает.
+    fn fits(&self, invoice: &Document, documents: &[Document]) -> Result<(), DocError> {
+        if self.data.currency != invoice.data.currency {
+            return Err(DocError::ActCurrency);
+        }
+        let acted = invoice.acted(documents).map_err(|error| match error {
+            MoneyError::CurrencyMismatch => DocError::ActCurrency,
+            MoneyError::RateUnknown | MoneyError::Overflow => DocError::TooLarge,
+        })?;
+        let whole = invoice.total().map_err(|_| DocError::TooLarge)?;
+        let this = self.data.total().map_err(|_| DocError::TooLarge)?;
+        let after = Money::total(invoice.data.currency, [acted, this]).map_err(|_| DocError::TooLarge)?;
+        if after.minor() > whole.minor() {
+            return Err(DocError::ActsOverInvoice);
+        }
+        Ok(())
+    }
+
+    /// Выпущенные действующие акты по этому счёту — этапы одной услуги
+    /// (шапка модуля, «Акты-этапы»). У акта и у счёта без актов — пусто.
+    pub fn acts<'a>(&self, documents: &'a [Document]) -> impl Iterator<Item = &'a Document> + use<'a> {
+        let id = self.id();
+        documents.iter().filter(move |act| {
+            act.data.kind == DocKind::Act
+                && act.data.basis == Some(id)
+                && act.issued.is_some()
+                && act.annulled.is_none()
+                && !act.meta.is_deleted()
+        })
+    }
+
+    /// Сумма выпущенных действующих актов по этому счёту — в валюте счёта:
+    /// доход по нему, когда акты есть (`ledger::income_documents`).
+    /// `CurrencyMismatch` — среди актов есть акт в другой валюте (выпуск таких
+    /// с 0.0.75 не пускает); `Overflow` — только от испорченных данных.
+    pub fn acted(&self, documents: &[Document]) -> Result<Money, MoneyError> {
+        let totals = self.acts(documents).map(Document::total).collect::<Result<Vec<_>, _>>()?;
+        Money::total(self.data.currency, totals)
     }
 
     /// Следующий номер серии `kind` и `year` — на единицу больше самого
@@ -786,13 +855,30 @@ impl Document {
     }
 
     /// Команда «вернуть аннулированный» — сразу после ошибочного
-    /// аннулирования. `None` — документ не аннулирован.
-    pub fn unannul(&self, now: Timestamp) -> Option<Self> {
-        self.annulled?;
+    /// аннулирования. Акт по счёту возвращается, только если помещается
+    /// в счёт рядом с его действующими актами (шапка модуля, «Акты-этапы»):
+    /// пока он был аннулирован, по счёту могли выпустить другой. `documents` —
+    /// все документы, прочитанные в той же транзакции. `Ok(None)` — документ
+    /// не аннулирован.
+    pub fn unannul(&self, documents: &[Document], now: Timestamp) -> Result<Option<Self>, DocError> {
+        if self.annulled.is_none() {
+            return Ok(None);
+        }
+        let basis = self
+            .data
+            .basis
+            .filter(|_| self.data.kind == DocKind::Act)
+            .and_then(|basis| documents.iter().find(|known| known.id() == basis));
+        if let Some(invoice) = basis {
+            self.fits(invoice, documents).map_err(|error| match error {
+                DocError::ActsOverInvoice => DocError::ReturnOverInvoice,
+                other => other,
+            })?;
+        }
         let mut document = self.clone();
         document.meta.touch(now);
         document.annulled = None;
-        Some(document)
+        Ok(Some(document))
     }
 
     /// Команда «удалить черновик»: метка, а не стирание. Выпущенный

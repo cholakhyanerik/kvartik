@@ -1217,6 +1217,9 @@ async fn issued_document_is_sent_by_the_share_menu() {
 /// не влияют: доход книги — по акту (`ledger::income_documents`). Карточка
 /// такого счёта не предлагает курс, а говорит, что он у акта; у самого
 /// акта — «Указать курс ЦБ» (дефект 0.0.27–0.0.47, найден ревью задачи 19).
+/// Один акт закрыл счёт целиком — обычный случай: карточка не говорит лишней
+/// строки о сумме актов и второго акта не предлагает — выпуск его не пустил
+/// бы (задача 84).
 #[wasm_bindgen_test]
 async fn an_invoice_with_an_act_leaves_the_rate_to_the_act() {
     let client = fresh_base_with_client().await;
@@ -1245,6 +1248,14 @@ async fn an_invoice_with_an_act_leaves_the_rate_to_the_act() {
     }
     if button(&host, &[t(lang, Key::DocRateSet)]).is_some() {
         wrong.push("у счёта с актом — «Указать курс ЦБ»".to_owned());
+    }
+    let acted = t(lang, Key::DocActsSoFar).split("{}").next().unwrap_or_default();
+    if host.text_content().unwrap_or_default().contains(acted) {
+        wrong.push("у счёта с одним актом на всю сумму — строка о сумме актов".to_owned());
+    }
+    // Кнопка прячется атрибутом, а не снимается (`DocCard`).
+    if button(&host, &[t(lang, Key::DocActFromInvoice)]).is_some_and(|button| !button.hidden()) {
+        wrong.push("у счёта, закрытого актом целиком, — «Акт по этому счёту»".to_owned());
     }
     if host.text_content().unwrap_or_default().contains(t(lang, Key::DocRateMissing)) {
         wrong.push("у счёта с актом — «в книге этот доход без суммы в драмах»".to_owned());

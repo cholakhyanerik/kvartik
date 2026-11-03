@@ -364,6 +364,9 @@ impl Problem {
             Self::Doc(DocError::PaymentAmount) => Key::PaymentInvalid,
             Self::Doc(DocError::SignedBeforeDate) => Key::SignBeforeDate,
             Self::Doc(DocError::TooLarge) => Key::DocTooLarge,
+            Self::Doc(DocError::ActsOverInvoice) => Key::DocActsOverInvoice,
+            Self::Doc(DocError::ReturnOverInvoice) => Key::DocReturnOverInvoice,
+            Self::Doc(DocError::ActCurrency) => Key::DocActCurrency,
             Self::Doc(
                 DocError::NoItems
                 | DocError::TooManyItems
@@ -1238,7 +1241,9 @@ async fn apply(store: &Store, id: RecordId, change: Change) -> Result<Option<(Do
     };
     let changed = match change {
         Change::Annul(today) => document.annul(today, now)?,
-        Change::Unannul => document.unannul(now),
+        // Акт по счёту возвращается, только если помещается в счёт: пока он
+        // был аннулирован, по счёту могли выпустить другой (задача 84).
+        Change::Unannul => document.unannul(&tx.list::<Document>().await?.records, now)?,
         Change::Delete => document.delete(now)?,
         Change::Restore => document.restore(now),
         Change::AddPayment(payment) => Some(document.add_payment(payment, now)?),
@@ -1749,6 +1754,29 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
     };
     let foreign = move || form.currency.get().is_some_and(|currency| currency != Currency::Amd);
     let full = move || form.items.with(|rows| rows.len() >= DocumentData::MAX_ITEMS);
+    // Акт по счёту (задача 84): сколько выпущено действующими актами этого
+    // счёта, их число и сумма самого счёта — форма говорит, что этот акт
+    // следующий этап, и сразу, а не при выпуске, — что он больше остатка.
+    let stage = Memo::new(move |_| {
+        let basis = form.basis.filter(|_| form.kind == DocKind::Act)?;
+        documents.with(|list, _, _| {
+            let invoice = list.iter().find(|known| known.id() == basis)?;
+            let acted = invoice.acted(list).ok()?;
+            Some((invoice.acts(list).count(), acted, invoice.total().ok()?))
+        })
+    });
+    let over_invoice = move || {
+        let (_, acted, whole) = stage.get()?;
+        let sum = total_money(lang.get())?;
+        let key = if sum.currency() != whole.currency() {
+            Key::DocActCurrency
+        } else if acted.minor().saturating_add(sum.minor()) > whole.minor() {
+            Key::DocActsOverInvoice
+        } else {
+            return None;
+        };
+        Some(view! { <p role="alert">{tr(lang, key)}</p> })
+    };
     // Выбранный клиент карточкой — на втором и третьем шаге: что о нём
     // знает документ и «Изменить», которое возвращает к выбору.
     let picked = move || {
@@ -2009,6 +2037,14 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                 </button>
                 <p class="total">{total}</p>
                 <p class="hint">{in_drams}</p>
+                {move || stage.get().filter(|(count, ..)| *count > 0).map(|(_, acted, whole)| view! {
+                    <p class="hint">{move || {
+                        let lang = lang.get();
+                        let left = Money::new(whole.minor().saturating_sub(acted.minor()).max(0), whole.currency());
+                        fill(t(lang, Key::DocActStage), &[&i18n::money(lang, acted), &i18n::money(lang, left)])
+                    }}</p>
+                })}
+                {over_invoice}
             </fieldset>
             <fieldset hidden=move || !shows(3)>
                 {wizard.then(|| view! {
@@ -2341,6 +2377,7 @@ fn DocCard(
     let invoice = data.kind == DocKind::Invoice;
     let open = document.annulled().is_none();
     let covered = covered_by_act(ctx, &document);
+    let staged = staged_acts(ctx, &document);
     // Сколько дней до срока — у счёта, который ждёт оплаты и ещё не
     // просрочен: о просроченном говорит статус.
     let days_left = match (ctx.today, data.due) {
@@ -2414,7 +2451,22 @@ fn DocCard(
             {basis.map(|number| view! {
                 <p class="hint">{move || fill(t(lang.get(), Key::DocBasis), &[&number])}</p>
             })}
+            {move || staged.get().and_then(|staged| Some((staged.worth_saying()?, staged.whole))).map(|(acted, whole)| view! {
+                <p class="hint">{move || {
+                    let lang = lang.get();
+                    fill(t(lang, Key::DocActsSoFar), &[&i18n::money(lang, acted), &i18n::money(lang, whole)])
+                }}</p>
+            })}
         </div>
+        {move || staged.get().and_then(Staged::over).map(|over| view! {
+            <p role="alert">{move || {
+                let lang = lang.get();
+                fill(t(lang, Key::DocActsOver), &[&i18n::money(lang, over)])
+            }}</p>
+        })}
+        {move || staged.get().is_some_and(|staged| staged.acted.is_none()).then(|| view! {
+            <p role="alert">{tr(lang, Key::DocActsMixed)}</p>
+        })}
         {(awaiting && left.is_some() && ctx.today.is_some()).then(|| view! {
             <button type="button" class="wide" disabled=move || busy.get() on:click=mark_paid>
                 {icon(Icon::Check)}
@@ -2422,10 +2474,15 @@ fn DocCard(
             </button>
         })}
         <div class="actions doc-next">
+            // Акт — пока по счёту что-то осталось: акты вместе не больше
+            // счёта (задача 84), и кнопка, которую выпуск отвергнет, путала бы.
+            // Прячется атрибутом, а не пересоздаётся: кнопка с обработчиком,
+            // которую можно снять, легла бы своим куском wasm (замер задачи 84).
             {(invoice && open).then(|| view! {
                 <button
                     type="button"
                     class="secondary"
+                    hidden=move || staged.get().is_some_and(|staged| !staged.room())
                     on:click=move |_| {
                         notice.set(None);
                         mode.set(Mode::ActFor(id));
@@ -2485,6 +2542,58 @@ fn ForBook(
             .into_any()
         }
     }
+}
+
+/// Акты-этапы выпущенного действующего счёта (задача 84): сколько их, на
+/// сколько они выпущены и сколько сам счёт, в его валюте. `acted` — `None`,
+/// когда среди актов есть акт в другой валюте (так выпускалось до 0.0.75):
+/// сумму не назвать, и нового акта по счёту выпуск не пустит.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Staged {
+    count: usize,
+    acted: Option<Money>,
+    whole: Money,
+}
+
+impl Staged {
+    /// Осталось ли по счёту на акт: сумма актов названа и меньше счёта.
+    fn room(&self) -> bool {
+        self.acted.is_some_and(|acted| acted.minor() < self.whole.minor())
+    }
+
+    /// Сумма актов, если о ней есть что сказать: актов больше одного или они
+    /// не на весь счёт. Один акт на весь счёт — обычный случай, и о нём
+    /// говорит `DocIncomeByAct` (ревью задачи 84).
+    fn worth_saying(&self) -> Option<Money> {
+        let acted = self.acted?;
+        (self.count > 1 || acted != self.whole).then_some(acted)
+    }
+
+    /// На сколько акты больше счёта — так выпускалось до 0.0.75; `None` — не
+    /// больше или сумму не назвать.
+    fn over(self) -> Option<Money> {
+        let over = self.acted?.minor().checked_sub(self.whole.minor())?;
+        (over > 0).then(|| Money::new(over, self.whole.currency()))
+    }
+}
+
+/// Акты-этапы счёта (`Document::acts`): `None` — актов нет, документ не
+/// выпущенный действующий счёт или документы ещё читаются. Отслеживаемое.
+fn staged_acts(ctx: Ctx, document: &Document) -> Memo<Option<Staged>> {
+    let live = document.data().kind == DocKind::Invoice && document.issued().is_some() && document.annulled().is_none();
+    let invoice = live.then(|| document.clone());
+    Memo::new(move |_| {
+        let invoice = invoice.as_ref()?;
+        let whole = invoice.total().ok()?;
+        ctx.documents.with(|documents, _, _| {
+            let count = invoice.acts(documents).count();
+            (count > 0).then(|| Staged {
+                count,
+                acted: invoice.acted(documents).ok(),
+                whole,
+            })
+        })
+    })
 }
 
 /// Закрыт ли счёт действующим актом: доход тогда — по акту

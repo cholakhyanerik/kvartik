@@ -610,9 +610,9 @@ fn issued_documents_are_annulled_not_edited() {
     assert_eq!(annulled.status(today), Status::Annulled);
     assert_eq!(annulled.number(), document.number(), "номер остаётся");
     assert_eq!(annulled.annul(today, at(5_000)), Ok(None));
-    let back = annulled.unannul(at(6_000)).expect("возвращён");
+    let back = annulled.unannul(&[], at(6_000)).expect("годно").expect("возвращён");
     assert_eq!(back.status(today), Status::Unpaid);
-    assert_eq!(back.unannul(at(7_000)), None);
+    assert_eq!(back.unannul(&[], at(7_000)), Ok(None));
 
     let draft = Document::create(data(DocKind::Invoice, &client, today), at(2_000)).expect("черновик");
     assert_eq!(draft.annul(today, at(3_000)), Err(DocError::NotIssued));
@@ -644,7 +644,7 @@ fn acts_are_signed_by_the_client() {
     assert_eq!(annulled.status(today), Status::Annulled);
     assert_eq!(annulled.signed(), Some(day(2026, 10, 5)), "аннулирование подпись не снимает");
     assert_eq!(annulled.sign(today, at(7_000)), Err(DocError::Annulled));
-    let back = annulled.unannul(at(7_000)).expect("возвращён");
+    let back = annulled.unannul(&[], at(7_000)).expect("годно").expect("возвращён");
     assert_eq!(back.status(today), Status::Signed);
 
     let unsigned = signed.unsign(at(8_000)).expect("отметка снята");
@@ -696,7 +696,7 @@ fn settlement_is_marked_on_an_issued_document() {
         let annulled = marked.annul(today, at(6_000)).expect("выпущен").expect("аннулирован");
         assert_eq!(annulled.settlement(), Some(&mark), "аннулирование отметку не снимает");
         assert_eq!(annulled.set_settlement(fixed.clone(), at(7_000)), Err(DocError::Annulled));
-        let back = annulled.unannul(at(7_000)).expect("возвращён");
+        let back = annulled.unannul(&[], at(7_000)).expect("годно").expect("возвращён");
         assert_eq!(back.settlement(), Some(&mark));
 
         let removed = marked.remove_settlement(at(8_000)).expect("отметка снята");
@@ -869,6 +869,65 @@ fn act_from_an_invoice() {
     assert_eq!(draft.act_data(today), Err(DocError::NotIssued));
     let annulled = invoice.annul(today, at(4_000)).expect("выпущен").expect("аннулирован");
     assert_eq!(annulled.act_data(today), Err(DocError::Annulled));
+}
+
+/// Акты-этапы (задача 84): по счёту выпускаются акты на его части, пока
+/// вместе они не больше счёта. Счёт — 3 месяца по 100 000 ֏ = 300 000 ֏, акт
+/// на месяц — 100 000 ֏. Аннулированный акт места не занимает, а вернуть его
+/// можно, только пока место за ним; акт в другой валюте не выпускается,
+/// а сколько выпущено — сумма действующих актов.
+#[test]
+fn staged_acts_stay_within_their_invoice() {
+    let client = client();
+    let october = day(2026, 10, 1);
+    let mut three = data(DocKind::Invoice, &client, october);
+    three.items[0].quantity_e3 = 3_000;
+    let invoice = Document::create(three, at(2_000))
+        .expect("черновик")
+        .issue(&[], 0, Some(&profile()), &client, at(3_000))
+        .expect("выпускается");
+    let mut documents = vec![invoice.clone()];
+    // Акт на `months` месяцев по этому счёту, выпущенный среди `documents`.
+    let act = |months: i64, documents: &[Document]| {
+        let mut data = invoice.act_data(day(2026, 10, 31)).expect("акт по счёту");
+        data.items[0].quantity_e3 = months * 1_000;
+        Document::create(data, at(4_000))
+            .expect("черновик акта")
+            .issue(documents, 0, Some(&profile()), &client, at(5_000))
+    };
+    let first = act(1, &documents).expect("первый этап");
+    documents.push(first.clone());
+    documents.push(act(1, &documents).expect("второй этап"));
+    assert_eq!(invoice.acted(&documents), Ok(Money::new(200_000, Currency::Amd)));
+    assert_eq!(invoice.acts(&documents).count(), 2);
+    assert_eq!(act(2, &documents).err(), Some(DocError::ActsOverInvoice), "два месяца при остатке в один");
+    documents.push(act(1, &documents).expect("последний этап — ровно остаток"));
+    assert_eq!(act(1, &documents).err(), Some(DocError::ActsOverInvoice), "счёт закрыт актами целиком");
+
+    let annulled = first.annul(day(2026, 11, 2), at(6_000)).expect("выпущен").expect("аннулирован");
+    documents[1] = annulled.clone();
+    assert_eq!(invoice.acted(&documents), Ok(Money::new(200_000, Currency::Amd)), "аннулированный не в счёт");
+    let instead = act(1, &documents).expect("на место аннулированного");
+    assert!(annulled.unannul(&documents, at(7_000)).is_ok_and(|back| back.is_some()), "место свободно — вернуть можно");
+    documents.push(instead);
+    assert_eq!(
+        annulled.unannul(&documents, at(7_000)).err(),
+        Some(DocError::ReturnOverInvoice),
+        "на его место выпустили другой — вернуть нельзя"
+    );
+
+    let mut dollars = invoice.act_data(day(2026, 10, 31)).expect("акт по счёту");
+    dollars.currency = Currency::Usd;
+    dollars.items[0].quantity_e3 = 1;
+    let draft = Document::create(dollars, at(4_000)).expect("черновик");
+    assert_eq!(
+        draft.issue(&documents, 0, Some(&profile()), &client, at(5_000)).err(),
+        Some(DocError::ActCurrency),
+        "акт в долларах по счёту в драмах"
+    );
+    // У самого акта и у акта без основания актов нет.
+    let lone = issued(DocKind::Act, &client, october, &documents);
+    assert_eq!((lone.acts(&documents).count(), documents[2].acts(&documents).count()), (0, 0));
 }
 
 /// Счёт в долларах для проб курса: 1 000,00 $, услуга оказана 30 сентября.
