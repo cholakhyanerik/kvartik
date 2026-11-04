@@ -553,10 +553,16 @@ fn rust_std_matches(rust_version: &str) -> Result<(), String> {
     }
 }
 
-/// Раздел файла с заголовком.
+/// Черта над группой крейтов: короче строки телефона — экран «О программе»
+/// показывает файл с переносом строк (`ui/about.rs`), и черта в 80 знаков
+/// рвалась на две (глазной прогон задачи 51, ширина 360).
+const GROUP_RULE: &str = "------------------------";
+
+/// Раздел файла: заголовок, подчёркнутый по своей длине, — по той же
+/// причине, что [`GROUP_RULE`].
 fn section(out: &mut String, title: &str) {
-    let rule = "=".repeat(80);
-    out.push_str(&format!("\n{rule}\n{title}\n{rule}\n\n"));
+    let rule = "=".repeat(title.chars().count());
+    out.push_str(&format!("\n\n{title}\n{rule}\n\n"));
 }
 
 /// Весь файл: шапка на трёх языках, шрифты, стандартная библиотека, CLDR
@@ -604,9 +610,8 @@ fn render(version: &str, fonts: &str, notices: &[Notice]) -> Result<String, Stri
     // по алфавиту.
     let mut groups: Vec<(&Text, Vec<&str>)> = groups.into_iter().collect();
     groups.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(b.0)));
-    let rule = "-".repeat(80);
     for (text, lines) in groups {
-        out.push_str(&format!("\n{rule}\n"));
+        out.push_str(&format!("\n{GROUP_RULE}\n"));
         for line in lines {
             out.push_str(line);
             out.push('\n');
@@ -615,7 +620,7 @@ fn render(version: &str, fonts: &str, notices: &[Notice]) -> Result<String, Stri
             out.push_str(note);
             out.push('\n');
         }
-        out.push_str(&format!("{rule}\n\n{}\n", text.body));
+        out.push_str(&format!("\n{}\n", text.body));
     }
     Ok(out)
 }
@@ -816,6 +821,28 @@ mod tests {
         assert_eq!(unused_stored(&all), Ok(()));
         let error = unused_stored(&all[1..]).expect_err("одной нет");
         assert!(error.contains(NO_FILES[0].0), "{error}");
+    }
+
+    /// Черты файла — короче строки телефона: экран «О программе» показывает
+    /// файл с переносом, и черта в 80 знаков рвалась на две (глазной прогон
+    /// задачи 51, ширина 360). Текст лицензий здесь свой, без чужих черт.
+    #[test]
+    fn rules_fit_a_phone_line() {
+        let notices = [Notice {
+            line: "a 1.0.0 — MIT".to_owned(),
+            texts: vec![Text {
+                note: None,
+                body: "MIT text".to_owned(),
+            }],
+        }];
+        let text = render("9.9.9", "OFL text", &notices).expect("файл");
+        let rules: Vec<&str> = text
+            .lines()
+            .filter(|line| !line.is_empty() && line.chars().all(|c| c == '=' || c == '-'))
+            .collect();
+        let long: Vec<&str> = rules.iter().copied().filter(|rule| rule.chars().count() > 32).collect();
+        assert!(long.is_empty(), "черты длиннее 32 знаков: {long:?}");
+        assert_eq!(rules.len(), 5, "четыре раздела и одна группа: {rules:?}");
     }
 
     /// Файл: шапка на трёх языках, четыре раздела, одинаковый текст — один

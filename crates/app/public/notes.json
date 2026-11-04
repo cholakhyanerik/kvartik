@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.80",
+      "date": "2026-11-04",
+      "hy": [
+        "«Ծրագրի մասին» էկրանին լիցենզիաների տեքստերում բաժինների և գրադարանների միջև գծերը հեռախոսում այլևս չեն կտրվում երկու տողի։"
+      ],
+      "ru": [
+        "В текстах лицензий на экране «О программе» черты между разделами и библиотеками на телефоне больше не рвутся на две строки."
+      ],
+      "en": [
+        "In the license texts on the “About” screen, the lines between sections and libraries no longer break in two on a phone."
+      ]
+    },
+    {
       "version": "0.0.79",
       "date": "2026-11-04",
       "hy": [
@@ -293,22 +306,6 @@
       ],
       "en": [
         "Nothing has changed in the app: the tool that builds the site has been updated, and the author now issues license keys with a dedicated program."
-      ]
-    },
-    {
-      "version": "0.0.60",
-      "date": "2026-10-27",
-      "hy": [
-        "Փորձաշրջանը 14 օր է՝ այս տարբերակի առաջին բացումից։ Դրանից հետո նոր հաշիվների և ակտերի թողարկումը և հաշվարկի թվերը՝ լիցենզիայի բանալիով, իսկ տվյալները, սևագրերը, եկամուտներն ու ծախսերը, հարկը, թողարկված փաստաթղթերի PDF-ը և պահուստային պատճենը միշտ աշխատում են։",
-        "Բանալին մուտքագրվում է պրոֆիլի «Լիցենզիա» էկրանում. այն տրվում է պրոֆիլի ՀՎՀՀ-ի համար և աշխատում է ցանկացած թվով սարքերում։"
-      ],
-      "ru": [
-        "Пробный период — 14 дней с первого открытия этой версии. После него выпуск новых счетов и актов и «Числа для расчёта» — с ключом лицензии, а данные, черновики, доходы и расходы, налог, PDF выпущенных документов и резервная копия работают всегда.",
-        "Ключ вводится на экране «Лицензия» в профиле: он выдаётся на ИНН (ՀՎՀՀ) из профиля и работает на любом числе устройств."
-      ],
-      "en": [
-        "A 14-day trial starts the first time you open this version. After it, issuing new invoices and acts and the numbers for the return need a license key; your data, drafts, income and expenses, tax, PDFs of issued documents and backups always work.",
-        "Enter the key on the “License” screen in your profile: it is issued for the TIN (ՀՎՀՀ) in the profile and works on any number of devices."
       ]
     }
   ]
