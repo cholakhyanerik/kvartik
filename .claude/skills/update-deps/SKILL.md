@@ -115,9 +115,10 @@ wasm-bindgen и программы разреза — и `tools/browser/check.mj
   Формат `Trunk.toml`
   у них один, а в 0.22 имена файлов с хэшем считаются от выходных байтов
   и не расходятся с SRI (trunk-rs/trunk#1028) — на этом держится кэш service
-  worker; wasm-opt по умолчанию version_131 вместо version_123 (её же
-  с 0.0.18 берёт хук сборки — `WASM_OPT_VERSION` в `crates/sw/src/wasm.rs`
-  и `BINARYEN_VERSION` в `ci.yml`). Wasm окна Trunk не собирает:
+  worker; wasm-opt по умолчанию version_131 вместо version_123. Хук сборки
+  берёт свою версию — `WASM_OPT_VERSION` в `crates/sw/src/wasm.rs`
+  и `BINARYEN_VERSION` в `ci.yml`: с 0.0.18 это была та же 131, с 0.0.81 —
+  version_133 (решение человека 2026-11-05). Wasm окна Trunk не собирает:
   `data-trunk-skip` в `index.html`, а без него он нашёл бы `Cargo.toml`
   рядом со страницей и собрал бы свой, неразрезанный (по исходникам
   0.22.0-rc.2, `src/pipelines/html.rs`). Версия записана в трёх местах:
@@ -167,12 +168,16 @@ wasm-bindgen и программы разреза — и `tools/browser/check.mj
 cargo-deny с этой машины скачивает: беды Trunk с DNS у него нет (проверено
 2026-10-10, 0.20.2).
 
-Для сборки сайта в `~/.cargo/bin` (он в PATH) лежат (2026-11-01)
-`wasm-bindgen` 0.2.130 — из того же архива, что раннер ниже, — и `wasm-opt`
-binaryen version_131 — из `binaryen-version_131-x86_64-windows.tar.gz`
-(github.com/WebAssembly/binaryen); суммы sha256 обоих архивов сверены
-с файлами выпуска и с полем `digest` в API GitHub. Без них `trunk build`
-останавливается и говорит, какой программы не хватает.
+Для сборки сайта в `~/.cargo/bin` (он в PATH) лежат `wasm-bindgen` 0.2.130
+(2026-11-01) — из того же архива, что раннер ниже, — и `wasm-opt` binaryen
+version_133 (с 2026-10-23; сборка берёт его с 0.0.81). Суммы sha256 архивов
+сверены с файлами выпуска и с полем `digest` в API GitHub. У `wasm-opt.exe`
+сумма `4217d75f…a8f4ba` совпадает с файлом из
+`binaryen-version_133-x86_64-windows.tar.gz` (сверено 2026-11-05). Без них
+`trunk build` останавливается и говорит, какой программы не хватает.
+Прежняя version_131 лежит в кэше Trunk
+(`%LOCALAPPDATA%\trunkrs\trunk\cache\wasm-opt-version_131`): ею собирают
+сравнительную сборку для замера.
 
 Для браузерных тестов в `~/.cargo/bin` лежат (2026-11-01):
 `wasm-bindgen-test-runner` 0.2.130 — из архива выпуска wasm-bindgen

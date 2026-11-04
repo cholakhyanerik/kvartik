@@ -81,10 +81,11 @@ const PLACEHOLDER: &str = "__wasm_split_placeholder__";
 /// Модуль, из которого части берут память, таблицу функций и прочее
 /// у главного (загрузчик собирает его из экспортов главного).
 const SHARED: &str = "__wasm_split";
-/// Версия binaryen, которой wasm-opt жмёт wasm: та, что брал Trunk
-/// 0.22.0-rc.2 по умолчанию (`version_131`). Меняется — меняется и в
-/// `ci.yml`, и замер размера (Правило 1).
-const WASM_OPT_VERSION: &str = "131";
+/// Версия binaryen, которой wasm-opt жмёт wasm: `version_133` (выпуск
+/// 2026-09-21) — с 0.0.81, решение человека 2026-11-05; до того — 131, та,
+/// что брал Trunk 0.22 по умолчанию. Меняется — меняется и в `ci.yml`,
+/// и замер размера (Правило 1).
+const WASM_OPT_VERSION: &str = "133";
 /// Уровень wasm-opt: `s`, а не `z` — после brotli `z` не меньше
 /// (замер 2026-10-13, задача 57; docs/measurements.md).
 const WASM_OPT_LEVEL: &str = "-Os";

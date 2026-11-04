@@ -61,9 +61,9 @@ env:
   # wasm-opt для сборки сайта (`crates/sw/src/wasm.rs`, задача 58): та же
   # версия binaryen, что `WASM_OPT_VERSION` там, — меняются обе. Сумма
   # архива `binaryen-<версия>-x86_64-linux.tar.gz` — из файла `.sha256`
-  # рядом с ним; совпала с полем `digest` в API GitHub (2026-10-13).
-  BINARYEN_VERSION: version_131
-  BINARYEN_SHA256: b5bf1f0eaf17c63ee588ff7a5954dc8f6ce2c26989051c66f24dfe9ece3e46db
+  # рядом с ним; совпала с полем `digest` в API GitHub (2026-11-05).
+  BINARYEN_VERSION: version_133
+  BINARYEN_SHA256: 2dc9c7813f5375db93d96ead4b78222fcc3e2677bbb832297af4797782a37489
 
 jobs:
   check:

@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.81",
+      "date": "2026-11-05",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել. կայքը կառուցելիս ծրագրի կոդն այժմ սեղմում է գործիքի նոր տարբերակը, իսկ ծրագրի չափը և բացվելու արագությունը նույնն են։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось: при сборке сайта её код теперь сжимает новая версия инструмента, а размер программы и скорость открытия остались прежними."
+      ],
+      "en": [
+        "Nothing has changed in the app: its code is now compressed by a newer version of the build tool, and the app's size and opening speed stay the same."
+      ]
+    },
+    {
       "version": "0.0.80",
       "date": "2026-11-04",
       "hy": [
@@ -293,19 +306,6 @@
       ],
       "en": [
         "A filing deadline moved off a non-working day, for the application or the declaration, no longer comes with a caveat: the SRC moves such deadlines itself. For payment deadlines the app still advises paying by the day the law names."
-      ]
-    },
-    {
-      "version": "0.0.61",
-      "date": "2026-10-27",
-      "hy": [
-        "Ծրագրում ոչինչ չի փոխվել. թարմացվել է կայքը հավաքող գործիքը, իսկ լիցենզիայի բանալիները հեղինակն այժմ թողարկում է իր ծրագրով։"
-      ],
-      "ru": [
-        "В программе ничего не изменилось: обновлён инструмент, которым собирается сайт, а ключи лицензии автор теперь выпускает своей программой."
-      ],
-      "en": [
-        "Nothing has changed in the app: the tool that builds the site has been updated, and the author now issues license keys with a dedicated program."
       ]
     }
   ]

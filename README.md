@@ -155,11 +155,11 @@ Trunk нужен 0.22.1 или новее из 0.22: со старым сбор�
 
 Ещё нужны две программы в PATH: `wasm-bindgen` **0.2.130** (та же версия,
 что крейт `wasm-bindgen` в `Cargo.lock`) и `wasm-opt` из binaryen
-**version_131**. Их берут готовыми из выпусков на GitHub —
+**version_133**. Их берут готовыми из выпусков на GitHub —
 `wasm-bindgen-0.2.130-<система>.tar.gz` в
 [wasm-bindgen](https://github.com/wasm-bindgen/wasm-bindgen/releases/tag/0.2.130)
-и `binaryen-version_131-<система>.tar.gz` в
-[binaryen](https://github.com/WebAssembly/binaryen/releases/tag/version_131),
+и `binaryen-version_133-<система>.tar.gz` в
+[binaryen](https://github.com/WebAssembly/binaryen/releases/tag/version_133),
 сверив сумму sha256 с файлом суммы рядом с архивом, — и кладут, например,
 в `~/.cargo/bin`. Окно режется на части, которые грузятся по нажатию, и эти
 программы зовёт сборка сама; не той версии — она остановится и скажет об
