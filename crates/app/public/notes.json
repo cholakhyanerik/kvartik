@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.79",
+      "date": "2026-11-04",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել. գրադարանները, որոնցից այն կառուցված է, այժմ ամեն շաբաթ ստուգվում են հայտնի խոցելիությունների բազայով, նույնիսկ երբ նոր տարբերակ չկա։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось: библиотеки, из которых она собрана, теперь каждую неделю сверяются с базой известных уязвимостей, даже когда новых версий нет."
+      ],
+      "en": [
+        "Nothing has changed in the app: the libraries it is built from are now checked against a database of known vulnerabilities every week, even when there is no new version."
+      ]
+    },
+    {
       "version": "0.0.78",
       "date": "2026-11-04",
       "hy": [
@@ -296,19 +309,6 @@
       "en": [
         "A 14-day trial starts the first time you open this version. After it, issuing new invoices and acts and the numbers for the return need a license key; your data, drafts, income and expenses, tax, PDFs of issued documents and backups always work.",
         "Enter the key on the “License” screen in your profile: it is issued for the TIN (ՀՎՀՀ) in the profile and works on any number of devices."
-      ]
-    },
-    {
-      "version": "0.0.59",
-      "date": "2026-10-23",
-      "hy": [
-        "Ուղղվել են հայերեն գրությունները. ձայնավոր հնչյունով սկսվող բառից առաջ որոշիչ հոդն այժմ «ն» է, ինչպես պահանջում է ուղղագրությունը։"
-      ],
-      "ru": [
-        "Исправлены армянские подписи: определённый артикль перед словом на гласный звук теперь «ն», как требует орфография."
-      ],
-      "en": [
-        "Armenian wording fixed: the definite article before a word that starts with a vowel sound is now “ն”, as the spelling rules require."
       ]
     }
   ]

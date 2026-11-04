@@ -161,7 +161,9 @@ wasm-bindgen и программы разреза — и `tools/browser/check.mj
 
 Инструменты: `cargo-outdated`, `cargo-edit` (даёт `cargo upgrade`), цель
 `wasm32-unknown-unknown`, Trunk 0.22.1 (с 2026-10-27) и cargo-deny
-0.20.2 (тот же выпуск, что в `ci.yml`) на машине есть (на 2026-10-10). Базу RustSec
+0.20.2 (тот же выпуск, что в `ci.yml`) на машине есть (на 2026-10-10).
+Версия и сумма архива cargo-deny записаны в двух заданиях CI — `ci.yml`
+и `advisories.yml` (проверка по расписанию, с 0.0.79): меняются вместе. Базу RustSec
 cargo-deny с этой машины скачивает: беды Trunk с DNS у него нет (проверено
 2026-10-10, 0.20.2).
 

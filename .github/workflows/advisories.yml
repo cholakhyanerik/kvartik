@@ -1,0 +1,74 @@
+# Зависимости по базе RustSec раз в неделю (задача 52).
+#
+# `cargo deny check` в задании проверки (ci.yml) сверяется с базой RustSec
+# только на push. Пока отправок нет, новая уязвимость в зависимости окна —
+# а значит, у каждого пользователя — ждала бы следующего push, а с бетой
+# отправки могут вставать на недели. Здесь — только `advisories`:
+# уязвимости, заброшенные крейты, небезопасный API и отозванные версии.
+# Лицензии, дубли и источники без новой отправки не меняются — их держит
+# ci.yml. Решение человека 2026-11-04 — это задание, а не Dependabot alerts:
+# у того своя база GitHub, и исключений `deny.toml` он не знает.
+#
+# Отдельным файлом, а не расписанием в ci.yml: там прогоны одной ветки
+# делят группу `concurrency` с отменой, и прогон по расписанию отменил бы
+# идущий прогон push в main вместе с выкладкой.
+#
+# Красный прогон GitHub присылает тому, кто создал этот файл, а потом — тому,
+# кто последним правил строку `cron` или включил задание снова (docs.github.com,
+# «Notifications for workflow runs», сверено 2026-11-04), если у него в
+# github.com/settings/notifications в разделе Actions включены письма.
+# В приватном репозитории задание GitHub сам не выключает; в публичном —
+# после 60 дней без активности (там же, «Events that trigger workflows»).
+# Без сборки и без кэша: около минуты в неделю из 2000 бесплатных в месяц
+# (CLAUDE.md, Правило 11). Руками — `gh workflow run advisories.yml`.
+name: RustSec
+
+on:
+  schedule:
+    # Понедельник, 05:17 UTC — 09:17 в Ереване. Не в начале часа: тогда
+    # очередь GitHub длиннее всего, и прогон могут отложить или выбросить
+    # (docs.github.com, «Events that trigger workflows», `schedule`).
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+# Ключу GitHub в прогоне — только чтение: писать в репозиторий незачем.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Та же версия cargo-deny и та же сумма архива, что в ci.yml (там — откуда
+  # сумма и почему она записана, а не скачивается): меняются вместе.
+  CARGO_DENY_VERSION: 0.20.2
+  CARGO_DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+
+jobs:
+  advisories:
+    name: RustSec
+    runs-on: ubuntu-latest
+
+    steps:
+      # Действия — по SHA коммита, те же, что в ci.yml (Правило 13).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # cargo-deny читает дерево зависимостей через `cargo metadata`: нужен
+      # cargo, а не сборка.
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+
+      - name: cargo-deny
+        run: |
+          curl -sSfL -o cargo-deny.tar.gz \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          echo "${CARGO_DENY_SHA256}  cargo-deny.tar.gz" | sha256sum -c -
+          tar -xzf cargo-deny.tar.gz -C "$HOME/.cargo/bin" --strip-components=1 \
+            "cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl/cargo-deny"
+          rm cargo-deny.tar.gz
+          cargo deny --version
+
+      # Новая запись в базе краснит прогон без нашего изменения — так
+      # и задумано: что с ней делать, решает человек (`deny.toml`).
+      - run: cargo deny check advisories
