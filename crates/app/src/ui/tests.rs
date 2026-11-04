@@ -428,6 +428,8 @@ async fn choosing_a_language_translates_the_whole_window() {
             Key::ReportAbout,
             Key::ReportTurnover,
             Key::AboutDisclaimer,
+            Key::AboutLicensesText,
+            Key::AboutLicensesOpen,
         ] {
             if !text.contains(t(lang, key)) {
                 wrong.push(format!("{lang:?}: нет {key:?} на этом языке"));

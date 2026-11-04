@@ -1,6 +1,6 @@
 [package]
 name = "kvartik-sw"
-description = "Сборка сайта Kvartik: wasm окна с частями и sw.js со списком файлов и хэшем сборки"
+description = "Сборка сайта Kvartik: wasm окна с частями, тексты лицензий и sw.js со списком файлов и хэшем сборки"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,7 +9,7 @@ publish.workspace = true
 
 # Программа сборки: её зовёт Trunk хуком `post_build` (`crates/app/Trunk.toml`)
 # на машине разработчика и в CI. В сайт попадают только написанные ею файлы
-# — wasm окна, его JS и `sw.js`, — а её код никогда. Поэтому её
+# — wasm окна, его JS, тексты лицензий и `sw.js`, — а её код никогда. Поэтому её
 # зависимости пользователь не скачивает, но они исполняются на машине
 # и в CI: проверяет их `cargo deny check`, как и остальные (Правило 13).
 [dependencies]

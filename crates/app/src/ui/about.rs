@@ -1,6 +1,6 @@
 //! О программе (задача 31): версия программы и формат данных, срок
-//! лицензии, правила налога с актами, на которых они стоят, и оговорка
-//! о расчёте.
+//! лицензии, правила налога с актами, на которых они стоят, оговорка
+//! о расчёте и тексты лицензий чужого кода и шрифтов (задача 51).
 //!
 //! Экран — внутри профиля, а его содержимое — в части книги, как у экрана
 //! лицензии (`ui/license.rs`): правила разбирает и подпись ключа проверяет
@@ -12,8 +12,12 @@
 
 use kvartik_core::format::FORMAT_VERSION;
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
+use kvartik_core::release::LICENSES;
 use kvartik_core::tax::rules;
 use leptos::prelude::*;
+use leptos::task::spawn_local;
+
+use crate::platform::site;
 
 use super::backup::BackupChip;
 use super::icon::{Icon, icon};
@@ -144,5 +148,57 @@ pub(super) fn AboutPage(ctx: tax::Ctx) -> impl IntoView {
         <p class="hint">{tr(lang, Key::AboutActsHint)}</p>
         <h2>{tr(lang, Key::AboutCalculation)}</h2>
         <p>{tr(lang, Key::AboutDisclaimer)}</p>
+        <h2>{tr(lang, Key::AboutLicenses)}</h2>
+        <p>{tr(lang, Key::AboutLicensesText)}</p>
+        <Licenses lang />
+    }
+}
+
+/// Что показывает раскрытый блок текстов лицензий.
+#[derive(Clone, PartialEq)]
+enum Shown {
+    Nothing,
+    Loading,
+    Text(String),
+    Unreachable,
+}
+
+/// Тексты лицензий (задача 51) — файлом `release::LICENSES` из папки
+/// программы, который пишет сборка (`crates/sw/src/licenses.rs`): по
+/// первому раскрытию, и без сети — из кэша service worker. Не открылся —
+/// слова, и следующее раскрытие пробует снова.
+///
+/// В окне, а не ссылкой на файл: у текстового файла нет `viewport`, и
+/// телефон показывает его уменьшенным до 980 точек — без увеличения не
+/// прочесть (глазной прогон задачи 51, Chrome 157), а программа с экрана
+/// «Домой» на iPhone, ушедшая на файл в своём окне, не показала бы кнопки
+/// «назад». Файл в 120 КБ в главный wasm не идёт: Правило 1.
+#[component]
+fn Licenses(lang: ReadSignal<Lang>) -> impl IntoView {
+    let shown = RwSignal::new(Shown::Nothing);
+    let open = move |_| {
+        if !shown.with_untracked(|shown| matches!(shown, Shown::Nothing | Shown::Unreachable)) {
+            return;
+        }
+        shown.set(Shown::Loading);
+        spawn_local(async move {
+            shown.set(match site::text(LICENSES).await {
+                Ok(text) => Shown::Text(text),
+                Err(_) => Shown::Unreachable,
+            });
+        });
+    };
+    view! {
+        <details class="licenses" on:toggle=open>
+            <summary>{tr(lang, Key::AboutLicensesOpen)}</summary>
+            {move || shown.with(|shown| match shown {
+                Shown::Nothing => ().into_any(),
+                Shown::Loading => view! { <p class="hint">{tr(lang, Key::PartLoading)}</p> }.into_any(),
+                Shown::Text(text) => view! { <pre class="licenses-text">{text.clone()}</pre> }.into_any(),
+                Shown::Unreachable => {
+                    view! { <p class="hint" role="alert">{tr(lang, Key::AboutLicensesFailed)}</p> }.into_any()
+                }
+            })}
+        </details>
     }
 }

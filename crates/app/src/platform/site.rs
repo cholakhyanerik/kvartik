@@ -1,10 +1,11 @@
-//! Файлы своего сайта по адресу: шрифты для документа (задача 12).
+//! Файлы своего сайта по адресу: шрифты для документа (задача 12) и тексты
+//! лицензий (задача 51).
 //!
 //! Шрифты PDF — те же файлы, что у окна (`public/fonts/`, `doc::fonts`):
 //! service worker кладёт их в кэш с первого захода (Правило 2), и без сети
-//! они приходят оттуда же. Запрос — только к своему сайту (Архитектура,
-//! «Сеть — только к своему сайту»), адрес — относительный, как
-//! у `fonts.css`.
+//! они приходят оттуда же — как и всё в папке программы. Запрос — только
+//! к своему сайту (Архитектура, «Сеть — только к своему сайту»), адрес —
+//! относительный, как у `fonts.css`.
 
 use js_sys::Uint8Array;
 use wasm_bindgen::{JsCast, JsValue};
@@ -34,8 +35,7 @@ pub async fn fonts(names: &[&'static str]) -> Result<Vec<(&'static str, Vec<u8>)
             .and_then(JsValue::dyn_into)
             .map_err(|error| log(name, &error))?;
         if !response.ok() {
-            log(name, &JsValue::from(response.status()));
-            return Err(Unreachable);
+            return Err(log(name, &JsValue::from(response.status())));
         }
         let buffer = response
             .array_buffer()
@@ -47,7 +47,29 @@ pub async fn fonts(names: &[&'static str]) -> Result<Vec<(&'static str, Vec<u8>)
     Ok(out)
 }
 
+/// Текст файла `name` папки программы. Ответ не с кодом 2xx — ошибка, как
+/// у шрифтов: на неизвестный адрес сайт отвечает `404.html` с кодом 404
+/// (с 0.0.29, Правило 6).
+pub async fn text(name: &str) -> Result<String, Unreachable> {
+    let window = web_sys::window().ok_or(Unreachable)?;
+    let response: Response = window
+        .fetch_with_str(name)
+        .await
+        .and_then(JsValue::dyn_into)
+        .map_err(|error| log(name, &error))?;
+    if !response.ok() {
+        return Err(log(name, &JsValue::from(response.status())));
+    }
+    response
+        .text()
+        .map_err(|error| log(name, &error))?
+        .await
+        .map_err(|error| log(name, &error))?
+        .as_string()
+        .ok_or(Unreachable)
+}
+
 fn log(name: &str, error: &JsValue) -> Unreachable {
-    web_sys::console::error_2(&format!("Kvartik, шрифт {name}:").into(), error);
+    web_sys::console::error_2(&format!("Kvartik, файл {name}:").into(), error);
     Unreachable
 }

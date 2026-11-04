@@ -2692,6 +2692,22 @@ strings! {
         "Kvartik считает налоги по тексту законов Армении так, как его прочитал автор программы: акты и дни сверки\u{A0}— выше. Это помощь в расчёте, а не налоговая консультация: закон меняется и читается по-разному, а программа знает только то, что вы в неё ввели. Перед подачей расчёта и уплатой сверьте числа с бухгалтером. За поданные расчёты и уплаченные налоги отвечает ИП.",
         "Kvartik calculates taxes from the text of Armenian law as the app's author reads it; the acts and check dates are above. It helps with the calculation and is not tax advice: the law changes and can be read in more than one way, and the app knows only what you have entered. Check the numbers with an accountant before you file a return or pay. The individual entrepreneur is responsible for the returns filed and the taxes paid.",
         "Kvartik-ը հարկերը հաշվում է ՀՀ օրենքների տեքստով՝ այնպես, ինչպես այն ընթերցել է ծրագրի հեղինակը. ակտերը և ստուգման օրերը՝ վերևում։ Սա օգնություն է հաշվարկում, ոչ թե հարկային խորհրդատվություն. օրենքը փոխվում է և կարող է տարբեր կերպ մեկնաբանվել, իսկ ծրագիրը գիտի միայն այն, ինչ դուք եք մուտքագրել։ Հաշվարկը ներկայացնելուց և հարկը վճարելուց առաջ ստուգեք թվերը հաշվապահի հետ։ Ներկայացված հաշվարկների և վճարված հարկերի համար պատասխանատու է ԱՁ-ն։";
+    /// Тексты лицензий чужого кода и шрифтов (задача 51): раздел экрана
+    /// «О программе» и раскрываемый блок с файлом `release::LICENSES`. Слова
+    /// о лицензиях пишет и сборка — шапкой самого файла
+    /// (`crates/sw/src/licenses.rs`).
+    AboutLicenses = "Лицензии", "Licenses", "Լիցենզիաներ";
+    AboutLicensesText =
+        "В Kvartik есть код и шрифты других авторов. Их лицензии это разрешают с условием: с программой идут тексты лицензий и имена авторов. Тексты\u{A0}— на английском, как их написали авторы.",
+        "Kvartik includes code and fonts by other authors. Their licenses allow this on one condition: the license texts and the authors' names come with the app. The texts are in English, as their authors wrote them.",
+        "Kvartik-ում կան այլ հեղինակների կոդ և տառատեսակներ։ Դրանց լիցենզիաները դա թույլ են տալիս մեկ պայմանով՝ ծրագրի հետ տրվում են լիցենզիաների տեքստերը և հեղինակների անունները։ Տեքստերն անգլերեն են, ինչպես գրել են հեղինակները։";
+    AboutLicensesOpen = "Тексты лицензий", "License texts", "Լիցենզիաների տեքստերը";
+    /// Файл не пришёл: нет сети, а service worker его ещё не сохранил.
+    /// Следующее раскрытие попробует снова.
+    AboutLicensesFailed =
+        "Тексты лицензий не загрузились. Проверьте интернет и раскройте их ещё раз.",
+        "The license texts didn't load. Check your internet connection and open them again.",
+        "Լիցենզիաների տեքստերը չբեռնվեցին։ Ստուգեք ինտերնետ կապը և նորից բացեք դրանք։";
 
     /// Годовые платежи (задача 20): экран внутри раздела налога, карточка
     /// на главном экране и строка на экране налога (`tax::annual`). Суммы,

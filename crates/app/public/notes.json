@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.78",
+      "date": "2026-11-04",
+      "hy": [
+        "«Ծրագրի մասին» էկրանին այժմ կան այլ հեղինակների կոդի և տառատեսակների լիցենզիաների տեքստերը, որոնցից կառուցված է Kvartik-ը. դրանց լիցենզիաները պահանջում են, որ տեքստերը տրվեն ծրագրի հետ։ Բաժինը բացվում է սեղմելով, նաև առանց ինտերնետի։"
+      ],
+      "ru": [
+        "На экране «О программе» теперь есть тексты лицензий кода и шрифтов других авторов, из которых собран Kvartik: их лицензии требуют, чтобы тексты шли вместе с программой. Блок раскрывается по нажатию, и без интернета тоже."
+      ],
+      "en": [
+        "The “About” screen now has the license texts of the code and fonts by other authors that Kvartik is built from: their licenses require these texts to come with the app. The section opens on a tap, also without an internet connection."
+      ]
+    },
+    {
       "version": "0.0.77",
       "date": "2026-11-04",
       "hy": [
@@ -296,19 +309,6 @@
       ],
       "en": [
         "Armenian wording fixed: the definite article before a word that starts with a vowel sound is now “ն”, as the spelling rules require."
-      ]
-    },
-    {
-      "version": "0.0.58",
-      "date": "2026-10-23",
-      "hy": [
-        "Ծրագիրը բացվում է ավելի արագ. առանձին բեռնվող էկրանների՝ հաշիվների, մատյանի, հաճախորդների, հարկի և պրոֆիլի գրություններն այլևս չեն ներբեռնվում գլխավոր էկրանի հետ, այլ գալիս են իրենց էկրանի հետ։"
-      ],
-      "ru": [
-        "Программа открывается быстрее: подписи экранов, которые грузятся отдельно, — счетов, книги, клиентов, налога и профиля — больше не скачиваются вместе с главным экраном, а приходят со своим экраном."
-      ],
-      "en": [
-        "The app opens faster: the wording of screens that load separately — invoices, ledger, clients, tax and profile — no longer downloads with the home screen and comes with its own screen instead."
       ]
     }
   ]

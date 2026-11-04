@@ -31,6 +31,8 @@ const TYPES = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".wasm": "application/wasm", ".css": "text/css",
   ".ttf": "font/ttf", ".png": "image/png", ".webmanifest": "application/manifest+json", ".json": "application/json",
   ".pdf": "application/pdf", ".svg": "image/svg+xml", ".ics": "text/calendar; charset=utf-8",
+  // Как Cloudflare Pages: `text/plain; charset=utf-8` (tools/deploy/check.sh).
+  ".txt": "text/plain; charset=utf-8",
 };
 
 /// Свой сервер. Возвращает `{ port, stop() }`.

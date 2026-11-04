@@ -23,7 +23,7 @@
 //    главном экране — и без вопроса браузера, и раскладка, которую видно
 //    только с настоящим CSS: кнопка не вплотную к карточке налога под ней.
 // 3. Сервер выключен: программа открывается из кэша service worker, и те же
-//    экраны, формы, карточка и PDF работают без сети.
+//    экраны, формы, карточка, PDF и тексты лицензий работают без сети.
 // 4. Новая версия (задача 67): на сервере — копия сборки новой версией. Пока
 //    открыта форма или начат ввод вне формы, над экраном только слова; всё
 //    закрыли — новая сборка включается сама, страница перезагружается,
@@ -137,6 +137,27 @@ async function screens(page, when) {
     await go(page, screen.hash);
     checks.check(`${when}: экран «${screen.name}»`, await page.waitFor(screen.shown));
   }
+  await licenses(page, when);
+}
+
+/// Тексты лицензий (задача 51): блок «О программе» раскрывается файлом,
+/// который пишет сборка (`crates/sw/src/licenses.rs`), а приходит файл и без
+/// сети — из кэша service worker. В нём — все четыре раздела и крейты Leptos,
+/// у которых своего файла лицензии нет.
+async function licenses(page, when) {
+  await go(page, "#/about");
+  const opened = await page.waitFor(`const summary = document.querySelector("#about details.licenses > summary");
+    if (!summary || !summary.getClientRects().length) return null;
+    if (!summary.parentElement.open) summary.click();
+    return true;`);
+  const got = opened && await page.waitFor(`const pre = document.querySelector("#about details.licenses[open] pre.licenses-text");
+    if (!pre) return null;
+    const text = pre.textContent;
+    return { parts: ["SIL OPEN FONT LICENSE", "The Rust Standard Library (Rust ", "UNICODE LICENSE V3", "4. Rust crates"]
+        .filter((part) => !text.includes(part)),
+      leptos: text.includes("leptos 0.") && text.includes("Copyright (c) 2022 Greg Johnston"),
+      wide: document.documentElement.scrollWidth > document.documentElement.clientWidth };`);
+  checks.check(`${when}: тексты лицензий`, got && got.parts.length === 0 && got.leptos && !got.wide, JSON.stringify(got));
 }
 
 /// Главный экран: кнопка «Установить» есть всегда, пока программа не

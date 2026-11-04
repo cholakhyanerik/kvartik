@@ -95,6 +95,9 @@ pub struct Built {
     pub hash: String,
     /// Сколько частей.
     pub parts: usize,
+    /// `package_id` крейтов, скомпилированных в wasm, — для файла лицензий
+    /// (`licenses.rs`).
+    pub crates: BTreeSet<String>,
 }
 
 /// Собрать wasm пакета `package` в папку программы `app` и вписать запуск
@@ -117,7 +120,7 @@ pub fn build(package: &str, app: &Path, public_url: &str) -> Result<Built, Strin
         None
     };
 
-    let raw = cargo_build(package, release)?;
+    let (raw, crates) = cargo_build(package, release)?;
     let work = raw
         .parent()
         .ok_or("у wasm нет папки")?
@@ -295,11 +298,13 @@ pub fn build(package: &str, app: &Path, public_url: &str) -> Result<Built, Strin
     Ok(Built {
         hash,
         parts: parts.len(),
+        crates,
     })
 }
 
-/// `cargo build` окна под wasm32; путь к wasm — из сообщений cargo.
-fn cargo_build(package: &str, release: bool) -> Result<PathBuf, String> {
+/// `cargo build` окна под wasm32; путь к wasm и крейты в нём — из сообщений
+/// cargo.
+fn cargo_build(package: &str, release: bool) -> Result<(PathBuf, BTreeSet<String>), String> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"));
     let mut command = Command::new(cargo);
     command.args([
@@ -320,8 +325,32 @@ fn cargo_build(package: &str, release: bool) -> Result<PathBuf, String> {
     if !output.status.success() {
         return Err(format!("cargo build {package} не собрался"));
     }
-    artifact(&String::from_utf8_lossy(&output.stdout), package)
-        .ok_or_else(|| format!("cargo не назвал wasm пакета {package}"))
+    let messages = String::from_utf8_lossy(&output.stdout);
+    let wasm = artifact(&messages, package).ok_or_else(|| format!("cargo не назвал wasm пакета {package}"))?;
+    Ok((wasm, compiled(&messages)))
+}
+
+/// `package_id` крейтов, скомпилированных под цель окна, из тех же
+/// сообщений: у них файлы — в папке цели (`target/wasm32-unknown-unknown/
+/// <профиль>/`). Proc-macro и скрипты сборки cargo собирает под машину
+/// сборки, в `target/<профиль>/` (по документации cargo, «Build cache»),
+/// и в wasm их нет; крейт, нужный и тем и другим, cargo собирает дважды,
+/// и под цель он здесь есть. Собранный раньше крейт cargo называет тоже
+/// (`"fresh": true`).
+fn compiled(messages: &str) -> BTreeSet<String> {
+    messages
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|message| message["reason"] == "compiler-artifact")
+        // Путь делится по обоим разделителям сам, а не `Path`: тот на Linux
+        // не делит путь Windows, и тест там проверял бы не то.
+        .filter(|message| {
+            message["filenames"].as_array().into_iter().flatten().any(|name| {
+                name.as_str().is_some_and(|name| name.split(['/', '\\']).any(|part| part == TARGET))
+            })
+        })
+        .filter_map(|message| message["package_id"].as_str().map(str::to_owned))
+        .collect()
 }
 
 /// Wasm пакета из сообщений `cargo build --message-format=json`.
@@ -927,6 +956,28 @@ mod tests {
             Some(PathBuf::from("/t/kvartik-app.wasm"))
         );
         assert_eq!(artifact(messages, "kvartik-core"), None);
+    }
+
+    /// Крейты wasm для файла лицензий — те, что собраны под цель окна: proc-macro
+    /// и библиотека, собранная для неё под машину сборки, — нет, а та же
+    /// библиотека под цель — да, один раз. Пути Windows — тоже.
+    #[test]
+    fn cargo_names_the_crates_of_the_wasm() {
+        let messages = concat!(
+            r#"{"reason":"compiler-artifact","package_id":"registry+x#paste@1.0.15","target":{"kind":["proc-macro"]},"filenames":["/k/target/debug/deps/paste.so"]}"#,
+            "\n",
+            r#"{"reason":"compiler-artifact","package_id":"registry+x#syn@3.0.9","target":{"kind":["lib"]},"filenames":["/k/target/debug/deps/libsyn.rlib"]}"#,
+            "\n",
+            r#"{"reason":"compiler-artifact","package_id":"registry+x#syn@3.0.9","target":{"kind":["lib"]},"filenames":["/k/target/wasm32-unknown-unknown/debug/deps/libsyn.rlib"]}"#,
+            "\n",
+            r#"{"reason":"compiler-artifact","package_id":"registry+x#leptos@0.8.23","fresh":true,"target":{"kind":["lib"]},"filenames":["C:\\k\\target\\wasm32-unknown-unknown\\release\\deps\\libleptos.rlib"]}"#,
+            "\n",
+            r#"{"reason":"build-script-executed","package_id":"registry+x#leptos@0.8.23"}"#,
+            "\n",
+            r#"{"reason":"build-finished","success":true}"#,
+        );
+        let ids: Vec<String> = compiled(messages).into_iter().collect();
+        assert_eq!(ids, ["registry+x#leptos@0.8.23", "registry+x#syn@3.0.9"]);
     }
 
     /// SRI — как у браузера: SHA-384 пустой строки известен.

@@ -20,7 +20,9 @@
 //! а не в одном `public_url`.
 //!
 //! С `--wasm` она собирает wasm пакета и вписывает его запуск в страницу,
-//! а потом пишет `sw.js` программы по всем файлам, wasm в том числе. Одна
+//! рядом кладёт тексты лицензий всего, из чего wasm собран, и шрифтов
+//! (задача 51, `licenses.rs`), а потом пишет `sw.js` программы по всем
+//! файлам, wasm в том числе. Одна
 //! программа, а не три хука: хуки одной стадии Trunk идут одновременно (по
 //! исходникам trunk 0.22.0-rc.2, `src/hooks.rs`), а `sw.js` должен видеть
 //! готовый wasm. Без `--root` и `--wasm` — только `sw.js`: так переписывают
@@ -39,8 +41,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use kvartik_core::i18n::Lang;
+use kvartik_core::release::LICENSES;
 use kvartik_core::tax::calendar;
 
+mod licenses;
 mod wasm;
 
 /// Строка шаблона, вместо которой встаёт хэш сборки.
@@ -96,7 +100,11 @@ fn run() -> Result<String, String> {
     let wasm = match &package {
         Some(package) => {
             let built = wasm::build(package, &app_dir, &public_url)?;
-            format!(", wasm {} с частями: {}", built.hash, built.parts)
+            let crates = licenses::write(&app_dir, &built.crates)?;
+            format!(
+                ", wasm {} с частями: {}, крейтов в {LICENSES}: {crates}",
+                built.hash, built.parts
+            )
         }
         None => String::new(),
     };

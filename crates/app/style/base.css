@@ -2103,6 +2103,29 @@ dl.months dd,
   margin: var(--space-2) 0 0;
 }
 
+/* Тексты лицензий (задача 51) — раскрываются на экране «О программе»: файл
+   в 120 КБ, а читают его редко. Текст — как его написали авторы, с их
+   строками и отступами (`pre-wrap`), но шрифтом окна: в шапке армянский
+   и русский, а длинная строка переносится, а не уезжает за край телефона. */
+.licenses > summary {
+  min-height: var(--touch);
+  color: var(--accent-text);
+  font-weight: var(--weight-strong);
+  cursor: pointer;
+}
+
+.licenses > p {
+  margin: var(--space-2) 0 0;
+}
+
+.licenses-text {
+  margin: var(--space-3) 0 0;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .tax-line {
   margin-top: var(--space-3);
   padding: var(--space-4) var(--space-5);
