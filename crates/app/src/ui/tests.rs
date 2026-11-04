@@ -679,6 +679,49 @@ async fn screens_follow_the_address() {
     assert!(wrong.is_empty(), "экраны: {wrong:#?}");
 }
 
+/// Пора сделать копию — метка о ней стоит под заголовком каждого экрана,
+/// кроме главного (там карточка) и самого экрана копии: напоминать обязано
+/// каждое открытие, на каком бы экране оно ни было (CLAUDE.md, Правило 2).
+/// Экран лицензии с 0.0.60 по 0.0.76 её не показывал.
+#[wasm_bindgen_test]
+async fn backup_label_stands_on_every_screen_when_due() {
+    documents::fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    // Копии на этом устройстве не было: в базе есть данные — пора.
+    if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
+        let _ = storage.remove_item("kvartik.last_backup");
+    }
+    let (host, mounted) = mount();
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::BackupChooseFile)).await {
+        wrong.push("база не открылась".to_owned());
+    }
+    for screen in Screen::PLAIN {
+        if matches!(screen, Screen::Home | Screen::Backup) {
+            continue;
+        }
+        crate::platform::set_hash(&screen.href());
+        let label = format!("#{} a.chip.nudge", screen.id());
+        let mut seen = false;
+        for _ in 0..100 {
+            if shown_screens(&host) == [screen.id()] && host.query_selector(&label).ok().flatten().is_some() {
+                seen = true;
+                break;
+            }
+            sleep(20).await;
+        }
+        if !seen {
+            wrong.push(format!("{screen:?}: нет метки копии под заголовком"));
+        }
+    }
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "метка копии: {wrong:#?}");
+}
+
 /// Текст раздела `#id` окна; нет раздела — пусто.
 fn section_text(host: &HtmlElement, id: &str) -> String {
     host.query_selector(&format!("#{id}"))

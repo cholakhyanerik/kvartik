@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.77",
+      "date": "2026-11-04",
+      "hy": [
+        "«Լիցենզիա» էկրանին վերնագրի տակ այժմ երևում է պահուստային պատճենի նշանը, երբ ժամանակն է այն պատրաստելու. պատճենի մասին ծրագիրը հիշեցնում է յուրաքանչյուր էկրանին։"
+      ],
+      "ru": [
+        "На экране «Лицензия» под заголовком теперь видна метка о резервной копии, когда пора её сделать: о копии программа напоминает на каждом экране."
+      ],
+      "en": [
+        "The License screen now shows the backup label under its title when it's time to make a backup: the app reminds you about backups on every screen."
+      ]
+    },
+    {
       "version": "0.0.76",
       "date": "2026-11-04",
       "hy": [
@@ -296,19 +309,6 @@
       ],
       "en": [
         "The app opens faster: the wording of screens that load separately — invoices, ledger, clients, tax and profile — no longer downloads with the home screen and comes with its own screen instead."
-      ]
-    },
-    {
-      "version": "0.0.57",
-      "date": "2026-10-22",
-      "hy": [
-        "Ծրագրում ոչինչ չի փոխվել. թարմացվել է գրադարան, որով աշխատում են թողարկումից առաջ ստուգումները։"
-      ],
-      "ru": [
-        "В программе ничего не изменилось: обновлена библиотека, на которой работают проверки перед выкладкой."
-      ],
-      "en": [
-        "Nothing has changed in the app: a library used by the checks before each release has been updated."
       ]
     }
   ]

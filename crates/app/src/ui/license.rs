@@ -24,6 +24,7 @@ use kvartik_core::model::tin::Tin;
 use leptos::ev::SubmitEvent;
 use leptos::prelude::*;
 
+use super::backup::BackupChip;
 use super::icon::{Icon, icon};
 use super::ledger::tax_part;
 use super::profile::Profiles;
@@ -225,8 +226,9 @@ pub fn LicenseEntry(lang: ReadSignal<Lang>) -> impl IntoView {
     }
 }
 
-/// Экран лицензии на языке окна: «назад» к профилю и заголовок — сразу,
-/// остальное — частью книги с первого показа (`split::screen`).
+/// Экран лицензии на языке окна: «назад» к профилю, заголовок и метка
+/// копии, когда пора её сделать (Правило 2), — сразу, остальное — частью
+/// книги с первого показа (`split::screen`).
 #[component]
 pub fn LicenseScreen(ctx: tax::Ctx, router: Router) -> impl IntoView {
     let lang = ctx.lang;
@@ -236,6 +238,7 @@ pub fn LicenseScreen(ctx: tax::Ctx, router: Router) -> impl IntoView {
             <span>{tr(lang, Key::NavProfile)}</span>
         </a>
         <h1 tabindex="-1">{tr(lang, Key::LicenseTitle)}</h1>
+        <BackupChip lang backups=ctx.backups nudge=true />
         {screen(lang, router, Screen::License, move || tax_part(ctx, Part::License))}
     }
 }
