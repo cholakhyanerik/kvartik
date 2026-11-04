@@ -175,6 +175,49 @@ fn the_built_in_file_is_sound() {
     assert!(!rules.holidays().is_empty());
     assert!(!rules.days_off().is_empty());
     assert_eq!(armenia(), &rules);
+    // Список актов «О программе»: самый поздний день сверки — тот же, что
+    // у файла, а поправки в скобках ушли из названий.
+    let acts = rules.acts();
+    assert_eq!(acts.iter().map(|act| act.checked).max(), rules.checked());
+    assert!(acts.iter().all(|act| !act.name.is_empty() && !act.name.contains('(')), "{acts:#?}");
+}
+
+/// Акты правил — по разу, в порядке файла, с самым поздним днём сверки их
+/// записей, а закон, который ввёл норму, — в скобках — акт не меняет
+/// (экран «О программе», задача 31). Самая поздняя сверка — у средней
+/// записи: ни первая, ни последняя запись за неё не сойдут.
+#[test]
+fn acts_come_once_with_their_latest_check() {
+    let code = |codes: &[&str], law: &str, checked: &str| {
+        with_source(with_source(exclusion(codes, "2025-07-01", None), "law", law), "checked", checked)
+    };
+    let text = file(
+        &[
+            code(&["69"], "ՀՕ-165-Ն ՀՀ հարկային օրենսգիրք (12.06.24 ՀՕ-285-Ն)", "2026-10-19"),
+            code(&["70"], "ՀՕ-165-Ն ՀՀ հարկային օրենսգիրք (26.03.25 ՀՕ-72-Ն)", "2026-11-01"),
+            code(&["78.2"], "ՀՕ-165-Ն ՀՀ հարկային օրենսգիրք", "2026-10-20"),
+        ],
+        &[with_source(
+            pension("2014-01-01", None),
+            "law",
+            "ՀՕ-244-Ն «Կուտակային կենսաթոշակների մասին» (21.06.14 ՀՕ-67-Ն)",
+        )],
+    );
+    let rules = Rules::parse(&text).expect("годный файл");
+    assert_eq!(
+        rules.acts(),
+        [
+            Act {
+                name: "ՀՕ-165-Ն ՀՀ հարկային օրենսգիրք",
+                checked: day(2026, 11, 1),
+            },
+            Act {
+                name: "ՀՕ-244-Ն «Կուտակային կենսաթոշակների մասին»",
+                checked: day(2026, 10, 19),
+            },
+        ]
+    );
+    assert_eq!(rules.checked(), Some(day(2026, 11, 1)));
 }
 
 /// Годный файл разбирается — без этого отказы ниже ничего бы не значили.

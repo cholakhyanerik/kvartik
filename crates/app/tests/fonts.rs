@@ -20,6 +20,7 @@ use kvartik_core::model::country::Country;
 use kvartik_core::model::date::Date;
 use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::release::Notes;
+use kvartik_core::tax::rules;
 
 fn app_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -253,7 +254,8 @@ impl Font {
 
 /// Знаки, которые окно может показать: вся таблица строк на трёх языках,
 /// заметки «Что нового» (`public/notes.json`, задача 67), названия стран
-/// (`model::country`, задача 10), записи сумм, курсов и дат, знаки, которые
+/// (`model::country`, задача 10), акты файла правил (задача 31), записи
+/// сумм, курсов и дат, знаки, которые
 /// Правило 4 называет поимённо, и целые алфавиты трёх языков — их человек
 /// вводит сам: имена, адреса, названия услуг.
 fn needed() -> BTreeSet<char> {
@@ -293,6 +295,11 @@ fn needed() -> BTreeSet<char> {
         for country in Country::by_name(lang) {
             text += country.name(lang);
         }
+    }
+    // Акты, на которых стоят правила, — их названия на экране «О программе»
+    // (задача 31), на любом языке окна — армянскими, как на arlis.am.
+    for act in rules::armenia().acts() {
+        text += act.name;
     }
     text += "№«»“”‘’—–…֏€$";
     text.extend((' '..='~').chain('А'..='я').chain(['Ё', 'ё']));

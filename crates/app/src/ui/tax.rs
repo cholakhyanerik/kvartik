@@ -43,6 +43,7 @@ use kvartik_core::tax::rules::{self, Percent};
 use kvartik_core::tax::turnover::{self, Books, Leaving, Line, QuarterTax, Regime, kind_key};
 use leptos::prelude::*;
 
+use super::about::AboutPage;
 use super::annual::{AnnualCard, AnnualEntry, AnnualPage};
 use super::deadlines::{DeadlineReminder, DeadlinesEntry, DeadlinesPage};
 use super::backup::{AutoCards, BackupChip, Backups};
@@ -610,13 +611,16 @@ pub(super) enum Part {
     Report,
     /// Содержимое экрана лицензии (`ui/license.rs`, задача 25).
     License,
+    /// Содержимое экрана «О программе» (`ui/about.rs`, задача 31).
+    About,
 }
 
 /// Карточки или экран — зовёт часть книги (`ledger::book_part`). Годовые
 /// платежи и числа для расчёта — в той же части: они считаются из книги
 /// и профиля, а своя часть делила бы с налогом почти весь код (CLAUDE.md,
 /// Правило 6). Лицензия — тоже: числа для расчёта открывает её срок, а
-/// карточку на главном часть книги грузит и так.
+/// карточку на главном часть книги грузит и так. И «О программе»: правила
+/// и срок лицензии у неё — отсюда.
 pub(super) fn content(ctx: Ctx, part: Part) -> AnyView {
     match part {
         Part::Card => view! {
@@ -634,6 +638,7 @@ pub(super) fn content(ctx: Ctx, part: Part) -> AnyView {
         Part::Deadlines => view! { <DeadlinesPage ctx /> }.into_any(),
         Part::Report => view! { <ReportPage ctx /> }.into_any(),
         Part::License => view! { <LicensePage ctx /> }.into_any(),
+        Part::About => view! { <AboutPage ctx /> }.into_any(),
     }
 }
 

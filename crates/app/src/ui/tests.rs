@@ -333,6 +333,7 @@ async fn choosing_a_language_translates_the_whole_window() {
             Screen::Deadlines,
             Screen::Report,
             Screen::Profile,
+            Screen::About,
         ],
     )
     .await;
@@ -426,6 +427,7 @@ async fn choosing_a_language_translates_the_whole_window() {
             Key::DeadlinesShiftRule,
             Key::ReportAbout,
             Key::ReportTurnover,
+            Key::AboutDisclaimer,
         ] {
             if !text.contains(t(lang, key)) {
                 wrong.push(format!("{lang:?}: нет {key:?} на этом языке"));

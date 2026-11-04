@@ -302,6 +302,27 @@ impl Source {
             .unwrap_or_default();
         self.law.contains("-Ն") && !self.article.trim().is_empty() && OFFICIAL_HOSTS.contains(&host)
     }
+
+    /// Акт без закона, который ввёл норму: `ՀՕ-165-Ն ՀՀ հարկային օրենսգիրք
+    /// (12.06.24 ՀՕ-285-Ն)` — `ՀՕ-165-Ն ՀՀ հարկային օրենսգիրք`. Записи одного
+    /// акта с разными поправками — один акт в списке источников
+    /// ([`Rules::acts`]).
+    pub fn act(&self) -> &str {
+        self.law
+            .split_once(" (")
+            .map_or(self.law.as_str(), |(act, _)| act)
+            .trim()
+    }
+}
+
+/// Акт, на котором стоят правила, и когда его текст сверен последний раз —
+/// для экрана «О программе» (задача 31).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Act<'a> {
+    /// Номер и название акта ([`Source::act`]).
+    pub name: &'a str,
+    /// Самый поздний день сверки его записей.
+    pub checked: Date,
 }
 
 /// Когда правило действует: с дня `from` по день `until` включительно.
@@ -1433,11 +1454,35 @@ impl Rules {
     /// сверки источника; `None` — записей нет. До конца следующего за ним
     /// года общий календарь сроков (`tax::calendar`) сроки и обещает.
     pub fn checked(&self) -> Option<Date> {
-        fn latest<R: Rule>(records: &[R]) -> Option<Date> {
-            records.iter().map(|record| record.source().checked).max()
+        self.sources().into_iter().map(|source| source.checked).max()
+    }
+
+    /// Акты, на которых стоят правила, — по разу, в порядке файла: записи
+    /// одного акта с разными поправками — один акт с самым поздним днём
+    /// сверки (экран «О программе», задача 31).
+    pub fn acts(&self) -> Vec<Act<'_>> {
+        let mut acts: Vec<Act<'_>> = Vec::new();
+        for source in self.sources() {
+            let name = source.act();
+            match acts.iter_mut().find(|act| act.name == name) {
+                Some(act) => act.checked = act.checked.max(source.checked),
+                None => acts.push(Act {
+                    name,
+                    checked: source.checked,
+                }),
+            }
+        }
+        acts
+    }
+
+    /// Источники всех записей — в порядке файла.
+    fn sources(&self) -> Vec<&Source> {
+        fn of<R: Rule>(records: &[R]) -> impl Iterator<Item = &Source> {
+            records.iter().map(R::source)
         }
         // Разбор без `..`: новый вид записей не соберётся, пока его не
-        // назовут и здесь.
+        // назовут и здесь, — иначе его источник выпал бы и из дня сверки,
+        // и из списка актов.
         let Self {
             version: _,
             turnover_exclusions,
@@ -1461,31 +1506,28 @@ impl Rules {
             holidays,
             days_off,
         } = self;
-        [
-            latest(turnover_exclusions),
-            latest(funded_pension),
-            latest(turnover_rates),
-            latest(high_tech),
-            latest(turnover_threshold),
-            latest(turnover_expenses),
-            latest(turnover_carry),
-            latest(turnover_place),
-            latest(turnover_form),
-            latest(profit_tax),
-            latest(social_payment),
-            latest(stamp_duty),
-            latest(health_insurance),
-            latest(turnover_due),
-            latest(turnover_application),
-            latest(income_declaration),
-            latest(settlement_due),
-            latest(deadline_shift),
-            latest(holidays),
-            latest(days_off),
-        ]
-        .into_iter()
-        .flatten()
-        .max()
+        let mut all = Vec::new();
+        all.extend(of(turnover_exclusions));
+        all.extend(of(funded_pension));
+        all.extend(of(turnover_rates));
+        all.extend(of(high_tech));
+        all.extend(of(turnover_threshold));
+        all.extend(of(turnover_expenses));
+        all.extend(of(turnover_carry));
+        all.extend(of(turnover_place));
+        all.extend(of(turnover_form));
+        all.extend(of(profit_tax));
+        all.extend(of(social_payment));
+        all.extend(of(stamp_duty));
+        all.extend(of(health_insurance));
+        all.extend(of(turnover_due));
+        all.extend(of(turnover_application));
+        all.extend(of(income_declaration));
+        all.extend(of(settlement_due));
+        all.extend(of(deadline_shift));
+        all.extend(of(holidays));
+        all.extend(of(days_off));
+        all
     }
 
     /// Кто не может быть плательщиком налога с оборота по виду

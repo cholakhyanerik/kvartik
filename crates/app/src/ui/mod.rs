@@ -5,6 +5,7 @@
 //! `style/`, а не атрибутом `style` (Правило 4). Цвет литералом и опечатку
 //! в `var(--…)` ловит тест `crates/app/tests/tokens.rs`.
 
+mod about;
 mod annual;
 mod avatar;
 mod backup;
@@ -37,6 +38,7 @@ use leptos::prelude::*;
 
 use crate::platform::clock;
 use crate::store::{self, Store};
+use about::{AboutEntry, AboutScreen};
 use annual::AnnualScreen;
 use backup::{BackupChip, BackupEntry, BackupSection, Backups};
 use clients::{Clients, ClientsSection};
@@ -118,8 +120,8 @@ impl Base {
 
 /// Корень окна (дизайн «Kvartik Design»): меню разделов и экраны —
 /// главный, счета и акты, книга, клиенты, налог и внутри него годовые
-/// платежи, сроки и числа для расчёта, профиль и внутри него копия
-/// и лицензия (`ui/route.rs`). Все экраны —
+/// платежи, сроки и числа для расчёта, профиль и внутри него копия,
+/// лицензия и «О программе» (`ui/route.rs`). Все экраны —
 /// в странице, открытый виден, остальные спрятаны: начатое в форме не
 /// пропадает при переходе. Содержимое счетов, книги, клиентов, налога,
 /// годовых платежей и профиля — частями wasm с первого показа
@@ -279,6 +281,9 @@ pub fn App() -> impl IntoView {
                             <span class="entry-title">{tr(lang, Key::Language)}</span>
                             <LangSwitch lang=window_lang />
                         </li>
+                        <li>
+                            <AboutEntry lang />
+                        </li>
                     </ul>
                     <p class="hint privacy">{tr(lang, Key::ProfilePrivacy)}</p>
                 </section>
@@ -293,6 +298,9 @@ pub fn App() -> impl IntoView {
                 </section>
                 <section id=Screen::License.id() class="screen" hidden=hidden(Screen::License)>
                     <LicenseScreen ctx=tax router />
+                </section>
+                <section id=Screen::About.id() class="screen" hidden=hidden(Screen::About)>
+                    <AboutScreen ctx=tax router />
                 </section>
             </main>
             {panic::debug_trigger()}

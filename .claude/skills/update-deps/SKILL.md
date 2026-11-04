@@ -161,14 +161,14 @@ binaryen version_131 — из `binaryen-version_131-x86_64-windows.tar.gz`
 `wasm-bindgen-test-runner` 0.2.130 — из архива выпуска wasm-bindgen
 `wasm-bindgen-0.2.130-x86_64-pc-windows-msvc.tar.gz` (github.com/
 wasm-bindgen/wasm-bindgen), сумма sha256 сверена с файлом выпуска;
-и chromedriver 155.0.8059.40 — из Chrome for Testing
-(`storage.googleapis.com/chrome-for-testing-public/<версия>/win64/
-chromedriver-win64.zip`; сумм CfT не публикует, md5 сверен по заголовку
-`x-goog-hash`). Драйвер годится только к Chrome той же сборки
-(major.minor.build): Chrome обновлялся до 155.0.8059.80 (2026-10-14)
-и 155.0.8059.85 (2026-10-16), и драйвер .40 с ними работает. Сменится
-сборка — тесты упадут с «session not created», и драйвер берётся заново той
-же версии, что Chrome. Версия Chrome — имя папки рядом с `chrome.exe`:
+и chromedriver 157.0.8103.39 (с 2026-11-04; до того — 155.0.8059.40) — из
+Chrome for Testing (`storage.googleapis.com/chrome-for-testing-public/
+<версия>/win64/chromedriver-win64.zip`; сумм CfT не публикует, md5 сверен по
+заголовку `x-goog-hash`). Драйвер годится только к Chrome той же сборки
+(major.minor.build): с Chrome 155.0.8059.80 и .85 драйвер .40 работал,
+а Chrome 157.0.8103.39 (2026-11-04) от него отказался. Сменится сборка —
+тесты упадут с «session not created», и драйвер берётся заново той же
+версии, что Chrome. Версия Chrome — имя папки рядом с `chrome.exe`:
 `chrome.exe --version` на Windows открывает окно вместо ответа. Раннер ищет
 драйвер в PATH и первым берёт geckodriver: появится он — переменная
 `CHROMEDRIVER` выберет Chrome явно (так в CI).
