@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.85",
+      "date": "2026-11-05",
+      "hy": [
+        "Այլ ԱՁ-ի պահուստային պատճենն այլևս լուռ չի միավորվում ծրագրի տվյալների հետ. ծրագիրը նշում է երկու ԱՁ-ի անունն ու ՀՎՀՀ-ն և հարցնում է՝ միավորել, թե ոչ։ Նույն ԱՁ-ի պատճենը վերականգնվում է ինչպես նախկինում։"
+      ],
+      "ru": [
+        "Резервная копия другого ИП больше не сливается с данными программы молча: программа называет оба ИП по имени и ИНН (ՀՎՀՀ) и спрашивает, сливать ли. Копия того же ИП восстанавливается, как раньше."
+      ],
+      "en": [
+        "A backup of a different individual entrepreneur is no longer merged into the app's data silently: the app names both by name and TIN (ՀՎՀՀ) and asks whether to merge. A backup of the same entrepreneur restores as before."
+      ]
+    },
+    {
       "version": "0.0.84",
       "date": "2026-11-05",
       "hy": [
@@ -278,25 +291,6 @@
       "en": [
         "If a return you filed before using the app carried a deduction forward, you can now enter it on the Tax screen, and the calculation will start from it. If there was none, save the empty fields and the question goes away.",
         "The question about an unknown carry-over now appears in every quarter it affects, not just the first."
-      ]
-    },
-    {
-      "version": "0.0.65",
-      "date": "2026-11-01",
-      "hy": [
-        "Եթե փակելուց հետո եռամսյակի հաշվարկը տարբերվում է ներկայացվածից, օրինակ՝ մոռացված ակտ եք ավելացրել, գլխավոր էկրանը դա ցույց կտա առանձին քարտով՝ երկու գումարով, իսկ հարկի էկրանը կբացվի այդ եռամսյակի վրա։",
-        "Փակված եռամսյակի համար հարկի էկրանն այժմ ցույց է տալիս ներկայացված թվերը, իսկ վերահաշվարկը՝ որպես տարբերություն։",
-        "«Կրկին բացել»-ից հետո կարող եք սեղմել «Հետ բերել». եռամսյակը կրկին կփակվի նախկին թվերով։"
-      ],
-      "ru": [
-        "Если расчёт закрытого квартала разошёлся с поданным, например вы внесли забытый акт, главный экран покажет это отдельной карточкой с обеими суммами, а экран налога откроется на этом квартале.",
-        "У закрытого квартала экран налога теперь показывает поданные числа, а пересчёт виден расхождением.",
-        "После «Открыть снова» можно нажать «Вернуть»: квартал снова закрыт с прежними числами."
-      ],
-      "en": [
-        "If a closed quarter's calculation no longer matches what you filed, for example after you add a forgotten act, the Home screen shows a separate card with both amounts, and the Tax screen opens on that quarter.",
-        "For a closed quarter, the Tax screen now shows the numbers you filed, and any recalculation appears as a difference.",
-        "After “Reopen” you can press “Undo”: the quarter is closed again with its earlier numbers."
       ]
     }
   ]

@@ -29,8 +29,8 @@ use std::time::Duration;
 
 use kvartik_core::format::autobackup::{self, DeviceTag};
 use kvartik_core::format::backup::{
-    self, BackupError, DeviceKey, Header, KDF_ITERATIONS, KINDS, MAX_FILE_BYTES,
-    MIN_PASSWORD_CHARS, PasswordProblem, SALT_BYTES, Sealed,
+    self, BackupError, DeviceKey, Entry, Header, KDF_ITERATIONS, KINDS, MAX_FILE_BYTES,
+    MIN_PASSWORD_CHARS, Owner, PasswordProblem, SALT_BYTES, Sealed,
 };
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
 use kvartik_core::model::date::Date;
@@ -54,7 +54,7 @@ use crate::platform::pause::breathe;
 use crate::platform::share::{self, ShareError};
 use crate::store::StoreError;
 use crate::store::autobackup::{self as remembered, Saved};
-use crate::store::backup::{self as stored, Failure, Restored};
+use crate::store::backup::{self as stored, Failure, Merged, OtherIe, Restored};
 use crate::store::device::Device;
 
 /// Что окно знает о копиях.
@@ -759,6 +759,8 @@ enum Restoring {
     Busy,
     /// Файл открыт — нужен его пароль; с проблемой — прошлый не подошёл.
     Password(Rc<Sealed>, Option<Problem>),
+    /// Копия другого ИП расшифрована: слить ли её (задача 38, этап 1).
+    Other(Rc<Asked>),
     Done(Restored),
     Failed(Problem),
 }
@@ -1452,12 +1454,39 @@ split! {
     /// только по «Восстановить».
     pub(super) fn restoring_task(
         backups: Backups,
-        sealed: Rc<Sealed>,
-        typed: String,
-    ) -> Task<Result<Restored, Problem>>, preload preload_restore
+        job: RestoreJob,
+    ) -> Task<Result<Recovered, Problem>>, preload preload_restore
     {
-        Box::pin(async move { restore(backups, &sealed, &typed).await })
+        Box::pin(async move { restore(backups, job).await })
     }
+}
+
+/// Что сделать части восстановления.
+pub(super) enum RestoreJob {
+    /// Расшифровать файл этим паролем и слить — или остановиться на
+    /// вопросе о другом ИП.
+    Open(Rc<Sealed>, String),
+    /// Человек ответил «слить» на вопрос о копии другого ИП.
+    Merge(Rc<Asked>),
+}
+
+/// Чем кончилась часть восстановления.
+pub(super) enum Recovered {
+    /// Записи легли.
+    Done(Restored),
+    /// Копия другого ИП: окно спрашивает, а записано ничего.
+    Other(Rc<Asked>),
+}
+
+/// Расшифрованная копия другого ИП — ждёт ответа человека (задача 38,
+/// этап 1). Пароль второй раз не спрашивается: ключ из него считается
+/// секунды (PBKDF2 на 600 000 итераций), а записи уже разобраны.
+pub(super) struct Asked {
+    sealed: Rc<Sealed>,
+    entries: Vec<Entry>,
+    key: crypto::Key,
+    ours: Option<Owner>,
+    theirs: Owner,
 }
 
 /// Ключ из введённого пароля копий. `repeat` — повтор нового пароля; `None` —
@@ -1737,7 +1766,8 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl
         let typed = password.get_untracked();
         restoring.set(Restoring::Busy);
         leptos::task::spawn_local(async move {
-            let outcome = match restoring_task(backups, Rc::clone(&sealed), typed).await {
+            let job = RestoreJob::Open(Rc::clone(&sealed), typed);
+            let outcome = match restoring_task(backups, job).await {
                 Ok(task) => task.await,
                 Err(_) => Err(Problem::Say(Key::PartFailed)),
             };
@@ -1745,12 +1775,32 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl
                 password.set(String::new());
             }
             restoring.set(match outcome {
-                Ok(restored) => Restoring::Done(restored),
+                Ok(Recovered::Done(restored)) => Restoring::Done(restored),
+                Ok(Recovered::Other(asked)) => Restoring::Other(asked),
                 // Пароль не подошёл — спросить снова, а не выбирать файл
                 // заново.
                 Err(problem @ Problem::Say(Key::BackupWrongFilePassword)) => {
                     Restoring::Password(sealed, Some(problem))
                 }
+                Err(problem) => Restoring::Failed(problem),
+            });
+        });
+    };
+
+    // «Всё равно слить» копию другого ИП: та же часть wasm, без пароля.
+    let merge = move |_: MouseEvent| {
+        let Restoring::Other(asked) = restoring.get_untracked() else {
+            return;
+        };
+        restoring.set(Restoring::Busy);
+        leptos::task::spawn_local(async move {
+            let outcome = match restoring_task(backups, RestoreJob::Merge(asked)).await {
+                Ok(task) => task.await,
+                Err(_) => Err(Problem::Say(Key::PartFailed)),
+            };
+            restoring.set(match outcome {
+                Ok(Recovered::Done(restored)) => Restoring::Done(restored),
+                Ok(Recovered::Other(_)) => Restoring::Failed(Problem::Say(Key::BackupFailed)),
                 Err(problem) => Restoring::Failed(problem),
             });
         });
@@ -1791,6 +1841,39 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl
                             </button>
                         </div>
                     </form>
+                }
+                .into_any()
+            }
+            Restoring::Other(asked) => {
+                // Ответа ещё нет, а копия расшифрована и ждёт: новая версия
+                // тоже ждёт, как у пароля файла.
+                forms.hold();
+                let ours = asked.ours.clone();
+                let theirs = asked.theirs.clone();
+                view! {
+                    <div class="notice">
+                        <p role="alert">{tr(lang, Key::BackupOtherIe)}</p>
+                        <p>{move || {
+                            let lang = lang.get();
+                            let ours = ours.as_ref().map_or_else(
+                                || t(lang, Key::BackupOtherIeUnreadable).to_owned(),
+                                |ours| who(lang, ours),
+                            );
+                            fill(t(lang, Key::BackupOtherIeOurs), &[&ours])
+                        }}</p>
+                        <p>{move || fill(t(lang.get(), Key::BackupOtherIeTheirs), &[&who(lang.get(), &theirs)])}</p>
+                        <p>{tr(lang, Key::BackupOtherIeWhy)}</p>
+                        // Безопасный ответ — первым и главным: смешанные
+                        // ИП потом не разделить одной кнопкой.
+                        <div class="actions">
+                            <button type="button" on:click=move |_| restoring.set(Restoring::Idle)>
+                                {tr(lang, Key::Cancel)}
+                            </button>
+                            <button type="button" class="secondary" on:click=merge>
+                                {tr(lang, Key::BackupOtherIeMerge)}
+                            </button>
+                        </div>
+                    </div>
                 }
                 .into_any()
             }
@@ -1841,12 +1924,76 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl
     }
 }
 
-/// Расшифровать копию и слить с базой.
-async fn restore(backups: Backups, sealed: &Sealed, typed: &str) -> Result<Restored, Problem> {
-    let password = crypto::normalize(typed);
-    let (entries, key) = stored::unlock(KINDS, sealed, &password).await?;
+/// ИП словами: имя и ՀՎՀՀ через запятую — или что их нет.
+fn who(lang: Lang, owner: &Owner) -> String {
+    let name = match owner.name(lang) {
+        "" => t(lang, Key::BackupOtherIeNameless),
+        name => name,
+    };
+    let tin = match owner.tin() {
+        Some(tin) => fill(t(lang, Key::TinShort), &[tin.as_str()]),
+        None => t(lang, Key::BackupOtherIeNoTin).to_owned(),
+    };
+    format!("{name}, {tin}")
+}
+
+/// Расшифровать копию и слить с базой — или остановиться на вопросе: копия
+/// другого ИП ([`backup::relation`]) без ответа человека не пишется.
+async fn restore(backups: Backups, job: RestoreJob) -> Result<Recovered, Problem> {
     let store = backups.base.get().ok_or(Problem::Say(Key::BackupFailed))?;
-    let restored = stored::restore(&store, KINDS, &entries).await?;
+    match job {
+        RestoreJob::Open(sealed, typed) => {
+            let password = crypto::normalize(&typed);
+            let (entries, key) = stored::unlock(KINDS, &sealed, &password).await?;
+            Ok(match stored::restore(&store, KINDS, &entries, OtherIe::Ask).await? {
+                Merged::Done(restored) => Recovered::Done(restored_from(
+                    backups,
+                    (&sealed, &entries, &key),
+                    restored,
+                    SameIe::Yes,
+                )),
+                Merged::Other { ours, theirs } => Recovered::Other(Rc::new(Asked {
+                    sealed,
+                    entries,
+                    key,
+                    ours,
+                    theirs,
+                })),
+            })
+        }
+        RestoreJob::Merge(asked) => {
+            match stored::restore(&store, KINDS, &asked.entries, OtherIe::Merge).await? {
+                Merged::Done(restored) => Ok(Recovered::Done(restored_from(
+                    backups,
+                    (&asked.sealed, &asked.entries, &asked.key),
+                    restored,
+                    SameIe::No,
+                ))),
+                // С ответом «слить» хранилище не спрашивает.
+                Merged::Other { .. } => Err(Problem::Say(Key::BackupFailed)),
+            }
+        }
+    }
+}
+
+/// Слитая копия — того же ИП, что в программе, или другого.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SameIe {
+    Yes,
+    /// Другого — по ответу «Всё равно слить».
+    No,
+}
+
+/// Записи копии легли: разделы перечитывают базу, а устройство запоминает
+/// пароль копий и день последней копии. День сдвигает только копия того же
+/// ИП (`backup::last_after_restore`: данные программы лежат в этом файле);
+/// в копии другого ИП их нет, и напоминание о копии не пропадает.
+fn restored_from(
+    backups: Backups,
+    (sealed, entries, key): (&Sealed, &[Entry], &crypto::Key),
+    restored: Restored,
+    same: SameIe,
+) -> Restored {
     if restored.added + restored.updated > 0 {
         backups.base.replaced();
     }
@@ -1865,18 +2012,20 @@ async fn restore(backups: Backups, sealed: &Sealed, typed: &str) -> Result<Resto
         (Some(current), Some(opened_with)) if current == opened_with => backups.password_entered(),
         _ => {}
     }
-    if let Some(at) = backup::last_after_restore(
-        device.last_backup(),
-        sealed.header().created(),
-        clock::now(),
-    ) {
+    if same == SameIe::Yes
+        && let Some(at) = backup::last_after_restore(
+            device.last_backup(),
+            sealed.header().created(),
+            clock::now(),
+        )
+    {
         device.set_last_backup(at);
         backups.last.set(clock::local_date(at));
     }
     if !entries.is_empty() {
         backups.has_data.set(true);
     }
-    Ok(restored)
+    restored
 }
 
 /// Автокопия от базы до файла (задача 29): настоящая база программы,

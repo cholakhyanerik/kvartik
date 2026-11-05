@@ -4,15 +4,19 @@
 //! к файлу и обратно.
 
 use kvartik_core::format::backup::{
-    DeviceKey, Header, KDF_ITERATIONS, KINDS, Kind, SALT_BYTES, open,
+    DeviceKey, Entry, Header, KDF_ITERATIONS, KINDS, Kind, SALT_BYTES, open,
 };
+use kvartik_core::i18n::Lang;
+use kvartik_core::model::profile::{Profile, ProfileData};
+use kvartik_core::model::text::Line;
+use kvartik_core::model::tin::Tin;
 use kvartik_core::release::Version;
 use wasm_bindgen::JsCast;
 
 use super::*;
 use crate::platform::crypto::{self, CryptoError, Key};
 use crate::platform::file::{self as files, Download, FileError};
-use crate::store::backup::{Failure, Restored, make, restore, unlock};
+use crate::store::backup::{Failure, Merged, OtherIe, Restored, make, restore, unlock};
 use crate::store::device::Device;
 
 /// Виды записей проб — вместо `KINDS` программы, в которой их пока нет.
@@ -64,6 +68,41 @@ async fn backup_of(store: &Store, salt: &[u8]) -> String {
     .await
     .expect("копия сделана")
     .file
+}
+
+/// Восстановить, как окно до ответа человека: в пробах без профилей
+/// и в образцах в пустую базу сверка ИП вопроса не задаёт.
+async fn restore_all(store: &Store, kinds: &[Kind], entries: &[Entry]) -> Result<Restored, Failure> {
+    match restore(store, kinds, entries, OtherIe::Ask).await? {
+        Merged::Done(restored) => Ok(restored),
+        other => panic!("вопрос о другом ИП там, где сравнивать не с чем: {other:?}"),
+    }
+}
+
+/// Записи копии базы, где только этот профиль, — как их получит окно из
+/// файла: копия, шифр и расшифровка настоящие.
+async fn entries_with(profile: &Profile, salt: &[u8]) -> Vec<Entry> {
+    let probe = Probe::new();
+    let store = probe.open(DB_VERSION).await.expect("база открыта");
+    let mut writes = Writes::default();
+    writes.insert(profile);
+    store
+        .write()
+        .expect("транзакция записи")
+        .commit(writes)
+        .await
+        .expect("профиль сохранён");
+    let key = key_for(PASSWORD, salt).await;
+    let made = make(&store, KINDS, &header(), &key, salt, KDF_ITERATIONS)
+        .await
+        .expect("копия сделана");
+    drop(store);
+    probe.delete().await;
+    let sealed = open(&made.file).expect("файл открывается");
+    unlock(KINDS, &sealed, &crypto::normalize(PASSWORD))
+        .await
+        .expect("копия расшифрована")
+        .0
 }
 
 /// Ключ из одного пароля и одной соли — один и тот же, а из другого
@@ -148,7 +187,7 @@ async fn backup_carries_the_whole_base() {
 
     let target = Probe::new();
     let store = target.open(DB_VERSION).await.expect("база открыта");
-    let restored = restore(&store, KINDS_UNDER_TEST, &entries)
+    let restored = restore_all(&store, KINDS_UNDER_TEST, &entries)
         .await
         .expect("восстановлено");
     assert_eq!(
@@ -165,7 +204,7 @@ async fn backup_carries_the_whole_base() {
     assert_eq!(tx.all::<Tag>().await, Ok(vec![deleted]));
 
     // Та же копия второй раз ничего не меняет.
-    let again = restore(&store, KINDS_UNDER_TEST, &entries)
+    let again = restore_all(&store, KINDS_UNDER_TEST, &entries)
         .await
         .expect("восстановлено снова");
     assert_eq!((again.added, again.updated, again.unchanged), (0, 0, 3));
@@ -224,7 +263,7 @@ async fn restore_keeps_the_later_record() {
     let (entries, _) = unlock(KINDS_UNDER_TEST, &sealed, &crypto::normalize(PASSWORD))
         .await
         .expect("копия расшифрована");
-    let restored = restore(&store, KINDS_UNDER_TEST, &entries)
+    let restored = restore_all(&store, KINDS_UNDER_TEST, &entries)
         .await
         .expect("восстановлено");
     assert_eq!(
@@ -278,7 +317,7 @@ async fn restore_over_newer_records_writes_nothing() {
     let raw_fresh = get_raw(&store, &key(Note::KIND, fresh.meta.id())).await;
 
     assert_eq!(
-        restore(&store, KINDS_UNDER_TEST, &entries).await,
+        restore_all(&store, KINDS_UNDER_TEST, &entries).await,
         Err(Failure::Store(StoreError::Newer))
     );
     assert_eq!(get_raw(&store, &newer_key).await, Some(newer));
@@ -477,6 +516,94 @@ async fn download_holds_the_file() {
     assert_eq!(body.as_string().as_deref(), Some(text));
 }
 
+/// Копия другого ИП в непустую программу молча не ложится (задача 38,
+/// этап 1): сверка возвращает обоих и не пишет ничего, а ответ «слить» —
+/// пишет. Копия того же ИП — с тем же ՀՎՀՀ, хоть профиль и заведён заново, —
+/// ложится без вопроса и тогда, когда в базе уже двое.
+#[wasm_bindgen_test]
+async fn backup_of_another_ie_asks_first() {
+    let profile = |name: &str, tin: &str, millis: i64| {
+        let mut data = ProfileData::default();
+        data.name.en = Line::new(name).expect("годное имя");
+        data.tin = Some(Tin::parse(tin).expect("годный ՀՎՀՀ"));
+        Profile::save(None, data, at(millis))
+            .expect("годный профиль")
+            .expect("новый профиль")
+    };
+    let aram = profile("IE Aram Petrosyan", "12345678", 1_000);
+    let aram_again = profile("IE Aram P.", "12345678", 2_000);
+    let anna = profile("IE Anna Hakobyan", "87654321", 3_000);
+    let salt = crypto::random(SALT_BYTES).expect("соль");
+    let annas = entries_with(&anna, &salt).await;
+    let arams = entries_with(&aram_again, &salt).await;
+
+    let probe = Probe::new();
+    let store = probe.open(DB_VERSION).await.expect("база открыта");
+    let mut writes = Writes::default();
+    writes.insert(&aram);
+    store
+        .write()
+        .expect("транзакция записи")
+        .commit(writes)
+        .await
+        .expect("профиль сохранён");
+    let profiles = |store: &Store| {
+        let tx = store.read().expect("транзакция чтения");
+        async move { tx.all::<Profile>().await.map(|all| all.len()) }
+    };
+    let mut wrong = Vec::new();
+    match restore(&store, KINDS, &annas, OtherIe::Ask).await {
+        Ok(Merged::Other { ours: Some(ours), theirs })
+            if ours.name(Lang::En) == "IE Aram Petrosyan"
+                && theirs.name(Lang::En) == "IE Anna Hakobyan"
+                && theirs.tin().map(Tin::as_str) == Some("87654321") => {}
+        other => wrong.push(format!("копия другого ИП: {other:?}")),
+    }
+    if profiles(&store).await != Ok(1) {
+        wrong.push(format!("после вопроса профилей в базе {:?}, а не 1", profiles(&store).await));
+    }
+    match restore(&store, KINDS, &annas, OtherIe::Merge).await {
+        Ok(Merged::Done(restored)) if restored.added == 1 => {}
+        other => wrong.push(format!("ответ «слить»: {other:?}")),
+    }
+    if profiles(&store).await != Ok(2) {
+        wrong.push(format!("после «слить» профилей {:?}, а не 2", profiles(&store).await));
+    }
+    match restore(&store, KINDS, &arams, OtherIe::Ask).await {
+        Ok(Merged::Done(restored)) if restored.added == 1 => {}
+        other => wrong.push(format!("копия того же ИП с тем же ՀՎՀՀ: {other:?}")),
+    }
+    drop(store);
+    probe.delete().await;
+
+    // Профиль базы не читается: чужая копия — вопрос без имени программы,
+    // и не записано ничего. Профиль новее программы — отказ целиком: кто
+    // он, эта версия не знает.
+    let damaged = Probe::new();
+    let store = damaged.open(DB_VERSION).await.expect("база открыта");
+    let profile_key = key(Profile::KIND, aram.id());
+    put_raw(&store, &profile_key, "не запись").await;
+    match restore(&store, KINDS, &annas, OtherIe::Ask).await {
+        Ok(Merged::Other { ours: None, theirs }) if theirs.name(Lang::En) == "IE Anna Hakobyan" => {}
+        other => wrong.push(format!("профиль базы не читается: {other:?}")),
+    }
+    if get_raw(&store, &key(Profile::KIND, anna.id())).await.is_some() {
+        wrong.push("после вопроса при нечитаемом профиле копия записана".to_owned());
+    }
+    let newer = format!(r#"{{"format_version":{},"record":{{"wings":2}}}}"#, FORMAT_VERSION + 1);
+    put_raw(&store, &profile_key, &newer).await;
+    match restore(&store, KINDS, &annas, OtherIe::Ask).await {
+        Err(Failure::Store(StoreError::Newer)) => {}
+        other => wrong.push(format!("профиль базы новее программы: {other:?}")),
+    }
+    if get_raw(&store, &key(Profile::KIND, anna.id())).await.is_some() {
+        wrong.push("при профиле новее программы копия записана".to_owned());
+    }
+    drop(store);
+    damaged.delete().await;
+    assert!(wrong.is_empty(), "копия другого ИП: {wrong:#?}");
+}
+
 include!("../../../../core/tests/backups/samples.rs");
 
 /// Копия каждой выпущенной версии открывается этой (Правило 2):
@@ -503,7 +630,7 @@ async fn every_released_backup_restores() {
         };
         let probe = Probe::new();
         let store = probe.open(DB_VERSION).await.expect("база открыта");
-        match restore(&store, KINDS, &entries).await {
+        match restore_all(&store, KINDS, &entries).await {
             Ok(restored) if entries.len() == sample.records && restored.added == sample.records => {
             }
             other => wrong.push(format!(

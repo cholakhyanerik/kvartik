@@ -12,8 +12,10 @@ use kvartik_core::i18n::{ALL_KEYS, Key, Lang, fill, t};
 use kvartik_core::model::client::{Client, ClientData};
 use kvartik_core::model::country::Country;
 use kvartik_core::model::money::Currency;
-use kvartik_core::model::profile::{Person, Profile, Residency};
+use kvartik_core::model::profile::{Person, Profile, ProfileData, Residency};
+use kvartik_core::model::record::Timestamp;
 use kvartik_core::model::text::{Line, Lines};
+use kvartik_core::model::tin::Tin;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 use web_sys::{Document, Element, HtmlElement, HtmlInputElement, HtmlSelectElement};
@@ -880,6 +882,147 @@ async fn restoring_a_backup_shows_its_profile() {
         }
     }
     assert!(wrong.is_empty(), "восстановление: {wrong:#?}");
+}
+
+/// Выбрать образец копии 0.0.12 и нажать «Восстановить» с его паролем,
+/// как человек.
+async fn restore_sample_0_0_12(host: &HtmlElement, lang: Lang, wrong: &mut Vec<String>) {
+    if !wait_for(host, t(lang, Key::BackupChooseFile)).await {
+        wrong.push("раздела копии нет".to_owned());
+    }
+    let input: Option<HtmlInputElement> = host
+        .query_selector(r#"input[type="file"][accept=".json,application/json"]"#)
+        .ok()
+        .flatten()
+        .map(JsCast::unchecked_into);
+    match &input {
+        Some(input) => choose_file(
+            input,
+            "kvartik-2026-10-12.json",
+            include_str!("../../../core/tests/backups/v2/kvartik-2026-10-12.json"),
+        ),
+        None => wrong.push("нет поля выбора копии".to_owned()),
+    }
+    if !wait_for(host, t(lang, Key::BackupFilePassword)).await {
+        wrong.push("копия не открылась".to_owned());
+    }
+    match field(host, t(lang, Key::BackupFilePassword), 0) {
+        Some(password) => type_into(&password, "Պահուստ копия sample 0.0.12"),
+        None => wrong.push("нет поля пароля копии".to_owned()),
+    }
+    match button(host, &[t(lang, Key::BackupRestore)]) {
+        Some(restore) => restore.click(),
+        None => wrong.push("нет кнопки «Восстановить»".to_owned()),
+    }
+}
+
+/// Кнопка в карточке вопроса о копии другого ИП.
+fn other_ie_button(host: &HtmlElement, lang: Lang, label: &str) -> Option<HtmlElement> {
+    let notices = host.query_selector_all(".notice").ok()?;
+    (0..notices.length())
+        .filter_map(|at| notices.item(at))
+        .map(|node| node.unchecked_into::<HtmlElement>())
+        .find(|notice| {
+            notice
+                .text_content()
+                .is_some_and(|text| text.contains(t(lang, Key::BackupOtherIe)))
+        })
+        .and_then(|notice| button(&notice, &[label]))
+}
+
+/// Записей профиля в базе программы — живых и удалённых.
+async fn stored_profiles() -> Result<usize, StoreError> {
+    let store = Store::open(|_| {}).await?;
+    Ok(store.read()?.all::<Profile>().await?.len())
+}
+
+/// Копия другого ИП в программу с профилем молча не ложится (задача 38,
+/// этап 1): окно называет обоих — имя и ՀՎՀՀ, — «Отмена» не пишет ничего,
+/// а «Всё равно слить» сливает. В программе — «ИП Анна Акопян» с ՀՎՀՀ,
+/// которого у образца 0.0.12 («ИП Арам Петросян») нет.
+#[wasm_bindgen_test]
+async fn a_backup_of_another_ie_asks_before_merging() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    // Копий на этом устройстве ещё не было: копия другого ИП, слитая по
+    // ответу, копией данных программы не станет.
+    if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten())
+    {
+        let _ = storage.remove_item("kvartik.last_backup");
+    }
+    let mut data = ProfileData::default();
+    data.name.ru = Line::new("ИП Анна Акопян").expect("годное имя");
+    data.tin = Some(Tin::parse("99999990").expect("годный ՀՎՀՀ"));
+    let anna = Profile::save(None, data, Timestamp::from_unix_millis(1_700_000_000_000))
+        .expect("годный профиль")
+        .expect("новый профиль");
+    let store = Store::open(|_| {}).await.expect("база открыта");
+    let mut writes = Writes::default();
+    writes.insert(&anna);
+    store
+        .write()
+        .expect("транзакция записи")
+        .commit(writes)
+        .await
+        .expect("профиль сохранён");
+    drop(store);
+    let (host, mounted) = mount();
+    let mut wrong = Vec::new();
+
+    restore_sample_0_0_12(&host, lang, &mut wrong).await;
+    if !wait_for(&host, t(lang, Key::BackupOtherIe)).await {
+        wrong.push("о копии другого ИП не спросили".to_owned());
+    }
+    let tin = fill(t(lang, Key::TinShort), &["99999990"]);
+    let ours = fill(t(lang, Key::BackupOtherIeOurs), &[&format!("ИП Анна Акопян, {tin}")]);
+    let theirs = fill(t(lang, Key::BackupOtherIeTheirs), &["ИП Арам Петросян"]);
+    for line in [&ours, &theirs] {
+        if !wait_for(&host, line).await {
+            wrong.push(format!("в вопросе нет «{line}»"));
+        }
+    }
+    match other_ie_button(&host, lang, t(lang, Key::Cancel)) {
+        Some(cancel) => cancel.click(),
+        None => wrong.push("у вопроса нет «Отмены»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::BackupChooseFile)).await
+        || host.text_content().unwrap_or_default().contains(t(lang, Key::BackupOtherIe))
+    {
+        wrong.push("после «Отмены» вопрос остался".to_owned());
+    }
+    if stored_profiles().await != Ok(1) {
+        wrong.push(format!("после «Отмены» профилей в базе {:?}, а не 1", stored_profiles().await));
+    }
+
+    restore_sample_0_0_12(&host, lang, &mut wrong).await;
+    if !wait_for(&host, t(lang, Key::BackupOtherIe)).await {
+        wrong.push("второй раз о копии другого ИП не спросили".to_owned());
+    }
+    match other_ie_button(&host, lang, t(lang, Key::BackupOtherIeMerge)) {
+        Some(merge) => merge.click(),
+        None => wrong.push("у вопроса нет «Всё равно слить»".to_owned()),
+    }
+    let done = t(lang, Key::BackupRestored).split("{}").next().unwrap_or_default();
+    if !wait_for(&host, done).await {
+        wrong.push("после «Всё равно слить» восстановление не завершилось".to_owned());
+    }
+    if stored_profiles().await != Ok(2) {
+        wrong.push(format!("после «Всё равно слить» профилей {:?}, а не 2", stored_profiles().await));
+    }
+    if let Some(day) = Device::new().last_backup() {
+        wrong.push(format!("копия другого ИП стала днём последней копии: {day:?}"));
+    }
+    drop(mounted);
+    host.remove();
+    if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten())
+    {
+        for name in ["kvartik.lang", "kvartik.backup_key", "kvartik.last_backup"] {
+            let _ = storage.remove_item(name);
+        }
+    }
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    assert!(wrong.is_empty(), "копия другого ИП: {wrong:#?}");
 }
 
 /// Профиль из базы программы — тот, что окно показывает.

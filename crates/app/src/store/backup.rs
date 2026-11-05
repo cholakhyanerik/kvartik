@@ -12,7 +12,7 @@
 
 use kvartik_core::format::FormatError;
 use kvartik_core::format::backup::{
-    self, BackupError, Entry, Header, IV_BYTES, Kind, Lock, MAX_FILE_BYTES, Sealed,
+    self, BackupError, Entry, Header, IV_BYTES, Kind, Lock, MAX_FILE_BYTES, Owner, Relation, Sealed,
 };
 
 use super::{Dumped, Store, StoreError, Writes};
@@ -121,29 +121,63 @@ pub struct Restored {
     pub unchanged: usize,
 }
 
+/// Копия другого ИП ([`backup::relation`]): спросить человека или сливать.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum OtherIe {
+    /// Не записывать ничего и вернуть обоих ИП: окно спросит.
+    Ask,
+    /// Человек ответил «слить».
+    Merge,
+}
+
+/// Чем кончилось восстановление.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Merged {
+    /// Записи легли.
+    Done(Restored),
+    /// Копия другого ИП, а спросить велели: не записано ничего.
+    Other {
+        /// ИП программы; `None` — профиль в базе не читается.
+        ours: Option<Owner>,
+        /// ИП копии.
+        theirs: Owner,
+    },
+}
+
 /// Слить записи копии с базой — одним действием: или легли все, что
-/// решило слияние, или ни одной.
+/// решило слияние, или ни одной. Копию другого ИП с [`OtherIe::Ask`] —
+/// не сливать, а вернуть обоих ИП; сверка — в той же транзакции, что
+/// запись, а профиль базы новее программы — отказ целиком, как у слияния.
+/// С [`OtherIe::Merge`] сверки нет: человек только что видел обоих.
 ///
 /// Между чтением базы и записью — только расчёт ядра, без ожидания
-/// чужого: транзакция ещё жива (шапка `store/mod.rs`).
+/// чужого: транзакция ещё жива (шапка `store/mod.rs`). Транзакция, брошенная
+/// без записи, кончается сама и ничего не пишет.
 pub async fn restore(
     store: &Store,
     kinds: &[Kind],
     entries: &[Entry],
-) -> Result<Restored, Failure> {
+    other: OtherIe,
+) -> Result<Merged, Failure> {
     let tx = store.write()?;
     let dumped = tx.dump().await?;
+    if other == OtherIe::Ask
+        && let Relation::Other { ours, theirs } =
+            backup::relation(entries, dumped.iter().map(Dumped::raw)).map_err(newer)?
+    {
+        return Ok(Merged::Other { ours, theirs });
+    }
     let merge = backup::merge(kinds, entries, dumped.iter().map(Dumped::raw)).map_err(newer)?;
     let mut writes = Writes::default();
     for entry in merge.writes() {
         writes.restore(entry);
     }
     tx.commit(writes).await?;
-    Ok(Restored {
+    Ok(Merged::Done(Restored {
         added: merge.added(),
         updated: merge.updated(),
         unchanged: merge.unchanged(),
-    })
+    }))
 }
 
 /// Запись базы новее программы — то же, что у остального хранилища:

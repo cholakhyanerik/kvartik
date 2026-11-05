@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 use crate::format::encode;
+use crate::model::profile::ProfileData;
 
 /// Запись для проб.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
@@ -1470,4 +1471,119 @@ fn padding_inside_the_data_is_damage() {
     assert!(matches!(open(&text), Err(BackupError::Damaged(_))));
     let fine = text.replace("QQ==QUFB", "QUFBQUFB");
     assert!(open(&fine).is_ok(), "без «=» посередине файл читается");
+}
+
+/// Профиль ИП для проб опознания: имя по-английски и ՀՎՀՀ, если он дан.
+fn owner_profile(name: &str, tin: Option<&str>, modified: i64) -> Profile {
+    let mut data = ProfileData::default();
+    data.name.en = Line::new(name).expect("в тесте — годное имя");
+    data.tin = tin.map(|tin| Tin::parse(tin).expect("в тесте — годный ՀՎՀՀ"));
+    Profile::save(None, data, at(modified))
+        .expect("годный профиль")
+        .expect("новый профиль")
+}
+
+/// Профили так, как их кладёт хранилище: идентификатор и текст записи.
+fn stored_profiles(profiles: &[&Profile]) -> Vec<(String, String)> {
+    profiles
+        .iter()
+        .map(|profile| (profile.id().to_string(), encode(*profile)))
+        .collect()
+}
+
+fn profile_raws(rows: &[(String, String)]) -> Vec<Raw<'_>> {
+    rows.iter().map(|(id, text)| raw(Profile::KIND, id, text)).collect()
+}
+
+/// Копия с этими профилями — собранная, как её собирает окно.
+fn backup_with(profiles: &[&Profile]) -> Vec<Entry> {
+    let rows = stored_profiles(profiles);
+    collect(KINDS, profile_raws(&rows)).expect("собрано").entries
+}
+
+/// Случай опознания: название, профили базы (как их кладёт хранилище),
+/// записи копии и чего ждать.
+type RelationCase = (&'static str, Vec<(String, String)>, Vec<Entry>, Result<Relation, FormatError>);
+
+/// Копия и база об одном ИП, если у них общая запись профиля или общий
+/// ՀՎՀՀ, иначе — о разных, и тогда в ответе оба ИП так, как их покажет окно:
+/// живой профиль, изменённый последним. Пустая база и копия без профиля —
+/// «тот же»: сравнивать не с чем. Нечитаемый профиль базы сравнивается
+/// идентификатором: чужая копия — вопрос без имени, своя — без вопроса,
+/// а профиль новее программы — отказ целиком. Случаи с обеих сторон:
+/// постоянный ответ любой из них не пройдёт.
+#[test]
+fn relation_tells_another_ie_apart() {
+    let aram = owner_profile("IE Aram Petrosyan", Some("12345678"), 1_000);
+    let mut fixed = aram.data().clone();
+    fixed.tin = Some(Tin::parse("12345679").expect("годный ՀՎՀՀ"));
+    let aram_fixed = Profile::save(Some(aram.clone()), fixed, at(2_000))
+        .expect("годный профиль")
+        .expect("правка");
+    let aram_again = owner_profile("IE Aram P.", Some("12345678"), 3_000);
+    let anna = owner_profile("IE Anna Hakobyan", Some("87654321"), 4_000);
+    let vahe = owner_profile("IE Vahe Sargsyan", Some("11223344"), 5_000);
+    let blank_here = owner_profile("", None, 6_000);
+    let blank_there = owner_profile("", None, 7_000);
+    let garbage = vec![(anna.id().to_string(), "не запись".to_owned())];
+    let newer = vec![(
+        anna.id().to_string(),
+        format!(r#"{{"format_version":{},"record":{{"wings":2}}}}"#, FORMAT_VERSION + 1),
+    )];
+    let other = |ours: &Profile, theirs: &Profile| {
+        Ok(Relation::Other {
+            ours: Some(Owner::of(ours)),
+            theirs: Owner::of(theirs),
+        })
+    };
+    let same = Ok(Relation::Same);
+    let cases: Vec<RelationCase> = vec![
+        ("пустая база", Vec::new(), backup_with(&[&aram]), same.clone()),
+        ("копия без профиля", stored_profiles(&[&aram]), Vec::new(), same.clone()),
+        ("та же запись, ՀՎՀՀ поправлен", stored_profiles(&[&aram]), backup_with(&[&aram_fixed]), same.clone()),
+        ("новая запись, тот же ՀՎՀՀ", stored_profiles(&[&aram]), backup_with(&[&aram_again]), same.clone()),
+        ("другой ИП", stored_profiles(&[&aram]), backup_with(&[&anna]), other(&aram, &anna)),
+        ("оба без ՀՎՀՀ", stored_profiles(&[&blank_here]), backup_with(&[&blank_there]), other(&blank_here, &blank_there)),
+        ("в базе двое, копия второго", stored_profiles(&[&aram, &anna]), backup_with(&[&anna]), same.clone()),
+        ("в базе двое, копия третьего", stored_profiles(&[&aram, &anna]), backup_with(&[&vahe]), other(&anna, &vahe)),
+        (
+            "профиль базы не читается, копия чужая",
+            garbage.clone(),
+            backup_with(&[&vahe]),
+            Ok(Relation::Other { ours: None, theirs: Owner::of(&vahe) }),
+        ),
+        ("профиль базы не читается, копия его же", garbage, backup_with(&[&anna]), same),
+        (
+            "профиль базы новее программы",
+            newer,
+            backup_with(&[&vahe]),
+            Err(FormatError::Newer { found: FORMAT_VERSION + 1 }),
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (case, base, backup, expected) in cases {
+        let found = relation(&backup, profile_raws(&base));
+        if found != expected {
+            wrong.push(format!("{case}: {found:?}, а ждали {expected:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "опознание ИП: {wrong:#?}");
+}
+
+/// Имя ИП — на языке окна, а без него — на первом языке, где оно есть;
+/// ՀՎՀՀ — как в профиле.
+#[test]
+fn owner_names_the_ie_in_any_language() {
+    let mut data = ProfileData::default();
+    data.name.ru = Line::new("ИП Анна Акопян").expect("годное имя");
+    data.name.en = Line::new("IE Anna Hakobyan").expect("годное имя");
+    let anna = Profile::save(None, data, at(1_000)).expect("годный").expect("новый");
+    let owner = Owner::of(&anna);
+    assert_eq!(owner.name(Lang::En), "IE Anna Hakobyan");
+    assert_eq!(owner.name(Lang::Ru), "ИП Анна Акопян");
+    assert_eq!(owner.name(Lang::Am), "ИП Анна Акопян", "армянского нет — первый по порядку языков");
+    assert_eq!(owner.tin(), None);
+    let nameless = Owner::of(&owner_profile("", Some("87654321"), 2_000));
+    assert_eq!(nameless.name(Lang::Am), "");
+    assert_eq!(nameless.tin().map(Tin::as_str), Some("87654321"));
 }

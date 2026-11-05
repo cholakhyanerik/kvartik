@@ -73,6 +73,11 @@
 //! после неё, а метка удаления переезжает вместе с записью (CLAUDE.md,
 //! «Записи не стираются») — то же понадобится второму устройству
 //! (задача 41).
+//!
+//! Копию другого ИП — ни общей записи профиля, ни общего ՀՎՀՀ — окно до
+//! записи показывает человеку вместе с ИП программы и сливает только по его
+//! ответу ([`relation`], с 0.0.85): по идентификаторам записи двух ИП не
+//! совпадут, и слияние молча положило бы их рядом.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -85,6 +90,7 @@ use serde_json::value::RawValue;
 use super::{
     FIRST_VERSION, FORMAT_VERSION, FormatError, Stored, base64, decode_record, split_raw, wrap,
 };
+use crate::i18n::Lang;
 use crate::license::License;
 use crate::model::attachment::Attachment;
 use crate::model::client::Client;
@@ -92,9 +98,11 @@ use crate::model::date::Date;
 use crate::model::document::Document;
 use crate::model::ledger::Operation;
 use crate::model::logo::Logo;
-use crate::model::profile::Profile;
+use crate::model::profile::{Localized, Profile};
 use crate::model::record::{RecordMeta, Timestamp};
 use crate::model::recurring::Recurring;
+use crate::model::text::Line;
+use crate::model::tin::Tin;
 use crate::tax::closing::Closing;
 use crate::tax::opening::Opening;
 
@@ -1076,6 +1084,117 @@ pub fn merge<'a, 'b>(
         }
     }
     Ok(merge)
+}
+
+/// Чей ИП в копии или в базе — чтобы показать человеку, что с чем он
+/// сливает: имя и ՀՎՀՀ живого профиля, изменённого последним, — того, с
+/// которым работает окно (`Profile::current`).
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Owner {
+    name: Localized<Line>,
+    tin: Option<Tin>,
+}
+
+impl Owner {
+    fn of(profile: &Profile) -> Self {
+        Self {
+            name: profile.data().name.clone(),
+            tin: profile.data().tin.clone(),
+        }
+    }
+
+    /// Имя на языке `lang`, а без него — на первом языке, где оно есть;
+    /// пусто — имени нет ни на одном.
+    pub fn name(&self, lang: Lang) -> &str {
+        std::iter::once(lang)
+            .chain(Lang::ALL)
+            .map(|lang| self.name.get(lang).as_str())
+            .find(|name| !name.is_empty())
+            .unwrap_or_default()
+    }
+
+    /// ՀՎՀՀ; `None` — в профиле не указан.
+    pub const fn tin(&self) -> Option<&Tin> {
+        self.tin.as_ref()
+    }
+}
+
+/// Об одном ли ИП копия и база.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Relation {
+    /// Об одном — или сравнивать не с чем: профиля нет у базы или живого
+    /// профиля — у копии.
+    Same,
+    /// О разных: профили есть у обеих сторон, а общего нет — ни записи
+    /// профиля, ни ՀՎՀՀ.
+    Other {
+        /// ИП базы; `None` — профиль в базе есть, но не читается.
+        ours: Option<Owner>,
+        /// ИП копии.
+        theirs: Owner,
+    },
+}
+
+/// Об одном ли ИП копия `incoming` и база `existing` (задача 38, этап 1).
+///
+/// Слияние ([`merge`]) сводит записи по идентификатору, и копия другого ИП
+/// легла бы рядом с записями этого: два живых профиля, из которых окно
+/// молча взяло бы изменённый последним, а счета и книга двух ИП — в одном
+/// налоге. Поэтому окно спрашивает до записи, а здесь решается, по чему
+/// узнать тот же ИП:
+///
+/// - общая запись профиля — тот же, даже если ՀՎՀՀ в ней с тех пор
+///   поправили;
+/// - общий ՀՎՀՀ — тот же, даже если профиль на другом устройстве завели
+///   заново;
+/// - профиля нет у базы или живого профиля у копии — сравнивать не с чем:
+///   пустая программа принимает копию, как раньше, и копия без профиля —
+///   тоже.
+///
+/// Профиль базы, который не читается, сравнивается одним идентификатором —
+/// он есть в ключе: окно при испорченной записи само советует восстановить
+/// из копии, и своя копия запись починит, а чужая без вопроса легла бы
+/// рядом. Профиль новее программы — отказ целиком, как у остального
+/// хранилища: кто он, эта версия не знает (Правило 2).
+pub fn relation<'b>(
+    incoming: &[Entry],
+    existing: impl IntoIterator<Item = Raw<'b>>,
+) -> Result<Relation, FormatError> {
+    let theirs: Vec<Profile> = incoming
+        .iter()
+        .filter(|entry| entry.kind == Profile::KIND)
+        .filter_map(|entry| decode_record(FORMAT_VERSION, entry.record.get()).ok())
+        .collect();
+    let mut ids = Vec::new();
+    let mut ours = Vec::new();
+    let mut unreadable = false;
+    for raw in existing.into_iter().filter(|raw| raw.kind == Profile::KIND) {
+        ids.push(raw.id);
+        match raw.text.map(super::decode::<Profile>) {
+            Some(Ok(profile)) => ours.push(profile),
+            Some(Err(FormatError::Newer { found })) => return Err(FormatError::Newer { found }),
+            Some(Err(FormatError::Damaged(_))) | None => unreadable = true,
+        }
+    }
+    let shared_record = theirs
+        .iter()
+        .any(|their| ids.contains(&their.id().to_string().as_str()));
+    let shared_tin = theirs
+        .iter()
+        .filter_map(|their| their.data().tin.as_ref())
+        .any(|tin| ours.iter().any(|our| our.data().tin.as_ref() == Some(tin)));
+    let unshared = !shared_record && !shared_tin;
+    Ok(match (Profile::current(ours), Profile::current(theirs)) {
+        (Some(ours), Some(theirs)) if unshared => Relation::Other {
+            ours: Some(Owner::of(&ours)),
+            theirs: Owner::of(&theirs),
+        },
+        (None, Some(theirs)) if unreadable && unshared => Relation::Other {
+            ours: None,
+            theirs: Owner::of(&theirs),
+        },
+        _ => Relation::Same,
+    })
 }
 
 /// Имя файла копии: `kvartik-2026-10-12.json`. Дата — сегодняшняя по
