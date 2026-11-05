@@ -54,12 +54,23 @@ if (calc) {
     }));
   };
 
+  const values = () => JSON.stringify(Object.fromEntries(fields.map((field) => [field.name, field.value])));
+
   const update = () => {
     if (!module) return;
-    const values = Object.fromEntries(fields.map((field) => [field.name, field.value]));
-    const answer = module.calculate(document.documentElement.lang, JSON.stringify(values));
+    const answer = module.calculate(document.documentElement.lang, values());
     if (answer) show(JSON.parse(answer));
   };
+
+  // «Открыть Kvartik» берёт введённое с собой: wasm оставляет его записью
+  // на этом устройстве, а программа предложит взять его в профиль. В самом
+  // нажатии: запись `localStorage` синхронна и ложится до перехода. Wasm
+  // нет — нечего и брать: примера не было.
+  for (const link of document.querySelectorAll("a[data-handoff]")) {
+    link.addEventListener("click", () => {
+      if (module) module.handoff(document.documentElement.lang, values());
+    });
+  }
 
   const load = () => {
     if (module || loading) return;

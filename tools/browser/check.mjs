@@ -18,7 +18,9 @@
 //    нажатию — частями wasm»). Лендинг (задача 34): страница каждого языка
 //    со своим оформлением и ссылкой в программу, без прокрутки вбок на
 //    телефоне, калькулятор отвечает числом ядра и прячет ненужные поля,
-//    а старый адрес программы `/#/…` ведёт в /app/ на тот же экран.
+//    «Открыть Kvartik» берёт введённое с собой и программа предлагает его
+//    в профиль, а старый адрес программы `/#/…` ведёт в /app/ на тот же
+//    экран.
 // 2. С сетью: восстановление образца копии, экраны и их формы, карточка
 //    выпущенного документа, PDF, выгрузка с закрытым кварталом, разошедшимся
 //    с поданным, новая копия — каждая из девяти частей;
@@ -345,6 +347,25 @@ async function landing(browser) {
     await page.eval(field("kind", "other"));
     checks.check("калькулятор: у прочей деятельности — поле расходов", await page.waitFor(`return document
       .querySelector('[data-field="expenses"]').getClientRects().length ? true : null;`));
+    // «Открыть Kvartik» берёт введённое с собой (задача 34, этап 3): wasm
+    // калькулятора оставляет его записью сайта, а программа после экрана
+    // первого запуска предлагает взять его в профиль карточкой. Язык окна
+    // выбирает браузер, поэтому «Продолжить» — на любом из трёх.
+    await page.eval(field("kind", "trade"));
+    await page.eval(field("birth", "1985"));
+    await page.eval(field("residency", "citizen"));
+    await page.waitFor(`return document.querySelector("section[data-module] .result .sum") ? true : null;`);
+    await page.eval(`document.querySelector("section[data-module] a[data-handoff]").click(); return true;`);
+    checks.check("калькулятор: «Открыть Kvartik» оставил программе введённое", await page.waitFor(`
+      if (location.pathname !== "/app/") return null;
+      const handed = JSON.parse(localStorage.getItem("kvartik.calc") ?? "null");
+      return handed?.kind === "trade" && handed.birth_year === 1985 && handed.residency === "citizen" ? true : null;`));
+    const proceed = JSON.stringify(["hy", "ru", "en"].map((lang) => t("WelcomeContinue", lang)));
+    await page.waitFor(`const b = [...document.querySelectorAll(".welcome button")].find((b) =>
+      ${proceed}.includes(b.textContent.trim())); if (!b) return null; b.click(); return true;`);
+    checks.check("программа: предлагает взять введённое в калькуляторе", await page.waitFor(`
+      const card = document.querySelector("#home .handoff");
+      return card && card.getClientRects().length > 0 && card.innerText.includes("1985") ? true : null;`));
     await page.go(`${ORIGIN}/#/documents`);
     checks.check("лендинг: старый адрес программы /#/… — в /app/ на тот же экран",
       await page.waitFor(`return location.pathname === "/app/" && location.hash === "#/documents" ? true : null;`));

@@ -233,6 +233,156 @@ fn missing_answers_are_asked() {
     assert!(matches!(example(&old, today()).annual.social, Social::Out(_)));
 }
 
+/// «Открыть Kvartik» берёт с собой то, что вошло в пример: строку налога,
+/// год рождения, гражданство и ответы — только на заданные вопросы (пенсия —
+/// родившемуся до 1974 года, резидентство — гражданину с 1961 года рождения,
+/// как в `fields_follow_the_rules`). Примера нет — нет и записи, а год
+/// с ошибкой в пример не вошёл и не передаётся.
+#[test]
+fn the_example_hands_off_what_the_profile_has() {
+    let old = Raw {
+        birth: "1961".to_owned(),
+        pension: "no".to_owned(),
+        resident: "yes".to_owned(),
+        ..raw(IncomeKind::Trade, "1 000 000")
+    };
+    let want = Handoff {
+        kind: Some(IncomeKind::Trade),
+        birth_year: Some(1961),
+        residency: Some(Residency::Citizen),
+        pension_joined: Some(false),
+        resident: Some(true),
+    };
+    let mut wrong = Vec::new();
+    let young = Raw {
+        pension: "yes".to_owned(),
+        resident: "no".to_owned(),
+        ..raw(IncomeKind::HighTech, "1 000 000")
+    };
+    let young_want = Handoff {
+        kind: Some(IncomeKind::HighTech),
+        birth_year: Some(1990),
+        residency: Some(Residency::Citizen),
+        ..Handoff::default()
+    };
+    let bad_year = Raw {
+        birth: "19".to_owned(),
+        ..raw(IncomeKind::Trade, "1 000")
+    };
+    for (what, got, expected) in [
+        ("с ответами", handoff(Lang::Ru, &old, today()), Some(want)),
+        ("без незаданных вопросов", handoff(Lang::Ru, &young, today()), Some(young_want)),
+        ("без оборота", handoff(Lang::Ru, &raw(IncomeKind::Trade, " "), today()), None),
+        ("оборот с ошибкой", handoff(Lang::Ru, &raw(IncomeKind::Trade, "abc"), today()), None),
+        (
+            "год с ошибкой",
+            handoff(Lang::Ru, &bad_year, today()),
+            Some(Handoff {
+                kind: Some(IncomeKind::Trade),
+                residency: Some(Residency::Citizen),
+                ..Handoff::default()
+            }),
+        ),
+    ] {
+        if got != expected {
+            wrong.push(format!("{what}: {got:?}, а ждали {expected:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Запись читается обратно, а запись другой версии — по полям: незнакомое
+/// значение — «нет значения», лишнее поле не мешает. Нечитаемая или
+/// с полем другого типа — пустая: это только предложение.
+#[test]
+fn the_handoff_record_is_lenient() {
+    let full = Handoff {
+        kind: Some(IncomeKind::Catering),
+        birth_year: Some(1985),
+        residency: Some(Residency::ForeignWithStatus),
+        pension_joined: Some(true),
+        resident: Some(false),
+    };
+    assert_eq!(
+        full.to_json(),
+        r#"{"kind":"catering","birth_year":1985,"residency":"foreign_with_status","pension_joined":true,"resident":false}"#
+    );
+    assert_eq!(Handoff::parse(&full.to_json()), full);
+    assert_eq!(Handoff::default().to_json(), "{}");
+    assert_eq!(
+        Handoff::parse(r#"{"kind":"space_mining","birth_year":1985,"residency":"martian","extra":[1,2]}"#),
+        Handoff {
+            birth_year: Some(1985),
+            ..Handoff::default()
+        }
+    );
+    for broken in ["", "x", "null", "[1985]", r#"{"birth_year":"1985"}"#] {
+        assert_eq!(Handoff::parse(broken), Handoff::default(), "{broken}");
+    }
+}
+
+/// Окно предлагает только то, чего профиль не знает: заполненное человеком
+/// не переписывается, а строку — коду, пока он один и строки у него никто
+/// не выбирал. Высокие технологии и прочую деятельность решает сам код.
+#[test]
+fn only_what_the_profile_lacks_is_offered() {
+    let carried = Handoff {
+        kind: Some(IncomeKind::Trade),
+        birth_year: Some(1961),
+        residency: Some(Residency::Citizen),
+        pension_joined: Some(false),
+        resident: Some(true),
+    };
+    let code = ActivityCode::parse("47.11.0").expect("годный код");
+    let mut wrong = Vec::new();
+    let mut check = |what: &str, got: Handoff, expected: Handoff| {
+        if got != expected {
+            wrong.push(format!("{what}: {got:?}, а ждали {expected:?}"));
+        }
+    };
+    check("профиля нет", carried.new_for(None), carried);
+    let mut data = ProfileData::default();
+    check("профиль пустой", carried.new_for(Some(&data)), carried);
+    data.person.birth_year = Some(1962);
+    data.person.residency = Some(Residency::ForeignWithStatus);
+    data.activities = vec![code];
+    check(
+        "год и гражданство заполнены, код один",
+        carried.new_for(Some(&data)),
+        Handoff {
+            kind: Some(IncomeKind::Trade),
+            pension_joined: Some(false),
+            resident: Some(true),
+            ..Handoff::default()
+        },
+    );
+    data.kinds.insert(code, IncomeKind::Production);
+    data.person.pension_joined = Some(true);
+    data.person.resident = Some(false);
+    check("заполнено всё", carried.new_for(Some(&data)), Handoff::default());
+    let two = ProfileData {
+        activities: vec![code, ActivityCode::parse("62.01.0").expect("годный код")],
+        ..ProfileData::default()
+    };
+    check(
+        "два кода",
+        carried.new_for(Some(&two)),
+        Handoff {
+            kind: None,
+            ..carried
+        },
+    );
+    for kind in [IncomeKind::HighTech, IncomeKind::Other] {
+        let only = Handoff {
+            kind: Some(kind),
+            ..Handoff::default()
+        };
+        check(&format!("{kind:?}"), only.new_for(None), Handoff::default());
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+    assert!(Handoff::default().is_empty() && !carried.is_empty());
+}
+
 /// Имена строк и гражданства в разметке — те же, что в данных, и читаются
 /// обратно; чужое имя — первая строка списка.
 #[test]

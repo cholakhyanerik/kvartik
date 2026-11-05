@@ -7,7 +7,7 @@
 
 use kvartik_core::i18n::Lang;
 use kvartik_core::model::date::Date;
-use kvartik_core::tax::example::{self, Raw};
+use kvartik_core::tax::example::{self, HANDOFF_KEY, Raw};
 use wasm_bindgen::prelude::*;
 
 /// Ответ на поля формы `input` — JSON `tax::example::Raw` — словами языка
@@ -22,6 +22,23 @@ pub fn calculate(lang: &str, input: &str) -> String {
         return String::new();
     };
     serde_json::to_string(&example::answer(lang, &raw, today)).unwrap_or_default()
+}
+
+/// «Открыть Kvartik»: то из полей `input`, что вошло в пример, — программе,
+/// записью `localStorage` сайта (`tax::example::handoff`). Примера нет —
+/// прежняя запись остаётся: человек мог вернуться на страницу только за
+/// ссылкой. `localStorage` отказал — программа просто не предложит взять
+/// введённое: ссылка уходит и без записи.
+#[wasm_bindgen]
+pub fn handoff(lang: &str, input: &str) {
+    let lang = Lang::from_code(lang).unwrap_or(Lang::Am);
+    let raw: Raw = serde_json::from_str(input).unwrap_or_default();
+    let Some(handed) = example::today(clock()).and_then(|today| example::handoff(lang, &raw, today)) else {
+        return;
+    };
+    if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
+        let _ = storage.set_item(HANDOFF_KEY, &handed.to_json());
+    }
 }
 
 /// День календаря устройства по местному времени, а не по UTC: в Ереване

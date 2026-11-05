@@ -27,6 +27,7 @@ use kvartik_core::model::profile::{
 };
 use kvartik_core::model::text::{Line, Lines};
 use kvartik_core::model::tin::Tin;
+use kvartik_core::tax::example::Handoff;
 use kvartik_core::tax::{annual, deadlines, turnover};
 use leptos::ev::{Event, SubmitEvent};
 use leptos::prelude::*;
@@ -48,6 +49,7 @@ use super::tax;
 use super::{Base, tr};
 use crate::platform::clock;
 use crate::platform::file::{self, FileError, Picture};
+use crate::store::device::Device;
 use crate::store::{Store, StoreError, Writes};
 
 /// Что окно знает о профиле.
@@ -63,6 +65,11 @@ pub struct Profiles {
     focus: RwSignal<Option<Part>>,
     /// Форма — короткая: только то, что нужно первому счёту.
     brief: RwSignal<bool>,
+    /// Ждёт ли на устройстве введённое в калькуляторе лендинга (задача 34):
+    /// окно предлагает взять его, пока человек не взял или не отказался.
+    handoff: RwSignal<bool>,
+    /// Что из него подставить в форму, которую открывает предложение.
+    handed: RwSignal<Option<Handoff>>,
 }
 
 /// Где профиль.
@@ -85,6 +92,8 @@ impl Profiles {
             editing: RwSignal::new(false),
             focus: RwSignal::new(None),
             brief: RwSignal::new(false),
+            handoff: RwSignal::new(Device::new().handoff().is_some()),
+            handed: RwSignal::new(None),
         }
     }
 
@@ -97,6 +106,42 @@ impl Profiles {
             self.focus.set(activities.then_some(Part::Activities));
             self.editing.set(true);
         }
+    }
+
+    /// Открыть форму с тем, что передал калькулятор лендинга (задача 34):
+    /// полную — года рождения и гражданства в короткой нет. С переданной
+    /// строкой налога — на кодах: строке нужен код, и вписать его надо там,
+    /// иначе — на данных человека. Открытую форму это не трогает: предложение
+    /// видно, только пока она закрыта.
+    pub(super) fn open_handoff(&self, handed: Handoff) {
+        if !self.editing.get_untracked() {
+            self.handed.set(Some(handed));
+            self.brief.set(false);
+            self.focus.set(Some(if handed.kind.is_some() { Part::Activities } else { Part::Person }));
+            self.editing.set(true);
+        }
+    }
+
+    /// Человек взял переданное калькулятором или отказался: забыть его на
+    /// устройстве.
+    pub(super) fn drop_handoff(&self) {
+        Device::new().clear_handoff();
+        self.handoff.set(false);
+    }
+
+    /// Ждёт ли предложение калькулятора — отслеживаемое.
+    pub(super) fn handoff_waiting(&self) -> bool {
+        self.handoff.get()
+    }
+
+    /// Открыта ли форма — отслеживаемое.
+    pub(super) fn form_open(&self) -> bool {
+        self.editing.get()
+    }
+
+    /// Прочитан ли профиль — есть он или нет. Отслеживаемое.
+    pub(super) fn ready(&self) -> bool {
+        self.state.with(|state| matches!(state, State::Ready(_)))
     }
 
     /// Профиля ещё нет — база прочитана, а его в ней нет. Отслеживаемое:
@@ -264,6 +309,11 @@ pub(super) async fn steps_part(card: Card) -> Result<AnyView, SplitLoaderError> 
     profile_screen(ProfilePart::Steps(card)).await
 }
 
+/// Предложение калькулятора лендинга — из той же части.
+pub(super) async fn handoff_part(card: Card) -> Result<AnyView, SplitLoaderError> {
+    profile_screen(ProfilePart::Handoff(card)).await
+}
+
 /// Что рисует часть профиля.
 #[derive(Clone, Copy)]
 pub(super) enum ProfilePart {
@@ -271,17 +321,96 @@ pub(super) enum ProfilePart {
     Screen(Ctx),
     /// Первые шаги на главном экране (`ui/onboarding.rs`): ведут сюда же.
     Steps(Card),
+    /// Предложение взять в профиль введённое в калькуляторе лендинга
+    /// (задача 34): ведёт сюда же, в форму.
+    Handoff(Card),
 }
 
 split! {
     /// Итог или форма экрана «Профиль» — своей частью wasm (`ui/split.rs`):
-    /// первому заходу нужен только главный экран. Первые шаги — в ней же:
-    /// своя часть умножала бы общие куски (там же).
+    /// первому заходу нужен только главный экран. Первые шаги и предложение
+    /// калькулятора — в ней же: своя часть умножала бы общие куски (там же).
     pub(super) fn profile_screen(part: ProfilePart) -> AnyView, preload preload_screen {
         match part {
             ProfilePart::Screen(ctx) => view! { <ProfileBody ctx /> }.into_any(),
             ProfilePart::Steps(card) => view! { <StepsCard card /> }.into_any(),
+            ProfilePart::Handoff(card) => view! { <HandoffCard card /> }.into_any(),
         }
+    }
+}
+
+/// Предложение взять в профиль введённое в калькуляторе лендинга (задача 34)
+/// — уже в части (`ui/onboarding.rs`, `HandoffOffer`). Запись читается один
+/// раз: пишет её только лендинг, до открытия программы. Предлагается только то,
+/// чего профиль ещё не знает (`Handoff::new_for`), а нечего — запись
+/// забывается: предлагать нечего и потом. «Взять» открывает форму с
+/// подставленным, и сохраняет её человек: молча окно ничего не берёт.
+#[component]
+fn HandoffCard(card: Card) -> impl IntoView {
+    let Card {
+        lang, router, profiles, ..
+    } = card;
+    let handed = Handoff::parse(&Device::new().handoff().unwrap_or_default());
+    let offer = Memo::new(move |_| profiles.ready().then(|| profiles.with(|data| handed.new_for(data))));
+    Effect::new(move || {
+        if offer.get().is_some_and(|offer| offer.is_empty()) {
+            profiles.drop_handoff();
+        }
+    });
+    let take = move |offer: Handoff| {
+        profiles.open_handoff(offer);
+        router.guide(Screen::Profile);
+    };
+    move || {
+        let offer = offer.get().filter(|offer| !offer.is_empty())?;
+        let lines = move || {
+            handoff_lines(lang.get(), offer)
+                .into_iter()
+                .map(|line| view! { <li>{line}</li> })
+                .collect_view()
+        };
+        Some(view! {
+            <section class="notice handoff">
+                <h2>{tr(lang, Key::HandoffTitle)}</h2>
+                <p>{tr(lang, Key::HandoffAbout)}</p>
+                <ul>{lines}</ul>
+                <button type="button" on:click=move |_| take(offer)>{tr(lang, Key::HandoffTake)}</button>
+                <button type="button" class="link" on:click=move |_| profiles.drop_handoff()>
+                    {tr(lang, Key::HandoffDismiss)}
+                </button>
+            </section>
+        })
+    }
+}
+
+/// Что предлагает калькулятор — строками на языке окна, в порядке формы.
+fn handoff_lines(lang: Lang, offer: Handoff) -> Vec<String> {
+    let row = |label: Key, value: &str| fill(t(lang, Key::CalcRow), &[t(lang, label), value]);
+    let mut lines = Vec::new();
+    if let Some(kind) = offer.kind {
+        lines.push(row(Key::ActivityKind, t(lang, turnover::kind_key(kind))));
+    }
+    if let Some(year) = offer.birth_year {
+        lines.push(row(Key::BirthYear, &year.to_string()));
+    }
+    if let Some(residency) = offer.residency {
+        lines.push(row(Key::ProfileResidency, t(lang, residency_key(residency))));
+    }
+    if let Some(joined) = offer.pension_joined {
+        lines.push(t(lang, if joined { Key::HandoffPensionYes } else { Key::HandoffPensionNo }).to_owned());
+    }
+    if let Some(resident) = offer.resident {
+        lines.push(t(lang, if resident { Key::HandoffResidentYes } else { Key::HandoffResidentNo }).to_owned());
+    }
+    lines
+}
+
+/// Подпись гражданства — та же, что у выбора в форме.
+const fn residency_key(residency: Residency) -> Key {
+    match residency {
+        Residency::Citizen => Key::ResidencyCitizen,
+        Residency::ForeignWithStatus => Key::ResidencyForeignWithStatus,
+        Residency::ForeignWithoutStatus => Key::ResidencyForeignWithoutStatus,
     }
 }
 
@@ -682,6 +811,43 @@ impl Form {
         }
     }
 
+    /// Подставить переданное калькулятором лендинга (задача 34) — только
+    /// в пустые поля: заполненное человеком не переписывается. Строка налога —
+    /// у единственной строки кода без строки налога, а строк кода нет — у новой
+    /// пустой. `true` — строка налога стоит у строки без кода: пустой код
+    /// форма не сохраняет, и строка пропала бы молча, поэтому форма говорит
+    /// об этом.
+    fn handoff(&self, handed: Handoff) -> bool {
+        if let Some(year) = handed.birth_year
+            && self.birth_year.with_untracked(|text| text.trim().is_empty())
+        {
+            self.birth_year.set(year.to_string());
+        }
+        for (field, value) in [(self.pension_joined, handed.pension_joined), (self.resident, handed.resident)] {
+            if field.get_untracked().is_none() {
+                field.set(value);
+            }
+        }
+        if self.residency.get_untracked().is_none() {
+            self.residency.set(handed.residency);
+        }
+        let Some(kind) = handed.kind else {
+            return false;
+        };
+        match self.activities.get_untracked().as_slice() {
+            [] => {
+                let row = self.code_row(String::new(), Some(kind));
+                self.activities.set(vec![row]);
+                true
+            }
+            [row] if row.kind.get_untracked().is_none() => {
+                row.kind.set(Some(kind));
+                row.text.with_untracked(|text| text.trim().is_empty())
+            }
+            _ => false,
+        }
+    }
+
     /// Данные профиля из полей; `None` — где-то ошибка, и её видно у поля.
     fn data(&self, today: Option<Date>) -> Option<ProfileData> {
         let line = |field: RwSignal<String>| Line::new(&field.get_untracked()).ok();
@@ -852,6 +1018,11 @@ fn ProfileForm(
 ) -> impl IntoView {
     forms.hold();
     let form = Form::new(data.as_ref(), profiles.picture);
+    // Открыли предложением калькулятора лендинга (задача 34) — подставить
+    // переданное. Один раз: форма, открытая потом иначе, его не получит.
+    let handed = profiles.handed.get_untracked();
+    profiles.handed.set(None);
+    let code_needed = handed.is_some_and(|handed| form.handoff(handed));
     // Короткая форма сразу со строками счёта и кода: пустые не сохраняются.
     if brief {
         if form.accounts.with_untracked(Vec::is_empty) {
@@ -915,6 +1086,11 @@ fn ProfileForm(
                     }
                     profiles.state.set(State::Ready(Some(Arc::new(profile))));
                     backups.data_saved();
+                    // Взятое из калькулятора сохранено вместе с формой: больше
+                    // его не предлагать.
+                    if handed.is_some() {
+                        profiles.drop_handoff();
+                    }
                     saved.set(true);
                     close();
                 }
@@ -926,9 +1102,10 @@ fn ProfileForm(
     view! {
         <form class="profile" on:submit=submit novalidate>
             {brief.then(|| view! { <p class="hint">{tr(lang, Key::ProfileBriefAbout)}</p> })}
+            {handed.is_some().then(|| view! { <p role="status">{tr(lang, Key::HandoffApplied)}</p> })}
             <Requisites lang form licenses saved_tin brief />
             <Accounts lang form />
-            <Activities lang form today />
+            <Activities lang form today code_needed />
             {(!brief).then(|| view! { <PersonFields lang form today /> })}
             {move || invalid.get().then(|| view! {
                 <p role="alert">{tr(lang, Key::ProfileFix)}</p>
@@ -1284,13 +1461,22 @@ fn Accounts(lang: ReadSignal<Lang>, form: Form) -> impl IntoView {
 
 /// Коды видов деятельности и режим налогообложения.
 #[component]
-fn Activities(lang: ReadSignal<Lang>, form: Form, today: Option<Date>) -> impl IntoView {
+fn Activities(
+    lang: ReadSignal<Lang>,
+    form: Form,
+    today: Option<Date>,
+    /// Калькулятор лендинга поставил строку налога у строки без кода
+    /// (задача 34): пустой код форма не сохраняет, и об этом — здесь же, над
+    /// кодом.
+    code_needed: bool,
+) -> impl IntoView {
     let tried = form.tried;
     let full = move || form.activities.with(|rows| rows.len() >= ProfileData::MAX_ACTIVITIES);
     view! {
         <fieldset id=Part::Activities.id()>
             <legend>{tr(lang, Key::ProfileActivities)}</legend>
             <p class="hint">{tr(lang, Key::ActivityHint)}</p>
+            {code_needed.then(|| view! { <p role="status">{tr(lang, Key::HandoffAppliedCode)}</p> })}
             <For each=move || form.activities.get() key=|row| row.key let(row)>
                 <div class="row">
                     <TextField

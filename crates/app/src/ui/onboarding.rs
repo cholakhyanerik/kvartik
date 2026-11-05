@@ -29,7 +29,7 @@ use super::clients::Clients;
 use super::documents::Documents;
 use super::icon::{Icon, icon};
 use super::lang::WindowLang;
-use super::profile::{Profiles, steps_part};
+use super::profile::{Profiles, handoff_part, steps_part};
 use super::pwa::{InstallSection, Program};
 use super::route::{self, Router, Screen};
 use super::tr;
@@ -236,6 +236,21 @@ pub fn FirstSteps(card: Card, welcome: RwSignal<bool>) -> impl IntoView {
     move || {
         wanted.get().then(|| Suspend::new(async move { steps_part(card).await.ok() }))
     }
+}
+
+/// Предложение взять в профиль введённое в калькуляторе лендинга (задача 34)
+/// — частью профиля, как первые шаги: нужно оно один раз, а чтение и разбор
+/// записи главному wasm ни к чему (Правило 1). Есть ли запись, окно знает
+/// с открытия (`Profiles`); пока стоит экран первого запуска, профиль не
+/// прочитан или открыта его форма — предложения нет: его считают по
+/// сохранённому профилю, а в открытую форму не подставляют.
+#[component]
+pub fn HandoffOffer(card: Card, welcome: RwSignal<bool>) -> impl IntoView {
+    let profiles = card.profiles;
+    let wanted = Memo::new(move |_| {
+        profiles.handoff_waiting() && !welcome.get() && profiles.ready() && !profiles.form_open()
+    });
+    move || wanted.get().then(|| Suspend::new(async move { handoff_part(card).await.ok() }))
 }
 
 /// Что нужно карточке первых шагов: через границу части — одним значением.

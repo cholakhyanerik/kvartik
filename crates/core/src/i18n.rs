@@ -257,6 +257,37 @@ strings! {
     StepsOpenInvoice = "Открыть счёт", "Open the invoice", "Բացել հաշիվը";
     StepsHide = "Скрыть первые шаги", "Hide first steps", "Թաքցնել առաջին քայլերը";
     StepsFinish = "Готово", "Done", "Պատրաստ է";
+    /// Предложение калькулятора лендинга (задача 34, `tax::example::Handoff`):
+    /// окно не берёт введённое молча — человек видит его в форме профиля
+    /// и сохраняет сам.
+    HandoffTitle = "Из калькулятора на сайте", "From the calculator on the website", "Կայքի հաշվիչից";
+    HandoffAbout =
+        "Это вы ввели в калькуляторе на kvartik.com. Взятое откроется в форме профиля\u{A0}— проверьте и сохраните.",
+        "You entered this in the calculator on kvartik.com. It will open in the profile form for you to check and save.",
+        "Սա մուտքագրել եք kvartik.com-ի հաշվիչում։ Այն կբացվի պրոֆիլի ձևում՝ ստուգեք և պահեք։";
+    HandoffTake = "Взять в профиль", "Add to profile", "Ավելացնել պրոֆիլում";
+    HandoffDismiss = "Не надо", "No, thanks", "Պետք չէ";
+    HandoffPensionYes =
+        "Накопительная пенсия: вступили сами",
+        "Funded pension: joined it yourself",
+        "Կուտակային կենսաթոշակ՝ միացել եք ինքներդ";
+    HandoffPensionNo =
+        "Накопительная пенсия: сами не вступали",
+        "Funded pension: haven't joined it yourself",
+        "Կուտակային կենսաթոշակ՝ ինքներդ չեք միացել";
+    HandoffResidentYes = "Резидент Армении", "Armenian resident", "Հայաստանի ռեզիդենտ";
+    HandoffResidentNo = "Не резидент Армении", "Not an Armenian resident", "Հայաստանի ոչ ռեզիդենտ";
+    /// Над формой профиля, открытой предложением калькулятора.
+    HandoffApplied =
+        "Из калькулятора подставлено то, чего не было в профиле. Проверьте и сохраните.",
+        "Anything your profile didn't have yet has been filled in from the calculator. Check it and save.",
+        "Պրոֆիլում չեղածը լրացվել է հաշվիչից։ Ստուգեք և պահեք։";
+    /// Строку налога калькулятор поставил у пустой строки кода: пустой код
+    /// форма не сохраняет, и строка пропала бы молча.
+    HandoffAppliedCode =
+        "Строка налога из калькулятора стоит у кода деятельности: впишите сам код, без него она не сохранится.",
+        "The tax row from the calculator is set next to an activity code: type in the code itself, or the row won't be saved.",
+        "Հաշվիչից հարկի տողը դրված է գործունեության կոդի մոտ. մուտքագրեք կոդը, առանց դրա տողը չի պահվի։";
     /// Формы по шагам (дизайн «Kvartik Design»): «назад» кружком — для
     /// экранного диктора, номер шага — «1 / 2» глазу и словами диктору.
     Back = "Назад", "Back", "Հետ";
@@ -3464,6 +3495,13 @@ strings! {
         "Пример: этот и прошлый год целиком на налоге с оборота, в каждом квартале\u{A0}— тот же оборот и те же расходы, переноса вычета из прежних расчётов нет. Ваши числа программа посчитает по вашей книге.",
         "Example assumptions: this year and last year entirely on turnover tax, the same turnover and expenses every quarter, and no deduction carried over from earlier returns. The app works out your own numbers from your ledger.",
         "Օրինակի ենթադրությունները. այս և նախորդ տարին ամբողջությամբ շրջանառության հարկով, յուրաքանչյուր եռամսյակում՝ նույն շրջանառությունը և նույն ծախսերը, նախորդ հաշվարկներից փոխանցված նվազեցում չկա։ Ձեր թվերը ծրագիրը կհաշվի ձեր մատյանով։";
+    /// Под ссылкой в программу (`tax::example::handoff`): что она возьмёт
+    /// с собой и где это останется — записью сайта на этом устройстве
+    /// (Правило 13: ничего не уходит с устройства).
+    CalcHandoffHint =
+        "Откройте Kvartik отсюда\u{A0}— программа предложит взять в профиль вид деятельности, год рождения и гражданство. Они остаются на этом устройстве.",
+        "Open Kvartik from here and it will offer to add your type of activity, year of birth and citizenship to your profile. They stay on this device.",
+        "Բացեք Kvartik-ն այստեղից՝ ծրագիրը կառաջարկի պրոֆիլում ավելացնել գործունեության տեսակը, ծննդյան տարեթիվը և քաղաքացիությունը։ Դրանք մնում են այս սարքում։";
 }
 
 /// Подставляет значения в шаблон вместо `{}`, по порядку.

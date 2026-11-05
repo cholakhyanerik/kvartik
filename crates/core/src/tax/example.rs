@@ -32,9 +32,19 @@
 //! считает и не пишет (Правило 13: в DOM — только текстом). Часов модуль не
 //! спрашивает: «сегодня» передаёт оболочка (Архитектура, «Время —
 //! параметр»).
+//!
+//! # Программе
+//!
+//! «Открыть Kvartik» берёт введённое с собой ([`handoff`]): то, что есть
+//! в профиле, — строку налога, год рождения, гражданство и ответы о пенсии
+//! и резидентстве. Калькулятор оставляет это записью `localStorage` сайта
+//! ([`HANDOFF_KEY`]) — у лендинга и программы одно происхождение (CLAUDE.md,
+//! Архитектура), — а окно предлагает взять в профиль только то, чего в нём
+//! ещё нет ([`Handoff::new_for`]), и не берёт молча.
 
 use std::collections::BTreeMap;
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use super::annual::{self, Annual, Fixed, Health, HealthUnclear, Missing, Social, Stamp, Status, Total};
@@ -326,6 +336,26 @@ impl Block {
 /// Ответ на поля `raw` в день `today` словами языка `lang` (шапка модуля,
 /// «Ответ странице»).
 pub fn answer(lang: Lang, raw: &Raw, today: Date) -> Answer {
+    let Read { fields, errors, input } = read(lang, raw, today);
+    let blocks = match input {
+        Some(input) => render(lang, &example(&input, today), today),
+        None => vec![Block::new(BlockKind::Note, t(lang, Key::CalcPrompt))],
+    };
+    Answer { fields, errors, blocks }
+}
+
+/// Поля формы, разобранные: какие показать, ошибки и — если пример можно
+/// посчитать — ввод.
+struct Read {
+    fields: Fields,
+    errors: BTreeMap<&'static str, String>,
+    input: Option<Input>,
+}
+
+/// Разобрать поля `raw` по правилам языка `lang`. Ввода нет без оборота
+/// и при ошибке суммы: пример считать не из чего. Ошибка года рождения пример
+/// не останавливает — он посчитается без года и попросит его.
+fn read(lang: Lang, raw: &Raw, today: Date) -> Read {
     let mut errors = BTreeMap::new();
     let kind = kind_from(&raw.kind).unwrap_or(KINDS[0]);
     let deduction = has_deduction(kind, today);
@@ -351,28 +381,131 @@ pub fn answer(lang: Lang, raw: &Raw, today: Date) -> Answer {
         resident: residency == Some(Residency::Citizen)
             && birth.is_some_and(|year| annual::residence_matters(year, today)),
     };
-    let answer = |blocks| Answer {
-        fields,
-        errors: errors.clone(),
-        blocks,
-    };
-    let prompt = || vec![Block::new(BlockKind::Note, t(lang, Key::CalcPrompt))];
-    let Some(turnover) = turnover else {
-        return answer(prompt());
-    };
-    if errors.contains_key("turnover") || errors.contains_key("expenses") {
-        return answer(prompt());
+    let input = turnover
+        .filter(|_| !errors.contains_key("turnover") && !errors.contains_key("expenses"))
+        .map(|turnover| Input {
+            kind,
+            turnover,
+            expenses: expenses.unwrap_or(0),
+            birth_year: birth,
+            residency,
+            pension_joined: fields.pension.then(|| yes_no(&raw.pension)).flatten(),
+            resident: fields.resident.then(|| yes_no(&raw.resident)).flatten(),
+        });
+    Read { fields, errors, input }
+}
+
+/// Под каким именем калькулятор оставляет введённое программе: запись
+/// `localStorage` сайта, среди записей устройства окна (`store/device.rs`,
+/// префикс `kvartik.`).
+pub const HANDOFF_KEY: &str = "kvartik.calc";
+
+/// Строки, которые калькулятор передаёт коду профиля: их у кода выбирает
+/// человек. Высокие технологии и прочую деятельность решает сам код
+/// (`turnover::default_kind`): строка из калькулятора у кода не из списка
+/// 142-Ն дала бы 1 % тому, кому закон его не даёт.
+const CODE_LINES: [IncomeKind; 4] = [IncomeKind::Trade, IncomeKind::Production, IncomeKind::Catering, IncomeKind::Rent];
+
+/// Что калькулятор передаёт программе (шапка модуля, «Программе»): то из
+/// введённого, что есть в профиле. Оборот и расходы примера — не записи
+/// книги, и их здесь нет. «Нет значения» — `None` (Правило 6).
+///
+/// Запись — договор между версиями, как заметки «Что нового» (шапка
+/// `release.rs`): лендинг приходит с сети, а программа — из кэша service
+/// worker, и запись новой страницы может прочесть прежняя программа.
+/// Поэтому разбор ([`Handoff::parse`]) пропускает незнакомые поля и значения,
+/// а смысл поля не меняется никогда.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug, Serialize)]
+pub struct Handoff {
+    /// Строка налога, для которой считался пример.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<IncomeKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub birth_year: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub residency: Option<Residency>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pension_joined: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resident: Option<bool>,
+}
+
+/// [`Handoff`], как запись лежит: перечисления — строками, и незнакомая строка
+/// другой версии — «нет значения», а не нечитаемая запись.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct HandoffText {
+    kind: Option<String>,
+    birth_year: Option<u16>,
+    residency: Option<String>,
+    pension_joined: Option<bool>,
+    resident: Option<bool>,
+}
+
+impl Handoff {
+    /// Запись для `localStorage`.
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_default()
     }
-    let input = Input {
-        kind,
-        turnover,
-        expenses: expenses.unwrap_or(0),
-        birth_year: birth,
-        residency,
-        pension_joined: fields.pension.then(|| yes_no(&raw.pension)).flatten(),
-        resident: fields.resident.then(|| yes_no(&raw.resident)).flatten(),
-    };
-    answer(render(lang, &example(&input, today), today))
+
+    /// Запись из `localStorage`. Нечитаемая — пустая: это только
+    /// предложение, и без него программа та же.
+    pub fn parse(text: &str) -> Self {
+        let Ok(text) = serde_json::from_str::<HandoffText>(text) else {
+            return Self::default();
+        };
+        Self {
+            kind: text.kind.as_deref().and_then(variant),
+            birth_year: text.birth_year,
+            residency: text.residency.as_deref().and_then(variant),
+            pension_joined: text.pension_joined,
+            resident: text.resident,
+        }
+    }
+
+    /// Чего из переданного профиль `profile` ещё не знает — это окно
+    /// и предлагает взять: заполненное человеком не переписывается. Строка
+    /// налога — только из [`CODE_LINES`] и только пока у профиля не больше
+    /// одного кода и строки у кода никто не выбирал: у двух кодов неясно,
+    /// чья она.
+    pub fn new_for(&self, profile: Option<&ProfileData>) -> Self {
+        let empty = ProfileData::default();
+        let data = profile.unwrap_or(&empty);
+        let person = &data.person;
+        let one_code = data.activities.len() <= 1 && data.kinds.is_empty();
+        Self {
+            kind: self.kind.filter(|kind| one_code && CODE_LINES.contains(kind)),
+            birth_year: self.birth_year.filter(|_| person.birth_year.is_none()),
+            residency: self.residency.filter(|_| person.residency.is_none()),
+            pension_joined: self.pension_joined.filter(|_| person.pension_joined.is_none()),
+            resident: self.resident.filter(|_| person.resident.is_none()),
+        }
+    }
+
+    /// Передавать нечего.
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// Вариант перечисления по имени в данных — тем же разбором, что у записей
+/// базы; чужое имя — `None`.
+fn variant<T: DeserializeOwned>(id: &str) -> Option<T> {
+    serde_json::from_str(&serde_json::to_string(id).ok()?).ok()
+}
+
+/// Что калькулятор передаёт программе по полям `raw` (шапка модуля,
+/// «Программе»): то, что вошло в пример. Примера нет — нет оборота или
+/// сумма с ошибкой — передавать нечего.
+pub fn handoff(lang: Lang, raw: &Raw, today: Date) -> Option<Handoff> {
+    let input = read(lang, raw, today).input?;
+    Some(Handoff {
+        kind: Some(input.kind),
+        birth_year: input.birth_year,
+        residency: input.residency,
+        pension_joined: input.pension_joined,
+        resident: input.resident,
+    })
 }
 
 /// Сумма поля в драмах. Пустое поле — `None` без ошибки: человек ещё не

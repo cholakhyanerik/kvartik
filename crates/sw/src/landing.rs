@@ -150,6 +150,8 @@ fn stylesheet(tokens: &str, fonts: &str, landing: &str, app: &str) -> Result<Str
 /// как в данных (`example::kind_id`, `residency_id`). Поля, которые нужны не
 /// всегда, спрятаны, пока ответ ядра не попросит их (`Fields`), а ошибки
 /// поля и слова о загрузке лежат в разметке: свои тексты скрипту не нужны.
+/// Ссылки в программу — с `data-handoff`: по нажатию скрипт отдаёт поля wasm,
+/// и тот оставляет программе введённое (`example::handoff`).
 fn calculator(lang: Lang, calc: &Calc, app: &str) -> String {
     let text = |key: Key| escape(t(lang, key));
     let choose = format!("<option value=\"\">{}</option>", text(Key::NotChosen));
@@ -216,7 +218,8 @@ fn calculator(lang: Lang, calc: &Calc, app: &str) -> String {
         </div>
         <p class="note" data-state="loading" hidden>{loading}</p>
         <p class="note" data-state="failed" role="alert" hidden>{failed}</p>
-        <p class="actions"><a class="button" href="{app}">{open}</a></p>
+        <p class="actions"><a class="button" href="{app}" data-handoff>{open}</a></p>
+        <p class="hint">{handoff}</p>
       </section>
 "#,
         module = escape(calc.module),
@@ -227,6 +230,7 @@ fn calculator(lang: Lang, calc: &Calc, app: &str) -> String {
         loading = text(Key::PartLoading),
         failed = text(Key::CalcFailed),
         open = text(Key::LandingOpen),
+        handoff = text(Key::CalcHandoffHint),
     )
 }
 
@@ -319,7 +323,7 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
       <section class="hero">
         <h1>{headline}</h1>
         <p class="lead">{lead}</p>
-        <p class="actions"><a class="button" href="{app}">{open}</a></p>
+        <p class="actions"><a class="button" href="{app}" data-handoff>{open}</a></p>
         <p class="trial">{trial} {after_trial}</p>
       </section>
 {calculator}      <section aria-labelledby="features">
@@ -337,7 +341,7 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
       <section class="card" aria-labelledby="fit">
         <h2 id="fit">{fit_title}</h2>
         <p>{fit_text}</p>
-        <p class="actions"><a class="button" href="{app}">{open}</a></p>
+        <p class="actions"><a class="button" href="{app}" data-handoff>{open}</a></p>
       </section>
     </main>
     <footer>
@@ -481,6 +485,15 @@ mod tests {
             if html.matches("<input name=\"").count() + html.matches("<select name=\"").count() != 7 {
                 wrong.push(format!("{lang:?}: полей не семь"));
             }
+            // Введённое берёт с собой любая ссылка в программу, а под
+            // ссылкой калькулятора сказано, что она возьмёт (задача 34).
+            if !html.contains(&escape(t(lang, Key::CalcHandoffHint))) {
+                wrong.push(format!("{lang:?}: не сказано, что ссылка возьмёт с собой"));
+            }
+            let links = html.matches("href=\"/app/\"").count();
+            if links != 3 || html.matches("href=\"/app/\" data-handoff>").count() != links {
+                wrong.push(format!("{lang:?}: не у всех трёх ссылок в программу есть data-handoff"));
+            }
         }
         assert!(wrong.is_empty(), "{wrong:#?}");
     }
@@ -504,7 +517,7 @@ mod tests {
                 "<link rel=\"alternate\" hreflang=\"x-default\" href=\"https://kvartik.com/\" />".to_owned(),
                 "<link rel=\"stylesheet\" href=\"/kvartik-site-a.css\" />".to_owned(),
                 "<script src=\"/kvartik-site-b.js\" defer></script>".to_owned(),
-                "<a class=\"button\" href=\"/app/\">".to_owned(),
+                "<a class=\"button\" href=\"/app/\" data-handoff>".to_owned(),
                 format!("href=\"webcal://kvartik.com/calendar/{}.ics\"", lang.code()),
                 format!("<a href=\"/app/{LICENSES}\">"),
                 escape(t(lang, Key::WelcomeHeadline)),

@@ -1,17 +1,22 @@
 //! Браузерные тесты первого запуска и первых шагов (задача 28): всё окно
 //! в настоящем DOM и настоящей IndexedDB.
 
-use kvartik_core::i18n::{Key, Lang, t};
+use kvartik_core::i18n::{Key, Lang, fill, t};
+use kvartik_core::model::activity::{ActivityCode, IncomeKind};
 use kvartik_core::model::client::Client;
 use kvartik_core::model::document::Document;
-use kvartik_core::model::profile::Profile;
+use kvartik_core::model::profile::{Profile, Residency};
+use kvartik_core::tax::example::{HANDOFF_KEY, Handoff};
+use kvartik_core::tax::turnover;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::wasm_bindgen_test;
 use web_sys::HtmlElement;
 
 use super::documents::{acme, commit, forget_device, fresh_base_with_client, invoice_data, profile};
-use super::{button, choice_card, document, field, mount_at, section_text, sleep, stored_profile, type_into, wait_for};
+use super::{
+    button, choice_card, document, field, mount_at, section_text, select, sleep, stored_profile, type_into, wait_for,
+};
 use crate::platform::pwa::Browser;
 use crate::platform::{clock, hash};
 use crate::store::Writes;
@@ -26,6 +31,40 @@ fn forget_steps() {
     if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
         let _ = storage.remove_item("kvartik.steps_hidden");
     }
+}
+
+/// `localStorage` страницы тестов.
+fn local_storage() -> Option<web_sys::Storage> {
+    web_sys::window().and_then(|window| window.local_storage().ok().flatten())
+}
+
+/// Оставить запись калькулятора лендинга — так, как её пишет wasm
+/// калькулятора (`crates/calc`): тем же ядром и под тем же именем.
+fn hand_off(handed: Handoff) {
+    if let Some(storage) = local_storage() {
+        let _ = storage.set_item(HANDOFF_KEY, &handed.to_json());
+    }
+}
+
+/// Осталась ли запись калькулятора.
+fn handoff_left() -> bool {
+    local_storage().and_then(|storage| storage.get_item(HANDOFF_KEY).ok().flatten()).is_some()
+}
+
+fn forget_handoff() {
+    if let Some(storage) = local_storage() {
+        let _ = storage.remove_item(HANDOFF_KEY);
+    }
+}
+
+/// Текст предложения калькулятора на главном экране; нет его — `None`.
+fn handoff_card(host: &HtmlElement) -> Option<String> {
+    host.query_selector("#home .handoff").ok().flatten().and_then(|card| card.text_content())
+}
+
+/// Строка предложения «что: значение» — по шаблону строки калькулятора.
+fn handoff_row(lang: Lang, label: Key, value: &str) -> String {
+    fill(t(lang, Key::CalcRow), &[t(lang, label), value])
 }
 
 /// Нажать кнопку с подписью `key` внутри экрана `screen`.
@@ -275,6 +314,190 @@ async fn a_settled_entrepreneur_sees_no_first_steps() {
     crate::platform::set_hash("");
     forget_device();
     assert!(wrong.is_empty(), "опытный человек: {wrong:#?}");
+}
+
+/// Введённое в калькуляторе лендинга (задача 34): окно предлагает его
+/// карточкой, «Взять в профиль» открывает полную форму с подставленным —
+/// и пока она открыта, карточки нет, — а сохраняет её человек. Строка налога
+/// встаёт у строки кода и просит сам код. Сохранённое лежит в базе, а форма
+/// вернула на главный экран. Год рождения человек в форме стёр — и его
+/// больше не предлагают: запись калькулятора забыта с сохранением формы.
+#[wasm_bindgen_test]
+async fn the_calculator_handoff_is_taken_through_the_form() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    forget_steps();
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    hand_off(Handoff {
+        kind: Some(IncomeKind::Trade),
+        birth_year: Some(1961),
+        residency: Some(Residency::Citizen),
+        pension_joined: Some(false),
+        resident: Some(true),
+    });
+    let (host, mounted) = mount_at("#/");
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::HandoffTitle)).await {
+        wrong.push("нет предложения калькулятора".to_owned());
+    }
+    let card = handoff_card(&host).unwrap_or_default();
+    for line in [
+        handoff_row(lang, Key::ActivityKind, t(lang, turnover::kind_key(IncomeKind::Trade))),
+        handoff_row(lang, Key::BirthYear, "1961"),
+        handoff_row(lang, Key::ProfileResidency, t(lang, Key::ResidencyCitizen)),
+        t(lang, Key::HandoffPensionNo).to_owned(),
+        t(lang, Key::HandoffResidentYes).to_owned(),
+    ] {
+        if !card.contains(&line) {
+            wrong.push(format!("в предложении нет «{line}»: {card}"));
+        }
+    }
+
+    press(&host, "home", lang, Key::HandoffTake, &mut wrong);
+    if !wait_for(&host, t(lang, Key::HandoffApplied)).await {
+        wrong.push("форма не сказала, что подставлено".to_owned());
+    }
+    if !section_text(&host, "profile").contains(t(lang, Key::HandoffAppliedCode)) {
+        wrong.push("форма не попросила код к строке налога".to_owned());
+    }
+    if handoff_card(&host).is_some() {
+        wrong.push("предложение видно при открытой форме".to_owned());
+    }
+    match field(&host, t(lang, Key::BirthYear), 0) {
+        Some(input) if input.value() == "1961" => type_into(&input, ""),
+        Some(input) => wrong.push(format!("год рождения в форме: «{}»", input.value())),
+        None => wrong.push("в форме нет года рождения".to_owned()),
+    }
+    match select(&host, t(lang, Key::ActivityKind), 0) {
+        Some(kind) if kind.value() == "trade" => {}
+        Some(kind) => wrong.push(format!("строка налога у кода: «{}»", kind.value())),
+        None => wrong.push("в форме нет строки налога у кода".to_owned()),
+    }
+    match field(&host, t(lang, Key::ActivityCode), 0) {
+        Some(input) => type_into(&input, "47.11.0"),
+        None => wrong.push("в форме нет поля кода".to_owned()),
+    }
+    press(&host, "profile", lang, Key::ProfileSave, &mut wrong);
+    for _ in 0..100 {
+        if !handoff_left() && hash() == "#/" {
+            break;
+        }
+        sleep(50).await;
+    }
+    if handoff_left() {
+        wrong.push("запись калькулятора осталась после сохранения".to_owned());
+    }
+    if hash() != "#/" {
+        wrong.push(format!("после формы не на главном: {}", hash()));
+    }
+    let code = ActivityCode::parse("47.11.0").expect("годный код");
+    match stored_profile().await {
+        Ok(Some(saved)) => {
+            let person = &saved.data().person;
+            let got = (
+                person.birth_year,
+                person.residency,
+                person.pension_joined,
+                person.resident,
+                saved.data().kinds.get(&code).copied(),
+            );
+            let want = (None, Some(Residency::Citizen), Some(false), Some(true), Some(IncomeKind::Trade));
+            if got != want {
+                wrong.push(format!("в базе {got:?}, а ждали {want:?}"));
+            }
+        }
+        other => wrong.push(format!("профиля в базе нет: {other:?}")),
+    }
+    sleep(200).await;
+    if handoff_card(&host).is_some() {
+        wrong.push("стёртый в форме год рождения предложен снова".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    forget_handoff();
+    forget_steps();
+    forget_device();
+    assert!(wrong.is_empty(), "калькулятор — в профиль: {wrong:#?}");
+}
+
+/// Окно предлагает только то, чего профиль не знает: заполненный год рождения
+/// и строку при двух кодах — нет. «Не надо» забывает запись и ничего не
+/// пишет; запись, из которой профилю нечего взять, забывается без карточки.
+#[wasm_bindgen_test]
+async fn a_declined_handoff_writes_nothing() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    forget_steps();
+    let mut data = profile();
+    data.person.birth_year = Some(1980);
+    data.activities = vec![
+        ActivityCode::parse("47.11.0").expect("годный код"),
+        ActivityCode::parse("62.01.0").expect("годный код"),
+    ];
+    let saved = Profile::save(None, data, clock::now()).expect("годный профиль").expect("новый");
+    let mut writes = Writes::default();
+    writes.insert(&saved);
+    commit(writes).await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    hand_off(Handoff {
+        kind: Some(IncomeKind::Trade),
+        birth_year: Some(1961),
+        residency: Some(Residency::Citizen),
+        ..Handoff::default()
+    });
+    let (host, mounted) = mount_at("#/");
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::HandoffTitle)).await {
+        wrong.push("нет предложения калькулятора".to_owned());
+    }
+    let card = handoff_card(&host).unwrap_or_default();
+    if !card.contains(&handoff_row(lang, Key::ProfileResidency, t(lang, Key::ResidencyCitizen))) {
+        wrong.push(format!("в предложении нет гражданства: {card}"));
+    }
+    for absent in [
+        handoff_row(lang, Key::BirthYear, "1961"),
+        handoff_row(lang, Key::ActivityKind, t(lang, turnover::kind_key(IncomeKind::Trade))),
+    ] {
+        if card.contains(&absent) {
+            wrong.push(format!("предложено то, что профиль уже решил: «{absent}»"));
+        }
+    }
+    press(&host, "home", lang, Key::HandoffDismiss, &mut wrong);
+    sleep(100).await;
+    if handoff_card(&host).is_some() || handoff_left() {
+        wrong.push("«Не надо» не забыло предложение".to_owned());
+    }
+    match stored_profile().await {
+        Ok(Some(stored)) if stored == saved => {}
+        other => wrong.push(format!("«Не надо» тронуло профиль: {other:?}")),
+    }
+    drop(mounted);
+    host.remove();
+
+    hand_off(Handoff {
+        birth_year: Some(1961),
+        ..Handoff::default()
+    });
+    let (host, mounted) = mount_at("#/");
+    if !wait_for(&host, t(lang, Key::DocNewInvoice)).await {
+        wrong.push("окно не открылось снова".to_owned());
+    }
+    for _ in 0..40 {
+        if !handoff_left() {
+            break;
+        }
+        sleep(25).await;
+    }
+    if handoff_card(&host).is_some() || handoff_left() {
+        wrong.push("запись, из которой нечего взять, не забыта".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    forget_handoff();
+    forget_device();
+    assert!(wrong.is_empty(), "отказ от предложения: {wrong:#?}");
 }
 
 /// Пока стоит экран первого запуска, карточки нет: её часть не грузится

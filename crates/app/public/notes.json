@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.86",
+      "date": "2026-11-06",
+      "hy": [
+        "kvartik.com-ում «Բացել Kvartik-ը» կոճակն այժմ իր հետ է բերում հաշվիչում մուտքագրածը՝ գործունեության տեսակը, ծննդյան տարեթիվը և քաղաքացիությունը։ Ծրագիրը կառաջարկի դրանք ավելացնել պրոֆիլում, իսկ պահելու եք ինքներդ՝ պրոֆիլի ձևում։"
+      ],
+      "ru": [
+        "«Открыть Kvartik» на kvartik.com теперь берёт с собой то, что вы ввели в калькуляторе: вид деятельности, год рождения и гражданство. Программа предложит взять это в профиль, а сохраните вы сами — в форме профиля."
+      ],
+      "en": [
+        "“Open Kvartik” on kvartik.com now brings along what you entered in the calculator: your type of activity, year of birth and citizenship. The app offers to add them to your profile, and you save them yourself in the profile form."
+      ]
+    },
+    {
       "version": "0.0.85",
       "date": "2026-11-05",
       "hy": [
@@ -275,22 +288,6 @@
       ],
       "en": [
         "A quarter before 2025 can no longer be closed: such a quarter couldn't be read afterwards, and the app kept reminding you about it."
-      ]
-    },
-    {
-      "version": "0.0.66",
-      "date": "2026-11-01",
-      "hy": [
-        "Եթե ծրագրից օգտվելուց առաջ ներկայացված հաշվարկում նվազեցման փոխանցում կար, այն այժմ կարող եք նշել հարկի էկրանին, և հաշվարկը կսկսվի դրանից։ Եթե փոխանցում չի եղել, պահպանեք դատարկ դաշտերը, և հարցն այլևս չի երևա։",
-        "Անհայտ փոխանցման մասին հարցն այժմ երևում է բոլոր այն եռամսյակներում, որոնց վերաբերում է, ոչ միայն առաջինում։"
-      ],
-      "ru": [
-        "Если в расчёте, поданном до начала работы в программе, был перенос вычета, его теперь можно указать на экране налога, и расчёт начнётся с него. Если переноса не было, сохраните пустые поля, и вопрос исчезнет.",
-        "Вопрос о неизвестном переносе теперь виден во всех кварталах, которых он касается, а не только в первом."
-      ],
-      "en": [
-        "If a return you filed before using the app carried a deduction forward, you can now enter it on the Tax screen, and the calculation will start from it. If there was none, save the empty fields and the question goes away.",
-        "The question about an unknown carry-over now appears in every quarter it affects, not just the first."
       ]
     }
   ]

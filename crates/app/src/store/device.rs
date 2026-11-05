@@ -23,6 +23,11 @@
 //! `localStorage` может отказать — сайтам запрещено хранить данные, место
 //! кончилось: тогда чтение даёт «нет», а запись — `false`, и окно живёт
 //! дальше без них.
+//!
+//! Одну запись пишет не окно, а калькулятор лендинга (задача 34): что из
+//! введённого в нём «Открыть Kvartik» взял с собой ([`Device::handoff`]).
+//! У лендинга и программы одно происхождение, и запись видна окну без
+//! переноса.
 
 use kvartik_core::format::autobackup::DeviceTag;
 use kvartik_core::format::backup::DeviceKey;
@@ -36,6 +41,11 @@ use kvartik_core::release::Version;
 pub struct Device {
     prefix: String,
 }
+
+/// Имя записи калькулятора — `tax::example::HANDOFF_KEY` без префикса
+/// [`Device::new`]: её пишет wasm калькулятора (`crates/calc`) под полным
+/// именем из ядра, и тест ниже держит их вместе.
+const HANDOFF: &str = "calc";
 
 impl Device {
     /// Записи программы.
@@ -173,6 +183,24 @@ impl Device {
         self.set("password_entered", &at.unix_millis().to_string())
     }
 
+    /// Что оставил программе калькулятор лендинга (задача 34) — текстом,
+    /// как его записал wasm калькулятора; разбирает ядро
+    /// (`tax::example::Handoff::parse`). `None` — ничего не оставлял.
+    pub fn handoff(&self) -> Option<String> {
+        self.get(HANDOFF)
+    }
+
+    /// Забыть переданное калькулятором: человек взял его в профиль или
+    /// отказался. `false` — `localStorage` отказал, и предложение встанет
+    /// при следующем открытии снова.
+    pub fn clear_handoff(&self) -> bool {
+        storage().is_some_and(|storage| {
+            storage
+                .remove_item(&format!("{}{HANDOFF}", self.prefix))
+                .is_ok()
+        })
+    }
+
     /// Момент под этим именем — как у [`Self::last_backup`].
     fn moment(&self, name: &str) -> Option<Timestamp> {
         let millis: i64 = self.get(name)?.parse().ok()?;
@@ -211,6 +239,7 @@ impl Device {
                 "changed",
                 "auto_tag",
                 "password_entered",
+                HANDOFF,
             ] {
                 let _ = storage.remove_item(&format!("{}{name}", self.prefix));
             }
@@ -221,4 +250,19 @@ impl Device {
 /// `localStorage`; `None` — его нет или браузер не даёт.
 fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok().flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Окно ищет запись калькулятора там, куда её пишет wasm калькулятора:
+    /// разойдись имена — предложение молча не встало бы ни у кого.
+    #[test]
+    fn the_handoff_is_read_where_the_calculator_writes_it() {
+        assert_eq!(
+            format!("{}{HANDOFF}", Device::new().prefix),
+            kvartik_core::tax::example::HANDOFF_KEY
+        );
+    }
 }

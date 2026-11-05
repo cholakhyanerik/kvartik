@@ -10,7 +10,7 @@ use super::backup::{BackupReminder, Backups};
 use super::clients::Clients;
 use super::documents::{Awaiting, Documents};
 use super::icon::{Icon, icon};
-use super::onboarding::{Card, FirstSteps, Steps};
+use super::onboarding::{Card, FirstSteps, HandoffOffer, Steps};
 use super::profile::Profiles;
 use super::pwa::{InstallSection, Program};
 use super::route::{Router, Screen};
@@ -58,6 +58,9 @@ pub fn Home(
         // Установка — выше всего о данных: на iPhone программу ставят до
         // того, как вводить данные (Правило 6).
         <InstallSection lang program />
+        // Введённое в калькуляторе лендинга — до первых шагов: первый шаг —
+        // тот же профиль.
+        <HandoffOffer card welcome />
         <FirstSteps card welcome />
         <TaxCard ctx=tax />
         <Show when=move || profiles.missing() && steps.hidden()>
