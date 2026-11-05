@@ -1477,19 +1477,8 @@ impl ItemRow {
 }
 
 /// Ошибка введённого числа — словами, с примером верной записи на языке
-/// окна.
-pub(super) fn number_problem(lang: Lang, error: ParseError, example: &str) -> String {
-    match error {
-        ParseError::Empty => fill(t(lang, Key::NumberEmpty), &[example]),
-        ParseError::Invalid => fill(t(lang, Key::NumberInvalid), &[example]),
-        ParseError::Separators => fill(t(lang, Key::NumberSeparators), &[example]),
-        ParseError::TooPrecise { max: 0 } => fill(t(lang, Key::NumberWhole), &[example]),
-        ParseError::TooPrecise { max } => {
-            fill(t(lang, Key::NumberTooPrecise), &[&i18n::integer(lang, i64::from(max)), example])
-        }
-        ParseError::TooLarge => t(lang, Key::NumberTooLarge).to_owned(),
-    }
-}
+/// окна. Живёт в ядре: её же зовёт калькулятор лендинга (задача 34).
+pub(super) use kvartik_core::i18n::number_problem;
 
 /// Что не так с количеством: число не прочиталось или оно не больше нуля.
 fn quantity_problem(lang: Lang, text: &str) -> Option<String> {

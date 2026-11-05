@@ -3336,6 +3336,107 @@ strings! {
     /// Ссылка на тексты лицензий рядом с программой (задача 51): шрифты
     /// лендинга — те же файлы, что у окна.
     LandingLicenses = "Лицензии шрифтов и кода", "Font and code licenses", "Տառատեսակների և կոդի լիցենզիաներ";
+
+    /// Калькулятор лендинга (задача 34, `tax::example`): пример расчёта тем
+    /// же кодом, что в программе. Число в нём — пример, а не расчёт человека
+    /// (Правило 2, «Образец назван образцом»): поэтому «пример» в каждом
+    /// заголовке ответа.
+    CalcTitle = "Калькулятор налога с оборота", "Turnover tax calculator", "Շրջանառության հարկի հաշվիչ";
+    CalcAbout =
+        "Пример по тем же правилам, что в программе: выберите вид деятельности и введите оборот за квартал.",
+        "An example using the same rules as the app: choose your type of activity and enter your turnover for the quarter.",
+        "Օրինակ՝ նույն կանոններով, ինչ ծրագրում. ընտրեք գործունեության տեսակը և մուտքագրեք եռամսյակի շրջանառությունը։";
+    CalcTurnover = "Оборот за квартал, ֏", "Turnover for the quarter, ֏", "Եռամսյակի շրջանառությունը, ֏";
+    /// Расход в вычет — только с документом продавца (НК, ст. 258, ч. 6;
+    /// `turnover::deductible`).
+    CalcExpenses =
+        "Расходы за квартал с документом продавца, ֏",
+        "Expenses for the quarter with the seller's document, ֏",
+        "Եռամսյակի ծախսերը՝ վաճառողի փաստաթղթով, ֏";
+    CalcPrompt =
+        "Введите оборот за квартал\u{A0}— здесь появится пример налога и годовых платежей.",
+        "Enter your turnover for the quarter to see an example of the tax and annual payments here.",
+        "Մուտքագրեք եռամսյակի շրջանառությունը՝ այստեղ կհայտնվի հարկի և տարեկան վճարների օրինակը։";
+    CalcNotNegative = "Сумма не может быть меньше нуля.", "The amount can't be negative.", "Գումարը չի կարող բացասական լինել։";
+    /// Wasm калькулятора не загрузился: нет сети. Следующее касание поля
+    /// попробует снова.
+    CalcFailed =
+        "Калькулятор не загрузился. Проверьте интернет и нажмите на любое поле ещё раз.",
+        "The calculator didn't load. Check your internet connection and tap any field again.",
+        "Հաշվիչը չբեռնվեց։ Ստուգեք ինտերնետ կապը և կրկին սեղմեք ցանկացած դաշտի վրա։";
+    /// Шаблон: квартал.
+    CalcQuarterHead =
+        "Налог с оборота за {}\u{A0}— пример",
+        "Turnover tax for {}: an example",
+        "Շրջանառության հարկ, {}՝ օրինակ";
+    /// Шаблоны строки расчёта: что, процент, от чего и сколько вышло; и
+    /// просто что и сколько.
+    CalcTimes = "{}: {} × {} = {}", "{}: {} × {} = {}", "{}՝ {} × {} = {}";
+    CalcRow = "{}: {}", "{}: {}", "{}՝ {}";
+    /// Значения платежа после двоеточия строки — со строчной: окно пишет
+    /// `AnnualNone` и `AnnualUnknown` отдельно, с заглавной.
+    CalcValueNone = "не платите", "not due", "չեք վճարում";
+    CalcValueUnknown = "не посчитан", "not calculated", "հաշվարկված չէ";
+    /// Строки вычета (НК, ст. 258, ч. 5–7; форма 299-Ն, x.6, x.7 и x.9).
+    CalcDeduction = "Вычет расходов", "Expense deduction", "Ծախսերի նվազեցում";
+    CalcCarry =
+        "Перенос вычета с прошлых кварталов",
+        "Deduction carried over from earlier quarters",
+        "Նախորդ եռամսյակներից փոխանցված նվազեցում";
+    CalcFloor = "Нижний предел", "Minimum", "Նվազագույն չափ";
+    /// Шаблон: порог оборота года (НК, ст. 254, ч. 2; ст. 255, ч. 1, п. 2).
+    CalcOverThreshold =
+        "При таком обороте за год больше {}: это уже не налог с оборота\u{A0}— считайте с бухгалтером.",
+        "At this turnover the year goes over {}, which is no longer turnover tax: work it out with an accountant.",
+        "Այս շրջանառությամբ տարին գերազանցում է {} շեմը. սա այլևս շրջանառության հարկ չէ՝ հաշվարկեք հաշվապահի հետ։";
+    CalcQuarterUnknown =
+        "Для этого вида деятельности на этот квартал правила нет\u{A0}— пример не посчитан.",
+        "There's no rule for this type of activity in this quarter, so the example isn't calculated.",
+        "Գործունեության այս տեսակի համար այս եռամսյակում կանոն չկա, ուստի օրինակը հաշվարկված չէ։";
+    /// Шаблон: год.
+    CalcAnnualHead =
+        "Годовые платежи за {} год\u{A0}— пример",
+        "Annual payments for {}: an example",
+        "Տարեկան վճարները {} թվականի համար՝ օրինակ";
+    /// Шаблон: срок и сумма налога на прибыль, соцплатежа и гербового сбора
+    /// (`annual::Total`).
+    CalcAnnualTotal = "Всего до {}: {}", "Total by {}: {}", "Ընդամենը մինչև {}՝ {}";
+    /// Шаблоны взноса медстраховки: помесячно — сумма и число месяца; за год
+    /// — сумма и день (`annual::Health`).
+    CalcHealthMonthly =
+        "{} в месяц, до {}-го числа следующего месяца",
+        "{} a month, by day {} of the next month",
+        "ամսական {}, մինչև հաջորդ ամսվա {}-ը";
+    CalcHealthYear = "{} одной суммой до {}", "{} in one payment by {}", "{} միանվագ, մինչև {}";
+    /// Чего не хватает примеру (`annual::Missing`): то же, что просит
+    /// профиль окна, но поля — здесь же, на странице.
+    CalcAskBirthYear =
+        "Укажите год рождения: от него зависит соцплатёж.",
+        "Enter your year of birth: the social payment depends on it.",
+        "Նշեք ծննդյան տարեթիվը. սոցիալական վճարը կախված է դրանից։";
+    CalcAskResidency =
+        "Выберите гражданство: от него зависят соцплатёж, гербовый сбор и взнос медстраховки.",
+        "Choose your citizenship: the social payment, stamp duty and health insurance premium depend on it.",
+        "Ընտրեք քաղաքացիությունը. դրանից են կախված սոցիալական վճարը, դրոշմանիշային վճարը և առողջության ապահովագրավճարը։";
+    CalcAskPension =
+        "Ответьте, вступали ли вы в накопительную пенсию сами: от этого зависит соцплатёж.",
+        "Say whether you joined the funded pension yourself: the social payment depends on it.",
+        "Պատասխանեք, թե ինքներդ միացե՞լ եք կուտակային կենսաթոշակային համակարգին. սոցիալական վճարը կախված է դրանից։";
+    CalcAskResident =
+        "Ответьте, резидент ли вы Армении: от этого зависит взнос медстраховки.",
+        "Say whether you're an Armenian resident: the health insurance premium depends on it.",
+        "Պատասխանեք, թե Հայաստանի ռեզիդե՞նտ եք. առողջության ապահովագրավճարը կախված է դրանից։";
+    /// Взнос медстраховки, который зависит от того, чего в примере нет:
+    /// дня рождения, дня возобновления (`annual::HealthUnclear`).
+    CalcHealthUnclear =
+        "Взнос медстраховки здесь зависит от подробностей, которых в примере нет: его посчитает программа по вашему профилю.",
+        "Here the health insurance premium depends on details the example doesn't have: the app works it out from your profile.",
+        "Այստեղ առողջության ապահովագրավճարը կախված է մանրամասներից, որոնք օրինակում չկան. այն կհաշվի ծրագիրը՝ ձեր պրոֆիլով։";
+    /// Допущения книги примера (шапка `tax::example`).
+    CalcAssume =
+        "Пример: этот и прошлый год целиком на налоге с оборота, в каждом квартале\u{A0}— тот же оборот и те же расходы, переноса вычета из прежних расчётов нет. Ваши числа программа посчитает по вашей книге.",
+        "Example assumptions: this year and last year entirely on turnover tax, the same turnover and expenses every quarter, and no deduction carried over from earlier returns. The app works out your own numbers from your ledger.",
+        "Օրինակի ենթադրությունները. այս և նախորդ տարին ամբողջությամբ շրջանառության հարկով, յուրաքանչյուր եռամսյակում՝ նույն շրջանառությունը և նույն ծախսերը, նախորդ հաշվարկներից փոխանցված նվազեցում չկա։ Ձեր թվերը ծրագիրը կհաշվի ձեր մատյանով։";
 }
 
 /// Подставляет значения в шаблон вместо `{}`, по порядку.
@@ -3363,6 +3464,23 @@ pub fn fill(template: &str, args: &[&str]) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// Ошибка введённого числа — словами, с примером верной записи `example` на
+/// языке `lang`. Одна на окно и калькулятор лендинга (задача 34): поле суммы
+/// у них разбирает один [`parse_money`], и слова о его ошибке не должны
+/// расходиться.
+pub fn number_problem(lang: Lang, error: ParseError, example: &str) -> String {
+    match error {
+        ParseError::Empty => fill(t(lang, Key::NumberEmpty), &[example]),
+        ParseError::Invalid => fill(t(lang, Key::NumberInvalid), &[example]),
+        ParseError::Separators => fill(t(lang, Key::NumberSeparators), &[example]),
+        ParseError::TooPrecise { max: 0 } => fill(t(lang, Key::NumberWhole), &[example]),
+        ParseError::TooPrecise { max } => {
+            fill(t(lang, Key::NumberTooPrecise), &[&integer(lang, i64::from(max)), example])
+        }
+        ParseError::TooLarge => t(lang, Key::NumberTooLarge).to_owned(),
+    }
 }
 
 /// Форма слова при числительном.

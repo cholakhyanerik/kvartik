@@ -271,7 +271,7 @@ fn wasm_and_service_worker_go_through_the_hook() {
     let trunk = fs::read_to_string(app_dir().join("Trunk.toml")).expect("Trunk.toml читается");
     assert!(
         trunk.contains(
-            r#"command_arguments = ["run", "--quiet", "--package", "kvartik-sw", "--", "--root", "public/root", "--site", "site", "--style", "style", "--wasm", "kvartik-app", "public/sw.js"]"#
+            r#"command_arguments = ["run", "--quiet", "--package", "kvartik-sw", "--", "--root", "public/root", "--site", "site", "--style", "style", "--calc", "kvartik-calc", "--wasm", "kvartik-app", "public/sw.js"]"#
         ),
         "хук kvartik-sw в Trunk.toml не найден"
     );

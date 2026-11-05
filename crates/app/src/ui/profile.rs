@@ -20,8 +20,10 @@ use kvartik_core::model::bank::{BankAccount, Swift};
 use kvartik_core::model::date::Date;
 use kvartik_core::model::logo::{self, Image, ImageError, Logo};
 use kvartik_core::model::money::Currency;
+// Год рождения разбирает ядро: его же поле — у калькулятора лендинга
+// (задача 34).
 use kvartik_core::model::profile::{
-    Email, Localized, Person, Profile, ProfileData, Regime, Residency, Stop,
+    Email, Localized, Person, Profile, ProfileData, Regime, Residency, Stop, birth_year,
 };
 use kvartik_core::model::text::{Line, Lines};
 use kvartik_core::model::tin::Tin;
@@ -769,22 +771,6 @@ fn asks_pension(text: &str, today: Option<Date>) -> bool {
     birth_year(text, today)
         .zip(today)
         .is_some_and(|(year, today)| annual::pension_is_a_choice(year, today))
-}
-
-/// Самый ранний год рождения, который программа принимает: человеку,
-/// родившемуся раньше, было бы больше ста двадцати лет.
-const FIRST_BIRTH_YEAR: u16 = 1900;
-
-/// Год рождения: четыре цифры, не раньше [`FIRST_BIRTH_YEAR`] и не позже
-/// этого года. Часы без даты — без верхней границы.
-fn birth_year(text: &str, today: Option<Date>) -> Option<u16> {
-    let text = text.trim();
-    if text.len() != 4 || !text.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    let year: u16 = text.parse().ok()?;
-    let last = today.map_or(Date::MAX_YEAR, Date::year);
-    (FIRST_BIRTH_YEAR..=last).contains(&year).then_some(year)
 }
 
 /// День регистрации ИП из поля даты: не позже сегодняшнего дня.

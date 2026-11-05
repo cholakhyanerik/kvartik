@@ -17,8 +17,8 @@
 //    блокировка открывает экран (CLAUDE.md, Правило 2, «Формы и действия по
 //    нажатию — частями wasm»). Лендинг (задача 34): страница каждого языка
 //    со своим оформлением и ссылкой в программу, без прокрутки вбок на
-//    телефоне, а старый адрес программы `/#/…` ведёт в /app/ на тот же
-//    экран.
+//    телефоне, калькулятор отвечает числом ядра и прячет ненужные поля,
+//    а старый адрес программы `/#/…` ведёт в /app/ на тот же экран.
 // 2. С сетью: восстановление образца копии, экраны и их формы, карточка
 //    выпущенного документа, PDF, выгрузка с закрытым кварталом, разошедшимся
 //    с поданным, новая копия — каждая из девяти частей;
@@ -327,6 +327,24 @@ async function landing(browser) {
       checks.check(`лендинг ${at}: без прокрутки вбок на 360`,
         await page.eval(`return document.documentElement.scrollWidth <= innerWidth ? true : null;`));
     }
+    // Калькулятор (задача 34, этап 2): wasm ядра грузится при первом касании
+    // формы и отвечает словами страницы. IT 1 000 000 ֏ — 1 % (НК, ст. 258,
+    // ч. 1, строка 8): 10 000 ֏; поля, нужные не всегда, не видны, пока ответ
+    // их не попросит, — расходы встают у строки с вычетом.
+    const field = (name, value) => `const f = document.querySelector('section[data-module] [name="${name}"]');
+      f.focus(); f.value = ${JSON.stringify(value)};
+      f.dispatchEvent(new Event(f.tagName === "SELECT" ? "change" : "input", { bubbles: true })); return true;`;
+    const shown = (name) => `return document.querySelector('[data-field="${name}"]').getClientRects().length > 0;`;
+    await page.go(`${ORIGIN}/ru/`);
+    await page.waitFor(`return document.querySelector("section[data-module]") ? true : null;`);
+    await page.eval(field("turnover", "1 000 000"));
+    checks.check("калькулятор: IT 1 000 000 ֏ — налог 10 000 ֏", await page.waitFor(`const s = document
+      .querySelector("section[data-module] .result .sum"); return s && s.textContent.replace(/\\D/g, "") === "10000" ? true : null;`));
+    checks.check("калькулятор: расходов, пенсии и резидентства не видно",
+      !(await page.eval(shown("expenses"))) && !(await page.eval(shown("pension"))) && !(await page.eval(shown("resident"))));
+    await page.eval(field("kind", "other"));
+    checks.check("калькулятор: у прочей деятельности — поле расходов", await page.waitFor(`return document
+      .querySelector('[data-field="expenses"]').getClientRects().length ? true : null;`));
     await page.go(`${ORIGIN}/#/documents`);
     checks.check("лендинг: старый адрес программы /#/… — в /app/ на тот же экран",
       await page.waitFor(`return location.pathname === "/app/" && location.hash === "#/documents" ? true : null;`));

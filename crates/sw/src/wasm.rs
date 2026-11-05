@@ -101,19 +101,144 @@ pub struct Built {
     pub crates: BTreeSet<String>,
 }
 
+/// Выпускная ли сборка: `trunk build --release` или отладочная.
+fn release() -> Result<bool, String> {
+    match env::var("TRUNK_PROFILE").as_deref() {
+        Ok("release") => Ok(true),
+        Ok("debug") => Ok(false),
+        _ => Err("нет TRUNK_PROFILE: программу зовёт хук Trunk (crates/app/Trunk.toml)".into()),
+    }
+}
+
+/// Имя клея и wasm калькулятора лендинга без хэша. Начало — как у файлов
+/// лендинга: правило долгого кэша в `_headers` у них одно.
+const CALC: &str = "kvartik-site-calc";
+
+/// Калькулятор лендинга в корне сайта.
+pub struct Calculator {
+    /// Имя модуля — клея wasm-bindgen с хэшем: его грузит скрипт лендинга.
+    pub module: String,
+    /// Имя wasm с хэшем: скрипт лендинга просит его вместе с клеем, а не
+    /// после него, — на круг сети раньше (замер 2026-11-05).
+    pub wasm: String,
+    /// `package_id` крейтов, скомпилированных в wasm, — для файла лицензий.
+    pub crates: BTreeSet<String>,
+}
+
+/// Собрать wasm калькулятора лендинга (задача 34) из пакета `package`
+/// в корень сайта `root`: тот же путь, что у окна, — cargo, wasm-bindgen,
+/// wasm-opt, имена с хэшем, — но без разреза: калькулятор — одна функция,
+/// и грузится он весь. Файл корня на его месте — ошибка.
+pub fn calculator(package: &str, root: &Path) -> Result<Calculator, String> {
+    let release = release()?;
+    let bindgen = Tool::wasm_bindgen()?;
+    let opt = if release {
+        Some(Tool::wasm_opt()?)
+    } else {
+        None
+    };
+    let (raw, crates) = cargo_build(package, release)?;
+    let work = raw.parent().ok_or("у wasm нет папки")?.join(CALC);
+    let _ = fs::remove_dir_all(&work);
+    fs::create_dir_all(&work).map_err(|error| format!("{}: {error}", work.display()))?;
+    bindgen.run(
+        Command::new(&bindgen.path)
+            .args(["--target", "web", "--no-typescript", "--out-name", CALC])
+            .arg("--out-dir")
+            .arg(&work)
+            .arg(&raw),
+    )?;
+    let glue = text(&work.join(format!("{CALC}.js")))?;
+    let stripped = work.join(format!("{CALC}-stripped.wasm"));
+    let bound = without_linking(&read(&work.join(format!("{CALC}_bg.wasm")))?)?;
+    fs::write(&stripped, bound).map_err(|error| format!("{}: {error}", stripped.display()))?;
+    let wasm_path = match &opt {
+        Some(opt) => {
+            let out = work.join(format!("{CALC}-opt.wasm"));
+            opt.optimize(&stripped, &out)?;
+            out
+        }
+        None => stripped,
+    };
+    let wasm = read(&wasm_path)?;
+    if Module::parse(&wasm)?.imports.iter().any(|(module, _)| module == PLACEHOLDER) {
+        return Err(format!("{package}: в калькуляторе точка разреза, а его никто не режет"));
+    }
+    let (glue_plain, wasm_plain) = (format!("{CALC}.js"), format!("{CALC}_bg.wasm"));
+    let hash = digest([(glue_plain.as_str(), glue.as_bytes()), (wasm_plain.as_str(), wasm.as_slice())]);
+    let (glue_name, wasm_name) = (format!("{CALC}-{hash}.js"), format!("{CALC}-{hash}_bg.wasm"));
+    let glue = replace(&glue, &format!("'{wasm_plain}'"), &format!("'{wasm_name}'"), true)?;
+    for (name, bytes) in [(&glue_name, glue.as_bytes()), (&wasm_name, wasm.as_slice())] {
+        let path = root.join(name);
+        if path.exists() {
+            return Err(format!("{}: файл корня лёг бы на калькулятор", path.display()));
+        }
+        fs::write(&path, bytes).map_err(|error| format!("{}: {error}", path.display()))?;
+    }
+    Ok(Calculator {
+        module: glue_name,
+        wasm: wasm_name,
+        crates,
+    })
+}
+
+/// Wasm без секций компоновщика — `linking` и `reloc.*`. Их пишет
+/// `--emit-relocs` из `.cargo/config.toml` (они нужны разрезу окна),
+/// wasm-bindgen их оставляет, а wasm-opt с ними не справляется
+/// («linking section is present … binaryen cannot handle this properly»):
+/// калькулятор выходил 711 КБ вместо 311, после brotli — 184 КБ вместо 91
+/// (замер 2026-11-05). Разбор — по формату wasm: заголовок 8 байт, потом
+/// секции «номер, длина LEB128, тело», у своей секции (0) тело начинается
+/// с имени. Прочее — как было, байт в байт.
+fn without_linking(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    /// Беззнаковое LEB128 с места `at`; `at` — за ним.
+    fn leb(bytes: &[u8], at: &mut usize) -> Option<usize> {
+        let mut value: u64 = 0;
+        for shift in (0..35).step_by(7) {
+            let byte = *bytes.get(*at)?;
+            *at += 1;
+            value |= u64::from(byte & 0x7f) << shift;
+            if byte & 0x80 == 0 {
+                return usize::try_from(value).ok();
+            }
+        }
+        None
+    }
+    /// Имя своей секции с телом `body..end`.
+    fn name(bytes: &[u8], body: usize, end: usize) -> Option<&[u8]> {
+        let mut at = body;
+        let length = leb(bytes, &mut at)?;
+        bytes.get(at..at.checked_add(length).filter(|stop| *stop <= end)?)
+    }
+    let broken = || "wasm калькулятора не разбирается как wasm".to_owned();
+    if bytes.get(..4) != Some(b"\0asm".as_slice()) || bytes.len() < 8 {
+        return Err(broken());
+    }
+    let mut out = bytes[..8].to_vec();
+    let mut at = 8;
+    while at < bytes.len() {
+        let start = at;
+        let id = bytes[at];
+        at += 1;
+        let size = leb(bytes, &mut at).ok_or_else(broken)?;
+        let end = at.checked_add(size).filter(|end| *end <= bytes.len()).ok_or_else(broken)?;
+        let linking = id == 0 && {
+            let name = name(bytes, at, end).ok_or_else(broken)?;
+            name == b"linking" || name.starts_with(b"reloc.")
+        };
+        if !linking {
+            out.extend_from_slice(&bytes[start..end]);
+        }
+        at = end;
+    }
+    Ok(out)
+}
+
 /// Собрать wasm пакета `package` в папку программы `app` и вписать запуск
 /// в её `index.html`. `public_url` — адрес этой папки на сайте (`/app/`):
 /// с него страница просит wasm и клей.
 pub fn build(package: &str, app: &Path, public_url: &str) -> Result<Built, String> {
-    let release = match env::var("TRUNK_PROFILE").as_deref() {
-        Ok("release") => true,
-        Ok("debug") => false,
-        _ => {
-            return Err(
-                "нет TRUNK_PROFILE: программу зовёт хук Trunk (crates/app/Trunk.toml)".into(),
-            );
-        }
-    };
+    let release = release()?;
     let bindgen = Tool::wasm_bindgen()?;
     let opt = if release {
         Some(Tool::wasm_opt()?)
@@ -303,8 +428,10 @@ pub fn build(package: &str, app: &Path, public_url: &str) -> Result<Built, Strin
     })
 }
 
-/// `cargo build` окна под wasm32; путь к wasm и крейты в нём — из сообщений
-/// cargo.
+/// `cargo build` пакета под wasm32; путь к wasm и крейты в нём — из сообщений
+/// cargo. Wasm ищется по имени цели: у программы окна оно — имя пакета,
+/// а у библиотеки калькулятора cargo пишет его через подчёркивание
+/// (`kvartik_calc`).
 fn cargo_build(package: &str, release: bool) -> Result<(PathBuf, BTreeSet<String>), String> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"));
     let mut command = Command::new(cargo);
@@ -327,7 +454,9 @@ fn cargo_build(package: &str, release: bool) -> Result<(PathBuf, BTreeSet<String
         return Err(format!("cargo build {package} не собрался"));
     }
     let messages = String::from_utf8_lossy(&output.stdout);
-    let wasm = artifact(&messages, package).ok_or_else(|| format!("cargo не назвал wasm пакета {package}"))?;
+    let wasm = artifact(&messages, package)
+        .or_else(|| artifact(&messages, &package.replace('-', "_")))
+        .ok_or_else(|| format!("cargo не назвал wasm пакета {package}"))?;
     Ok((wasm, compiled(&messages)))
 }
 
@@ -838,6 +967,44 @@ mod tests {
         let parsed = Module::parse(&wasm.finish()).expect("модуль читается");
         assert_eq!(parsed.imports, [(SHARED.to_owned(), "memory".to_owned())]);
         assert_eq!(parsed.exports.iter().collect::<Vec<_>>(), ["own"]);
+    }
+
+    /// Секции компоновщика уходят, а прочие — и свои секции с другими
+    /// именами — остаются байт в байт и по порядку; испорченный wasm —
+    /// ошибка, а не обрезанный файл.
+    #[test]
+    fn linking_sections_go_and_the_rest_stays() {
+        use std::borrow::Cow;
+        use wasm_encoder::{CustomSection, MemorySection, MemoryType, Module as Encoder};
+        let custom = |name: &'static str| CustomSection {
+            name: Cow::Borrowed(name),
+            data: Cow::Borrowed(&[1, 2, 3]),
+        };
+        let memory = MemoryType {
+            minimum: 1,
+            maximum: None,
+            memory64: false,
+            shared: false,
+            page_size_log2: None,
+        };
+        let build = |names: &[&'static str]| {
+            let mut wasm = Encoder::new();
+            let mut memories = MemorySection::new();
+            memories.memory(memory);
+            wasm.section(&memories);
+            for name in names {
+                wasm.section(&custom(name));
+            }
+            wasm.finish()
+        };
+        let full = build(&["linking", "name", "reloc.CODE", "reloc.DATA", "producers"]);
+        let kept = build(&["name", "producers"]);
+        assert_eq!(without_linking(&full).expect("wasm разбирается"), kept);
+        assert_eq!(without_linking(&kept).expect("wasm разбирается"), kept);
+        let mut cut = full.clone();
+        cut.truncate(full.len() - 2);
+        assert!(without_linking(&cut).is_err(), "обрезанная секция");
+        assert!(without_linking(b"not wasm").is_err());
     }
 
     #[test]

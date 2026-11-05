@@ -13,3 +13,77 @@
 if (location.hash.startsWith("#/")) {
   location.replace(`/app/${location.search}${location.hash}`);
 }
+
+// Калькулятор: форма — в разметке страницы, а считает и пишет ответ wasm
+// ядра (crates/calc, `tax::example`) — тот же расчёт, что у программы.
+// Здесь ни чисел, ни слов: поля уходят в wasm строкой JSON, а ответ — уже
+// словами языка страницы — ложится в разметку только текстом (CLAUDE.md,
+// Правило 13). Wasm — около 90 КБ после сжатия, поэтому грузится он при
+// первом касании формы, а не у каждого, кто открыл страницу (Правило 1):
+// пока человек вводит оборот, он успевает прийти. Клей и wasm просятся
+// вместе: клей сам попросил бы wasm только после себя — на круг сети позже.
+// Не пришли — слова об этом из разметки, и следующее касание пробует снова.
+const calc = document.querySelector("section[data-module]");
+if (calc) {
+  const fields = [...calc.querySelectorAll("[name]")];
+  const result = calc.querySelector(".result");
+  const state = (name, shown) => {
+    calc.querySelector(`[data-state="${name}"]`).hidden = !shown;
+  };
+  let module = null;
+  let loading = null;
+
+  // Ответ ядра: какие поля показать, ошибки полей и блоки ответа.
+  const show = (answer) => {
+    for (const [name, needed] of Object.entries(answer.fields)) {
+      calc.querySelector(`[data-field="${name}"]`).hidden = !needed;
+    }
+    for (const field of fields) {
+      const text = answer.errors[field.name] ?? "";
+      const error = calc.querySelector(`[data-error="${field.name}"]`);
+      error.textContent = text;
+      error.hidden = !text;
+      if (text) field.setAttribute("aria-invalid", "true");
+      else field.removeAttribute("aria-invalid");
+    }
+    result.replaceChildren(...answer.blocks.map(({ kind, text }) => {
+      const block = document.createElement(kind === "head" ? "h3" : "p");
+      block.className = kind;
+      block.textContent = text;
+      return block;
+    }));
+  };
+
+  const update = () => {
+    if (!module) return;
+    const values = Object.fromEntries(fields.map((field) => [field.name, field.value]));
+    const answer = module.calculate(document.documentElement.lang, JSON.stringify(values));
+    if (answer) show(JSON.parse(answer));
+  };
+
+  const load = () => {
+    if (module || loading) return;
+    state("failed", false);
+    state("loading", true);
+    const wasm = fetch(calc.dataset.wasm);
+    // Отказ запроса wasm доходит до `default` ниже; без этого обработчика
+    // браузер ещё и назвал бы его необработанным, если клей не пришёл.
+    wasm.catch(() => {});
+    loading = import(calc.dataset.module)
+      .then(async (loaded) => {
+        await loaded.default({ module_or_path: wasm });
+        module = loaded;
+        update();
+      })
+      .catch(() => state("failed", true))
+      .finally(() => {
+        state("loading", false);
+        loading = null;
+      });
+  };
+
+  calc.addEventListener("focusin", load);
+  calc.addEventListener("pointerdown", load);
+  calc.addEventListener("input", update);
+  calc.addEventListener("change", update);
+}

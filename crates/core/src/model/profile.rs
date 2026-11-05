@@ -255,6 +255,23 @@ pub struct Person {
     pub stops: Vec<Stop>,
 }
 
+/// Самый ранний год рождения, который программа принимает: человеку,
+/// родившемуся раньше, было бы больше ста двадцати лет.
+pub const FIRST_BIRTH_YEAR: u16 = 1900;
+
+/// Год рождения из поля: четыре цифры, не раньше [`FIRST_BIRTH_YEAR`] и не
+/// позже года дня `today`. Часы без даты — без верхней границы. Один на
+/// форму профиля и калькулятор лендинга (задача 34): поле одно и то же.
+pub fn birth_year(text: &str, today: Option<Date>) -> Option<u16> {
+    let text = text.trim();
+    if text.len() != 4 || !text.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let year: u16 = text.parse().ok()?;
+    let last = today.map_or(Date::MAX_YEAR, Date::year);
+    (FIRST_BIRTH_YEAR..=last).contains(&year).then_some(year)
+}
+
 /// Профиль, как его заполнил человек, — то, что меняет форма.
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Default, Serialize)]
 pub struct ProfileData {

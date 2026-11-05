@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.83",
+      "date": "2026-11-05",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել, իսկ kvartik.com կայքի գլխավոր էջում այժմ կա շրջանառության հարկի հաշվիչ. այն ցույց է տալիս եռամսյակի հարկի և տարեկան վճարների օրինակ՝ նույն կանոններով, ինչ ծրագիրը։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось, а на главной странице kvartik.com появился калькулятор налога с оборота: он показывает пример налога квартала и годовых платежей по тем же правилам, что программа."
+      ],
+      "en": [
+        "Nothing has changed in the app, and the kvartik.com home page now has a turnover tax calculator: it shows an example of the quarterly tax and annual payments using the same rules as the app."
+      ]
+    },
+    {
       "version": "0.0.82",
       "date": "2026-11-05",
       "hy": [
@@ -290,22 +303,6 @@
         "The expense form now says that interest on loans, fines, taxes and duties aren't deductible unless they're part of the price of goods. The expense type is now “Salary, bank fee”.",
         "The Tax screen now names shared expenses that gave no deduction: this happens when all the quarter's income falls under rows without one, such as IT alone.",
         "“Numbers for the return” now explains that the form takes a code cell by cell, and that fields the system calculates can't be filled in by hand."
-      ]
-    },
-    {
-      "version": "0.0.63",
-      "date": "2026-11-01",
-      "hy": [
-        "Թարմացումներն այժմ տեղադրվում են ինքնուրույն. «Թարմացնել» կոճակն այլևս սեղմել պետք չէ։ Հենց նոր տարբերակը ներբեռնվի, ծրագիրը կվերաբեռնվի նույն էկրանին և ցույց կտա, թե ինչ է փոխվել։",
-        "Եթե բաց է ձև կամ արդեն սկսել եք լրացնել դաշտը, նոր տարբերակը կսպասի, մինչև ավարտեք, և սկսածը չի կորչի։"
-      ],
-      "ru": [
-        "Обновления теперь ставятся сами: нажимать «Обновить» больше не нужно. Как только новая версия скачалась, программа перезагрузится на том же экране и покажет, что изменилось.",
-        "Если открыта форма или начат ввод, новая версия подождёт, пока вы закончите: начатое не пропадёт."
-      ],
-      "en": [
-        "Updates now install themselves: there's no need to press “Update” any more. Once a new version has downloaded, the app reloads on the same screen and shows what has changed.",
-        "If a form is open or you've started typing, the new version waits until you finish, so nothing you've started is lost."
       ]
     }
   ]

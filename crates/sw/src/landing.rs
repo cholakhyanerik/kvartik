@@ -35,7 +35,7 @@ use kvartik_core::i18n::{self, Key, Lang, fill, plural, t};
 use kvartik_core::license::TRIAL_DAYS;
 use kvartik_core::model::date::Date;
 use kvartik_core::release::LICENSES;
-use kvartik_core::tax::{calendar, rules};
+use kvartik_core::tax::{calendar, example, rules, turnover};
 
 use super::digest;
 
@@ -63,6 +63,14 @@ const FEATURES: [(Key, Key); 6] = [
     (Key::LandingDevicesTitle, Key::LandingDevicesText),
 ];
 
+/// Калькулятор в корне сайта (`wasm::calculator`): клей wasm-bindgen и сам
+/// wasm. Скрипт лендинга просит их вместе, а не wasm после клея: круг сети
+/// на телефоне — 0,56 с.
+pub struct Calc<'a> {
+    pub module: &'a str,
+    pub wasm: &'a str,
+}
+
 /// Адрес страницы языка от корня сайта. Армянская — корень: программа для
 /// ИП Армении, и армянский — язык окна, пока браузер не назвал другого
 /// (`Lang::preferred`).
@@ -81,9 +89,10 @@ fn page_file(lang: Lang) -> String {
 
 /// Лендинг в папку сборки `staging`: оформление и скрипт с хэшем в имени,
 /// страницы трёх языков, `robots.txt` и `sitemap.xml`. Источники — из папки
-/// `site`, оформление окна — из `style`, адрес программы — `app` (`/app/`).
-/// Файл на месте любого из них — ошибка, а не молча затёртый файл.
-pub fn write(staging: &Path, site: &Path, style: &Path, app: &str) -> Result<String, String> {
+/// `site`, оформление окна — из `style`, адрес программы — `app` (`/app/`),
+/// `calc` — модуль калькулятора в корне (`wasm::calculator`). Файл на месте
+/// любого из них — ошибка, а не молча затёртый файл.
+pub fn write(staging: &Path, site: &Path, style: &Path, app: &str, calc: &Calc) -> Result<String, String> {
     let read = |path: &Path| fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()));
     let css = stylesheet(
         &read(&style.join(TOKENS))?,
@@ -97,7 +106,7 @@ pub fn write(staging: &Path, site: &Path, style: &Path, app: &str) -> Result<Str
     let checked = rules::armenia().checked();
     let mut files = Vec::new();
     for lang in Lang::ALL {
-        files.push((page_file(lang), page(lang, &css_name, &js_name, app, checked)));
+        files.push((page_file(lang), page(lang, &css_name, &js_name, app, calc, checked)));
     }
     files.push(("robots.txt".to_owned(), robots()));
     files.push(("sitemap.xml".to_owned(), sitemap()));
@@ -134,10 +143,97 @@ fn stylesheet(tokens: &str, fonts: &str, landing: &str, app: &str) -> Result<Str
     Ok(format!("{tokens}\n{fonts}\n{landing}"))
 }
 
+/// Калькулятор (задача 34): форма — готовым HTML, а считает её wasm
+/// `calc`, который скрипт лендинга грузит при первом касании формы
+/// (`site/landing.js`). Без wasm форма видна, но не считает. Имена полей —
+/// те, что разбирает ядро (`tax::example::Raw`), имена строк и гражданства —
+/// как в данных (`example::kind_id`, `residency_id`). Поля, которые нужны не
+/// всегда, спрятаны, пока ответ ядра не попросит их (`Fields`), а ошибки
+/// поля и слова о загрузке лежат в разметке: свои тексты скрипту не нужны.
+fn calculator(lang: Lang, calc: &Calc, app: &str) -> String {
+    let text = |key: Key| escape(t(lang, key));
+    let choose = format!("<option value=\"\">{}</option>", text(Key::NotChosen));
+    let mut kinds = String::new();
+    for kind in example::KINDS {
+        kinds.push_str(&format!(
+            "<option value=\"{}\">{}</option>",
+            escape(&example::kind_id(kind)),
+            text(turnover::kind_key(kind))
+        ));
+    }
+    let mut residencies = choose.clone();
+    for (residency, key) in example::RESIDENCIES.into_iter().zip([
+        Key::ResidencyCitizen,
+        Key::ResidencyForeignWithStatus,
+        Key::ResidencyForeignWithoutStatus,
+    ]) {
+        residencies.push_str(&format!(
+            "<option value=\"{}\">{}</option>",
+            escape(&example::residency_id(residency)),
+            text(key)
+        ));
+    }
+    let yes_no = format!(
+        "{choose}<option value=\"yes\">{}</option><option value=\"no\">{}</option>",
+        text(Key::Yes),
+        text(Key::No)
+    );
+    // Поле: подпись, само поле и место для ошибки под ним, связанное с полем
+    // для экранного диктора. `optional` — поле спрятано, пока не нужно.
+    let field = |name: &str, label: Key, control: String, optional: bool| {
+        let hidden = if optional { format!(" data-field=\"{name}\" hidden") } else { String::new() };
+        format!(
+            "          <label class=\"field\"{hidden}>\n            <span>{}</span>\n            {control}\n            \
+             <span class=\"error\" id=\"calc-{name}-error\" data-error=\"{name}\" hidden></span>\n          </label>\n",
+            text(label)
+        )
+    };
+    let input = |name: &str, mode: &str, extra: &str| {
+        format!(
+            "<input name=\"{name}\" inputmode=\"{mode}\" autocomplete=\"off\"{extra} \
+             aria-describedby=\"calc-{name}-error\" />"
+        )
+    };
+    let select = |name: &str, options: &str| {
+        format!("<select name=\"{name}\" aria-describedby=\"calc-{name}-error\">{options}</select>")
+    };
+    let mut fields = String::new();
+    fields.push_str(&field("kind", Key::StepActivity, select("kind", &kinds), false));
+    fields.push_str(&field("turnover", Key::CalcTurnover, input("turnover", "decimal", ""), false));
+    fields.push_str(&field("expenses", Key::CalcExpenses, input("expenses", "decimal", ""), true));
+    fields.push_str(&field("birth", Key::BirthYear, input("birth", "numeric", " maxlength=\"4\""), false));
+    fields.push_str(&field("residency", Key::ProfileResidency, select("residency", &residencies), false));
+    fields.push_str(&field("pension", Key::PensionJoined, select("pension", &yes_no), true));
+    fields.push_str(&field("resident", Key::ResidentQuestion, select("resident", &yes_no), true));
+    format!(
+        r#"      <section class="card calc" aria-labelledby="calc" data-module="/{module}" data-wasm="/{wasm}">
+        <h2 id="calc">{title}</h2>
+        <p>{about}</p>
+        <div class="fields">
+{fields}        </div>
+        <div class="result" aria-live="polite">
+          <p class="note">{prompt}</p>
+        </div>
+        <p class="note" data-state="loading" hidden>{loading}</p>
+        <p class="note" data-state="failed" role="alert" hidden>{failed}</p>
+        <p class="actions"><a class="button" href="{app}">{open}</a></p>
+      </section>
+"#,
+        module = escape(calc.module),
+        wasm = escape(calc.wasm),
+        title = text(Key::CalcTitle),
+        about = text(Key::CalcAbout),
+        prompt = text(Key::CalcPrompt),
+        loading = text(Key::PartLoading),
+        failed = text(Key::CalcFailed),
+        open = text(Key::LandingOpen),
+    )
+}
+
 /// Страница языка `lang`. `css` и `js` — имена файлов оформления и скрипта
-/// в корне, `app` — адрес программы, `checked` — день последней сверки
-/// правил: нет его — нет и строки о нём.
-fn page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -> String {
+/// в корне, `app` — адрес программы, `calc` — модуль калькулятора,
+/// `checked` — день последней сверки правил: нет его — нет и строки о нём.
+fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option<Date>) -> String {
     let text = |key: Key| escape(t(lang, key));
     let days = u64::from(TRIAL_DAYS.unsigned_abs());
     let days = fill(plural(lang, days, Key::DaysOne, Key::DaysFew, Key::DaysMany), &[&days.to_string()]);
@@ -226,7 +322,7 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -> St
         <p class="actions"><a class="button" href="{app}">{open}</a></p>
         <p class="trial">{trial} {after_trial}</p>
       </section>
-      <section aria-labelledby="features">
+{calculator}      <section aria-labelledby="features">
         <h2 id="features">{features_title}</h2>
         <ul class="cards">
 {features}        </ul>
@@ -251,6 +347,7 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -> St
   </body>
 </html>
 "#,
+        calculator = calculator(lang, calc, app),
         title = text(Key::LandingTitle),
         description = text(Key::LandingDescription),
         name = text(Key::AppName),
@@ -335,12 +432,61 @@ mod tests {
     const LANDING_CSS: &str = include_str!("../../app/site/landing.css");
     const LANDING_JS: &str = include_str!("../../app/site/landing.js");
 
+    /// Модуль калькулятора в тестах страниц.
+    const CALC: Calc = Calc {
+        module: "kvartik-site-calc-c.js",
+        wasm: "kvartik-site-calc-c_bg.wasm",
+    };
+
     fn checked() -> Option<Date> {
         rules::armenia().checked()
     }
 
+    /// Калькулятор (задача 34): модуль — по адресу от корня, у каждой строки
+    /// и гражданства — вариант с именем, как в данных, поля — с именами,
+    /// которые разбирает ядро (`example::Raw`), а поля, нужные не всегда,
+    /// спрятаны, пока их не попросит ответ.
+    #[test]
+    fn the_calculator_form_matches_the_core() {
+        let mut wrong = Vec::new();
+        for lang in Lang::ALL {
+            let html = sample(lang);
+            let mut need = vec![
+                format!("data-module=\"/{}\" data-wasm=\"/{}\"", CALC.module, CALC.wasm),
+                escape(t(lang, Key::CalcTitle)),
+                escape(t(lang, Key::CalcPrompt)),
+            ];
+            for kind in example::KINDS {
+                need.push(format!(
+                    "<option value=\"{}\">{}</option>",
+                    example::kind_id(kind),
+                    escape(t(lang, turnover::kind_key(kind)))
+                ));
+            }
+            for residency in example::RESIDENCIES {
+                need.push(format!("<option value=\"{}\">", example::residency_id(residency)));
+            }
+            for name in ["kind", "turnover", "expenses", "birth", "residency", "pension", "resident"] {
+                need.push(format!("name=\"{name}\""));
+                need.push(format!("data-error=\"{name}\""));
+            }
+            for optional in ["expenses", "pension", "resident"] {
+                need.push(format!("data-field=\"{optional}\" hidden"));
+            }
+            for piece in need {
+                if !html.contains(&piece) {
+                    wrong.push(format!("{lang:?}: нет {piece}"));
+                }
+            }
+            if html.matches("<input name=\"").count() + html.matches("<select name=\"").count() != 7 {
+                wrong.push(format!("{lang:?}: полей не семь"));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
     fn sample(lang: Lang) -> String {
-        page(lang, "kvartik-site-a.css", "kvartik-site-b.js", "/app/", checked())
+        page(lang, "kvartik-site-a.css", "kvartik-site-b.js", "/app/", &CALC, checked())
     }
 
     /// Каждая страница — на своём языке, называет себя канонической, все
@@ -392,7 +538,7 @@ mod tests {
         assert!(html.contains(&format!("{TRIAL_DAYS}\u{A0}дней бесплатно")), "нет срока пробного периода");
         let day = checked().expect("правила сверены");
         assert!(html.contains(&escape(&i18n::date(Lang::Ru, day))), "нет дня сверки правил");
-        assert!(!page(Lang::Ru, "a.css", "b.js", "/app/", None).contains("сверены с законом"));
+        assert!(!page(Lang::Ru, "a.css", "b.js", "/app/", &CALC, None).contains("сверены с законом"));
     }
 
     /// Ни встроенного скрипта, ни стиля, ни атрибута `style` или
@@ -511,7 +657,7 @@ mod tests {
         sources(&temp);
         let stage = temp.0.join("stage");
         fs::create_dir_all(&stage).expect("папка сборки");
-        write(&stage, &temp.0.join("site"), &temp.0.join("style"), "/app/").expect("лендинг пишется");
+        write(&stage, &temp.0.join("site"), &temp.0.join("style"), "/app/", &CALC).expect("лендинг пишется");
         let written = names(&stage);
         let css: Vec<&String> = written.iter().filter(|n| n.starts_with("kvartik-site-") && n.ends_with(".css")).collect();
         let js: Vec<&String> = written.iter().filter(|n| n.starts_with("kvartik-site-") && n.ends_with(".js")).collect();
@@ -528,7 +674,7 @@ mod tests {
         sources(&again);
         let stage_again = again.0.join("stage");
         fs::create_dir_all(&stage_again).expect("папка сборки");
-        write(&stage_again, &again.0.join("site"), &again.0.join("style"), "/app/").expect("лендинг пишется");
+        write(&stage_again, &again.0.join("site"), &again.0.join("style"), "/app/", &CALC).expect("лендинг пишется");
         assert_eq!(names(&stage_again), written, "та же сборка — те же имена");
         for name in &written {
             assert_eq!(fs::read(stage.join(name)).ok(), fs::read(stage_again.join(name)).ok(), "{name}");
@@ -537,7 +683,7 @@ mod tests {
         let clash = Temp::new("clash");
         sources(&clash);
         clash.put("stage/ru/index.html", "root page");
-        let error = write(&clash.0.join("stage"), &clash.0.join("site"), &clash.0.join("style"), "/app/")
+        let error = write(&clash.0.join("stage"), &clash.0.join("site"), &clash.0.join("style"), "/app/", &CALC)
             .expect_err("файл корня на месте страницы лендинга");
         assert!(error.contains("лёг бы на файл лендинга"), "{error}");
     }

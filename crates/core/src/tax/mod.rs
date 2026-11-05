@@ -13,12 +13,14 @@
 //! [`deadlines`] (задача 21), они же файлом календаря — [`calendar`]
 //! (задача 22), по каким документам ещё не выписан расчётный документ
 //! в системе ՊԵԿ — [`settlement`] (задача 23), числа квартала полями
-//! формы расчёта ՊԵԿ — [`report`] (задача 24).
+//! формы расчёта ՊԵԿ — [`report`] (задача 24), пример расчёта для
+//! калькулятора лендинга — [`example`] (задача 34).
 
 pub mod annual;
 pub mod calendar;
 pub mod closing;
 pub mod deadlines;
+pub mod example;
 pub mod opening;
 pub mod report;
 pub mod rules;
