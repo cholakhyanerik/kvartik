@@ -2169,31 +2169,35 @@ mod tests {
         );
     }
 
-    /// Дождаться двух будущих разом — без крейта `futures`: обе бегут
-    /// задачами, и обе дожидаются.
-    async fn futures_join<A: 'static, B: 'static>(
-        a: impl Future<Output = A> + 'static,
-        b: impl Future<Output = B> + 'static,
-    ) -> (A, B) {
-        let left = Rc::new(RefCell::new(None));
-        let right = Rc::new(RefCell::new(None));
-        let (l, r) = (Rc::clone(&left), Rc::clone(&right));
-        leptos::task::spawn_local(async move { *l.borrow_mut() = Some(a.await) });
-        leptos::task::spawn_local(async move { *r.borrow_mut() = Some(b.await) });
-        loop {
-            if left.borrow().is_some() && right.borrow().is_some() {
-                break;
+    /// Дождаться двух будущих разом — без крейта `futures` и без исполнителя
+    /// Leptos: обе опрашиваются здесь же, первая — первой, и ждут, пока
+    /// не кончатся обе. Задачами (`leptos::task::spawn_local`) их запускать
+    /// нельзя: исполнитель заводит монтирование окна в соседнем тесте, и тест,
+    /// запущенный раньше всех, падал «before a global executor was
+    /// initialized» — порядок тестов меняется с раскладкой wasm (CI 0.0.83,
+    /// 2026-11-05).
+    async fn futures_join<A, B>(a: impl Future<Output = A>, b: impl Future<Output = B>) -> (A, B) {
+        use std::task::Poll;
+        let (mut a, mut b) = (std::pin::pin!(a), std::pin::pin!(b));
+        let (mut left, mut right) = (None, None);
+        std::future::poll_fn(|cx| {
+            if left.is_none()
+                && let Poll::Ready(value) = a.as_mut().poll(cx)
+            {
+                left = Some(value);
             }
-            let promise = js_sys::Promise::new(&mut |resolve, _| {
-                let _ = web_sys::window()
-                    .expect("окно есть")
-                    .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, 10);
-            });
-            let _ = promise.await;
-        }
-        let a = left.borrow_mut().take().expect("первая кончилась");
-        let b = right.borrow_mut().take().expect("вторая кончилась");
-        (a, b)
+            if right.is_none()
+                && let Poll::Ready(value) = b.as_mut().poll(cx)
+            {
+                right = Some(value);
+            }
+            if left.is_some() && right.is_some() { Poll::Ready(()) } else { Poll::Pending }
+        })
+        .await;
+        (
+            left.expect("первая кончилась"),
+            right.expect("вторая кончилась"),
+        )
     }
 
     /// Напоминание о копии считается только по дню сделанной копии —
