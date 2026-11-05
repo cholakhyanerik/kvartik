@@ -140,10 +140,18 @@ jobs:
       # порядке. Клиппи дважды: на машине окно собирается как обычная
       # программа, и ветки `#[cfg(target_arch = "wasm32")]` — среди них
       # браузерные тесты — видит только второй прогон.
-      - run: cargo build --workspace
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo clippy -p kvartik-app --target wasm32-unknown-unknown --all-targets -- -D warnings
-      - run: cargo test --workspace
+      #
+      # Все — по замку, `--locked` (задача 85): `Cargo.lock`, отставший от
+      # `Cargo.toml` в коммите, останавливает прогон словами cargo («cannot
+      # update the lock file … because --locked was passed»). Без флага cargo
+      # молча выбрал бы новые версии с crates.io, которых человек в замке не
+      # видел, и сайт с ними ушёл бы всем (Правило 13). На машине флага нет:
+      # там замок догоняет `Cargo.toml` сборкой перед коммитом (skill
+      # `finish-task`).
+      - run: cargo build --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo clippy -p kvartik-app --target wasm32-unknown-unknown --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
       # Браузерные тесты — в headless Chrome образа. Драйвер — явно: иначе
       # раннер первым найдёт в PATH geckodriver, и тесты уйдут в Firefox.
       # При нуле тестов раннер выходит с кодом 0 («no tests to run!») —
@@ -154,7 +162,7 @@ jobs:
         shell: bash
         run: |
           CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver" \
-            cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app 2>&1 | tee browser-tests.log
+            cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app --locked 2>&1 | tee browser-tests.log
           grep -E "test result: ok\. [1-9][0-9]* passed" browser-tests.log
       # Те же тесты — в headless Firefox образа (задача 54): хранилище
       # держится на поведении движка — жива ли транзакция после `await`, где
@@ -168,11 +176,25 @@ jobs:
         shell: bash
         run: |
           GECKODRIVER="$GECKOWEBDRIVER/geckodriver" \
-            cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app 2>&1 | tee browser-tests-firefox.log
+            cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app --locked 2>&1 | tee browser-tests-firefox.log
           grep -q "Running headless tests in Firefox" browser-tests-firefox.log
           grep -E "test result: ok\. [1-9][0-9]* passed" browser-tests-firefox.log
       - run: trunk build --release
         working-directory: crates/app
+      # Сборка сайта зовёт cargo и без `--locked`, и флаг туда не передать
+      # (по исходникам trunk 0.22.1, сверено 2026-11-05): сам Trunk —
+      # `cargo metadata` манифеста окна (`src/config/manifest.rs:21`) ещё до
+      # того, как прочтёт `data-trunk-skip` (`src/pipelines/rust/mod.rs:197`
+      # и `:261`), а его собственный `--locked` идёт только в его
+      # `cargo build` (`:428`), который мы пропускаем; хук — строкой
+      # `cargo run` в `Trunk.toml`. Отставший замок `cargo metadata`
+      # переписывает молча и с кодом 0 (проверено 2026-11-05), и `--locked`
+      # в командах самого хука увидел бы уже переписанный. Поэтому — сверка
+      # с коммитом: замок, который тронула сборка, краснит прогон до
+      # выкладки. С командами по замку выше сюда не дойти; она держит,
+      # если сборку сайта переставят раньше них.
+      - name: Сборка не тронула Cargo.lock
+        run: git diff --exit-code -- Cargo.lock
       # Собранный сайт — в браузере (задача 60): части wasm рисуют экраны
       # и формы, копия и PDF работают, без сети всё приходит из кэша service
       # worker, а несгруженная часть — словами с «Отменой». И новая версия
@@ -190,7 +212,9 @@ jobs:
           node tools/browser/check.mjs
       # Новая запись в базе RustSec краснит прогон и без нашего изменения —
       # так и задумано: что с ней делать, решает человек (`deny.toml`).
-      - run: cargo deny check
+      # По замку, как сборка: дерево cargo-deny берёт у `cargo metadata`,
+      # и без `--locked` проверил бы версии, которых в коммите нет.
+      - run: cargo deny --locked check
       # Собранный и проверенный сайт — заданию выкладки: выкладывается ровно
       # он, а не пересборка (задача 50). Последним шагом — когда все
       # проверки прошли. День хранения: больше он никому не нужен.

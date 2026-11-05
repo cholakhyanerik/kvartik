@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.84",
+      "date": "2026-11-05",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել. կայքն այժմ կառուցվում է միայն գրադարանների այն տարբերակներից, որոնք ստուգել է հեղինակը, իսկ այլ տարբերակներով ծրագիրը կայքում չի հրապարակվի։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось: сайт теперь собирается только из тех версий библиотек, которые проверил автор, а с другими программа на сайт не попадёт."
+      ],
+      "en": [
+        "Nothing has changed in the app: the website is now built only from the library versions the author has checked, and with any others the app will not be published."
+      ]
+    },
+    {
       "version": "0.0.83",
       "date": "2026-11-05",
       "hy": [
@@ -284,25 +297,6 @@
         "If a closed quarter's calculation no longer matches what you filed, for example after you add a forgotten act, the Home screen shows a separate card with both amounts, and the Tax screen opens on that quarter.",
         "For a closed quarter, the Tax screen now shows the numbers you filed, and any recalculation appears as a difference.",
         "After “Reopen” you can press “Undo”: the quarter is closed again with its earlier numbers."
-      ]
-    },
-    {
-      "version": "0.0.64",
-      "date": "2026-11-01",
-      "hy": [
-        "Ծախսի ձևում այժմ ասված է, որ չեն նվազեցվում վարկերի տոկոսները, տուգանքները, հարկերն ու տուրքերը, բացի ապրանքի գնի մեջ մտածներից։ Ծախսի տեսակը դարձել է «Աշխատավարձ, բանկի միջնորդավճար»։",
-        "Հարկի էկրանն այժմ նշում է այն ընդհանուր ծախսերը, որոնք չեն նվազեցվել, երբ եռամսյակի ամբողջ եկամուտն առանց նվազեցման տողերով է, օրինակ՝ միայն ՏՏ։",
-        "«Թվեր հաշվարկի համար» էկրանը բացատրում է, որ ձևում կոդը լրացվում է վանդակներով, իսկ համակարգի հաշվարկած դաշտերը ձեռքով չեն լրացվում։"
-      ],
-      "ru": [
-        "Форма расхода теперь говорит, что в вычет не идут проценты по кредитам, штрафы, налоги и пошлины, кроме вошедших в цену товара. Вид расхода стал «Зарплата, комиссия банка».",
-        "Экран налога называет общие расходы, которые не дали вычета: так бывает, когда весь доход квартала идёт по строкам без вычета, например только IT.",
-        "«Числа для расчёта» подсказывают: в форме код вводится по ячейкам, а поля, которые система считает сама, вручную не заполняются."
-      ],
-      "en": [
-        "The expense form now says that interest on loans, fines, taxes and duties aren't deductible unless they're part of the price of goods. The expense type is now “Salary, bank fee”.",
-        "The Tax screen now names shared expenses that gave no deduction: this happens when all the quarter's income falls under rows without one, such as IT alone.",
-        "“Numbers for the return” now explains that the form takes a code cell by cell, and that fields the system calculates can't be filled in by hand."
       ]
     }
   ]
