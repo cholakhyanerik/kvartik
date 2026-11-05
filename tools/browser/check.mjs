@@ -15,7 +15,10 @@
 // Что проверяется, по порядку:
 // 1. Часть не загрузилась — окно говорит словами и даёт «Отмену», а снятая
 //    блокировка открывает экран (CLAUDE.md, Правило 2, «Формы и действия по
-//    нажатию — частями wasm»).
+//    нажатию — частями wasm»). Лендинг (задача 34): страница каждого языка
+//    со своим оформлением и ссылкой в программу, без прокрутки вбок на
+//    телефоне, а старый адрес программы `/#/…` ведёт в /app/ на тот же
+//    экран.
 // 2. С сетью: восстановление образца копии, экраны и их формы, карточка
 //    выпущенного документа, PDF, выгрузка с закрытым кварталом, разошедшимся
 //    с поданным, новая копия — каждая из девяти частей;
@@ -302,6 +305,38 @@ async function blocked(browser) {
   }
 }
 
+/// Лендинг (задача 34): страницы языков — готовым HTML с оформлением окна,
+/// ссылка в программу и старые адреса программы `/#/…` (до 0.0.34 она жила
+/// в корне) — в /app/ с тем же экраном. В своём контексте браузера: service
+/// worker, которого поставит переход в программу, не должен править
+/// вкладкой следующих шагов.
+async function landing(browser) {
+  const page = await browser.page({ context: true });
+  try {
+    await page.emulate(360);
+    for (const [lang, at] of [["hy", "/"], ["ru", "/ru/"], ["en", "/en/"]]) {
+      await page.go(`${ORIGIN}${at}`);
+      checks.check(`лендинг ${at}: страница своего языка`, await page.waitFor(`return document.documentElement.lang
+        === ${JSON.stringify(lang)} && document.querySelector("h1")?.textContent
+        === ${JSON.stringify(t("WelcomeHeadline", lang))} ? true : null;`));
+      // Оформление пришло: заголовок — засечками окна, кнопка — пилюлей.
+      checks.check(`лендинг ${at}: оформление и ссылка в программу`, await page.waitFor(`
+        const button = document.querySelector('a.button[href="/app/"]');
+        return button && getComputedStyle(document.querySelector("h1")).fontFamily.includes("Kvartik Serif")
+          && getComputedStyle(button).borderTopLeftRadius !== "0px" ? true : null;`));
+      checks.check(`лендинг ${at}: без прокрутки вбок на 360`,
+        await page.eval(`return document.documentElement.scrollWidth <= innerWidth ? true : null;`));
+    }
+    await page.go(`${ORIGIN}/#/documents`);
+    checks.check("лендинг: старый адрес программы /#/… — в /app/ на тот же экран",
+      await page.waitFor(`return location.pathname === "/app/" && location.hash === "#/documents" ? true : null;`));
+    const errors = [...new Set(page.errors)];
+    checks.check("лендинг: без ошибок в консоли", errors.length === 0, errors.slice(0, 8).join(" | "));
+  } finally {
+    await page.close();
+  }
+}
+
 /// Восстановить последний образец копии: в нём есть выпущенные документы.
 /// Пароль образца станет паролем копий устройства.
 async function restore(page) {
@@ -507,6 +542,7 @@ async function main() {
   const browser = await Browser.launch({ work: WORK, name: "check", port: 9340 });
   try {
     await blocked(browser);
+    await landing(browser);
 
     const page = await browser.page();
     await page.emulate(360);

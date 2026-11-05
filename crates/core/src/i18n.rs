@@ -222,7 +222,9 @@ strings! {
     Language = "Язык", "Language", "Լեզու";
 
     /// Первый запуск (дизайн «Kvartik Design», экран 01).
-    WelcomeHeadline = "Счёт, акт и налог\u{A0}— в одном месте", "Invoices, acts and tax in one place", "Հաշիվ, ակտ և հարկ՝ մեկ տեղում";
+    /// Им же открывается лендинг (задача 34). Предлог «в» не остаётся
+    /// в конце строки крупного заголовка: за ним неразрывный пробел.
+    WelcomeHeadline = "Счёт, акт и налог\u{A0}— в\u{A0}одном месте", "Invoices, acts and tax in one place", "Հաշիվ, ակտ և հարկ՝ մեկ տեղում";
     WelcomeAbout =
         "Для ИП на налоге с оборота. Ваши данные остаются только на этом устройстве.",
         "For individual entrepreneurs (IE) on turnover tax. Your data stays only on this device.",
@@ -3224,6 +3226,116 @@ strings! {
         "Копия вышла больше {}\u{A0}МБ\u{A0}— такую программа не откроет. Уберите из книги лишние файлы и сделайте копию снова.",
         "The backup came out over {}\u{A0}MB, and the app can't open one that large. Remove unneeded files from the ledger and make the backup again.",
         "Պատճենը ստացվեց {}\u{A0}ՄԲ-ից մեծ, իսկ այդպիսին ծրագիրը չի բացի։ Հեռացրեք մատյանից ավելորդ ֆայլերը և նորից պատճեն արեք։";
+
+    /// Лендинг (задача 34): страницы kvartik.com на трёх языках, готовым
+    /// HTML — их пишет сборка (`crates/sw/src/landing.rs`), а не окно, и в
+    /// wasm окна эти строки не попадают. Заголовок страницы и её описание —
+    /// для поисковиков и ссылок в мессенджерах. Числа и правила — только то,
+    /// что делает программа: страница, обещающая другое, — дефект
+    /// (Правило 2).
+    LandingTitle =
+        "Kvartik\u{A0}— счета, книга и налог ИП в Армении",
+        "Kvartik\u{A0}— invoices, ledger and tax for individual entrepreneurs in Armenia",
+        "Kvartik\u{A0}— ԱՁ-ի հաշիվներ, մատյան և հարկ Հայաստանում";
+    LandingDescription =
+        "Счёт и акт на трёх языках, доходы и расходы в драмах и валюте, налог с оборота по кварталам и сроки для ИП в Армении. Данные остаются на вашем устройстве.",
+        "Invoices and acts in three languages, income and expenses in drams and foreign currency, quarterly turnover tax and deadlines for individual entrepreneurs in Armenia. Your data stays on your device.",
+        "Հաշիվ և ակտ երեք լեզվով, եկամուտներ և ծախսեր դրամով և արտարժույթով, շրջանառության հարկը եռամսյակներով և ժամկետներ Հայաստանի ԱՁ-ների համար։ Ձեր տվյալները մնում են ձեր սարքում։";
+    /// Под заголовком первого экрана — тем же, что у первого запуска окна
+    /// (`WelcomeHeadline`). Армянское «կազմում է», а не «դուրս է գրում»:
+    /// счёт программы — не расчётный документ ՊԵԿ (CLAUDE.md, «Общее»).
+    LandingLead =
+        "Для ИП на налоге с оборота. Kvartik выписывает счета и акты, ведёт книгу доходов и расходов, считает налог квартала и годовые платежи и помнит сроки.",
+        "For individual entrepreneurs (IE) on turnover tax. Kvartik issues invoices and acts, keeps your income and expense ledger, works out the quarterly tax and annual payments, and keeps track of deadlines.",
+        "Շրջանառության հարկ վճարող ԱՁ-ների համար։ Kvartik-ը կազմում է հաշիվներ և ակտեր, վարում է եկամուտների և ծախսերի մատյանը, հաշվում է եռամսյակի հարկը և տարեկան վճարները և հիշում է ժամկետները։";
+    LandingOpen = "Открыть Kvartik", "Open Kvartik", "Բացել Kvartik-ը";
+    /// Что запирает конец пробного периода — и что нет, как `LicenseLocked`
+    /// (решение человека 2026-10-27). Цены здесь нет: тарифы — решение
+    /// человека (задача 42).
+    LandingAfterTrial =
+        "Потом выпуск новых счетов и актов и числа для расчёта\u{A0}— с ключом лицензии. Данные, книга, налог, PDF выпущенных документов, выгрузка и резервная копия работают и без него.",
+        "After that, issuing new invoices and acts and the numbers for the return need a license key. Your data, ledger, tax, PDFs of issued documents, exports and backups work without one.",
+        "Դրանից հետո նոր հաշիվների և ակտերի թողարկումը և թվերը հաշվարկի համար՝ լիցենզիայի բանալիով։ Տվյալները, մատյանը, հարկը, թողարկված փաստաթղթերի PDF-ը, արտահանումը և պահուստային պատճենն աշխատում են նաև առանց դրա։";
+    LandingFeaturesTitle = "Что умеет Kvartik", "What Kvartik does", "Ինչ է անում Kvartik-ը";
+    LandingDocsTitle = "Счёт и акт на трёх языках", "Invoices and acts in three languages", "Հաշիվ և ակտ երեք լեզվով";
+    LandingDocsText =
+        "Армянский, русский или английский\u{A0}— свой у каждого клиента. PDF с вашим логотипом, реквизитами и номером по порядку; акт по счёту\u{A0}— одним нажатием, PDF\u{A0}— отправить прямо с телефона.",
+        "Armenian, Russian or English, set for each client. PDFs with your logo, your details and a running number; an act from an invoice in one tap, and the PDF sent straight from your phone.",
+        "Հայերեն, ռուսերեն կամ անգլերեն՝ յուրաքանչյուր հաճախորդի համար իր լեզուն։ PDF՝ ձեր լոգոտիպով, վավերապայմաններով և հերթական համարով. ակտը հաշվից՝ մեկ սեղմումով, իսկ PDF-ը կարող եք ուղարկել անմիջապես հեռախոսից։";
+    LandingBookTitle =
+        "Доходы и расходы в драмах и валюте",
+        "Income and expenses in drams and foreign currency",
+        "Եկամուտներ և ծախսեր դրամով և արտարժույթով";
+    /// Доход — по дню оказания услуги (НК, ст. 15, 40, 257; CLAUDE.md,
+    /// «Правила совместимости»).
+    LandingBookText =
+        "Доход\u{A0}— по дню оказания услуги и в драмах по курсу ЦБ, как его считает налог. Расход\u{A0}— с документом продавца и фото чека. Квартал или год\u{A0}— файлом Excel для бухгалтера.",
+        "Income counts on the day the service is delivered and in drams at the CBA rate, the way the tax counts it. Expenses come with the seller's document and a photo of the receipt. A quarter or a year goes to your accountant as an Excel file.",
+        "Եկամուտը՝ ծառայության մատուցման օրով և դրամով՝ ԿԲ փոխարժեքով, ինչպես այն հաշվում է հարկը։ Ծախսը՝ վաճառողի փաստաթղթով և կտրոնի լուսանկարով։ Եռամսյակը կամ տարին՝ Excel ֆայլով հաշվապահի համար։";
+    LandingTaxTitle = "Налог с оборота по кварталам", "Turnover tax quarter by quarter", "Շրջանառության հարկը՝ ըստ եռամսյակների";
+    /// 1 % — строка 8 ст. 258 ч. 1 НК (высокие технологии по списку
+    /// правительства 142-Ն), как в файле правил.
+    LandingTaxText =
+        "Ставка\u{A0}— по коду деятельности, например 1\u{A0}% для IT из списка правительства. Налог квартала, годовые платежи и сколько откладывать в месяц\u{A0}— по правилам из текста закона, с днём сверки.",
+        "The rate follows your activity code, for example 1% for IT on the government's list. The quarterly tax, the annual payments and how much to set aside each month, by rules taken from the text of the law, with the date they were checked.",
+        "Դրույքաչափը՝ ըստ գործունեության կոդի. օրինակ, կառավարության ցանկի ՏՏ-ի համար այն 1% է։ Եռամսյակի հարկը, տարեկան վճարները և ամսական որքան մի կողմ դնել՝ օրենքի տեքստից վերցված կանոններով, ստուգման օրով։";
+    LandingDeadlinesTitle =
+        "Сроки и числа для расчёта",
+        "Deadlines and numbers for the return",
+        "Ժամկետներ և թվեր հաշվարկի համար";
+    LandingDeadlinesText =
+        "Последние дни расчётов и платежей с переносом с выходных и праздников и напоминание при открытии программы. Числа квартала\u{A0}— полями формы ՊԵԿ, их остаётся скопировать в расчёт.",
+        "Last days for returns and payments, moved off weekends and holidays, and a reminder when you open the app. The quarter's numbers are laid out as the fields of the SRC form, ready to copy into your return.",
+        "Հաշվարկների և վճարումների վերջին օրերը՝ հանգստյան և տոնական օրերից տեղափոխված, և հիշեցում՝ ծրագիրը բացելիս։ Եռամսյակի թվերը՝ ՊԵԿ ձևի դաշտերով, մնում է պատճենել դրանք հաշվարկի մեջ։";
+    /// То же обещание, что в политике конфиденциальности (задача 32), — его
+    /// держит CSP сайта (Правило 13). «Օգտահաշիվներ», а не «հաշիվներ»: те
+    /// по-армянски ещё и счета.
+    LandingPrivacyTitle =
+        "Данные\u{A0}— только на вашем устройстве",
+        "Your data stays on your device",
+        "Տվյալները՝ միայն ձեր սարքում";
+    LandingPrivacyText =
+        "У Kvartik нет сервера с вашими данными, учётных записей, аналитики и рекламы. Программа работает и без интернета, а резервная копия\u{A0}— файл под вашим паролем.",
+        "Kvartik has no server holding your data, no accounts, no analytics and no ads. The app works offline too, and a backup is a file locked with your password.",
+        "Kvartik-ը չունի ձեր տվյալներով սերվեր, օգտահաշիվներ, վերլուծություն և գովազդ։ Ծրագիրն աշխատում է նաև առանց ինտերնետի, իսկ պահուստային պատճենը ֆայլ է՝ ձեր գաղտնաբառով։";
+    LandingDevicesTitle = "На телефоне и компьютере", "On your phone and computer", "Հեռախոսում և համակարգչում";
+    LandingDevicesText =
+        "Kvartik открывается в браузере и ставится на экран «Домой» как приложение. Без магазина приложений и без обновлений вручную: новые налоговые правила приходят сами.",
+        "Kvartik opens in the browser and installs to your home screen as an app. No app store and no manual updates: new tax rules arrive on their own.",
+        "Kvartik-ը բացվում է դիտարկիչում և տեղադրվում է հիմնական էկրանին որպես ծրագիր։ Առանց հավելվածների խանութի և առանց ձեռքով թարմացումների. նոր հարկային կանոնները գալիս են ինքնաբերաբար։";
+    /// Общий календарь сроков (задача 22) — приманка лендинга: кнопка та же,
+    /// что на экране сроков (`CalendarSubscribe`). Сработают ли напоминания,
+    /// решает программа календаря (CLAUDE.md, Правило 6).
+    LandingCalendarTitle =
+        "Сроки ИП в вашем календаре",
+        "IE deadlines in your calendar",
+        "ԱՁ-ի ժամկետները ձեր օրացույցում";
+    LandingCalendarText =
+        "Общий календарь сроков ИП на налоге с оборота обновляется сам, а в его событиях\u{A0}— напоминания за неделю и за день до срока. Сработают ли они, решает программа календаря.",
+        "The shared deadline calendar for IEs on turnover tax updates itself, and its events come with reminders a week and a day before each deadline. Whether they go off is up to your calendar app.",
+        "Շրջանառության հարկ վճարող ԱՁ-ների ժամկետների ընդհանուր օրացույցն ինքն է թարմանում, իսկ դրա իրադարձություններում հիշեցումներ կան ժամկետից մեկ շաբաթ և մեկ օր առաջ։ Կաշխատեն դրանք, թե ոչ, որոշում է օրացույցի ծրագիրը։";
+    /// Чего в первой версии нет (PDF, «Продукт»): зарплаты, НДС, учёта ООО.
+    LandingFitTitle = "Кому подходит", "Who it's for", "Ում է հարմար";
+    LandingFitText =
+        "Индивидуальным предпринимателям на налоге с оборота: IT-специалистам с клиентами за рубежом, переехавшим в Армению, репетиторам, консультантам и мастерам. Зарплату, НДС и учёт ООО Kvartik не ведёт.",
+        "Individual entrepreneurs on turnover tax: IT specialists with clients abroad, people who have moved to Armenia, tutors, consultants and craftspeople. Kvartik doesn't do payroll, VAT or company (LLC) accounting.",
+        "Շրջանառության հարկ վճարող ԱՁ-ներին՝ արտասահմանում հաճախորդներ ունեցող ՏՏ մասնագետներին, Հայաստան տեղափոխվածներին, կրկնուսույցներին, խորհրդատուներին և վարպետներին։ Աշխատավարձը, ԱԱՀ-ն և ՍՊԸ-ի հաշվառումը Kvartik-ը չի վարում։";
+    /// Оговорка о расчёте — предложения утверждённой `AboutDisclaimer`
+    /// (решение человека 2026-11-04) без ссылки на акты «выше»: на
+    /// лендинге их нет. Смысл тот же; правка смысла — решение человека.
+    LandingDisclaimer =
+        "Kvartik считает налоги по тексту законов Армении так, как его прочитал автор программы. Это помощь в расчёте, а не налоговая консультация: перед подачей расчёта и уплатой сверьте числа с бухгалтером.",
+        "Kvartik calculates taxes from the text of Armenian law as the app's author reads it. It helps with the calculation and is not tax advice: check the numbers with an accountant before you file a return or pay.",
+        "Kvartik-ը հարկերը հաշվում է ՀՀ օրենքների տեքստով՝ այնպես, ինչպես այն ընթերցել է ծրագրի հեղինակը։ Սա օգնություն է հաշվարկում, ոչ թե հարկային խորհրդատվություն. հաշվարկը ներկայացնելուց և հարկը վճարելուց առաջ ստուգեք թվերը հաշվապահի հետ։";
+    /// Шаблон: день последней сверки правил (`Rules::checked`), как
+    /// в описании общего календаря.
+    LandingRulesChecked =
+        "Налоговые правила сверены с законом {}.",
+        "Tax rules checked against the law on {}.",
+        "Հարկային կանոններն օրենքի հետ ստուգված են {}։";
+    /// Ссылка на тексты лицензий рядом с программой (задача 51): шрифты
+    /// лендинга — те же файлы, что у окна.
+    LandingLicenses = "Лицензии шрифтов и кода", "Font and code licenses", "Տառատեսակների և կոդի լիցենզիաներ";
 }
 
 /// Подставляет значения в шаблон вместо `{}`, по порядку.

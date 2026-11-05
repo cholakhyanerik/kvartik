@@ -118,25 +118,46 @@ check_page() {
 }
 check_page
 
-# Корень ведёт в программу, пока там нет лендинга (`_redirects`), — 302,
-# а не 301: постоянную переадресацию браузер запомнил бы навсегда. И адрес
-# программы без косой черты — туда же: относительные ссылки страницы
-# с `/app` ушли бы в корень. Строка запроса — с собой.
-check_redirects() {
-  local pair from code got location
-  for pair in "/?q=1 302" "/$app?q=1 308"; do
-    from="${pair% *}"
-    code="${pair#* }"
+# Корень и страницы языков — лендинг (задача 34, с 0.0.82): 200 и байт
+# в байт та страница, что собрана, — с CSP и без долгого кэша. Зона
+# вписывает свой скрипт в любой ответ `text/html` (выше), и на лендинге
+# тоже. До 0.0.82 корень вёл в программу переадресацией 302.
+check_landing() {
+  local path code got
+  for path in "" ru/ en/; do
     while :; do
-      got="$(curl -sS -o /dev/null -D "$work/redirect-head" -w '%{http_code}' "$site$from" || true)"
-      location="$(header location "$work/redirect-head")"
-      location="${location#"$site"}"
-      [ "$got $location" != "$code /$app/?q=1" ] || break
-      settling || { fail "$from: «$got $location», а ждали $code на /$app/?q=1"; break; }
+      code="$(curl -sS --compressed -o "$work/landing" -D "$work/landing-head" -w '%{http_code}' \
+        -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' "$site/$path" || true)"
+      if [ "$code" = 200 ] && cmp -s "$work/landing" "$dist/${path}index.html"; then
+        break
+      fi
+      settling || break
     done
+    [ "$code" = 200 ] || fail "/$path: $code, а ждали 200"
+    cmp -s "$work/landing" "$dist/${path}index.html" || fail "/$path: страница не этой сборки"
+    got="$(header content-security-policy "$work/landing-head")"
+    [ "$got" = "$csp" ] || fail "/$path: CSP «$got», а в _headers «$csp»"
+    got="$(header cache-control "$work/landing-head")"
+    case "$got" in
+      *immutable* | *max-age=[1-9]*) fail "/$path: Cache-Control «$got» — страница без хэша в имени" ;;
+    esac
   done
 }
-check_redirects
+check_landing
+
+# Адрес программы без косой черты — на неё же, 308: относительные ссылки
+# страницы с `/app` ушли бы в корень. Строка запроса — с собой.
+check_redirect() {
+  local got location
+  while :; do
+    got="$(curl -sS -o /dev/null -D "$work/redirect-head" -w '%{http_code}' "$site/$app?q=1" || true)"
+    location="$(header location "$work/redirect-head")"
+    location="${location#"$site"}"
+    [ "$got $location" != "308 /$app/?q=1" ] || break
+    settling || { fail "/$app?q=1: «$got $location», а ждали 308 на /$app/?q=1"; break; }
+  done
+}
+check_redirect
 
 # Свой домен (задача 16). Его зона Cloudflare стоит перед Pages и меняет
 # ответы, а зона `*.pages.dev` — не наша, и там этого не проверить.
@@ -207,6 +228,9 @@ expected_type() {
     # Общий календарь сроков (задача 22): тип iCalendar — RFC 5545, 8.1;
     # ставит его wrangler по той же таблице `mime`.
     *.ics) echo text/calendar ;;
+    # Карта сайта лендинга (задача 34): тип XML — RFC 7303; какой из двух
+    # ставит wrangler по таблице `mime`, сверяет первая выкладка.
+    *.xml) echo application/xml text/xml ;;
     *) echo "?" ;;
   esac
 }

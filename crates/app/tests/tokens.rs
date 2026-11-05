@@ -329,7 +329,8 @@ fn contrast_meets_wcag_and_comments_tell_the_truth() {
 }
 
 /// Все файлы, где может оказаться цвет: стили, страница, код окна,
-/// service worker и манифест программы.
+/// service worker, манифест программы и стили и скрипт лендинга (задача 34,
+/// `site/`).
 fn sources() -> Vec<PathBuf> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         for entry in fs::read_dir(dir).expect("папка читается") {
@@ -348,6 +349,7 @@ fn sources() -> Vec<PathBuf> {
     walk(&app_dir().join("style"), &mut out);
     walk(&app_dir().join("src"), &mut out);
     walk(&app_dir().join("public"), &mut out);
+    walk(&app_dir().join("site"), &mut out);
     out
 }
 

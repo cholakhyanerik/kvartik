@@ -1,13 +1,14 @@
-//! Сборка сайта после Trunk: раскладка сайта (задача 65), wasm окна
-//! с частями (задача 58, `wasm.rs`) и `sw.js` со списком файлов для кэша
-//! и хэшем сборки (задача 8).
+//! Сборка сайта после Trunk: раскладка сайта (задача 65), лендинг (задача
+//! 34, `landing.rs`), wasm окна с частями (задача 58, `wasm.rs`) и `sw.js`
+//! со списком файлов для кэша и хэшем сборки (задача 8).
 //!
 //! Зовёт её Trunk хуком `post_build` (`crates/app/Trunk.toml`): к этому
 //! времени остальные файлы сайта уже лежат в папке сборки, а `index.html`
 //! дописан (по исходникам trunk 0.22.0-rc.2, `src/pipelines/html.rs`).
 //! Папку она берёт из переменной `TRUNK_STAGING_DIR`, адрес программы —
 //! из `TRUNK_PUBLIC_URL`, а остальное — из аргументов:
-//! `kvartik-sw [--root <папка>] [--wasm <пакет>] <шаблон sw.js>`.
+//! `kvartik-sw [--root <папка> [--site <папка> --style <папка>]]
+//! [--wasm <пакет>] <шаблон sw.js>`.
 //!
 //! Программа живёт в папке сайта — `/app/`, `public_url` в `Trunk.toml`, —
 //! а корень отдан лендингу (задача 65). Trunk кладёт всё собранное в корень
@@ -17,7 +18,9 @@
 //! программы, а в корень кладёт файлы корня сайта из `<папка>` и общий
 //! календарь сроков (задача 22). Разложил бы и сам Trunk (`html_output`
 //! и `data-target-path`), но имя папки стояло бы тогда в восьми местах,
-//! а не в одном `public_url`.
+//! а не в одном `public_url`. С `--site` в корень ложится и лендинг: его
+//! стили и скрипт — из `--site`, оформление окна, на котором он стоит, — из
+//! `--style`, а текст — из таблицы строк ядра.
 //!
 //! С `--wasm` она собирает wasm пакета и вписывает его запуск в страницу,
 //! рядом кладёт тексты лицензий всего, из чего wasm собран, и шрифтов
@@ -44,6 +47,7 @@ use kvartik_core::i18n::Lang;
 use kvartik_core::release::LICENSES;
 use kvartik_core::tax::calendar;
 
+mod landing;
 mod licenses;
 mod wasm;
 
@@ -81,10 +85,13 @@ fn run() -> Result<String, String> {
         .map_err(|_| "нет TRUNK_PUBLIC_URL: программу зовёт хук Trunk (crates/app/Trunk.toml)")?;
     let app = app_folder(&public_url)?;
     let (mut root, mut package, mut template_path) = (None, None, None);
+    let (mut site, mut style) = (None, None);
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--root" => root = Some(PathBuf::from(args.next().ok_or("после --root ожидалась папка")?)),
+            "--site" => site = Some(PathBuf::from(args.next().ok_or("после --site ожидалась папка")?)),
+            "--style" => style = Some(PathBuf::from(args.next().ok_or("после --style ожидалась папка")?)),
             "--wasm" => package = Some(args.next().ok_or("после --wasm ожидалось имя пакета")?),
             _ if template_path.is_none() => template_path = Some(PathBuf::from(arg)),
             _ => return Err(format!("лишний аргумент «{arg}»")),
@@ -93,9 +100,20 @@ fn run() -> Result<String, String> {
     let template_path = template_path.ok_or("ожидался путь к шаблону sw.js")?;
     let template = fs::read_to_string(&template_path)
         .map_err(|error| format!("{}: {error}", template_path.display()))?;
+    // Лендинг ложится в корень рядом с файлами корня: без раскладки ему
+    // некуда, а без оформления окна он не соберётся.
+    let landing = match (&root, &site, &style) {
+        (Some(_), Some(site), Some(style)) => Some((site, style)),
+        (_, None, None) => None,
+        _ => return Err("--site и --style идут вместе и только с --root".to_owned()),
+    };
     if let Some(root) = &root {
         lay_out(&staging, app, root)?;
     }
+    let site = match landing {
+        Some((site, style)) => format!(", {}", landing::write(&staging, site, style, &public_url)?),
+        None => String::new(),
+    };
     let app_dir = staging.join(app);
     let wasm = match &package {
         Some(package) => {
@@ -114,7 +132,7 @@ fn run() -> Result<String, String> {
     let output = app_dir.join(OUTPUT);
     fs::write(&output, sw).map_err(|error| format!("{}: {error}", output.display()))?;
     Ok(format!(
-        "kvartik-sw: сборка {build}, программа в {public_url}, файлов в кэше {}{wasm}",
+        "kvartik-sw: сборка {build}, программа в {public_url}, файлов в кэше {}{wasm}{site}",
         precached(&files, app).count() + 1
     ))
 }

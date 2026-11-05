@@ -258,32 +258,35 @@ fn page_links_the_manifest_and_icons() {
     );
 }
 
-/// Раскладку сайта, wasm окна и `sw.js` собирает хук сборки (`Trunk.toml`),
-/// а не Trunk. Шаблон service worker лежит там, откуда его берёт хук,
-/// и сам в сайт не копируется: в сайте должен оказаться только `sw.js`,
-/// написанный `kvartik-sw`, — шаблон с `"dev"` выключил бы обновления
-/// у всех. Файлы корня сайта Trunk не копирует тоже: он положил бы их
-/// в папку программы, а не в корень (задача 65). А wasm Trunk не собирает
-/// (`data-trunk-skip`): без этого он собрал бы свой, неразрезанный, со
-/// своим запуском (задача 58).
+/// Раскладку сайта, лендинг, wasm окна и `sw.js` собирает хук сборки
+/// (`Trunk.toml`), а не Trunk. Шаблон service worker лежит там, откуда его
+/// берёт хук, и сам в сайт не копируется: в сайте должен оказаться только
+/// `sw.js`, написанный `kvartik-sw`, — шаблон с `"dev"` выключил бы
+/// обновления у всех. Файлы корня сайта и лендинга Trunk не копирует тоже:
+/// он положил бы их в папку программы, а не в корень (задачи 65 и 34). А
+/// wasm Trunk не собирает (`data-trunk-skip`): без этого он собрал бы свой,
+/// неразрезанный, со своим запуском (задача 58).
 #[test]
 fn wasm_and_service_worker_go_through_the_hook() {
     let trunk = fs::read_to_string(app_dir().join("Trunk.toml")).expect("Trunk.toml читается");
     assert!(
         trunk.contains(
-            r#"command_arguments = ["run", "--quiet", "--package", "kvartik-sw", "--", "--root", "public/root", "--wasm", "kvartik-app", "public/sw.js"]"#
+            r#"command_arguments = ["run", "--quiet", "--package", "kvartik-sw", "--", "--root", "public/root", "--site", "site", "--style", "style", "--wasm", "kvartik-app", "public/sw.js"]"#
         ),
         "хук kvartik-sw в Trunk.toml не найден"
     );
     assert!(app_dir().join("public/sw.js").is_file());
+    for source in ["site/landing.css", "site/landing.js", "style/tokens.css", "style/fonts.css"] {
+        assert!(app_dir().join(source).is_file(), "нет {source}: лендинг из него собирается");
+    }
     let page = fs::read_to_string(app_dir().join("index.html")).expect("index.html читается");
     assert!(
         !page.contains("public/sw.js") && !page.contains(r#"href="public""#),
         "шаблон sw.js копируется в сайт как есть"
     );
     assert!(
-        !page.contains(r#"href="public/root"#),
-        "файлы корня сайта копирует Trunk — в папку программы"
+        !page.contains(r#"href="public/root"#) && !page.contains(r#"href="site"#),
+        "файлы корня сайта или лендинга копирует Trunk — в папку программы"
     );
     let rust: Vec<_> = page
         .split('<')
@@ -295,12 +298,12 @@ fn wasm_and_service_worker_go_through_the_hook() {
     );
 }
 
-/// Программа живёт в папке сайта, а корень — лендингу (задача 65). Папку
-/// называет одна строка — `public_url` в `Trunk.toml`, а файлы корня
-/// (`public/root/`) знают её сами, и каждый — молча: корень, который ведёт
-/// не туда, `404.html`, который ведёт в пустоту, правило `_headers`, которое
-/// не подходит ни к одному файлу программы, — ни ошибки сборки, ни ошибки
-/// в браузере. Поэтому тест сверяет их с `public_url`.
+/// Программа живёт в папке сайта, а корень — лендингу (задачи 65 и 34).
+/// Папку называет одна строка — `public_url` в `Trunk.toml`, а файлы корня
+/// (`public/root/`) и скрипт лендинга знают её сами, и каждый — молча:
+/// старый адрес программы, который ведёт не туда, правило `_headers`,
+/// которое не подходит ни к одному файлу программы, — ни ошибки сборки, ни
+/// ошибки в браузере. Поэтому тест сверяет их с `public_url`.
 #[test]
 fn the_site_root_knows_the_app_folder() {
     let trunk = fs::read_to_string(app_dir().join("Trunk.toml")).expect("Trunk.toml читается");
@@ -327,35 +330,37 @@ fn the_site_root_knows_the_app_folder() {
     };
     let mut wrong = Vec::new();
 
-    // Корень — в программу, временной переадресацией: постоянную браузер
-    // запомнил бы навсегда, и лендинга не увидел бы никто.
-    let rules: Vec<_> = root("_redirects")
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(str::to_owned)
-        .collect();
-    if rules != [format!("/ {app} 302")] {
-        wrong.push(format!("_redirects: {rules:?}, а ждали «/ {app} 302»"));
+    // Корень — лендинг (с 0.0.82): переадресации нет ни одной. Правило
+    // `/ …` спрятало бы лендинг, а `/app` на `/app/` Pages ведёт сам.
+    if app_dir().join("public/root/_redirects").exists() {
+        wrong.push("public/root/_redirects: корень — лендинг, переадресаций не нужно".into());
+    }
+    // Старый адрес программы `/#/…` (до 0.0.34 она жила в корне) — в её
+    // папку: `#` сервер не видит, и ведёт туда скрипт лендинга.
+    let landing = fs::read_to_string(app_dir().join("site/landing.js")).expect("site/landing.js читается");
+    let forward = format!("location.replace(`{app}${{location.search}}${{location.hash}}`)");
+    if !landing.contains(&forward) {
+        wrong.push(format!("site/landing.js: нет {forward}"));
     }
 
-    // Неизвестный адрес — в программу.
+    // Неизвестный адрес — на лендинг, а с него — и в программу.
     let missing = root("404.html");
-    for needed in [format!("content=\"0; url={app}\""), format!("<a href=\"{app}\">")] {
-        if !missing.contains(&needed) {
+    for needed in ["content=\"0; url=/\"", "<a href=\"/\">"] {
+        if !missing.contains(needed) {
             wrong.push(format!("404.html: нет {needed}"));
         }
     }
 
-    // Долгий кэш — только файлам программы с хэшем в имени: правило без её
-    // папки к ним не подойдёт.
+    // Долгий кэш — только файлам с хэшем в имени: программы — правило без
+    // её папки к ним не подойдёт — и лендинга, оформлению и скрипту
+    // `kvartik-site-<хэш>` в корне (crates/sw/src/landing.rs).
     let headers = root("_headers");
     let mut path = "";
     for line in headers.lines() {
         if line.starts_with('/') {
             path = line.trim();
-        } else if line.contains("immutable") && !path.starts_with(app.as_str()) {
-            wrong.push(format!("_headers: immutable у «{path}» — не в {app}"));
+        } else if line.contains("immutable") && !path.starts_with(app.as_str()) && path != "/kvartik-site-*" {
+            wrong.push(format!("_headers: immutable у «{path}» — не в {app} и не файлы лендинга"));
         }
     }
 

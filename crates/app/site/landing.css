@@ -1,0 +1,299 @@
+/* Лендинг (задача 34): страницы kvartik.com. Сборка кладёт перед этим
+   файлом tokens.css и fonts.css окна — одним файлом с хэшем в имени
+   (crates/sw/src/landing.rs), — поэтому здесь только переменные tokens.css
+   (Правило 4): ни одного цвета литералом, это держит тест
+   crates/app/tests/tokens.rs. Вид — как у окна по дизайну «Kvartik Design»:
+   кремовый фон, круги первого запуска, кнопки пилюлей высотой 56 px,
+   заголовки засечками, «Kvartik» — Caprasimo. Каждая пара «текст на фоне»
+   здесь — из тех, что тест уже считает: текст и ссылки — на --surface
+   и --surface-raised, языки — на --surface-sunken. */
+
+html {
+  font-family: var(--font-sans);
+  font-weight: var(--weight-regular);
+  line-height: var(--leading-normal);
+  color: var(--text);
+  background: var(--surface);
+  /* Цифры одной ширины, как у окна. */
+  font-variant-numeric: tabular-nums;
+  /* Телефон в альбомной ориентации не увеличивает текст сам. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  position: relative;
+  margin: 0;
+}
+
+/* Круги в углу, как на первом экране окна: только украшают (у их цветов
+   нет порога контраста — tokens.css) и под текст не заходят — заголовок
+   начинается ниже них (`.hero`), а языки лежат на своей дорожке. Свой слой
+   с обрезкой: за правым краем страницы круги не дают прокрутки вбок. */
+.decor {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 12.5rem;
+  height: 11rem;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.decor span {
+  position: absolute;
+  border-radius: var(--radius-round);
+}
+
+.decor span:first-child {
+  top: -10.25rem;
+  right: -9rem;
+  width: 21.25rem;
+  height: 21.25rem;
+  background: var(--decor-olive);
+}
+
+.decor span:last-child {
+  top: 3rem;
+  right: 4.375rem;
+  width: 7.5rem;
+  height: 7.5rem;
+  background: var(--decor-clay);
+}
+
+/* Колонка страницы: на телефоне — во всю ширину с полями, на компьютере —
+   не шире 64rem. Поверх кругов украшения: они раньше в разметке. */
+.top,
+main,
+footer {
+  position: relative;
+  box-sizing: border-box;
+  max-width: 64rem;
+  margin-inline: auto;
+  padding-inline: var(--space-5);
+}
+
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-block: var(--space-4);
+}
+
+.brand {
+  font-family: var(--font-display);
+  font-size: var(--font-size-2xl);
+  line-height: var(--leading-tight);
+  color: var(--text);
+  text-decoration: none;
+}
+
+/* Языки — пилюлями на дорожке, как переключатель окна. Текущий —
+   приподнятым и жирным, а не одним цветом (Правило 4). */
+.langs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border-radius: var(--radius-lg);
+  background: var(--surface-sunken);
+}
+
+.langs a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--touch);
+  padding-inline: var(--space-4);
+  border-radius: var(--radius-round);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.langs a[aria-current="page"] {
+  background: var(--surface-raised);
+  font-weight: var(--weight-strong);
+}
+
+h1,
+h2 {
+  font-family: var(--font-serif);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-tight);
+  text-wrap: balance;
+}
+
+h1 {
+  margin: 0;
+  font-size: var(--font-size-3xl);
+}
+
+h2 {
+  margin: 0 0 var(--space-4);
+  font-size: var(--font-size-2xl);
+}
+
+h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-lg);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
+}
+
+p {
+  margin: 0 0 var(--space-3);
+  text-wrap: pretty;
+}
+
+p:last-child {
+  margin-bottom: 0;
+}
+
+a {
+  color: var(--accent-text);
+}
+
+/* Кольцо фокуса — --focus: 3:1 на каждом фоне (tokens.css). */
+a:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Первый экран. Заголовок — ниже кругов украшения при любой ширине: 6rem
+   над ним и шапка выше — больше их высоты (11rem), как у первого экрана
+   окна. Ширина строки — не больше ~70 знаков. */
+.hero {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 40rem;
+  padding-block: 6rem var(--space-7);
+}
+
+.lead {
+  margin: 0;
+  font-size: var(--font-size-xl);
+}
+
+.actions {
+  margin: 0;
+}
+
+.trial {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+/* Главная кнопка — как у окна: заливка --accent, текст --on-accent, пилюля
+   высотой 56 px. Ссылка, а не кнопка: она ведёт на другую страницу.
+   Подпись в две строки (армянская на телефоне) не прижимается к краям. */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: var(--control);
+  padding: var(--space-2) var(--space-6);
+  border: 0;
+  border-radius: var(--radius-round);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--font-size-lg);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
+  text-align: center;
+  text-decoration: none;
+}
+
+/* Второстепенная — рамкой без заливки: рядом с главной видно, какая
+   главная. Рамка --border-strong — 3:1 на каждом фоне (WCAG 1.4.11). */
+.button.secondary {
+  border: 2px solid var(--border-strong);
+  background: none;
+  color: var(--text);
+}
+
+/* Отклик на наведение — только там, где есть мышь: на телефоне оно
+   залипает после касания. */
+@media (hover: hover) {
+  .button.secondary:hover {
+    background: var(--surface);
+  }
+
+  .langs a:hover:not([aria-current="page"]) {
+    background: var(--surface);
+  }
+}
+
+main > section + section {
+  margin-top: var(--space-8);
+}
+
+/* Что умеет Kvartik — карточками: на телефоне столбцом, шире — в две
+   и в три колонки. */
+.cards {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cards li,
+.card {
+  box-sizing: border-box;
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+}
+
+/* Карточка — во всю колонку, вровень с карточками выше, а строка в ней —
+   не длиннее ~90 знаков. */
+.card > * {
+  max-width: 48rem;
+}
+
+.card .actions {
+  margin-block: var(--space-4);
+}
+
+.hint,
+.address {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* Адрес календаря вставляют в календарь сами: он длиннее строки телефона
+   и выделяется целиком одним касанием. */
+.address {
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+footer {
+  margin-top: var(--space-8);
+  padding-block: var(--space-6) var(--space-8);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+footer p {
+  max-width: 48rem;
+}
+
+@media (min-width: 40rem) {
+  .cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 60rem) {
+  .cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  h1 {
+    font-size: var(--font-size-hero);
+  }
+}

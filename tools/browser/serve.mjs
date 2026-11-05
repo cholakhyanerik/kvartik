@@ -6,8 +6,9 @@
 //   (проверено 2026-10-15 и 2026-10-16, wrangler 4.149.0). Для экранов,
 //   работы без сети, новой версии и установки.
 // - `own` — свой сервер Node со сжатием brotli заранее и теми же ответами:
-//   `/` — 302 на `/app/`, `/app` — 308, неизвестный адрес — ближайший
-//   `404.html` с кодом 404. Для замера первого захода: сжимать файл при
+//   папка — её `index.html` (лендинг в `/`, `/ru/`, `/en/` — задача 34),
+//   `/app` — 308, неизвестный адрес — ближайший `404.html` с кодом 404.
+//   Для замера первого захода: сжимать файл при
 //   первом запросе нельзя — сжатие шрифтов держало шесть соединений HTTP/1.1,
 //   и части wasm выглядели на 650 мс медленнее (задача 58, 2026-10-13).
 //   Заголовков `_headers` он не ставит. Качество сжатия — параметр: замеру
@@ -33,6 +34,8 @@ const TYPES = {
   ".pdf": "application/pdf", ".svg": "image/svg+xml", ".ics": "text/calendar; charset=utf-8",
   // Как Cloudflare Pages: `text/plain; charset=utf-8` (tools/deploy/check.sh).
   ".txt": "text/plain; charset=utf-8",
+  // Карта сайта лендинга (задача 34).
+  ".xml": "application/xml",
 };
 
 /// Свой сервер. Возвращает `{ port, stop() }`.
@@ -61,7 +64,6 @@ export function own(dist, port, { quality = 11 } = {}) {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://x");
     let p = decodeURIComponent(url.pathname);
-    if (p === "/") { res.writeHead(302, { Location: `/app/${url.search}` }); return res.end(); }
     if (p === "/app") { res.writeHead(308, { Location: `/app/${url.search}` }); return res.end(); }
     if (p.endsWith("/")) p += "index.html";
     const found = files.get(p);
