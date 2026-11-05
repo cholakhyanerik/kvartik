@@ -2716,6 +2716,85 @@ strings! {
         "The license key is issued for TIN {}: with another TIN it won't open document issuing and the numbers for the return.",
         "Լիցենզիայի բանալին տրված է {} ՀՎՀՀ-ի համար. այլ ՀՎՀՀ-ով այն չի բացի փաստաթղթերի թողարկումը և թվերը հաշվարկի համար։";
 
+    /// ИП в программе (задача 38, `ui/office.rs`): у каждого ИП своя база,
+    /// открыт один, другой — перезагрузкой страницы.
+    OfficeTitle = "ИП в программе", "Entrepreneurs in the app", "ԱՁ-ները ծրագրում";
+    OfficeAbout =
+        "У каждого ИП свои счета, клиенты, книга и налог. Открыт один, а другой открывается с перезагрузкой страницы.",
+        "Each entrepreneur has their own invoices, clients, ledger and tax. One is open at a time, and opening another reloads the page.",
+        "Յուրաքանչյուր ԱՁ ունի իր հաշիվները, հաճախորդները, մատյանը և հարկը։ Բաց է մեկը, իսկ մյուսը բացվում է էջը վերաբեռնելով։";
+    /// Шаблон: число ИП в списке — строкой профиля.
+    OfficeCount = "ИП в списке: {}", "Entrepreneurs: {}", "ԱՁ-ներ ցանկում՝ {}";
+    /// Слово у открытого ИП — не только цветом (Правило 4).
+    OfficeOpenNow = "открыт", "open", "բաց է";
+    OfficeOpen = "Открыть", "Open", "Բացել";
+    OfficeNameless = "ИП без имени", "Unnamed entrepreneur", "Անանուն ԱՁ";
+    OfficeAdd = "Добавить ИП", "Add an entrepreneur", "Ավելացնել ԱՁ";
+    OfficeAddAbout =
+        "Новый ИП откроется пустым: заполните его профиль, как в первый раз. Пробный период у всех ИП на этом устройстве общий.",
+        "A new entrepreneur opens empty: fill in their profile as on the first run. All entrepreneurs on this device share one trial period.",
+        "Նոր ԱՁ-ն կբացվի դատարկ. լրացրեք նրա պրոֆիլը, ինչպես առաջին անգամ։ Այս սարքի բոլոր ԱՁ-ների փորձաշրջանն ընդհանուր է։";
+    OfficeRemove = "Убрать из списка", "Remove from the list", "Հեռացնել ցանկից";
+    /// Убранный ИП не стирается (решение 2026-11-05, предложение агента).
+    OfficeRemovedTitle = "Убранные из списка", "Removed from the list", "Ցանկից հեռացվածներ";
+    OfficeRemovedAbout =
+        "Данные убранного ИП остаются на этом устройстве и в копии всех ИП, а вернуть его можно в любой момент.",
+        "A removed entrepreneur's data stays on this device and in the backup of all entrepreneurs, and you can bring them back at any time.",
+        "Հեռացված ԱՁ-ի տվյալները մնում են այս սարքում և բոլոր ԱՁ-ների պատճենում, և այն կարող եք վերադարձնել ցանկացած պահի։";
+    OfficeBringBack = "Вернуть в список", "Bring back", "Վերադարձնել ցանկ";
+    /// Перезагрузка оборвала бы начатое (`Forms`) и запись в базу.
+    OfficeBusy =
+        "Сначала закончите начатое: закройте открытую форму и дождитесь сохранения.",
+        "Finish what you've started first: close the open form and wait until it's saved.",
+        "Նախ ավարտեք սկսածը. փակեք բաց ձևը և սպասեք, մինչև պահվի։";
+    /// Шаблон: предел числа ИП (`model::office::MAX_IPS`).
+    OfficeTooMany =
+        "Больше {} ИП в программе не бывает: уберите из списка ненужных.",
+        "The app holds at most {} entrepreneurs: remove the ones you don't need.",
+        "Ծրագրում կարող է լինել առավելագույնը {} ԱՁ. հեռացրեք ավելորդները։";
+    /// Шаблон: число нечитаемых записей списка.
+    OfficeUnreadable =
+        "Записей списка ИП, которые не читаются: {}.",
+        "Entrepreneur list entries that can't be read: {}.",
+        "ԱՁ-ների ցանկի չկարդացվող գրառումներ՝ {}։";
+    /// Над экранами, когда ИП больше одного: какой открыт (шаблон — имя).
+    /// Без «ИП:» впереди — имя ИП и так обычно начинается с «ИП».
+    OfficeBar = "Открыт: {}", "Open: {}", "Բաց է՝ {}";
+    OfficeSwitch = "Сменить", "Switch", "Փոխել";
+    /// Копия одного ИП для клиента (задача 38, решение человека 2026-11-05):
+    /// новым паролем дважды, он не запоминается.
+    BackupClientTitle = "Копия этого ИП для клиента", "Backup of this entrepreneur for the client", "Այս ԱՁ-ի պատճենը հաճախորդի համար";
+    BackupClientAbout =
+        "Только открытый ИП\u{A0}— без других ИП и их списка. Пароль\u{A0}— новый, только для этой копии: программа его не запомнит. Передайте его клиенту не в том же чате, что файл.",
+        "Only the open entrepreneur, without the others or their list. The password is new and only for this backup: the app won't remember it. Give it to the client in a different chat from the file.",
+        "Միայն բաց ԱՁ-ն՝ առանց մյուս ԱՁ-ների և դրանց ցանկի։ Գաղտնաբառը նոր է և միայն այս պատճենի համար. ծրագիրն այն չի հիշի։ Հաճախորդին այն փոխանցեք ոչ նույն զրուցարանում, որտեղ ֆայլն է։";
+    BackupClientMake = "Сделать копию для клиента", "Make a backup for the client", "Ստեղծել պատճեն հաճախորդի համար";
+    BackupClientPassword = "Пароль для клиента", "Password for the client", "Գաղտնաբառ հաճախորդի համար";
+    /// Шаблон: наименьшая длина пароля. Без «программа спросит при каждой
+    /// копии», как у пароля копий: этот не запоминается.
+    BackupClientPasswordHint =
+        "Не короче {} знаков: надёжнее всего фраза из нескольких слов. Без него клиент копию не откроет.",
+        "At least {} characters: a phrase of several words is safest. Without it the client can't open the backup.",
+        "Առնվազն {} նիշ. ամենահուսալին մի քանի բառից կազմված արտահայտությունն է։ Առանց դրա հաճախորդը պատճենը չի բացի։";
+    /// Третий ответ на вопрос о копии другого ИП (`BackupOtherIe`): своя база
+    /// и запись в списке ИП, ничего не смешивается.
+    BackupOtherIeAsNew = "Добавить как нового ИП", "Add as a new entrepreneur", "Ավելացնել որպես նոր ԱՁ";
+    BackupAsNewDone =
+        "Копия легла новым ИП\u{A0}— открыть его можно в списке ИП.",
+        "The backup was added as a new entrepreneur. You can open them from the list of entrepreneurs.",
+        "Պատճենն ավելացվեց որպես նոր ԱՁ. այն կարող եք բացել ԱՁ-ների ցանկից։";
+    /// Шаблон: имя ИП. Копия одного ИП из списка, а открыт другой (задача 38,
+    /// ревью 2026-11-06): ни в открытую базу, ни отдельным ИП её не кладут.
+    BackupElsewhere =
+        "Это копия «{}»\u{A0}— он уже есть в списке ИП. Откройте его и восстановите копию там: так она сольётся с его данными, а не ляжет к другому ИП.",
+        "This is a backup of “{}”, who is already on the list of entrepreneurs. Open them and restore the backup there, so it merges with their data rather than another entrepreneur's.",
+        "Սա «{}»-ի պատճենն է. նա արդեն ԱՁ-ների ցանկում է։ Բացեք նրան և վերականգնեք պատճենն այնտեղ, որպեսզի այն միավորվի նրա տվյալների հետ, ոչ թե այլ ԱՁ-ի։";
+    /// Шаблон: почему не легла база. Список ИП уже записан, а повтор
+    /// безвреден (решение человека 2026-11-05).
+    BackupPartly =
+        "Копия легла не вся: {} Повторите восстановление\u{A0}— что уже легло, не задвоится.",
+        "Only part of the backup was restored: {} Restore it again; what's already in won't be duplicated.",
+        "Պատճենը վերականգնվեց ոչ ամբողջությամբ. {} Կրկնեք վերականգնումը. արդեն վերականգնվածը չի կրկնապատկվի։";
     /// О программе (задача 31): экран внутри профиля — версия программы,
     /// формат данных, срок лицензии, правила налога с их актами и оговорка
     /// о расчёте (`ui/about.rs`).

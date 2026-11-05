@@ -19,6 +19,7 @@ mod lang;
 mod ledger;
 mod license;
 mod nav;
+mod office;
 mod onboarding;
 pub mod panic;
 mod paper;
@@ -51,6 +52,7 @@ use lang::{LangSwitch, WindowLang};
 use ledger::{LedgerScreen, Operations};
 use license::{LicenseEntry, LicenseScreen, Licenses};
 use nav::Nav;
+use office::{Office, OfficeBar, OfficeEntry, OfficeScreen};
 use onboarding::Welcome;
 use profile::{ProfileSection, Profiles};
 use pwa::{Program, UpdateDialog, UpdateNotice};
@@ -162,6 +164,9 @@ pub fn App() -> impl IntoView {
     // `versionchange` (Правило 6).
     let base = Base::new();
     let backups = Backups::new(base);
+    // ИП в программе (задача 38): какую базу открыть — решает контора.
+    let office = Office::new(backups);
+    backups.attach(office);
     let profiles = Profiles::new();
     let clients = Clients::new();
     let documents = Documents::new();
@@ -184,7 +189,8 @@ pub fn App() -> impl IntoView {
             store::Event::Written => backups.written(),
             event => storage.update(|state| state.apply(event)),
         };
-        match Store::open(on_event).await {
+        let name = office.start().await;
+        match Store::open_base(&name, on_event).await {
             Ok(store) => {
                 let store = Rc::new(store);
                 base.opened(Rc::clone(&store));
@@ -194,7 +200,10 @@ pub fn App() -> impl IntoView {
                     Ok(tx) => tx.is_empty().await.is_ok_and(|empty| !empty),
                     Err(_) => false,
                 };
-                backups.opened(has_data);
+                // ИП несколько — данные у программы есть, даже если открыт
+                // пустой новый ИП: напоминание о копии и автокопия — за всех
+                // (ревью 2026-11-06).
+                backups.opened(has_data || crate::store::device::Device::new().office());
                 profiles.load(&store).await;
                 clients.load(&store).await;
                 documents.load(&store, clock::today()).await;
@@ -221,6 +230,22 @@ pub fn App() -> impl IntoView {
         ready
     });
 
+    // Профиль открытой базы — копией в список ИП (задача 38): прочитан,
+    // сохранён или восстановлен из копии.
+    Effect::new(move |_| {
+        if let Some(profile) = profiles.profile() {
+            office.profile_changed(profile);
+        }
+    });
+    let office_ctx = office::Ctx {
+        lang,
+        office,
+        profiles,
+        forms,
+        base,
+        backups,
+    };
+
     // Экран сменился — страница с его начала, фокус на его заголовке.
     Effect::watch(move || router.screen(), |screen, _, _| route::shown(*screen), false);
 
@@ -239,8 +264,9 @@ pub fn App() -> impl IntoView {
             <main>
                 <UpdateNotice lang program forms />
                 <StorageAlert lang storage />
+                <OfficeBar ctx=office_ctx />
                 <section id=Screen::Home.id() class="screen" hidden=hidden(Screen::Home)>
-                    <Home lang router program backups profiles documents clients tax welcome />
+                    <Home lang router program backups profiles documents clients tax welcome office />
                 </section>
                 <section id=Screen::Documents.id() class="screen" hidden=hidden(Screen::Documents)>
                     <DocumentsScreen lang documents clients profiles licenses base backups router forms />
@@ -275,6 +301,9 @@ pub fn App() -> impl IntoView {
                             <BackupEntry lang backups />
                         </li>
                         <li>
+                            <OfficeEntry lang />
+                        </li>
+                        <li>
                             <LicenseEntry lang />
                         </li>
                         <li class="setting">
@@ -301,6 +330,9 @@ pub fn App() -> impl IntoView {
                 </section>
                 <section id=Screen::About.id() class="screen" hidden=hidden(Screen::About)>
                     <AboutScreen ctx=tax router />
+                </section>
+                <section id=Screen::Office.id() class="screen" hidden=hidden(Screen::Office)>
+                    <OfficeScreen ctx=office_ctx router />
                 </section>
             </main>
             {panic::debug_trigger()}

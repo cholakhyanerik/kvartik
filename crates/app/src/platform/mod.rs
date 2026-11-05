@@ -18,10 +18,25 @@ pub mod site;
 
 /// Перезагрузить страницу. Не вышло — делать нечего: кнопка браузера
 /// остаётся.
+#[cfg(not(all(test, target_arch = "wasm32")))]
 pub fn reload() {
     if let Some(window) = web_sys::window() {
         let _ = window.location().reload();
     }
+}
+
+/// В браузерных тестах страница — раннер тестов, и перезагрузка оборвала бы
+/// прогон: вместо неё — счёт просьб, которые видит тест (переход к другому
+/// ИП, `ui/office.rs`).
+#[cfg(all(test, target_arch = "wasm32"))]
+pub fn reload() {
+    RELOADS.with(|count| count.set(count.get() + 1));
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+thread_local! {
+    /// Сколько раз окно просило перезагрузить страницу.
+    pub static RELOADS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
 /// Адрес сайта — схема, домен и порт (`https://kvartik.com`) — и адрес

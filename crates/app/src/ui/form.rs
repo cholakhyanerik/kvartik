@@ -54,6 +54,12 @@ impl Forms {
     pub fn any(self) -> bool {
         self.0.get() > 0
     }
+
+    /// Открыта ли хоть одна сейчас — в обработчике нажатия, без слежения:
+    /// переход к другому ИП перезагружает страницу (`ui/office.rs`).
+    pub fn busy(self) -> bool {
+        self.0.get_untracked() > 0
+    }
 }
 
 /// Необязательное поле: пусто — `Some(None)`, прочитано — `Some(Some(…))`,

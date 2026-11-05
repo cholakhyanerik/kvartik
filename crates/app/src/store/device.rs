@@ -127,15 +127,17 @@ impl Device {
         self.set("update_tried", &version.to_string())
     }
 
-    /// Скрыты ли первые шаги на главном экране (`ui/onboarding.rs`).
-    pub fn steps_hidden(&self) -> bool {
-        self.get("steps_hidden").is_some()
+    /// Скрыты ли первые шаги на главном экране у ИП базы `base`
+    /// (`ui/onboarding.rs`): у каждого ИП свои, и новый ИП начинает с них
+    /// (задача 38).
+    pub fn steps_hidden(&self, base: &str) -> bool {
+        self.get(&steps_name(base)).is_some()
     }
 
-    /// Скрыть первые шаги на этом устройстве. `false` — `localStorage`
+    /// Скрыть первые шаги у ИП базы `base`. `false` — `localStorage`
     /// отказал: при следующем открытии они появятся снова.
-    pub fn set_steps_hidden(&self) -> bool {
-        self.set("steps_hidden", "1")
+    pub fn set_steps_hidden(&self, base: &str) -> bool {
+        self.set(&steps_name(base), "1")
     }
 
     /// Когда последняя удавшаяся автокопия (задача 29) начала читать базу;
@@ -181,6 +183,31 @@ impl Device {
     /// Запомнить ввод пароля. `false` — `localStorage` отказал.
     pub fn set_password_entered(&self, at: Timestamp) -> bool {
         self.set("password_entered", &at.unix_millis().to_string())
+    }
+
+    /// Ведёт ли устройство больше одного ИП (задача 38): тогда окно при
+    /// открытии читает список конторы (`store/office.rs`). Без метки базы
+    /// конторы не открывают: `indexedDB.open` создал бы её пустой у каждого,
+    /// кто ведёт одного ИП.
+    pub fn office(&self) -> bool {
+        self.get("office").is_some()
+    }
+
+    /// Запомнить, что ИП больше одного. `false` — `localStorage` отказал:
+    /// окно откроет первого ИП, а список найдёт экран конторы.
+    pub fn set_office(&self) -> bool {
+        self.set("office", "1")
+    }
+
+    /// База ИП, открытая на устройстве последней, — для новой вкладки;
+    /// `None` — не помнит.
+    pub fn base(&self) -> Option<String> {
+        self.get("base")
+    }
+
+    /// Запомнить базу, открытую последней. `false` — `localStorage` отказал.
+    pub fn set_base(&self, name: &str) -> bool {
+        self.set("base", name)
     }
 
     /// Что оставил программе калькулятор лендинга (задача 34) — текстом,
@@ -240,10 +267,22 @@ impl Device {
                 "auto_tag",
                 "password_entered",
                 HANDOFF,
+                "office",
+                "base",
             ] {
                 let _ = storage.remove_item(&format!("{}{name}", self.prefix));
             }
         }
+    }
+}
+
+/// Имя записи скрытых первых шагов: у первого ИП — прежнее, какое было до
+/// конторы, у следующих — с именем базы.
+fn steps_name(base: &str) -> String {
+    if base == super::DB_NAME {
+        "steps_hidden".to_owned()
+    } else {
+        format!("steps_hidden.{base}")
     }
 }
 

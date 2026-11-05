@@ -42,7 +42,10 @@
 //!
 //! # База
 //!
-//! База записей одна — [`DB_NAME`], в ней одно хранилище объектов — `records`.
+//! База записей — одна на ИП: первого — [`DB_NAME`], следующих — свои
+//! (задача 38, [`Store::open_base`]); в каждой одно хранилище объектов —
+//! `records`. Список ИП — в базе конторы ([`office::OFFICE_DB`]) того же
+//! устройства: она устроена так же и идёт только в копию всех ИП.
 //! Рядом — база устройства для автокопии ([`autobackup::DEVICE_DB`],
 //! задача 29): в ней не записи, а объекты браузера — папка и ключ, — и в
 //! копию она не идёт.
@@ -61,6 +64,7 @@
 pub mod autobackup;
 pub mod backup;
 pub mod device;
+pub mod office;
 mod settle;
 
 use std::cell::Cell;
@@ -81,10 +85,11 @@ use web_sys::{
 
 use settle::Settle;
 
-/// Имя базы. Данные привязаны к нему и к адресу сайта навсегда
-/// («Происхождение сайта» в CLAUDE.md): сменить его — значит оставить
-/// данные всех пользователей в старой базе.
-pub const DB_NAME: &str = "kvartik";
+/// Имя базы — первого ИП (задача 38: у следующих свои, `model::office`).
+/// Данные привязаны к нему и к адресу сайта навсегда («Происхождение
+/// сайта» в CLAUDE.md): сменить его — значит оставить данные всех
+/// пользователей в старой базе.
+pub const DB_NAME: &str = kvartik_core::model::office::FIRST_BASE;
 
 /// Версия базы: хранилища объектов и индексы. Растёт вместе с шагом
 /// в [`upgrade`] и тестом (Правило 5).
@@ -164,6 +169,27 @@ struct Shared {
     closed: Cell<Option<StoreError>>,
     /// Просили ли в этой сессии постоянное хранение.
     asked_persistence: Cell<bool>,
+    /// Сколько действий сейчас записывается ([`Tx::commit`]): переход
+    /// к другому ИП перезагружает страницу (задача 38), а перезагрузка
+    /// посреди записи отменила бы действие.
+    writing: Cell<usize>,
+}
+
+/// Отметка «действие записывается» на время [`Tx::commit`]: снимается
+/// и на любом раннем выходе.
+struct Writing(Rc<Shared>);
+
+impl Writing {
+    fn start(shared: &Rc<Shared>) -> Self {
+        shared.writing.set(shared.writing.get() + 1);
+        Self(Rc::clone(shared))
+    }
+}
+
+impl Drop for Writing {
+    fn drop(&mut self) {
+        self.0.writing.set(self.0.writing.get().saturating_sub(1));
+    }
 }
 
 impl Shared {
@@ -192,11 +218,26 @@ impl Shared {
 }
 
 impl Store {
-    /// Открыть базу программы. `on_event` получает то, о чём хранилище
-    /// сообщает само: ожидание старой вкладки, закрытие соединения, ответ
-    /// на просьбу о постоянном хранении.
+    /// Открыть базу первого ИП — для браузерных тестов: окно открывает
+    /// базу, которую выбрала контора ([`Store::open_base`]).
+    #[cfg(all(test, target_arch = "wasm32"))]
     pub async fn open(on_event: impl Fn(Event) + 'static) -> Result<Self, StoreError> {
-        Self::open_named(DB_NAME, DB_VERSION, Box::new(on_event)).await
+        Self::open_base(DB_NAME, on_event).await
+    }
+
+    /// Открыть базу ИП по имени (задача 38): первого — [`DB_NAME`] —
+    /// или следующего (`model::office`). `on_event` получает то, о чём
+    /// хранилище сообщает само: ожидание старой вкладки, закрытие
+    /// соединения, ответ на просьбу о постоянном хранении. Имя проверяется
+    /// до открытия:
+    /// `indexedDB.open` молча создаёт пустую базу, и мусор в имени стал бы
+    /// пустой программой (Правило 6).
+    pub async fn open_base(name: &str, on_event: impl Fn(Event) + 'static) -> Result<Self, StoreError> {
+        if !kvartik_core::model::office::is_base_name(name) {
+            log("open", &format!("не имя базы ИП: {name}").into());
+            return Err(StoreError::Failed);
+        }
+        Self::open_named(name, DB_VERSION, Box::new(on_event)).await
     }
 
     /// Открыть базу с этим именем и версией: программа открывает свою,
@@ -210,6 +251,7 @@ impl Store {
             on_event,
             closed: Cell::new(None),
             asked_persistence: Cell::new(false),
+            writing: Cell::new(0),
         });
         let factory = web_sys::window()
             .and_then(|window| window.indexed_db().ok().flatten())
@@ -261,6 +303,11 @@ impl Store {
             _on_versionchange: on_versionchange,
             _on_close: on_close,
         })
+    }
+
+    /// Записывается ли сейчас какое-нибудь действие.
+    pub fn writing(&self) -> bool {
+        self.shared.writing.get() > 0
     }
 
     /// Транзакция только на чтение.
@@ -522,6 +569,7 @@ impl Tx<Write> {
         if writes.items.is_empty() {
             return Ok(());
         }
+        let _writing = Writing::start(&self.shared);
         // Обработчики `complete` и `abort` — до первой записи, иначе ответ
         // браузера может прийти раньше, чем его начнут ждать.
         let done = Settle::new(self.tx.clone());

@@ -29,6 +29,7 @@ use super::clients::Clients;
 use super::documents::Documents;
 use super::icon::{Icon, icon};
 use super::lang::WindowLang;
+use super::office::Office;
 use super::profile::{Profiles, handoff_part, steps_part};
 use super::pwa::{InstallSection, Program};
 use super::route::{self, Router, Screen};
@@ -135,17 +136,19 @@ pub fn Welcome(
 }
 
 /// Скрыты ли первые шаги — одно на главный экран: пока они не скрыты, слова
-/// о незаполненном профиле говорят они.
+/// о незаполненном профиле говорят они. У каждого ИП свои (задача 38): какой
+/// открыт, решается при открытии — тогда и перечитывается.
 #[derive(Clone, Copy)]
 pub struct Steps {
     hidden: RwSignal<bool>,
+    office: Office,
 }
 
 impl Steps {
-    pub fn new() -> Self {
-        Self {
-            hidden: RwSignal::new(Device::new().steps_hidden()),
-        }
+    pub fn new(office: Office) -> Self {
+        let hidden = RwSignal::new(Device::new().steps_hidden(&office.open_name()));
+        Effect::new(move |_| hidden.set(Device::new().steps_hidden(&office.base())));
+        Self { hidden, office }
     }
 
     /// Скрыты — отслеживаемое.
@@ -154,7 +157,7 @@ impl Steps {
     }
 
     fn hide(self) {
-        Device::new().set_steps_hidden();
+        Device::new().set_steps_hidden(&self.office.open_name());
         self.hidden.set(true);
     }
 }

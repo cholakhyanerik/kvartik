@@ -14,6 +14,7 @@ pub mod document;
 pub mod ledger;
 pub mod logo;
 pub mod money;
+pub mod office;
 pub mod profile;
 pub mod record;
 pub mod recurring;

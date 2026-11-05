@@ -30,6 +30,7 @@ mod documents;
 mod install;
 mod ledger;
 pub(super) mod license;
+mod office;
 mod onboarding;
 mod report;
 mod share;

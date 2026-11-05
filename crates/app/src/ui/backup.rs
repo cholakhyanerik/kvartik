@@ -25,15 +25,18 @@
 //! ручка её состояния и событие записи в базу (замер задачи 29, Правило 1).
 
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use kvartik_core::format::autobackup::{self, DeviceTag};
 use kvartik_core::format::backup::{
-    self, BackupError, DeviceKey, Entry, Header, KDF_ITERATIONS, KINDS, MAX_FILE_BYTES,
+    self, BackupError, DeviceKey, Entry, FILE_KINDS, Header, KDF_ITERATIONS, KINDS, MAX_FILE_BYTES,
     MIN_PASSWORD_CHARS, Owner, PasswordProblem, SALT_BYTES, Sealed,
 };
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
 use kvartik_core::model::date::Date;
+use kvartik_core::model::office::{Ip, MAX_IPS};
+use kvartik_core::model::profile::Profile;
 use kvartik_core::model::record::Timestamp;
 use leptos::ev::{Event, MouseEvent, SubmitEvent};
 use leptos::prelude::*;
@@ -42,6 +45,7 @@ use web_sys::{FileSystemDirectoryHandle, HtmlInputElement};
 
 use super::form::Forms;
 use super::icon::{Icon, icon};
+use super::office::Office;
 use super::route::{Router, Screen};
 use super::split::{Task, split};
 use super::storage::{Storage, error_key};
@@ -52,10 +56,12 @@ use crate::platform::crypto::{self, CryptoError};
 use crate::platform::file::{self, Download, FileError};
 use crate::platform::pause::breathe;
 use crate::platform::share::{self, ShareError};
-use crate::store::StoreError;
+use crate::store::{Store, StoreError};
 use crate::store::autobackup::{self as remembered, Saved};
-use crate::store::backup::{self as stored, Failure, Merged, OtherIe, Restored};
+use crate::store::backup::{self as stored, Failure, Merged, OtherIe, Restored, Sealing};
 use crate::store::device::Device;
+use crate::store::office::list as office_list;
+use kvartik_core::format::office as office_route;
 
 /// Что окно знает о копиях.
 #[derive(Clone, Copy)]
@@ -70,9 +76,9 @@ pub struct Backups {
     has_data: RwSignal<bool>,
     /// Сегодня — один раз при открытии (Архитектура, «Время — параметр»).
     today: Option<Date>,
-    /// Автокопия в папку (задача 29) — одной ручкой: `Backups` лежит
-    /// в каждом разделе, и его размер держит `clippy` (`large_enum_variant`
-    /// у частей профиля).
+    /// Автокопия в папку (задача 29) и контора (задача 38) — одной
+    /// ручкой: `Backups` лежит в каждом разделе, и его размер держит `clippy`
+    /// (`large_enum_variant` у частей профиля).
     auto: StoredValue<AutoParts, LocalStorage>,
 }
 
@@ -167,7 +173,7 @@ impl From<Failure> for Hitch {
         match failure {
             Failure::Store(error) => Self::Store(error),
             Failure::Crypto(CryptoError::Unavailable) => Self::NoCrypto,
-            Failure::Crypto(_) | Failure::File(_) => Self::Failed,
+            Failure::Crypto(_) | Failure::File(_) | Failure::TooManyIps(_) => Self::Failed,
             Failure::TooLarge => Self::TooLarge,
         }
     }
@@ -197,12 +203,14 @@ struct Auto {
     entered: Option<Date>,
 }
 
-/// Всё об автокопии — за одной ручкой [`Backups`].
+/// Всё об автокопии — за одной ручкой [`Backups`]. И контора: копия всех ИП,
+/// когда их несколько (задача 38); ставит её окно ([`Backups::attach`]).
 struct AutoParts {
     /// Где автокопия.
     state: RwSignal<Auto>,
     /// Её объекты браузера.
     handles: Handles,
+    office: Option<Office>,
 }
 
 /// Объекты браузера автокопии и её будильник.
@@ -238,8 +246,19 @@ impl Backups {
             auto: StoredValue::new_local(AutoParts {
                 state: RwSignal::new(Auto::default()),
                 handles: Handles::default(),
+                office: None,
             }),
         }
+    }
+
+    /// Контора заведена — копия теперь знает о ней.
+    pub fn attach(&self, office: Office) {
+        self.auto.update_value(|parts| parts.office = Some(office));
+    }
+
+    /// Контора; `None` — ещё не заведена.
+    fn office(&self) -> Option<Office> {
+        self.auto.with_value(|parts| parts.office)
     }
 
     /// Состояние автокопии.
@@ -653,6 +672,11 @@ enum Problem {
     TooLarge,
     /// Сделанная копия вышла больше предела: такую программа не откроет.
     Oversized,
+    /// С копией ИП в программе стало бы больше `MAX_IPS` (задача 38).
+    TooManyIps,
+    /// Копия всех ИП легла не вся — вот почему (задача 38): повтор
+    /// безвреден.
+    Partly(Key),
 }
 
 impl Problem {
@@ -671,6 +695,8 @@ impl Problem {
                 t(lang, Key::BackupOversized),
                 &[&i18n::integer(lang, (MAX_FILE_BYTES >> 20) as i64)],
             ),
+            Self::TooManyIps => fill(t(lang, Key::OfficeTooMany), &[&i18n::integer(lang, MAX_IPS as i64)]),
+            Self::Partly(why) => fill(t(lang, Key::BackupPartly), &[t(lang, why)]),
         }
     }
 }
@@ -724,6 +750,7 @@ impl From<Failure> for Problem {
             Failure::Crypto(error) => error.into(),
             Failure::File(error) => error.into(),
             Failure::TooLarge => Self::Oversized,
+            Failure::TooManyIps(_) => Self::TooManyIps,
         }
     }
 }
@@ -762,6 +789,10 @@ enum Restoring {
     /// Копия другого ИП расшифрована: слить ли её (задача 38, этап 1).
     Other(Rc<Asked>),
     Done(Restored),
+    /// Копия другого ИП легла новым ИП (задача 38).
+    AsNew,
+    /// Копия ИП из списка, а открыт другой: ничего не записано (задача 38).
+    Elsewhere(Arc<Ip>),
     Failed(Problem),
 }
 
@@ -836,10 +867,104 @@ pub(super) struct AutoView {
     forms: Forms,
 }
 
-/// Блок автокопии — его рисует часть книги.
+/// Блок автокопии — его рисует часть книги. И копия для клиента, когда ИП
+/// больше одного (задача 38): нужна она редко, и главному wasm её строки
+/// ни к чему (Правило 1).
 pub(super) fn auto_view(view: AutoView) -> AnyView {
     let AutoView { lang, backups, forms } = view;
-    view! { <AutoSection lang backups forms /> }.into_any()
+    view! {
+        <AutoSection lang backups forms />
+        {move || backups.office().is_some_and(|office| office.several()).then(|| view! {
+            <ClientCopy lang backups forms />
+        })}
+    }
+    .into_any()
+}
+
+/// Копия открытого ИП для клиента (задача 38, решение человека 2026-11-05):
+/// только его база — без других ИП и без списка, — под новым паролем: его
+/// вводят дважды и не запоминают. Ни пароль копий устройства, ни день
+/// последней копии она не трогает: копией программы она не считается.
+/// Имя файла — по ՀՎՀՀ (`backup::client_file_name`).
+#[component]
+fn ClientCopy(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl IntoView {
+    let password = RwSignal::new(String::new());
+    let repeat = RwSignal::new(String::new());
+    let making = RwSignal::new_local(Making::Idle);
+    let busy = move || matches!(making.get(), Making::Busy);
+    forms.hold_while(move || {
+        password.with(|text| !text.is_empty())
+            || repeat.with(|text| !text.is_empty())
+            || matches!(making.get(), Making::Busy)
+    });
+    let submit = move |event: SubmitEvent| {
+        event.prevent_default();
+        if busy() {
+            return;
+        }
+        let job = Job::Client {
+            typed: password.get_untracked(),
+            repeat: repeat.get_untracked(),
+        };
+        making.set(Making::Busy);
+        leptos::task::spawn_local(async move {
+            let outcome = match making_task(backups, job).await {
+                Ok(task) => task.await.and_then(|made| match made {
+                    Made::File(ready) => Ok(ready),
+                    _ => Err(Problem::Say(Key::BackupFailed)),
+                }),
+                Err(_) => Err(Problem::Say(Key::PartFailed)),
+            };
+            if outcome.is_ok() {
+                password.set(String::new());
+                repeat.set(String::new());
+            }
+            making.set(match outcome {
+                Ok(ready) => Making::Ready(Rc::new(ready)),
+                Err(problem) => Making::Failed(problem),
+            });
+        });
+    };
+    view! {
+        <h2>{tr(lang, Key::BackupClientTitle)}</h2>
+        <p class="hint">{tr(lang, Key::BackupClientAbout)}</p>
+        <form class="backup" on:submit=submit>
+            <label>
+                {tr(lang, Key::BackupClientPassword)}
+                <input type="password" autocomplete="new-password" bind:value=password />
+            </label>
+            <label>
+                {tr(lang, Key::BackupRepeatPassword)}
+                <input type="password" autocomplete="new-password" bind:value=repeat />
+            </label>
+            <p class="hint">{counted(lang, Key::BackupClientPasswordHint, MIN_PASSWORD_CHARS as i64)}</p>
+            <button type="submit" class="secondary" disabled=busy>
+                {icon(Icon::Download)}
+                <span>{tr(lang, Key::BackupClientMake)}</span>
+            </button>
+        </form>
+        {move || match making.get() {
+            Making::Idle => None,
+            Making::Busy => Some(view! { <p role="status">{tr(lang, Key::BackupMaking)}</p> }.into_any()),
+            Making::Failed(problem) => Some(view! {
+                <p role="alert">{move || problem.text(lang.get())}</p>
+            }.into_any()),
+            Making::Ready(ready) => {
+                let name = ready.download.name();
+                Some(view! {
+                    <p role="status">{counted(lang, Key::BackupReady, ready.records as i64)}</p>
+                    {(ready.unreadable > 0).then(|| view! {
+                        <p role="alert">{counted(lang, Key::BackupUnreadable, ready.unreadable as i64)}</p>
+                    })}
+                    <div class="actions backup-file">
+                        <a class="button" href=ready.download.url().to_owned() download=ready.download.name()>
+                            {move || fill(t(lang.get(), Key::BackupSaveFile), &[&name])}
+                        </a>
+                    </div>
+                }.into_any())
+            }
+        }}
+    }
 }
 
 /// Карточки автокопии на главном экране — из части книги, вместе
@@ -1362,6 +1487,9 @@ enum Job {
     /// Ручная копия: введённый пароль и повтор нового; `None` — пароль на
     /// устройстве уже задан, и введённый сверяется с ним.
     Manual { typed: String, repeat: Option<String> },
+    /// Копия открытого ИП для клиента — своим новым паролем с повтором
+    /// (задача 38).
+    Client { typed: String, repeat: String },
     /// Что помнит устройство об автокопии и что браузер разрешает с её
     /// папкой.
     Status,
@@ -1424,6 +1552,7 @@ split! {
         Box::pin(async move {
             match job {
                 Job::Manual { typed, repeat } => make(backups, &typed, repeat.as_deref()).await.map(Made::File),
+                Job::Client { typed, repeat } => make_client(backups, &typed, &repeat).await.map(Made::File),
                 Job::Status => Ok(status().await),
                 Job::Enable { typed, repeat, folder, place } => {
                     enable(backups, &typed, repeat.as_deref(), folder, place).await
@@ -1468,6 +1597,8 @@ pub(super) enum RestoreJob {
     Open(Rc<Sealed>, String),
     /// Человек ответил «слить» на вопрос о копии другого ИП.
     Merge(Rc<Asked>),
+    /// Человек ответил «добавить как нового ИП» (задача 38).
+    AsNew(Rc<Asked>),
 }
 
 /// Чем кончилась часть восстановления.
@@ -1476,6 +1607,12 @@ pub(super) enum Recovered {
     Done(Restored),
     /// Копия другого ИП: окно спрашивает, а записано ничего.
     Other(Rc<Asked>),
+    /// Копия легла новым ИП.
+    AsNew,
+    /// Копия ИП из списка, а открыт другой: ничего не записано.
+    Elsewhere(Arc<Ip>),
+    /// Легла не вся — вот почему; повтор безвреден.
+    Partial(Key),
 }
 
 /// Расшифрованная копия другого ИП — ждёт ответа человека (задача 38,
@@ -1538,15 +1675,13 @@ async fn make(backups: Backups, typed: &str, repeat: Option<&str>) -> Result<Rea
     let now = clock::now();
     let today = clock::local_date(now).ok_or(Problem::Say(Key::BackupFailed))?;
     let header = Header::new(env!("CARGO_PKG_VERSION"), now);
-    let made = stored::make(
-        &store,
-        KINDS,
-        &header,
-        &key,
-        device_key.salt(),
-        device_key.iterations(),
-    )
-    .await?;
+    let sealing = Sealing {
+        header: &header,
+        key: &key,
+        salt: device_key.salt(),
+        iterations: device_key.iterations(),
+    };
+    let made = make_file(backups, &store, &sealing).await?;
     let download = Download::text(&made.file, &backup::file_name(today))
         .ok_or(Problem::Say(Key::BackupFailed))?;
     // Новый пароль запоминается, когда копия под ним уже собрана.
@@ -1563,6 +1698,52 @@ async fn make(backups: Backups, typed: &str, repeat: Option<&str>) -> Result<Rea
         records: made.records,
         unreadable: made.unreadable,
     })
+}
+
+/// Копия открытого ИП для клиента (задача 38): своя соль и свой ключ из
+/// нового пароля — пароль копий устройства тут ни при чём и не меняется.
+async fn make_client(backups: Backups, typed: &str, repeat: &str) -> Result<Ready, Problem> {
+    let password = crypto::normalize(typed);
+    if let Some(problem) = backup::new_password_problem(&password, &crypto::normalize(repeat)) {
+        return Err(problem.into());
+    }
+    let salt = crypto::random(SALT_BYTES)?;
+    let key = crypto::derive(&password, &salt, KDF_ITERATIONS).await?;
+    let store = backups.base.get().ok_or(Problem::Say(Key::BackupFailed))?;
+    let now = clock::now();
+    let today = clock::local_date(now).ok_or(Problem::Say(Key::BackupFailed))?;
+    let header = Header::new(env!("CARGO_PKG_VERSION"), now);
+    let sealing = Sealing {
+        header: &header,
+        key: &key,
+        salt: &salt,
+        iterations: KDF_ITERATIONS,
+    };
+    let made = stored::make(&store, KINDS, &sealing).await?;
+    // ՀՎՀՀ — из профиля этой базы; не читается — имя без него.
+    let tin = match store.read() {
+        Ok(tx) => tx.all::<Profile>().await.ok().and_then(Profile::current).and_then(|profile| profile.data().tin.clone()),
+        Err(_) => None,
+    };
+    let download = Download::text(&made.file, &backup::client_file_name(tin.as_ref(), today))
+        .ok_or(Problem::Say(Key::BackupFailed))?;
+    Ok(Ready {
+        download,
+        records: made.records,
+        unreadable: made.unreadable,
+    })
+}
+
+/// Копия программы — ручная и автокопия: у кого список ИП (задача 38) —
+/// всех ИП одним файлом ([`stored::make_all`]), у кого его нет — базы
+/// открытого ИП, как всегда.
+async fn make_file(backups: Backups, store: &Store, sealing: &Sealing<'_>) -> Result<stored::Made, Failure> {
+    if let Some(office) = backups.office()
+        && let Some((office, open_name)) = office.full().await?
+    {
+        return stored::make_all(store, &open_name, &office, sealing).await;
+    }
+    stored::make(store, KINDS, sealing).await
 }
 
 /// Что помнит устройство об автокопии и что браузер разрешает с её папкой.
@@ -1675,15 +1856,13 @@ async fn write_file(backups: Backups) -> Result<Option<Wrote>, Hitch> {
     });
     let key = crypto::Key::stored(saved.key, saved.lock.check().to_vec());
     let header = Header::new(env!("CARGO_PKG_VERSION"), at);
-    let made = stored::make(
-        &store,
-        KINDS,
-        &header,
-        &key,
-        saved.lock.salt(),
-        saved.lock.iterations(),
-    )
-    .await?;
+    let sealing = Sealing {
+        header: &header,
+        key: &key,
+        salt: saved.lock.salt(),
+        iterations: saved.lock.iterations(),
+    };
+    let made = make_file(backups, &store, &sealing).await?;
     folders::write(&saved.folder, &autobackup::file_name(today, tag), made.file.as_bytes()).await?;
     // Старые свои файлы и брошенные временные — уже после нового: не
     // убрались — копия всё равно записана, а лишнее уберёт следующая.
@@ -1777,6 +1956,9 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl
             restoring.set(match outcome {
                 Ok(Recovered::Done(restored)) => Restoring::Done(restored),
                 Ok(Recovered::Other(asked)) => Restoring::Other(asked),
+                Ok(Recovered::AsNew) => Restoring::AsNew,
+                Ok(Recovered::Elsewhere(ip)) => Restoring::Elsewhere(ip),
+                Ok(Recovered::Partial(why)) => Restoring::Failed(Problem::Partly(why)),
                 // Пароль не подошёл — спросить снова, а не выбирать файл
                 // заново.
                 Err(problem @ Problem::Say(Key::BackupWrongFilePassword)) => {
@@ -1787,24 +1969,29 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl
         });
     };
 
-    // «Всё равно слить» копию другого ИП: та же часть wasm, без пароля.
-    let merge = move |_: MouseEvent| {
+    // Ответ на вопрос о копии другого ИП — «Всё равно слить» или «Добавить
+    // как нового ИП»: та же часть wasm, без пароля.
+    let answer = move |job: fn(Rc<Asked>) -> RestoreJob| {
         let Restoring::Other(asked) = restoring.get_untracked() else {
             return;
         };
         restoring.set(Restoring::Busy);
         leptos::task::spawn_local(async move {
-            let outcome = match restoring_task(backups, RestoreJob::Merge(asked)).await {
+            let outcome = match restoring_task(backups, job(asked)).await {
                 Ok(task) => task.await,
                 Err(_) => Err(Problem::Say(Key::PartFailed)),
             };
             restoring.set(match outcome {
                 Ok(Recovered::Done(restored)) => Restoring::Done(restored),
+                Ok(Recovered::AsNew) => Restoring::AsNew,
+                Ok(Recovered::Elsewhere(ip)) => Restoring::Elsewhere(ip),
+                Ok(Recovered::Partial(why)) => Restoring::Failed(Problem::Partly(why)),
                 Ok(Recovered::Other(_)) => Restoring::Failed(Problem::Say(Key::BackupFailed)),
                 Err(problem) => Restoring::Failed(problem),
             });
         });
     };
+
 
     view! {
         <p class="restore">{tr(lang, Key::BackupRestoreAbout)}</p>
@@ -1869,7 +2056,10 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl
                             <button type="button" on:click=move |_| restoring.set(Restoring::Idle)>
                                 {tr(lang, Key::Cancel)}
                             </button>
-                            <button type="button" class="secondary" on:click=merge>
+                            <button type="button" class="secondary" on:click=move |_| answer(RestoreJob::AsNew)>
+                                {tr(lang, Key::BackupOtherIeAsNew)}
+                            </button>
+                            <button type="button" class="secondary" on:click=move |_| answer(RestoreJob::Merge)>
                                 {tr(lang, Key::BackupOtherIeMerge)}
                             </button>
                         </div>
@@ -1913,6 +2103,23 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl
                             }}
                         </p>
                     }.into_any()),
+                    // Другой ИП открывается на экране списка: переход
+                    // перезагружает страницу, и его место там (`ui/office.rs`).
+                    Restoring::AsNew => Some(view! {
+                        <p role="status">{tr(lang, Key::BackupAsNewDone)}</p>
+                        <a class="button" href=Screen::Office.href()>{tr(lang, Key::OfficeTitle)}</a>
+                    }.into_any()),
+                    Restoring::Elsewhere(ip) => Some(view! {
+                        <p role="alert">{move || {
+                            let lang = lang.get();
+                            let name = match ip.name(lang) {
+                                "" => t(lang, Key::OfficeNameless),
+                                name => name,
+                            };
+                            fill(t(lang, Key::BackupElsewhere), &[name])
+                        }}</p>
+                        <a class="button" href=Screen::Office.href()>{tr(lang, Key::OfficeTitle)}</a>
+                    }.into_any()),
                     Restoring::Failed(problem) => Some(view! {
                         <p role="alert">{move || problem.text(lang.get())}</p>
                     }.into_any()),
@@ -1944,13 +2151,31 @@ async fn restore(backups: Backups, job: RestoreJob) -> Result<Recovered, Problem
     match job {
         RestoreJob::Open(sealed, typed) => {
             let password = crypto::normalize(&typed);
-            let (entries, key) = stored::unlock(KINDS, &sealed, &password).await?;
+            let (entries, key) = stored::unlock(FILE_KINDS, &sealed, &password).await?;
+            if backup::is_full(&entries) {
+                return restore_full(backups, &store, (&sealed, &key), entries).await;
+            }
+            // ИП несколько, а копия — ИП из списка, не открытого: в открытую
+            // базу её не класть, а отдельным ИП — тем более (ревью 2026-11-06).
+            let several = Device::new().office();
+            if several && let Some(office) = backups.office() {
+                let office_store = office.store().await.map_err(Failure::from)?;
+                let listed = office_list(&office_store).await.map_err(Failure::from)?.records;
+                if let Some(ip) = office_route::listed(&entries, &listed).map_err(stored::newer)?
+                    && ip.base() != office.open_name()
+                {
+                    return Ok(Recovered::Elsewhere(Arc::new(ip.clone())));
+                }
+            }
+            // Копия одного ИП — копия данных программы, только когда ИП один:
+            // тогда и день копии сдвигается, и пароль её — свой.
+            let own = if several { SameIe::No } else { SameIe::Yes };
             Ok(match stored::restore(&store, KINDS, &entries, OtherIe::Ask).await? {
                 Merged::Done(restored) => Recovered::Done(restored_from(
                     backups,
-                    (&sealed, &entries, &key),
+                    (&sealed, &key),
                     restored,
-                    SameIe::Yes,
+                    Landed::single(&restored, &entries, own),
                 )),
                 Merged::Other { ours, theirs } => Recovered::Other(Rc::new(Asked {
                     sealed,
@@ -1965,15 +2190,95 @@ async fn restore(backups: Backups, job: RestoreJob) -> Result<Recovered, Problem
             match stored::restore(&store, KINDS, &asked.entries, OtherIe::Merge).await? {
                 Merged::Done(restored) => Ok(Recovered::Done(restored_from(
                     backups,
-                    (&asked.sealed, &asked.entries, &asked.key),
+                    (&asked.sealed, &asked.key),
                     restored,
-                    SameIe::No,
+                    Landed::single(&restored, &asked.entries, SameIe::No),
                 ))),
                 // С ответом «слить» хранилище не спрашивает.
                 Merged::Other { .. } => Err(Problem::Say(Key::BackupFailed)),
             }
         }
+        RestoreJob::AsNew(asked) => restore_as_new(backups, &store, &asked).await,
     }
+}
+
+/// Открытый ИП и список конторы, который заводит восстановление (задача 38):
+/// списка ещё нет — открытый ИП ложится в него записью `Ip::first`, чтобы
+/// копия того же ИП слилась с его базой, а пустая база открытого ИП
+/// свободна: её займёт первый ИП копии (`format::office::route`). Список
+/// уже есть — ни того ни другого.
+async fn unlisted(office_store: &Store, open: &Store, open_name: &str) -> Result<(Option<Ip>, Option<String>), Failure> {
+    if !office_list(office_store).await?.records.is_empty() {
+        return Ok((None, None));
+    }
+    let tx = open.read()?;
+    if tx.is_empty().await? {
+        return Ok((None, Some(open_name.to_owned())));
+    }
+    let profile = match tx.all::<Profile>().await {
+        Ok(profiles) => Profile::current(profiles),
+        // Нечитаемый профиль — ИП без имени в списке; его данные целы.
+        Err(StoreError::Damaged) => None,
+        Err(error) => return Err(error.into()),
+    };
+    let today = clock::today().ok_or(Failure::Store(StoreError::Failed))?;
+    Ok((Some(Ip::first(profile.as_ref(), today, clock::now())), None))
+}
+
+/// Копия всех ИП (задача 38): по ИП, маршрутом ядра, в базы этого
+/// устройства; списка конторы не было — он заводится.
+async fn restore_full(
+    backups: Backups,
+    store: &Store,
+    opened: (&Sealed, &crypto::Key),
+    entries: Vec<Entry>,
+) -> Result<Recovered, Problem> {
+    let office = backups.office().ok_or(Problem::Say(Key::BackupFailed))?;
+    // Конторы не было — устройство чьё-то своё, и пароль его копии — его.
+    let had_office = Device::new().office();
+    let office_store = office.store().await.map_err(Failure::from)?;
+    let open_name = office.open_name();
+    let (first, spare) = unlisted(&office_store, store, &open_name).await?;
+    let done = stored::restore_all(store, &open_name, &office_store, entries, first, spare.as_deref()).await?;
+    // Список уже записан — и тогда, когда база не легла: перечитать его
+    // и тронутое (ревью 2026-11-06).
+    office.several_now();
+    office.refresh(&office_store).await;
+    let landed = Landed {
+        touched: done.open_touched,
+        data: done.open_touched,
+        same: if done.covers_all { SameIe::Yes } else { SameIe::No },
+        adopt: !had_office,
+    };
+    let restored = restored_from(backups, opened, done.restored, landed);
+    Ok(match done.failed {
+        None => Recovered::Done(restored),
+        Some(failure) => Recovered::Partial(match Problem::from(failure) {
+            Problem::Say(why) => why,
+            _ => Key::BackupFailed,
+        }),
+    })
+}
+
+/// Копия другого ИП — новым ИП (задача 38): своя база и запись в списке.
+/// Открытая база не меняется, и копией её данных этот файл не считается.
+async fn restore_as_new(backups: Backups, store: &Store, asked: &Asked) -> Result<Recovered, Problem> {
+    let office = backups.office().ok_or(Problem::Say(Key::BackupFailed))?;
+    let office_store = office.store().await.map_err(Failure::from)?;
+    let (first, _) = unlisted(&office_store, store, &office.open_name()).await?;
+    let today = clock::today().ok_or(Problem::Say(Key::BackupFailed))?;
+    let (new, restored) = stored::restore_new(&office_store, &asked.entries, first, today, clock::now()).await?;
+    office.several_now();
+    office.refresh(&office_store).await;
+    let landed = Landed {
+        touched: false,
+        data: false,
+        same: SameIe::No,
+        adopt: false,
+    };
+    restored_from(backups, (&asked.sealed, &asked.key), restored, landed);
+    let _ = new;
+    Ok(Recovered::AsNew)
 }
 
 /// Слитая копия — того же ИП, что в программе, или другого.
@@ -1984,26 +2289,54 @@ enum SameIe {
     No,
 }
 
+/// Что восстановление сделало с открытой базой.
+#[derive(Clone, Copy)]
+struct Landed {
+    /// Что-то в ней изменилось: разделы перечитывают своё.
+    touched: bool,
+    /// В ней теперь есть данные.
+    data: bool,
+    /// В копии — данные программы: этой базы, а при нескольких ИП — всех.
+    same: SameIe,
+    /// Пароль копии может стать паролем копий устройства, если своего нет:
+    /// только у своей копии — не у копии клиента, другого ИП или копии
+    /// одного ИП при нескольких (реестр, задача 38; ревью 2026-11-06).
+    adopt: bool,
+}
+
+impl Landed {
+    /// Копия одного ИП — в открытую базу.
+    fn single(restored: &Restored, entries: &[Entry], same: SameIe) -> Self {
+        Self {
+            touched: restored.added + restored.updated > 0,
+            data: !entries.is_empty(),
+            same,
+            adopt: same == SameIe::Yes,
+        }
+    }
+}
+
 /// Записи копии легли: разделы перечитывают базу, а устройство запоминает
-/// пароль копий и день последней копии. День сдвигает только копия того же
-/// ИП (`backup::last_after_restore`: данные программы лежат в этом файле);
-/// в копии другого ИП их нет, и напоминание о копии не пропадает.
+/// пароль копий и день последней копии. День сдвигает только копия, в которой
+/// данные открытой базы (`backup::last_after_restore`: они лежат в этом
+/// файле); в копии другого ИП их нет, и напоминание о копии не пропадает.
 fn restored_from(
     backups: Backups,
-    (sealed, entries, key): (&Sealed, &[Entry], &crypto::Key),
+    (sealed, key): (&Sealed, &crypto::Key),
     restored: Restored,
-    same: SameIe,
+    landed: Landed,
 ) -> Restored {
-    if restored.added + restored.updated > 0 {
+    if landed.touched {
         backups.base.replaced();
     }
     let device = Device::new();
     let lock = sealed.lock();
     let opened_with = DeviceKey::new(lock.iterations(), lock.salt().to_vec(), key.check().to_vec());
-    // Своего пароля у устройства нет — берётся пароль этой копии: человек
-    // только что показал, что знает его, и следующая копия будет под ним же.
+    // Своего пароля у устройства нет — берётся пароль этой копии, если она
+    // своя: человек только что показал, что знает его, и следующая копия
+    // будет под ним же.
     match (device.backup_key(), opened_with) {
-        (None, Some(opened_with)) => {
+        (None, Some(opened_with)) if landed.adopt => {
             device.set_backup_key(&opened_with);
             backups.key_set.set(true);
             backups.password_entered();
@@ -2012,7 +2345,7 @@ fn restored_from(
         (Some(current), Some(opened_with)) if current == opened_with => backups.password_entered(),
         _ => {}
     }
-    if same == SameIe::Yes
+    if landed.same == SameIe::Yes
         && let Some(at) = backup::last_after_restore(
             device.last_backup(),
             sealed.header().created(),
@@ -2022,7 +2355,7 @@ fn restored_from(
         device.set_last_backup(at);
         backups.last.set(clock::local_date(at));
     }
-    if !entries.is_empty() {
+    if landed.data {
         backups.has_data.set(true);
     }
     restored
@@ -2078,6 +2411,218 @@ mod tests {
             .await
             .expect("ключ получен");
         DeviceKey::new(KDF_ITERATIONS, salt, key.check().to_vec()).expect("пароль устройства")
+    }
+
+    /// Профиль ИП с английским именем.
+    fn named(name: &str) -> Profile {
+        let mut data = kvartik_core::model::profile::ProfileData::default();
+        data.name.en = Line::new(name).expect("годное имя");
+        Profile::save(None, data, clock::now()).expect("годный профиль").expect("новый")
+    }
+
+    /// Записать профиль в базу `name`.
+    async fn seed(name: &str, profile: &Profile) {
+        let store = Store::open_base(name, |_| {}).await.expect("база открыта");
+        let mut writes = Writes::default();
+        writes.insert(profile);
+        store.write().expect("транзакция").commit(writes).await.expect("записано");
+    }
+
+    /// Файл копии одной базы `name` под `PASSWORD`.
+    async fn single_file(name: &str) -> Rc<Sealed> {
+        let store = Store::open_base(name, |_| {}).await.expect("база открыта");
+        let salt = crypto::random(SALT_BYTES).expect("соль");
+        let key = crypto::derive(&crypto::normalize(PASSWORD), &salt, KDF_ITERATIONS).await.expect("ключ");
+        let header = Header::new("0.0.87", clock::now());
+        let sealing = Sealing {
+            header: &header,
+            key: &key,
+            salt: &salt,
+            iterations: KDF_ITERATIONS,
+        };
+        let made = stored::make(&store, KINDS, &sealing).await.expect("копия");
+        Rc::new(open(&made.file).expect("файл открывается"))
+    }
+
+    fn forget_office() {
+        let window = web_sys::window().expect("окно есть");
+        if let Ok(Some(storage)) = window.local_storage() {
+            for name in ["kvartik.office", "kvartik.base"] {
+                let _ = storage.remove_item(name);
+            }
+        }
+        if let Ok(Some(storage)) = window.session_storage() {
+            let _ = storage.remove_item("kvartik.base");
+        }
+    }
+
+    /// Копия одного ИП при нескольких ИП (задача 38, ревью 2026-11-06).
+    /// Копию ИП из списка, когда открыт другой, окно никуда не кладёт,
+    /// а называет его. Своя копия ложится, но день последней копии не
+    /// сдвигает — в ней не все ИП — и пароль её устройству не отдаёт. Копия
+    /// чужого ИП новым ИП — тоже без пароля: он клиента, а не устройства.
+    #[wasm_bindgen_test]
+    async fn single_backups_with_several_ies() {
+        use crate::store::office::OFFICE_DB;
+        crate::store::delete_database(crate::store::DB_NAME).await;
+        crate::store::delete_database(OFFICE_DB).await;
+        forget_device();
+        forget_office();
+        let (today, now) = (clock::today().expect("сегодня"), clock::now());
+        let aram = named("IE Aram");
+        let anna = named("IE Anna");
+        let first = Ip::first(Some(&aram), today, now);
+        let mut second = Ip::new(today, now);
+        second.copy_profile(&anna, now);
+        let stranger = Ip::new(today, now);
+        seed(crate::store::DB_NAME, &aram).await;
+        seed(second.base(), &anna).await;
+        seed(stranger.base(), &named("IE Vahe")).await;
+        let (anna_file, aram_file, vahe_file) = (
+            single_file(second.base()).await,
+            single_file(crate::store::DB_NAME).await,
+            single_file(stranger.base()).await,
+        );
+        crate::store::delete_database(stranger.base()).await;
+        let office_store = Store::open_office(|_| {}).await.expect("контора открыта");
+        let mut writes = Writes::default();
+        writes.insert(&first);
+        writes.insert(&second);
+        office_store.write().expect("транзакция").commit(writes).await.expect("записано");
+        drop(office_store);
+        Device::new().set_office();
+        let open = Rc::new(Store::open_base(crate::store::DB_NAME, |_| {}).await.expect("база открыта"));
+        let backups = backups_over(Rc::clone(&open));
+        backups.attach(Office::new(backups));
+        let mut wrong = Vec::new();
+
+        match restore(backups, RestoreJob::Open(anna_file, PASSWORD.to_owned())).await {
+            Ok(Recovered::Elsewhere(ip)) if ip.id() == second.id() => {}
+            Ok(_) => wrong.push("копию ИП из списка окно не назвало".to_owned()),
+            Err(problem) => wrong.push(format!("копия ИП из списка: {}", problem.text(Lang::Ru))),
+        }
+        let profiles = open.read().expect("чтение").all::<Profile>().await.expect("профили");
+        if profiles.len() != 1 {
+            wrong.push(format!("в открытой базе профилей: {}", profiles.len()));
+        }
+
+        match restore(backups, RestoreJob::Open(aram_file, PASSWORD.to_owned())).await {
+            Ok(Recovered::Done(_)) => {}
+            Ok(_) => wrong.push("своя копия не легла".to_owned()),
+            Err(problem) => wrong.push(format!("своя копия: {}", problem.text(Lang::Ru))),
+        }
+        if Device::new().last_backup().is_some() || Device::new().backup_key().is_some() {
+            wrong.push("копия одного ИП сдвинула день копии или отдала пароль".to_owned());
+        }
+
+        match restore(backups, RestoreJob::Open(Rc::clone(&vahe_file), PASSWORD.to_owned())).await {
+            Ok(Recovered::Other(asked)) => match restore(backups, RestoreJob::AsNew(asked)).await {
+                Ok(Recovered::AsNew) => {}
+                Ok(_) => wrong.push("чужой ИП не лёг новым".to_owned()),
+                Err(problem) => wrong.push(format!("новым ИП: {}", problem.text(Lang::Ru))),
+            },
+            Ok(_) => wrong.push("о копии чужого ИП не спросили".to_owned()),
+            Err(problem) => wrong.push(format!("копия чужого ИП: {}", problem.text(Lang::Ru))),
+        }
+        if Device::new().backup_key().is_some() {
+            wrong.push("копия чужого ИП отдала пароль устройству".to_owned());
+        }
+        // Та же копия ещё раз — ИП уже в списке, под своим именем: окно его
+        // называет, а не заводит второй раз (глазной прогон, 2026-11-06).
+        match restore(backups, RestoreJob::Open(vahe_file, PASSWORD.to_owned())).await {
+            Ok(Recovered::Elsewhere(ip)) if ip.name(Lang::En) == "IE Vahe" => {}
+            Ok(Recovered::Elsewhere(ip)) => wrong.push(format!("новый ИП в списке без имени: {:?}", ip.name(Lang::En))),
+            Ok(_) => wrong.push("копию ИП, добавленного новым, окно не узнало".to_owned()),
+            Err(problem) => wrong.push(format!("та же копия ещё раз: {}", problem.text(Lang::Ru))),
+        }
+        let office_store = Store::open_office(|_| {}).await.expect("контора открыта");
+        let ips = office_list(&office_store).await.expect("список").records;
+        if ips.len() != 3 {
+            wrong.push(format!("в списке {} ИП вместо трёх", ips.len()));
+        }
+        drop((open, office_store));
+        for ip in &ips {
+            crate::store::delete_database(ip.base()).await;
+        }
+        crate::store::delete_database(OFFICE_DB).await;
+        forget_device();
+        forget_office();
+        assert!(wrong.is_empty(), "копии одного ИП при нескольких: {wrong:#?}");
+    }
+
+    /// Копия всех ИП на свежем устройстве (задача 38): легла — и открытую
+    /// базу помнят вкладка и устройство. Иначе следующая перезагрузка — без
+    /// сети, новой версией — выбрала бы ИП по дню добавления, а у ИП копии он
+    /// бывает один на всех (найдено проверкой собранного сайта, 2026-11-06).
+    #[wasm_bindgen_test]
+    async fn a_full_backup_on_a_fresh_device_keeps_the_open_ie() {
+        use crate::store::DB_NAME;
+        use crate::store::office::{OFFICE_DB, tab_base};
+        crate::store::delete_database(DB_NAME).await;
+        crate::store::delete_database(OFFICE_DB).await;
+        forget_device();
+        forget_office();
+        let (today, now) = (clock::today().expect("сегодня"), clock::now());
+        let aram = named("IE Aram");
+        let anna = named("IE Anna");
+        let first = Ip::first(Some(&aram), today, now);
+        let mut second = Ip::new(today, now);
+        second.copy_profile(&anna, now);
+        seed(DB_NAME, &aram).await;
+        seed(second.base(), &anna).await;
+        let office_store = Store::open_office(|_| {}).await.expect("контора открыта");
+        let mut writes = Writes::default();
+        writes.insert(&first);
+        writes.insert(&second);
+        office_store.write().expect("транзакция").commit(writes).await.expect("записано");
+        let file = {
+            let base = Store::open_base(DB_NAME, |_| {}).await.expect("база открыта");
+            let salt = crypto::random(SALT_BYTES).expect("соль");
+            let key = crypto::derive(&crypto::normalize(PASSWORD), &salt, KDF_ITERATIONS).await.expect("ключ");
+            let header = Header::new("0.0.87", clock::now());
+            let sealing = Sealing {
+                header: &header,
+                key: &key,
+                salt: &salt,
+                iterations: KDF_ITERATIONS,
+            };
+            let made = stored::make_all(&base, DB_NAME, &office_store, &sealing).await.expect("копия всех ИП");
+            Rc::new(open(&made.file).expect("файл открывается"))
+        };
+        drop(office_store);
+        for name in [DB_NAME, second.base(), OFFICE_DB] {
+            crate::store::delete_database(name).await;
+        }
+        forget_office();
+        let open = Rc::new(Store::open_base(DB_NAME, |_| {}).await.expect("база открыта"));
+        let backups = backups_over(Rc::clone(&open));
+        backups.attach(Office::new(backups));
+        let mut wrong = Vec::new();
+        match restore(backups, RestoreJob::Open(file, PASSWORD.to_owned())).await {
+            Ok(Recovered::Done(_)) => {}
+            Ok(_) => wrong.push("копия всех ИП легла не вся".to_owned()),
+            Err(problem) => wrong.push(format!("копия всех ИП: {}", problem.text(Lang::Ru))),
+        }
+        let remembered = (tab_base(), Device::new().base());
+        if remembered != (Some(DB_NAME.to_owned()), Some(DB_NAME.to_owned())) {
+            wrong.push(format!("открытую базу не помнят: {remembered:?}"));
+        }
+        if !Device::new().office() {
+            wrong.push("устройство не помнит, что ИП несколько".to_owned());
+        }
+        let office_store = Store::open_office(|_| {}).await.expect("контора открыта");
+        let ips = office_list(&office_store).await.expect("список").records;
+        if ips.len() != 2 {
+            wrong.push(format!("в списке {} ИП вместо двух", ips.len()));
+        }
+        drop((open, office_store));
+        for ip in &ips {
+            crate::store::delete_database(ip.base()).await;
+        }
+        crate::store::delete_database(OFFICE_DB).await;
+        forget_device();
+        forget_office();
+        assert!(wrong.is_empty(), "копия всех ИП на свежем устройстве: {wrong:#?}");
     }
 
     /// Окно копий над базой программы.

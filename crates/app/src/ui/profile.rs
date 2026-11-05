@@ -144,6 +144,15 @@ impl Profiles {
         self.state.with(|state| matches!(state, State::Ready(_)))
     }
 
+    /// Сохранённый профиль; `None` — его нет или он ещё не прочитан.
+    /// Отслеживаемое: по нему контора обновляет имя ИП в списке (задача 38).
+    pub(super) fn profile(&self) -> Option<Arc<Profile>> {
+        self.state.with(|state| match state {
+            State::Ready(profile) => profile.clone(),
+            State::Loading | State::Failed(_) => None,
+        })
+    }
+
     /// Профиля ещё нет — база прочитана, а его в ней нет. Отслеживаемое:
     /// главный экран предлагает заполнить профиль, пока его нет.
     pub fn missing(&self) -> bool {
@@ -475,7 +484,7 @@ fn ProfileBody(ctx: Ctx) -> impl IntoView {
 }
 
 /// Имя ИП на языке окна, а нет его — на любом из заполненных.
-fn name_for(name: &Localized<Line>, lang: Lang) -> String {
+pub(super) fn name_for(name: &Localized<Line>, lang: Lang) -> String {
     std::iter::once(lang)
         .chain(Lang::ALL)
         .map(|lang| name.get(lang).as_str())

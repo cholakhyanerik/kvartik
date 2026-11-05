@@ -20,7 +20,8 @@
 //    телефоне, калькулятор отвечает числом ядра и прячет ненужные поля,
 //    «Открыть Kvartik» берёт введённое с собой и программа предлагает его
 //    в профиль, а старый адрес программы `/#/…` ведёт в /app/ на тот же
-//    экран.
+//    экран. Несколько ИП (задача 38): второй заводится и открывается
+//    перезагрузкой, и первый открывается снова.
 // 2. С сетью: восстановление образца копии, экраны и их формы, карточка
 //    выпущенного документа, PDF, выгрузка с закрытым кварталом, разошедшимся
 //    с поданным, новая копия — каждая из девяти частей;
@@ -376,6 +377,43 @@ async function landing(browser) {
   }
 }
 
+/// Несколько ИП (задача 38): «Добавить ИП» на экране «ИП в программе»
+/// заводит второго и открывает его перезагрузкой страницы — вкладка помнит
+/// его базу, а над экранами его имя; «Открыть» у первого возвращает к нему.
+/// Экран — из части книги, и переход — настоящая перезагрузка, которой
+/// браузерные тесты не делают. В своём контексте браузера: метка конторы
+/// и вторая база не должны попасть в следующие шаги.
+async function office(browser) {
+  const page = await browser.page({ context: true });
+  try {
+    await page.emulate(360);
+    await page.go(`${ORIGIN}/app/`);
+    await page.setLang(opt.lang);
+    checks.check("ИП: рабочий экран", await page.waitFor(WORKING));
+    await go(page, "#/office");
+    checks.check("ИП: «Добавить ИП» нажата", await page.waitFor(`const b = ${BUTTON("#office", s("OfficeAdd"))};
+      if (!b) return null; b.click(); return true;`));
+    checks.check("ИП: открыт новый — вкладка помнит его базу, над экраном его имя", await page.waitFor(`
+      const bar = document.querySelector(".office-bar");
+      return (sessionStorage.getItem("kvartik.base") ?? "").startsWith("kvartik-ip-") && bar
+        && bar.getClientRects().length > 0 && bar.innerText.includes(${JSON.stringify(s("OfficeNameless"))}) ? true : null;`, 30000));
+    // Перезагрузка оставила экран списка — новый ИП пустой, с первыми шагами
+    // на главном.
+    await go(page, "#/");
+    checks.check("ИП: новый — пустой, с первыми шагами", await page.waitFor(VISIBLE("#home .first-steps"), 30000));
+    await go(page, "#/office");
+    checks.check("ИП: «Открыть» у первого нажата", await page.waitFor(`const b = ${BUTTON("#office", s("OfficeOpen"))};
+      if (!b) return null; b.click(); return true;`));
+    checks.check("ИП: открыт первый — вкладка помнит его базу", await page.waitFor(`
+      return sessionStorage.getItem("kvartik.base") === "kvartik" && document.querySelector(".office-bar") ? true : null;`, 30000));
+    checks.check("ИП: без плашки сбоя", await page.eval(NO_PANIC));
+    const errors = [...new Set(page.errors)];
+    checks.check("ИП: без ошибок в консоли", errors.length === 0, errors.slice(0, 8).join(" | "));
+  } finally {
+    await page.close();
+  }
+}
+
 /// Восстановить последний образец копии: в нём есть выпущенные документы.
 /// Пароль образца станет паролем копий устройства.
 async function restore(page) {
@@ -582,6 +620,7 @@ async function main() {
   try {
     await blocked(browser);
     await landing(browser);
+    await office(browser);
 
     const page = await browser.page();
     await page.emulate(360);

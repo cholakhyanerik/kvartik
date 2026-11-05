@@ -32,6 +32,7 @@
 pub mod autobackup;
 pub mod backup;
 pub mod export;
+pub mod office;
 pub(crate) mod base64;
 
 use serde::de::DeserializeOwned;
@@ -92,7 +93,10 @@ use crate::model::record::RecordMeta;
 ///   о выборе пенсионного фонда) и `person.resident` (резидент ли Армении; оба
 ///   `#[serde(default)]`), задача 73. Записи версий 1–13 читаются как есть:
 ///   без полей — не указано.
-pub const FORMAT_VERSION: u32 = 14;
+/// - 15 (0.0.87) — вид `ip` (ИП в списке конторы) и у записи копии метка
+///   базы `base` — копия всех ИП одним файлом (`backup`), задача 38. Поля
+///   прежних видов те же, и записи версий 1–14 читаются как есть.
+pub const FORMAT_VERSION: u32 = 15;
 
 /// Первая версия формата: старше не бывает.
 pub(crate) const FIRST_VERSION: u32 = 1;
@@ -422,11 +426,21 @@ mod tests {
         r#"}}"#
     );
 
-    /// Та же запись в версии 14 — так её пишет эта программа. Выписана
-    /// человеком: версия 14 прибавила поля профилю, а не этой записи,
-    /// и запись отличается только номером.
+    /// Та же запись в версии 14 — так её писали 0.0.69–0.0.86.
     const SAMPLE_V14: &str = concat!(
         r#"{"format_version":14,"record":{"#,
+        r#""meta":{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":1760000000000,"deleted":null},"#,
+        r#""day":"2026-10-12","#,
+        r#""sum":{"minor":150000,"currency":"USD"},"#,
+        r#""rate":{"currency":"USD","per_unit_e4":3619300,"date":"2026-10-09","source":"central_bank"}"#,
+        r#"}}"#
+    );
+
+    /// Та же запись в версии 15 — так её пишет эта программа. Выписана
+    /// человеком: версия 15 прибавила вид записи и метку базы в копии,
+    /// а не поля этой записи, и запись отличается только номером.
+    const SAMPLE_V15: &str = concat!(
+        r#"{"format_version":15,"record":{"#,
         r#""meta":{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":1760000000000,"deleted":null},"#,
         r#""day":"2026-10-12","#,
         r#""sum":{"minor":150000,"currency":"USD"},"#,
@@ -450,8 +464,8 @@ mod tests {
     /// значений — слово в слово образец. Поменялась запись — это новая
     /// версия формата с миграцией (Правило 5), а не правка образца.
     #[test]
-    fn sample_v14_is_pinned() {
-        let record: Probe = decode(SAMPLE_V14).expect("образец версии 14 читается");
+    fn sample_v15_is_pinned() {
+        let record: Probe = decode(SAMPLE_V15).expect("образец версии 15 читается");
         assert_eq!(
             record.meta.id().to_string(),
             "0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a"
@@ -464,14 +478,14 @@ mod tests {
         assert_eq!(record.day, day(2026, 10, 12));
         assert_eq!(record.sum, Money::new(150_000, Currency::Usd));
         assert_eq!(record.rate, probe().rate);
-        assert_eq!(encode(&record), SAMPLE_V14);
+        assert_eq!(encode(&record), SAMPLE_V15);
     }
 
-    /// Записи версий 1–13 читаются той же записью, а пишутся уже версией 14:
+    /// Записи версий 1–14 читаются той же записью, а пишутся уже версией 15:
     /// данные прошлых версий не теряются (Правило 2).
     #[test]
     fn older_samples_still_read() {
-        let current: Probe = decode(SAMPLE_V14).expect("образец версии 14 читается");
+        let current: Probe = decode(SAMPLE_V15).expect("образец версии 15 читается");
         let older = [
             (1, SAMPLE_V1),
             (2, SAMPLE_V2),
@@ -486,12 +500,13 @@ mod tests {
             (11, SAMPLE_V11),
             (12, SAMPLE_V12),
             (13, SAMPLE_V13),
+            (14, SAMPLE_V14),
         ];
         for (version, sample) in older {
             let old: Probe = decode(sample)
                 .unwrap_or_else(|error| panic!("образец версии {version}: {error:?}"));
             assert_eq!(old, current, "версия {version}");
-            assert_eq!(encode(&old), SAMPLE_V14, "версия {version}");
+            assert_eq!(encode(&old), SAMPLE_V15, "версия {version}");
         }
     }
 

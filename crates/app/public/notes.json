@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.87",
+      "date": "2026-11-06",
+      "hy": [
+        "Այժմ մեկ ծրագրում կարելի է վարել մի քանի ԱՁ. պրոֆիլի «ԱՁ-ները ծրագրում» բաժնում կարող եք ավելացնել, բացել և հեռացնել դրանք։ Յուրաքանչյուր ԱՁ ունի իր հաշիվները, մատյանը և հարկը։",
+        "Մի քանի ԱՁ-ի դեպքում պահուստային պատճենը բոլոր ԱՁ-ներինն է՝ մեկ ֆայլով, իսկ մեկ ԱՁ-ի պատճենը կարելի է ստեղծել հաճախորդի համար՝ առանձին գաղտնաբառով, որը ծրագիրը չի հիշում։"
+      ],
+      "ru": [
+        "Теперь в одной программе можно вести несколько ИП: в профиле, в разделе «ИП в программе», их можно добавить, открыть и убрать из списка. У каждого ИП свои счета, книга и налог.",
+        "При нескольких ИП резервная копия — всех ИП одним файлом, а копию одного ИП можно сделать для клиента под отдельным паролем, который программа не запоминает."
+      ],
+      "en": [
+        "You can now keep several entrepreneurs in one app: add, open and remove them under “Entrepreneurs in the app” in your profile. Each has their own invoices, ledger and tax.",
+        "With several entrepreneurs, the backup holds all of them in one file, and you can make a backup of one of them for the client under a separate password the app doesn't remember."
+      ]
+    },
+    {
       "version": "0.0.86",
       "date": "2026-11-06",
       "hy": [
@@ -275,19 +291,6 @@
       "en": [
         "If income is rent, interest, royalties or a sale of assets, you can now choose that tax row on an invoice, an act or a ledger entry: the tax is then calculated by that row, not by your activity code.",
         "In a quarter with such income, the expense form asks for the activity: choose the code for goods and direct expenses, and they will count towards the deduction in full."
-      ]
-    },
-    {
-      "version": "0.0.67",
-      "date": "2026-11-01",
-      "hy": [
-        "2025 թվականից առաջ եռամսյակն այլևս հնարավոր չէ փակել. այդպիսի եռամսյակը հետո չէր կարդացվում, և ծրագիրն անընդհատ հիշեցնում էր դրա մասին։"
-      ],
-      "ru": [
-        "Квартал раньше 2025 года больше нельзя закрыть: такой квартал потом не читался, и программа всё время об этом напоминала."
-      ],
-      "en": [
-        "A quarter before 2025 can no longer be closed: such a quarter couldn't be read afterwards, and the app kept reminding you about it."
       ]
     }
   ]

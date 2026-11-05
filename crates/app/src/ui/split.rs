@@ -188,6 +188,7 @@ pub async fn preload() {
     let _ = super::backup::preload_make().await;
     let _ = super::backup::preload_open().await;
     let _ = super::backup::preload_restore().await;
+    let _ = super::office::preload_office().await;
 }
 
 #[cfg(all(test, target_arch = "wasm32"))]

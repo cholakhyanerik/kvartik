@@ -9,12 +9,24 @@
 //! и базой: прочитать все записи одной транзакцией, собрать и зашифровать
 //! файл; расшифровать, разобрать и слить с базой — тоже одной транзакцией
 //! (одно действие — одна транзакция, Правило 2).
+//!
+//! Копия всех ИП (задача 38) — тот же файл: записи конторы и записи каждой
+//! базы с меткой своего ИП ([`make_all`]). Восстанавливается она по ИП:
+//! куда ляжет каждый, решает маршрут ядра до первой записи, потом список
+//! конторы и каждая база — своей транзакцией, и повтор безвреден
+//! ([`restore_all`], решение человека 2026-11-05).
 
 use kvartik_core::format::FormatError;
 use kvartik_core::format::backup::{
-    self, BackupError, Entry, Header, IV_BYTES, Kind, Lock, MAX_FILE_BYTES, Owner, Relation, Sealed,
+    self, BackupError, Entry, Header, IV_BYTES, KINDS, Kind, Lock, MAX_FILE_BYTES, OFFICE_KINDS, Owner,
+    Relation, Sealed,
 };
+use kvartik_core::format::office::{self as route, RouteError};
+use kvartik_core::model::date::Date;
+use kvartik_core::model::office::{Ip, MAX_IPS};
+use kvartik_core::model::record::Timestamp;
 
+use super::office;
 use super::{Dumped, Store, StoreError, Writes};
 use crate::platform::crypto::{self, CryptoError, Key};
 use crate::platform::pause::breathe;
@@ -31,6 +43,8 @@ pub enum Failure {
     /// Копия вышла больше `MAX_FILE_BYTES`: такую программа не откроет,
     /// и отдавать её человеку — обещать то, чего она не вернёт.
     TooLarge,
+    /// С копией ИП в программе стало бы больше `MAX_IPS`: столько.
+    TooManyIps(usize),
 }
 
 impl From<StoreError> for Failure {
@@ -61,17 +75,58 @@ pub struct Made {
     pub unreadable: usize,
 }
 
-/// Собрать копию всей базы и зашифровать её ключом `key`. Соль и число
-/// итераций, из которых получен ключ, ложатся в замок файла: по ним ключ
-/// получат снова при восстановлении.
-pub async fn make(
-    store: &Store,
-    kinds: &[Kind],
-    header: &Header,
-    key: &Key,
-    salt: &[u8],
-    iterations: u32,
+/// Ключ копии и откуда он: соль и число итераций, из которых его получили,
+/// ложатся в замок файла — по ним ключ получат снова при восстановлении.
+pub struct Sealing<'a> {
+    pub header: &'a Header,
+    pub key: &'a Key,
+    pub salt: &'a [u8],
+    pub iterations: u32,
+}
+
+/// Собрать копию всей базы и зашифровать её.
+pub async fn make(store: &Store, kinds: &[Kind], sealing: &Sealing<'_>) -> Result<Made, Failure> {
+    let (entries, unreadable) = collect(store, kinds).await?;
+    seal(entries, unreadable, sealing).await
+}
+
+/// Собрать копию всех ИП (задача 38) и зашифровать её: записи конторы
+/// и записи базы каждого ИП списка — и убранного: он не стёрт и вернуться
+/// может только с копией — с меткой своего ИП. База открытого ИП
+/// (`open_name`) читается его соединением, остальные открываются по одной.
+/// Каждая база — своей транзакцией: копия — не снимок всех баз одним
+/// моментом, но каждая база в ней целая.
+///
+/// Список ИП — из той же выгрузки конторы, что её записи в файле: иначе ИП,
+/// добавленный между двумя чтениями, оставил бы в файле метки без своего ИП,
+/// и файл не открылся бы (ревью 2026-11-06). Запись ИП не читается — отказ:
+/// база этого ИП молча выпала бы из копии, а день копии сдвинулся бы.
+pub async fn make_all(
+    open: &Store,
+    open_name: &str,
+    office_store: &Store,
+    sealing: &Sealing<'_>,
 ) -> Result<Made, Failure> {
+    let (mut entries, unreadable) = collect(office_store, OFFICE_KINDS).await?;
+    if unreadable > 0 {
+        return Err(Failure::Store(StoreError::Damaged));
+    }
+    let mut unreadable = 0;
+    for ip in route::ips(&entries).map_err(newer)? {
+        let (base, skipped) = if ip.base() == open_name {
+            collect(open, KINDS).await?
+        } else {
+            let other = Store::open_base(ip.base(), |_| {}).await?;
+            collect(&other, KINDS).await?
+        };
+        entries.extend(base.into_iter().map(|entry| entry.in_base(ip.id())));
+        unreadable += skipped;
+    }
+    seal(entries, unreadable, sealing).await
+}
+
+/// Записи базы для копии — и сколько не читается: их видно в консоли.
+async fn collect(store: &Store, kinds: &[Kind]) -> Result<(Vec<Entry>, usize), Failure> {
     let dumped = store.read()?.dump().await?;
     let collected = backup::collect_sliced(kinds, dumped.iter().map(Dumped::raw), &mut breathe)
         .await
@@ -79,18 +134,24 @@ pub async fn make(
     for why in collected.unreadable() {
         super::log("backup", &format!("не вошла в копию: {why}").into());
     }
-    let packed = backup::pack_sliced(header, collected.entries(), &mut breathe).await;
+    let (entries, unreadable) = collected.into_parts();
+    Ok((entries, unreadable.len()))
+}
+
+/// Сжать, зашифровать и запечатать записи копии.
+async fn seal(entries: Vec<Entry>, unreadable: usize, sealing: &Sealing<'_>) -> Result<Made, Failure> {
+    let packed = backup::pack_sliced(sealing.header, &entries, &mut breathe).await;
     let iv = crypto::random(IV_BYTES)?;
-    let lock = Lock::new(iterations, salt.to_vec(), iv).ok_or(CryptoError::Failed)?;
-    let ciphertext = crypto::encrypt(key, lock.iv(), &packed).await?;
-    let file = backup::seal_sliced(header, &lock, &ciphertext, &mut breathe).await;
+    let lock = Lock::new(sealing.iterations, sealing.salt.to_vec(), iv).ok_or(CryptoError::Failed)?;
+    let ciphertext = crypto::encrypt(sealing.key, lock.iv(), &packed).await?;
+    let file = backup::seal_sliced(sealing.header, &lock, &ciphertext, &mut breathe).await;
     if file.len() as u64 > MAX_FILE_BYTES {
         return Err(Failure::TooLarge);
     }
     Ok(Made {
         file,
-        records: collected.entries().len(),
-        unreadable: collected.unreadable().len(),
+        records: entries.len(),
+        unreadable,
     })
 }
 
@@ -180,9 +241,149 @@ pub async fn restore(
     }))
 }
 
+/// Что сделало восстановление копии всех ИП — и когда легло не всё.
+pub struct RestoredAll {
+    /// Записи всех баз вместе.
+    pub restored: Restored,
+    /// Легло ли что-нибудь в базу открытого ИП: тогда её разделы
+    /// перечитывают своё (`Base::replaced`).
+    pub open_touched: bool,
+    /// Были ли в копии все ИП этого устройства — тогда она и копия его
+    /// данных: день последней копии сдвигает только такая (ревью
+    /// 2026-11-06).
+    pub covers_all: bool,
+    /// Список легшего уже записан, а база ИП не легла: почему. Повтор
+    /// безвреден, и окно так и говорит.
+    pub failed: Option<Failure>,
+}
+
+/// Восстановить копию всех ИП (задача 38). Куда ложится каждый ИП копии,
+/// решает маршрут ядра (`format::office::route`) — до первой записи; потом
+/// список конторы — своей транзакцией, и каждая база — своей. Повтор
+/// безвреден: слияние — по идентификатору записи (решение человека
+/// 2026-11-05). `first` — открытый ИП, которого в списке ещё нет: конторы
+/// не было. Он ложится в список вместе с маршрутом, и копия того же ИП
+/// сливается с его базой, а не встаёт рядом вторым. `spare` — пустая база
+/// открытого ИП без списка: её займёт первый ИП копии.
+///
+/// Список — первым: запись списка без данных — пустой ИП, которого видно
+/// и можно убрать, а база без записи в списке потерялась бы. Не легла база —
+/// дальше не идёт, а говорит, что уже легло ([`RestoredAll::failed`]): окно
+/// перечитывает тронутое и просит повторить.
+pub async fn restore_all(
+    open: &Store,
+    open_name: &str,
+    office_store: &Store,
+    entries: Vec<Entry>,
+    first: Option<Ip>,
+    spare: Option<&str>,
+) -> Result<RestoredAll, Failure> {
+    let mut local = office::list(office_store).await?.records;
+    local.extend(first.clone());
+    let route = route::route(entries, &local, spare).map_err(|error| match error {
+        RouteError::TooMany(count) => Failure::TooManyIps(count),
+        RouteError::Format(error) => newer(error),
+    })?;
+    let mut writes = Writes::default();
+    if let Some(first) = &first {
+        writes.insert(first);
+    }
+    for ip in &route.office {
+        writes.update(ip);
+    }
+    office::write(office_store, writes).await?;
+    let covers_all = local
+        .iter()
+        .all(|ip| route.bases.iter().any(|landing| landing.base == ip.base()));
+    let mut done = RestoredAll {
+        restored: Restored {
+            added: 0,
+            updated: 0,
+            unchanged: 0,
+        },
+        open_touched: false,
+        covers_all: covers_all && route.bases.iter().any(|landing| landing.base == open_name),
+        failed: None,
+    };
+    for landing in &route.bases {
+        let landed = if landing.base == open_name {
+            merge_into(open, &landing.entries).await
+        } else {
+            match Store::open_base(&landing.base, |_| {}).await {
+                Ok(other) => merge_into(&other, &landing.entries).await,
+                Err(error) => Err(error.into()),
+            }
+        };
+        match landed {
+            Ok(restored) => {
+                done.open_touched |= landing.base == open_name && restored.added + restored.updated > 0;
+                done.restored.added += restored.added;
+                done.restored.updated += restored.updated;
+                done.restored.unchanged += restored.unchanged;
+            }
+            Err(failure) => {
+                done.failed = Some(failure);
+                break;
+            }
+        }
+    }
+    Ok(done)
+}
+
+/// Восстановить копию одного ИП как нового ИП (задача 38): его записи —
+/// в его новую базу, одной транзакцией, а потом — запись в списке (`first` —
+/// открытый ИП, которого в списке ещё нет). База — первой: не легла — нет
+/// ничего, и повтор не заведёт второго пустого ИП (ревью 2026-11-06); не лёг
+/// список — база не видна, но файл копии у человека, и повтор положит всё.
+pub async fn restore_new(
+    office_store: &Store,
+    entries: &[Entry],
+    first: Option<Ip>,
+    today: Date,
+    now: Timestamp,
+) -> Result<(Ip, Restored), Failure> {
+    let listed = office::list(office_store).await?.records;
+    let count = listed.len() + usize::from(first.is_some()) + 1;
+    if count > MAX_IPS {
+        return Err(Failure::TooManyIps(count));
+    }
+    // Имя, ՀՎՀՀ и запись профиля — сразу из копии (`route::profile`).
+    let mut new = Ip::new(today, now);
+    if let Some(profile) = route::profile(entries).map_err(newer)? {
+        new.copy_profile(&profile, now);
+    }
+    let store = Store::open_base(new.base(), |_| {}).await?;
+    let restored = merge_into(&store, entries).await?;
+    let mut writes = Writes::default();
+    if let Some(first) = &first {
+        writes.insert(first);
+    }
+    writes.insert(&new);
+    office::write(office_store, writes).await?;
+    Ok((new, restored))
+}
+
+/// Слить записи с базой одной транзакцией — без сверки ИП: куда они идут,
+/// уже решено.
+async fn merge_into(store: &Store, entries: &[Entry]) -> Result<Restored, Failure> {
+    let tx = store.write()?;
+    let dumped = tx.dump().await?;
+    let merge = backup::merge(KINDS, entries, dumped.iter().map(Dumped::raw)).map_err(newer)?;
+    let mut writes = Writes::default();
+    for entry in merge.writes() {
+        writes.restore(entry);
+    }
+    tx.commit(writes).await?;
+    Ok(Restored {
+        added: merge.added(),
+        updated: merge.updated(),
+        unchanged: merge.unchanged(),
+    })
+}
+
 /// Запись базы новее программы — то же, что у остального хранилища:
 /// «откройте новую версию».
-fn newer(error: FormatError) -> Failure {
+pub fn newer(error: FormatError) -> Failure {
     match error {
         FormatError::Newer { .. } => Failure::Store(StoreError::Newer),
         FormatError::Damaged(why) => {

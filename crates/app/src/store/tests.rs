@@ -19,6 +19,7 @@ use super::*;
 
 pub(crate) mod autobackup;
 mod backup;
+mod office;
 
 wasm_bindgen_test_configure!(run_in_browser);
 

@@ -98,8 +98,9 @@ use crate::model::date::Date;
 use crate::model::document::Document;
 use crate::model::ledger::Operation;
 use crate::model::logo::Logo;
+use crate::model::office::Ip;
 use crate::model::profile::{Localized, Profile};
-use crate::model::record::{RecordMeta, Timestamp};
+use crate::model::record::{RecordId, RecordMeta, Timestamp};
 use crate::model::recurring::Recurring;
 use crate::model::text::Line;
 use crate::model::tin::Tin;
@@ -290,6 +291,28 @@ pub const KINDS: &[Kind] = &[
     Kind::of::<Opening>(),
 ];
 
+/// Виды записей конторы (задача 38): то, что копия всех ИП берёт из базы
+/// конторы и кладёт обратно. В базу ИП они не идут никогда.
+pub const OFFICE_KINDS: &[Kind] = &[Kind::of::<Ip>()];
+
+/// Все виды, какие бывают в файле копии: записи баз ИП и записи конторы.
+/// Файл разбирается этим списком, а где чему лежать, решает метка базы
+/// ([`Entry::base`]). Ровно [`KINDS`] и [`OFFICE_KINDS`] вместе — это
+/// держит тест: забытый здесь вид сделал бы файл всех ИП нечитаемым.
+pub const FILE_KINDS: &[Kind] = &[
+    Kind::of::<Profile>(),
+    Kind::of::<Logo>(),
+    Kind::of::<Client>(),
+    Kind::of::<Document>(),
+    Kind::of::<Recurring>(),
+    Kind::of::<Operation>(),
+    Kind::of::<Attachment>(),
+    Kind::of::<Closing>(),
+    Kind::of::<License>(),
+    Kind::of::<Opening>(),
+    Kind::of::<Ip>(),
+];
+
 fn find(kinds: &[Kind], name: &str) -> Option<Kind> {
     kinds.iter().copied().find(|kind| kind.name == name)
 }
@@ -328,12 +351,33 @@ pub struct Entry {
     kind: &'static str,
     meta: RecordMeta,
     record: Box<RawValue>,
+    base: Option<RecordId>,
 }
 
 impl Entry {
     /// Вид записи.
     pub const fn kind(&self) -> &'static str {
         self.kind
+    }
+
+    /// Чья база — у копии всех ИП: идентификатор записи ИП конторы
+    /// (`model::office::Ip`). `None` — копия одного ИП или сама запись
+    /// конторы.
+    pub const fn base(&self) -> Option<RecordId> {
+        self.base
+    }
+
+    /// Та же запись с меткой базы ИП `ip` — для копии всех ИП.
+    pub fn in_base(self, ip: RecordId) -> Self {
+        Self {
+            base: Some(ip),
+            ..self
+        }
+    }
+
+    /// Та же запись без метки — для своей базы.
+    pub(crate) fn untagged(self) -> Self {
+        Self { base: None, ..self }
     }
 
     /// Общие поля записи.
@@ -344,6 +388,11 @@ impl Entry {
     /// Строка для базы — та же, что дал бы `format::encode`.
     pub fn stored(&self) -> String {
         wrap(self.record.get())
+    }
+
+    /// Поля записи в JSON текущей версии — без конверта.
+    pub(crate) fn record(&self) -> &str {
+        self.record.get()
     }
 }
 
@@ -376,6 +425,7 @@ fn read_stored(kinds: &[Kind], raw: Raw<'_>) -> Result<Entry, FormatError> {
         kind: kind.name,
         meta: checked.meta,
         record: checked.record,
+        base: None,
     })
 }
 
@@ -396,6 +446,13 @@ impl Collected {
     /// и причина, для консоли разработчика. Человеку окно говорит число.
     pub fn unreadable(&self) -> &[String] {
         &self.unreadable
+    }
+
+    /// Записи и что не вошло — без копирования: копия всех ИП складывает
+    /// записи всех баз в один файл (задача 38), и с файлами книги это
+    /// десятки мегабайт.
+    pub fn into_parts(self) -> (Vec<Entry>, Vec<String>) {
+        (self.entries, self.unreadable)
     }
 }
 
@@ -492,6 +549,8 @@ struct PlainOut<'a> {
 #[derive(Serialize)]
 struct RecordOut<'a> {
     kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    base: Option<RecordId>,
     record: &'a RawValue,
 }
 
@@ -506,6 +565,7 @@ pub fn plaintext(header: &Header, entries: &[Entry]) -> String {
             .iter()
             .map(|entry| RecordOut {
                 kind: entry.kind,
+                base: entry.base,
                 record: &entry.record,
             })
             .collect(),
@@ -878,6 +938,8 @@ struct PlainIn<'a> {
 #[serde(deny_unknown_fields)]
 struct RecordIn<'a> {
     kind: String,
+    #[serde(default)]
+    base: Option<RecordId>,
     #[serde(borrow)]
     record: &'a RawValue,
 }
@@ -929,7 +991,9 @@ where
         let kind = find(kinds, &item.kind)
             .ok_or_else(|| damaged(format!("вид «{}» программе незнаком", item.kind)))?;
         let checked = (kind.check)(inner.format_version, item.record)?;
-        if !seen.insert((kind.name, checked.meta.id())) {
+        // Дважды — в одной базе: одна запись в двух базах ИП бывает — копию
+        // одного ИП слили «всё равно» в другой.
+        if !seen.insert((item.base, kind.name, checked.meta.id())) {
             return Err(damaged(format!(
                 "запись {} {} в копии дважды",
                 kind.name,
@@ -940,9 +1004,40 @@ where
             kind: kind.name,
             meta: checked.meta,
             record: checked.record,
+            base: item.base,
         });
     }
+    whole(&entries)?;
     Ok(entries)
+}
+
+/// Копия устроена как одна из двух ([`Entry::base`]): копия одного ИП — без
+/// меток базы и без записей конторы, а копия всех ИП — записи конторы без
+/// метки и все остальные с меткой своего ИП из этой же копии. Иначе — порча:
+/// запись без своего ИП некуда положить, а запись конторы в базе ИП —
+/// чужая.
+fn whole(entries: &[Entry]) -> Result<(), BackupError> {
+    let ips: BTreeSet<RecordId> = entries
+        .iter()
+        .filter(|entry| entry.kind == Ip::KIND)
+        .map(|entry| entry.meta.id())
+        .collect();
+    let full = !ips.is_empty() || entries.iter().any(|entry| entry.base.is_some());
+    for entry in entries {
+        let fits = match (entry.kind == Ip::KIND, entry.base) {
+            (true, base) => base.is_none(),
+            (false, Some(base)) => ips.contains(&base),
+            (false, None) => !full,
+        };
+        if !fits {
+            return Err(damaged(format!(
+                "запись {} {} не на своём месте в копии",
+                entry.kind,
+                entry.meta.id()
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Сжатый текст копии ([`pack`]), разжатый не больше чем до `limit`
@@ -1206,6 +1301,27 @@ pub fn file_name(today: Date) -> String {
         today.month(),
         today.day()
     )
+}
+
+/// Имя копии одного ИП для клиента (задача 38): `kvartik-12345678-2026-11-06.json`
+/// — по ՀՎՀՀ, а не по имени ИП: имя на чужом письме и с кавычками в имени
+/// файла ломалось бы, а ՀՎՀՀ — восемь цифр. Без ՀՎՀՀ — `kvartik-ip-…`.
+pub fn client_file_name(tin: Option<&Tin>, today: Date) -> String {
+    let who = tin.map_or("ip", Tin::as_str);
+    format!(
+        "kvartik-{who}-{:04}-{:02}-{:02}.json",
+        today.year(),
+        today.month(),
+        today.day()
+    )
+}
+
+/// Копия всех ИП (задача 38): в ней записи конторы или записи с меткой базы.
+/// Такую окно кладёт по ИП (`format::office::route`), а не в открытую базу.
+pub fn is_full(entries: &[Entry]) -> bool {
+    entries
+        .iter()
+        .any(|entry| entry.kind() == Ip::KIND || entry.base().is_some())
 }
 
 /// Пора ли напомнить о копии: данные есть, а копии нет или она сделана

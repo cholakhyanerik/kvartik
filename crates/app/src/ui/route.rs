@@ -42,6 +42,8 @@ pub enum Screen {
     License,
     /// О программе — экран внутри профиля (задача 31).
     About,
+    /// ИП в программе — экран внутри профиля (задача 38).
+    Office,
 }
 
 /// Начало адреса документа: дальше — его идентификатор.
@@ -49,7 +51,7 @@ const DOCUMENT: &str = "#/documents/";
 
 impl Screen {
     /// Экраны без параметров — в порядке разделов.
-    pub const PLAIN: [Screen; 12] = [
+    pub const PLAIN: [Screen; 13] = [
         Screen::Home,
         Screen::Documents,
         Screen::Ledger,
@@ -62,6 +64,7 @@ impl Screen {
         Screen::Backup,
         Screen::License,
         Screen::About,
+        Screen::Office,
     ];
 
     /// Адрес экрана — для ссылок. У главного — `#/`, а не пустой: пустая
@@ -81,6 +84,7 @@ impl Screen {
             Screen::Backup => "#/backup".to_owned(),
             Screen::License => "#/license".to_owned(),
             Screen::About => "#/about".to_owned(),
+            Screen::Office => "#/office".to_owned(),
         }
     }
 
@@ -106,12 +110,12 @@ impl Screen {
         }
     }
 
-    /// Раздел, который подсвечен в меню на этом экране: копия, лицензия
-    /// и «О программе» — часть профиля, годовые платежи, сроки и числа для
-    /// расчёта — налога, документ — раздела документов.
+    /// Раздел, который подсвечен в меню на этом экране: копия, лицензия,
+    /// «О программе» и ИП в программе — часть профиля, годовые платежи, сроки
+    /// и числа для расчёта — налога, документ — раздела документов.
     pub const fn section(self) -> Screen {
         match self {
-            Screen::Backup | Screen::License | Screen::About => Screen::Profile,
+            Screen::Backup | Screen::License | Screen::About | Screen::Office => Screen::Profile,
             Screen::Annual | Screen::Deadlines | Screen::Report => Screen::Tax,
             Screen::Document(_) => Screen::Documents,
             other => other,
@@ -133,6 +137,7 @@ impl Screen {
             Screen::Backup => "backup",
             Screen::License => "license",
             Screen::About => "about",
+            Screen::Office => "office",
         }
     }
 }
@@ -280,6 +285,9 @@ mod tests {
         assert_eq!(Screen::About.section(), Screen::Profile);
         assert_eq!(Screen::About.page(), Screen::About);
         assert_eq!(Screen::About.href(), "#/about");
+        assert_eq!(Screen::Office.section(), Screen::Profile);
+        assert_eq!(Screen::Office.page(), Screen::Office);
+        assert_eq!(Screen::Office.href(), "#/office");
         for screen in [Screen::Home, Screen::Documents, Screen::Ledger, Screen::Clients, Screen::Tax, Screen::Profile] {
             assert_eq!(screen.section(), screen);
             assert_eq!(screen.page(), screen);

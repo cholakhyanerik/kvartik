@@ -43,6 +43,7 @@ use super::clients::Clients;
 use super::documents::{DateField, Documents, kind_key, number_problem, retype, shown_problem};
 use super::form::{CURRENCIES, Forms, TextField, currency_code, currency_key, optional};
 use super::icon::{Icon, icon};
+use super::office;
 use super::profile::Profiles;
 use super::route::{Router, Screen};
 use super::split::{screen, split};
@@ -149,6 +150,10 @@ pub(super) enum BookView {
     Tax(tax::Ctx, tax::Part),
     /// Автокопия на экране копии (`ui/backup.rs`, задача 29).
     Auto(AutoView),
+    /// Полоса открытого ИП и экран списка ИП (`ui/office.rs`, задача 38):
+    /// разметка у них общая с экранами, и своя часть умножила бы общие куски
+    /// (CLAUDE.md, Правило 6).
+    Office(office::OfficeView),
 }
 
 split! {
@@ -163,6 +168,7 @@ split! {
             BookView::Ledger(ctx) => view! { <LedgerBody ctx /> }.into_any(),
             BookView::Tax(ctx, part) => tax::content(ctx, part),
             BookView::Auto(view) => backup::auto_view(view),
+            BookView::Office(view) => office::view(view),
         }
     }
 }
@@ -176,6 +182,11 @@ pub(super) async fn tax_part(ctx: tax::Ctx, part: tax::Part) -> Result<AnyView, 
 /// Автокопия на экране копии — из части книги.
 pub(super) async fn auto_part(view: AutoView) -> Result<AnyView, SplitLoaderError> {
     book_part(BookView::Auto(view)).await
+}
+
+/// Полоса открытого ИП и экран списка ИП — из части книги.
+pub(super) async fn office_view(view: office::OfficeView) -> Result<AnyView, SplitLoaderError> {
+    book_part(BookView::Office(view)).await
 }
 
 /// Где записи книги.

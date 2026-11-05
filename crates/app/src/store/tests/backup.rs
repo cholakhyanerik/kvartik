@@ -4,8 +4,9 @@
 //! к файлу и обратно.
 
 use kvartik_core::format::backup::{
-    DeviceKey, Entry, Header, KDF_ITERATIONS, KINDS, Kind, SALT_BYTES, open,
+    DeviceKey, Entry, FILE_KINDS, Header, KDF_ITERATIONS, KINDS, Kind, SALT_BYTES, is_full, open,
 };
+use kvartik_core::model::office::Ip;
 use kvartik_core::i18n::Lang;
 use kvartik_core::model::profile::{Profile, ProfileData};
 use kvartik_core::model::text::Line;
@@ -16,7 +17,10 @@ use wasm_bindgen::JsCast;
 use super::*;
 use crate::platform::crypto::{self, CryptoError, Key};
 use crate::platform::file::{self as files, Download, FileError};
-use crate::store::backup::{Failure, Merged, OtherIe, Restored, make, restore, unlock};
+use crate::store::backup::{
+    Failure, Made, Merged, OtherIe, Restored, Sealing, make, restore, restore_all as restore_by_ip, unlock,
+};
+use crate::store::office::{OFFICE_DB, list as office_list};
 use crate::store::device::Device;
 
 /// Виды записей проб — вместо `KINDS` программы, в которой их пока нет.
@@ -54,20 +58,25 @@ async fn insert_all(store: &Store, notes: &[Note], tags: &[Tag]) {
         .expect("записи сохранены");
 }
 
+/// Копия базы видов `kinds` ключом `key` из соли `salt`.
+async fn make_with(store: &Store, kinds: &[Kind], key: &Key, salt: &[u8]) -> Result<Made, Failure> {
+    let header = header();
+    let sealing = Sealing {
+        header: &header,
+        key,
+        salt,
+        iterations: KDF_ITERATIONS,
+    };
+    make(store, kinds, &sealing).await
+}
+
 /// Копия всей базы под `PASSWORD` — текстом файла.
 async fn backup_of(store: &Store, salt: &[u8]) -> String {
     let key = key_for(PASSWORD, salt).await;
-    make(
-        store,
-        KINDS_UNDER_TEST,
-        &header(),
-        &key,
-        salt,
-        KDF_ITERATIONS,
-    )
-    .await
-    .expect("копия сделана")
-    .file
+    make_with(store, KINDS_UNDER_TEST, &key, salt)
+        .await
+        .expect("копия сделана")
+        .file
 }
 
 /// Восстановить, как окно до ответа человека: в пробах без профилей
@@ -93,7 +102,7 @@ async fn entries_with(profile: &Profile, salt: &[u8]) -> Vec<Entry> {
         .await
         .expect("профиль сохранён");
     let key = key_for(PASSWORD, salt).await;
-    let made = make(&store, KINDS, &header(), &key, salt, KDF_ITERATIONS)
+    let made = make_with(&store, KINDS, &key, salt)
         .await
         .expect("копия сделана");
     drop(store);
@@ -339,16 +348,9 @@ async fn make_skips_unreadable_and_refuses_newer() {
     put_raw(&store, &key(Note::KIND, RecordId::random()), "не JSON").await;
     let salt = crypto::random(SALT_BYTES).expect("соль");
     let secret = key_for(PASSWORD, &salt).await;
-    let made = make(
-        &store,
-        KINDS_UNDER_TEST,
-        &header(),
-        &secret,
-        &salt,
-        KDF_ITERATIONS,
-    )
-    .await
-    .expect("копия сделана");
+    let made = make_with(&store, KINDS_UNDER_TEST, &secret, &salt)
+        .await
+        .expect("копия сделана");
     assert_eq!((made.records, made.unreadable), (1, 1));
 
     let newer = format!(
@@ -357,15 +359,7 @@ async fn make_skips_unreadable_and_refuses_newer() {
     );
     put_raw(&store, &key(Note::KIND, RecordId::random()), &newer).await;
     assert!(matches!(
-        make(
-            &store,
-            KINDS_UNDER_TEST,
-            &header(),
-            &secret,
-            &salt,
-            KDF_ITERATIONS
-        )
-        .await,
+        make_with(&store, KINDS_UNDER_TEST, &secret, &salt).await,
         Err(Failure::Store(StoreError::Newer))
     ));
     drop(store);
@@ -621,13 +615,21 @@ async fn every_released_backup_restores() {
                 continue;
             }
         };
-        let entries = match unlock(KINDS, &sealed, &crypto::normalize(sample.password)).await {
+        let entries = match unlock(FILE_KINDS, &sealed, &crypto::normalize(sample.password)).await {
             Ok((entries, _)) => entries,
             Err(error) => {
                 wrong.push(format!("{}: {error:?}", sample.path));
                 continue;
             }
         };
+        // Копия всех ИП (формат 15 и новее) — по ИП, в базы свежего
+        // устройства: записи конторы — в список, остальные — в базы.
+        if is_full(&entries) {
+            if let Err(error) = by_ip(&entries, sample.records).await {
+                wrong.push(format!("{}: {error}", sample.path));
+            }
+            continue;
+        }
         let probe = Probe::new();
         let store = probe.open(DB_VERSION).await.expect("база открыта");
         match restore_all(&store, KINDS, &entries).await {
@@ -643,4 +645,27 @@ async fn every_released_backup_restores() {
         probe.delete().await;
     }
     assert!(wrong.is_empty(), "образцы не восстанавливаются: {wrong:#?}");
+}
+
+/// Копия всех ИП — на свежее устройство: своя пустая `kvartik` и пустая
+/// контора. Ложится всё: записи конторы — в список, остальные — в базы;
+/// потом базы стираются.
+async fn by_ip(entries: &[Entry], records: usize) -> Result<(), String> {
+    delete_database(DB_NAME).await;
+    delete_database(OFFICE_DB).await;
+    let open = Store::open_base(DB_NAME, |_| {}).await.map_err(|e| format!("{e:?}"))?;
+    let office = Store::open_office(|_| {}).await.map_err(|e| format!("{e:?}"))?;
+    let listed = entries.iter().filter(|entry| entry.kind() == Ip::KIND).count();
+    let outcome = restore_by_ip(&open, DB_NAME, &office, entries.to_vec(), None, Some(DB_NAME)).await;
+    let ips = office_list(&office).await.map(|listed| listed.records).unwrap_or_default();
+    drop((open, office));
+    for ip in &ips {
+        delete_database(ip.base()).await;
+    }
+    delete_database(OFFICE_DB).await;
+    delete_database(DB_NAME).await;
+    match outcome {
+        Ok(done) if done.restored.added + listed == records && ips.len() == listed => Ok(()),
+        other => Err(format!("ИП {}, восстановление {:?}", ips.len(), other.map(|done| done.restored))),
+    }
 }

@@ -10,6 +10,7 @@ use super::backup::{BackupReminder, Backups};
 use super::clients::Clients;
 use super::documents::{Awaiting, Documents};
 use super::icon::{Icon, icon};
+use super::office::Office;
 use super::onboarding::{Card, FirstSteps, HandoffOffer, Steps};
 use super::profile::Profiles;
 use super::pwa::{InstallSection, Program};
@@ -31,10 +32,12 @@ pub fn Home(
     tax: tax::Ctx,
     /// Стоит ли ещё экран первого запуска.
     welcome: RwSignal<bool>,
+    /// ИП в программе: первые шаги — у каждого свои (задача 38).
+    office: Office,
 ) -> impl IntoView {
     // Сегодня — один раз (Архитектура, «Время — параметр»).
     let today = clock::today();
-    let steps = Steps::new();
+    let steps = Steps::new(office);
     let card = Card {
         lang,
         router,
