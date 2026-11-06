@@ -418,7 +418,8 @@ async function office(browser) {
 /// снимает только прежний экран: новый живой, и нажатие посреди перехода
 /// попадает в него, а не в снимок страницы (`elementFromPoint`, как
 /// браузер ищет цель нажатия). Под мышью кнопка получает точку входа,
-/// а кружок у курсора встаёт над ней. У того, кто выключил анимацию
+/// а кружок у курсора встаёт над ней — виден он, только если у системы есть
+/// мышь. У того, кто выключил анимацию
 /// в системе, — ни перехода, ни одной анимации, ни кружка. У лендинга —
 /// переход между страницами языков в стилях и кружок под мышью.
 /// В своём контексте браузера: эмуляция медиа не должна попасть в
@@ -460,8 +461,16 @@ async function motion(browser) {
     checks.check("движение: под мышью у кнопки — точка входа", Boolean(await hover("#clients")) && await page.waitFor(`
       const b = document.querySelector("[data-hovered]");
       return b && b.style.getPropertyValue("--pointer-x") !== "" ? true : null;`, 3000));
-    checks.check("движение: кружок у курсора — над кнопкой", await page.waitFor(`const c = document.querySelector(".cursor");
-      return c && c.dataset.over === "press" && getComputedStyle(c).display === "block" ? true : null;`, 3000));
+    // Виден ли кружок, решает мышь системы (`hover: hover` и `pointer:
+    // fine`), а не события: у headless Chrome на Linux в CI мыши нет —
+    // и кружка нет, как у телефона. Эмулировать эти признаки протокол
+    // DevTools не умеет (`Emulation.setEmulatedMedia`, Chrome 157,
+    // 2026-11-06), поэтому проверяется то, что верно для этой машины.
+    const pointing = await page.eval(`return matchMedia("(hover: hover) and (pointer: fine)").matches;`);
+    checks.check(`движение: кружок у курсора — над кнопкой, ${pointing ? "виден: мышь есть" : "не виден: мыши нет"}`,
+      await page.waitFor(`const c = document.querySelector(".cursor");
+      return c && c.dataset.over === "press" && getComputedStyle(c).display === ${JSON.stringify(pointing ? "block" : "none")}
+        ? true : null;`, 3000));
 
     await media("reduce");
     await mouse(5, 5);
