@@ -2545,29 +2545,40 @@ ul.report-fields {
   main p a:not([class]),
   :is(button, .button).link .label,
   .notice.due .button .label {
+    position: relative;
     text-decoration: none;
-    background:
-      linear-gradient(currentColor, currentColor) right bottom / 0 0.125rem no-repeat,
-      linear-gradient(var(--border-strong), var(--border-strong)) left bottom / 100% 0.0625rem no-repeat;
-    transition: background-size var(--motion-duration) var(--motion-ease);
-  }
-
-  main p a:not([class]):hover,
-  :is(button, .button).link:hover .label,
-  .notice.due .button:hover .label {
-    background-position: left bottom, left bottom;
-    background-size: 100% 0.125rem, 100% 0.0625rem;
+    background: linear-gradient(var(--border-strong), var(--border-strong)) left bottom / 100% 0.0625rem no-repeat;
   }
 
   /* «Назад» — со стрелкой, и линии в покое у него нет: под мышью — та же. */
   .back > span {
-    background: linear-gradient(currentColor, currentColor) right bottom / 0 0.125rem no-repeat;
-    transition: background-size var(--motion-duration) var(--motion-ease);
+    position: relative;
   }
 
-  .back:hover > span {
-    background-position: left bottom;
-    background-size: 100% 0.125rem;
+  /* Линия цвета ссылки растёт `scale`, а не размером фона: её ведёт
+     видеокарта, без перерисовки каждый кадр (задача 87). */
+  main p a:not([class])::after,
+  :is(button, .button).link .label::after,
+  .notice.due .button .label::after,
+  .back > span::after {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 0.125rem;
+    background: currentColor;
+    scale: 0 1;
+    transform-origin: right;
+    transition: scale var(--motion-duration) var(--motion-ease);
+    content: "";
+  }
+
+  main p a:not([class]):hover::after,
+  :is(button, .button).link:hover .label::after,
+  .notice.due .button:hover .label::after,
+  .back:hover > span::after {
+    scale: 1 1;
+    transform-origin: left;
   }
 
   /* Кнопка-пилюля под мышью заливается цветом из точки, где навели курсор,
@@ -2575,7 +2586,11 @@ ul.report-fields {
      `ui/motion.rs`); подпись «перелистывается» вверх — на её место
      въезжает её же тень цветом заливки (`text-shadow`, без второго текста:
      диктор и тесты видят одну подпись). Кнопки-ссылки, круглые, строки
-     списков и переключатели — без заливки: у них свой вид. */
+     списков и переключатели — без заливки: у них свой вид.
+     Движется здесь только то, что ведёт видеокарта, — `scale`, `translate`,
+     `opacity`: заливка — круг, растущий из точки входа, блик — готовое
+     пятно, которое едет за мышью. `clip-path` и градиент с новым центром
+     перерисовывали кнопку и карточку каждый кадр (замер задачи 87). */
   :where(button, .button):where(:not(.link, .round, .entry, .disabled, :disabled, .seg *, .langs *, .notice.due *)) {
     position: relative;
     isolation: isolate;
@@ -2584,17 +2599,21 @@ ul.report-fields {
 
   :where(button, .button):where(:not(.link, .round, .entry, .disabled, :disabled, .seg *, .langs *, .notice.due *))::before {
     position: absolute;
-    inset: 0;
+    top: calc(var(--pointer-y) * 100%);
+    left: calc(var(--pointer-x) * 100%);
     z-index: -1;
-    border-radius: inherit;
+    width: calc(200% + 2 * var(--control));
+    aspect-ratio: 1;
+    border-radius: var(--radius-round);
     background: var(--fill-hover);
-    clip-path: circle(0 at calc(var(--pointer-x) * 100%) calc(var(--pointer-y) * 100%));
-    transition: clip-path var(--motion-duration) var(--motion-ease);
+    translate: -50% -50%;
+    scale: 0;
+    transition: scale var(--motion-duration) var(--motion-ease);
     content: "";
   }
 
   :where(button, .button):where(:not(.link, .round, .entry, .disabled, :disabled, .seg *, .langs *, .notice.due *)):hover::before {
-    clip-path: circle(150% at calc(var(--pointer-x) * 100%) calc(var(--pointer-y) * 100%));
+    scale: 1;
   }
 
   :where(button, .button):where(:not(.link, .round, .entry, .disabled, :disabled, .seg *, .langs *, .notice.due *)) .label {
@@ -2626,9 +2645,13 @@ ul.report-fields {
 
   /* Карточка под мышью чуть наклоняется вслед за курсором, а по ней
      скользит лёгкий блик. Наклон — только под мышью: в покое у карточки
-     нет трёхмерного преобразования, и текст рисуется как всегда. */
+     нет трёхмерного преобразования, и текст рисуется как всегда. Пятно
+     блика вдвое больше карточки, и карточка его обрезает. Без `mix-blend-mode`: смешивание
+     слоя, который ведёт видеокарта, в повёрнутой карточке Chrome обрезал
+     прямыми краями (глазной прогон задачи 87). */
   [data-tilt] {
     position: relative;
+    overflow: hidden;
     transition: transform var(--motion-follow) var(--motion-ease);
   }
 
@@ -2640,22 +2663,21 @@ ul.report-fields {
 
   [data-tilt]::after {
     position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background: radial-gradient(
-      circle at calc(var(--pointer-x) * 100%) calc(var(--pointer-y) * 100%),
-      var(--decor-glare),
-      transparent 60%
-    );
-    mix-blend-mode: soft-light;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle closest-side, var(--decor-glare), transparent);
+    translate: calc((var(--pointer-x) - 0.5) * 50%) calc((var(--pointer-y) - 0.5) * 50%);
     opacity: 0;
     pointer-events: none;
-    transition: opacity var(--motion-duration) var(--motion-ease);
+    transition: opacity var(--motion-duration) var(--motion-ease),
+      translate var(--motion-follow) var(--motion-ease);
     content: "";
   }
 
   [data-tilt]:hover::after {
-    opacity: 1;
+    opacity: 0.25;
   }
 
   /* Кружок у курсора (`ui/motion.rs` ведёт его за мышью): плавно догоняет

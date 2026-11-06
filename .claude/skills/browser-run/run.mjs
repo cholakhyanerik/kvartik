@@ -348,6 +348,100 @@ async function measure() {
   }
 }
 
+/// Движение под мышью (задача 87): на лендинге `/ru/`, 1280 точек, процессор
+/// ×4 — мышь над простым текстом (контроль: только кружок у курсора),
+/// по карточке «что умеет» (наклон и блик), на главную кнопку и с неё
+/// (заливка и подпись), на ссылку подвала и с неё (линия). Трассировка
+/// Chrome считает перерисовки (`Paint`) и пересчёты стиля главного потока
+/// и его занятость, цикл `requestAnimationFrame` — пропущенные кадры
+/// (промежуток больше полутора кадров при 60 Гц). Сборки — по кругу,
+/// каждая в своём браузере; медиана `--runs` кругов. Эффект, который ведёт
+/// видеокарта (`scale`, `translate`, `opacity`), перерисовок почти не даёт.
+async function motion() {
+  const SCENARIOS = {
+    plain: { selector: ".hero .lead", moves: (b) => Array.from({ length: 61 }, (_, i) =>
+      [b.x + 10 + b.w * 0.8 * (i / 60), b.y + b.h * 0.5]), start: (b) => [b.x + 10, b.y + 10] },
+    card: { selector: ".cards li:nth-child(2)", moves: (b) => Array.from({ length: 61 }, (_, i) =>
+      [b.x + b.w * (0.1 + 0.8 * (i / 60)), b.y + b.h * (0.5 + 0.35 * Math.sin((i / 60) * 6.28))]),
+      start: (b) => [b.x - 20, b.y + b.h / 2] },
+    button: { selector: ".hero .button", hover: (b) => [[b.x + 16, b.y + b.h / 2], [b.x + b.w + 40, b.y + b.h / 2]],
+      start: (b) => [b.x - 40, b.y + b.h / 2] },
+    link: { selector: "footer a", hover: (b) => [[b.x + 6, b.y + b.h / 2], [b.x - 30, b.y - 30]],
+      start: (b) => [b.x - 30, b.y - 30] },
+  };
+  const results = DISTS.map(() => ({}));
+  for (let round = 0; round < Number(opt.runs); round++) {
+    for (const [index, dist] of DISTS.entries()) {
+      const srv = own(dist, 8821 + index);
+      const browser = await Browser.launch({ work: WORK, name: `motion-${index}`, port: 9336 + index });
+      try {
+        for (const [name, s] of Object.entries(SCENARIOS)) {
+          const page = await browser.page({ context: true });
+          const events = [];
+          let complete;
+          const finished = new Promise((r) => { complete = r; });
+          page.on((msg) => {
+            if (msg.method === "Tracing.dataCollected") events.push(...msg.params.value);
+            if (msg.method === "Tracing.tracingComplete") complete();
+          });
+          await page.emulate(1280);
+          await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
+          await page.go(`http://127.0.0.1:${srv.port}/ru/`);
+          await page.waitFor(`return document.fonts.ready.then(() => true);`);
+          await sleep(500);
+          const mouse = ([x, y]) => page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+          const b = await page.eval(`const e = document.querySelector(${JSON.stringify(s.selector)});
+            e.scrollIntoView({ block: "center" }); const r = e.getBoundingClientRect();
+            return { x: r.x, y: r.y, w: r.width, h: r.height };`);
+          await mouse(s.start(b));
+          await sleep(300);
+          await page.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+          await page.send("Tracing.start", { transferMode: "ReportEvents",
+            traceConfig: { includedCategories: ["devtools.timeline", "disabled-by-default-devtools.timeline"] } });
+          await page.eval(`window.__gaps = []; let last = performance.now(); window.__run = true;
+            const tick = (t) => { if (!window.__run) return; window.__gaps.push(t - last); last = t; requestAnimationFrame(tick); };
+            requestAnimationFrame(tick); return true;`);
+          if (s.moves) {
+            for (const at of s.moves(b)) { await mouse(at); await sleep(16); }
+            await mouse(s.start(b));
+            await sleep(600);
+          } else {
+            for (let n = 0; n < 2; n++) {
+              for (const at of s.hover(b)) { await mouse(at); await sleep(700); }
+            }
+          }
+          const gaps = await page.eval(`window.__run = false; return window.__gaps.slice(1);`);
+          await page.send("Tracing.end");
+          await finished;
+          await page.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+          const paints = events.filter((e) => e.name === "Paint" && e.ph === "X");
+          const tid = paints[0]?.tid ?? events.find((e) => e.name === "UpdateLayoutTree")?.tid;
+          (results[index][name] ??= []).push({
+            paints: paints.length,
+            style: events.filter((e) => e.tid === tid && e.name === "UpdateLayoutTree").length,
+            busy: events.filter((e) => e.tid === tid && e.ph === "X" && e.name === "RunTask")
+              .reduce((sum, e) => sum + (e.dur ?? 0), 0) / 1000,
+            dropped: gaps.filter((g) => g > (1000 / 60) * 1.5).length,
+          });
+          await page.close();
+        }
+      } finally {
+        browser.close();
+        await srv.stop();
+      }
+    }
+  }
+  const median = (xs) => [...xs].sort((a, b) => a - b)[xs.length >> 1];
+  for (const [index, dist] of DISTS.entries()) {
+    for (const [name, runs] of Object.entries(results[index])) {
+      const pick = (key) => median(runs.map((r) => r[key]));
+      console.log(`${path.relative(REPO, dist) || dist} ${name}: перерисовок ${pick("paints")}, пересчётов стиля ${pick("style")}, `
+        + `главный поток ${Math.round(pick("busy"))} мс, пропущено кадров ${pick("dropped")} (медиана ${runs.length}; Chrome ${await chromeVersion()})`);
+    }
+    checks.check(`${path.relative(REPO, dist) || dist}: замер движения дошёл до конца`, Object.keys(results[index]).length === 4);
+  }
+}
+
 async function chromeVersion() {
   // `chrome.exe --version` на Windows открывает окно вместо ответа: версия —
   // имя папки рядом с программой (2026-10-13).
@@ -374,7 +468,7 @@ async function pdf() {
   }
 }
 
-const SCENARIOS = { screens, offline, update, install, measure, pdf };
+const SCENARIOS = { screens, offline, update, install, measure, motion, pdf };
 try {
   if (!SCENARIOS[scenario]) throw new Error(`нет сценария «${scenario}»: ${Object.keys(SCENARIOS).join(", ")}`);
   await SCENARIOS[scenario]();

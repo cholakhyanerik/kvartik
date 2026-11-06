@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.90",
+      "date": "2026-11-07",
+      "hy": [
+        "Մկնիկի տակ շարժումը դարձել է ավելի սահուն և թեթև համակարգչի համար. կոճակների լցումը, հղումների տակի գիծը և քարտերի փայլն այժմ նկարում է վիդեոքարտը, և էջն ամեն կադր չի վերանկարվում։"
+      ],
+      "ru": [
+        "Движение под мышью стало плавнее и легче для компьютера: заливку кнопок, линию под ссылками и блик на карточках теперь рисует видеокарта, и страница не перерисовывается каждый кадр."
+      ],
+      "en": [
+        "Motion under the mouse is smoother and lighter on your computer: the button fill, the line under links and the glare on cards are now drawn by the graphics card, so the page is no longer repainted every frame."
+      ]
+    },
+    {
       "version": "0.0.89",
       "date": "2026-11-06",
       "hy": [
@@ -269,22 +282,6 @@
       "en": [
         "Home now has “First steps”: from your business details to your first invoice and its PDF. If you don't need them, you can hide them.",
         "In the profile, the rate and the last day for the return and tax now appear under the activity code."
-      ]
-    },
-    {
-      "version": "0.0.70",
-      "date": "2026-11-02",
-      "hy": [
-        "Հանրային սնունդով 2025 թվականի եռամսյակն այժմ ասում է, որ հաշվարկված է Երևանի կանոններով. եթե աշխատել եք միայն Երևանից դուրս, հաշվարկեք այն հաշվապահի հետ։",
-        "Եթե հանրային սննդի կողքին այլ եկամուտ ունեք, հարկի էկրանը հիշեցնում է հանրային սննդի հայտարարության մասին։"
-      ],
-      "ru": [
-        "Квартал 2025 года с общепитом теперь говорит, что посчитан по правилам Еревана: если вы работали только вне Еревана, считайте его с бухгалтером.",
-        "Если рядом с общепитом есть другой доход, экран налога напоминает о заявлении об общепите."
-      ],
-      "en": [
-        "A 2025 quarter with catering now says it's calculated by the rules for Yerevan: if you worked only outside Yerevan, calculate it with your accountant.",
-        "If you have other income next to catering, the tax screen reminds you about the catering declaration."
       ]
     }
   ]
