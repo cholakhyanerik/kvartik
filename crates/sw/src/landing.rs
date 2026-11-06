@@ -218,7 +218,7 @@ fn calculator(lang: Lang, calc: &Calc, app: &str) -> String {
         </div>
         <p class="note" data-state="loading" hidden>{loading}</p>
         <p class="note" data-state="failed" role="alert" hidden>{failed}</p>
-        <p class="actions"><a class="button" href="{app}" data-handoff>{open}</a></p>
+        <p class="actions"><a class="button" href="{app}" data-handoff><span class="label">{open}</span></a></p>
         <p class="hint">{handoff}</p>
       </section>
 "#,
@@ -279,7 +279,7 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
     let mut features = String::new();
     for (title, about) in FEATURES {
         features.push_str(&format!(
-            "          <li>\n            <h3>{}</h3>\n            <p>{}</p>\n          </li>\n",
+            "          <li data-tilt>\n            <h3>{}</h3>\n            <p>{}</p>\n          </li>\n",
             text(title),
             text(about)
         ));
@@ -323,7 +323,7 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
       <section class="hero">
         <h1>{headline}</h1>
         <p class="lead">{lead}</p>
-        <p class="actions"><a class="button" href="{app}" data-handoff>{open}</a></p>
+        <p class="actions"><a class="button" href="{app}" data-handoff><span class="label">{open}</span></a></p>
         <p class="trial">{trial} {after_trial}</p>
       </section>
 {calculator}      <section aria-labelledby="features">
@@ -331,17 +331,17 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
         <ul class="cards">
 {features}        </ul>
       </section>
-      <section class="card" aria-labelledby="calendar">
+      <section class="card" aria-labelledby="calendar" data-tilt>
         <h2 id="calendar">{calendar_title}</h2>
         <p>{calendar_text}</p>
-        <p class="actions"><a class="button secondary" href="{webcal}">{subscribe}</a></p>
+        <p class="actions"><a class="button secondary" href="{webcal}"><span class="label">{subscribe}</span></a></p>
         <p class="hint">{subscribe_hint}</p>
         <p class="address">{calendar}</p>
       </section>
-      <section class="card" aria-labelledby="fit">
+      <section class="card" aria-labelledby="fit" data-tilt>
         <h2 id="fit">{fit_title}</h2>
         <p>{fit_text}</p>
-        <p class="actions"><a class="button" href="{app}" data-handoff>{open}</a></p>
+        <p class="actions"><a class="button" href="{app}" data-handoff><span class="label">{open}</span></a></p>
       </section>
     </main>
     <footer>

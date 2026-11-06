@@ -584,7 +584,7 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
                             view! {
                                 <span class="office-actions">
                                     <button type="button" on:click=move |_| open(to.clone())>
-                                        {t(lang, Key::OfficeOpen)}
+                                        <span class="label">{t(lang, Key::OfficeOpen)}</span>
                                     </button>
                                     <button
                                         type="button"
@@ -592,7 +592,7 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
                                         disabled=move || office.busy.get()
                                         on:click=move |_| mark(id, Ip::remove)
                                     >
-                                        {t(lang, Key::OfficeRemove)}
+                                        <span class="label">{t(lang, Key::OfficeRemove)}</span>
                                     </button>
                                 </span>
                             }
@@ -623,7 +623,7 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
                                 disabled=move || office.busy.get()
                                 on:click=move |_| mark(id, Ip::bring_back)
                             >
-                                {t(lang, Key::OfficeBringBack)}
+                                <span class="label">{t(lang, Key::OfficeBringBack)}</span>
                             </button>
                         </li>
                     }
@@ -659,7 +659,7 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
         <ul class="list">{rows}</ul>
         {problem}
         <button type="button" disabled=move || office.busy.get() on:click=add>
-            {tr(lang, Key::OfficeAdd)}
+            <span class="label">{tr(lang, Key::OfficeAdd)}</span>
         </button>
         <p class="hint">{tr(lang, Key::OfficeAddAbout)}</p>
         {removed}

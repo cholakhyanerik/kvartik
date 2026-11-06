@@ -409,3 +409,242 @@ footer p {
     font-size: var(--font-size-hero);
   }
 }
+
+/* Движение (задача 86) — то же, что у окна (base.css): одна скорость
+   и кривая из tokens.css, всё — внутри `prefers-reduced-motion:
+   no-preference`, наведение — только с мышью. Где мышь, пишет landing.js
+   (--pointer-…, --pull-…) и ведёт кружок курсора. */
+
+/* Переход между страницами языков (View Transitions между документами):
+   прежняя растворяется, новая въезжает снизу, шапка и круги стоят на
+   месте, а подсветка языка переезжает к новому. Программа в /app/ так не
+   открывается: переход нужен обеим страницам, а её первый кадр — пустой. */
+@media (prefers-reduced-motion: no-preference) {
+  @view-transition {
+    navigation: auto;
+  }
+
+  .top {
+    view-transition-name: top;
+  }
+
+  .decor {
+    view-transition-name: decor;
+  }
+
+  .langs a[aria-current="page"] {
+    view-transition-name: lang;
+  }
+
+  ::view-transition-group(*) {
+    animation-duration: var(--motion-duration);
+    animation-timing-function: var(--motion-ease);
+  }
+
+  ::view-transition-old(root) {
+    animation: motion-out var(--motion-duration) var(--motion-ease) both;
+  }
+
+  ::view-transition-new(root) {
+    animation: motion-in var(--motion-duration) var(--motion-ease) both;
+  }
+}
+
+@keyframes motion-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes motion-in {
+  from {
+    opacity: 0;
+    translate: 0 var(--motion-rise);
+  }
+}
+
+/* Появление при прокрутке: разделы, карточки и подвал выплывают снизу,
+   пока входят в окно, а карточки ряда — «лесенкой», каждая на шаг позже
+   соседа. Время — прокрутка (`animation-timeline: view()`): первый экран
+   на месте сразу, а браузер без такой шкалы (и поисковик) видит всё как
+   есть. Раздел карточек сам не выплывает: его заголовок и карточки — по
+   отдельности, иначе прозрачность сложилась бы дважды. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    main > section:not(.hero, :has(.cards)),
+    main > section > h2,
+    .cards li,
+    footer {
+      animation-name: motion-in;
+      animation-fill-mode: both;
+      animation-timing-function: linear;
+      animation-timeline: view();
+      animation-range: entry 0% entry var(--motion-reveal);
+    }
+
+    @media (min-width: 40rem) {
+      .cards li:nth-child(2n) {
+        animation-range: entry var(--motion-step) entry calc(var(--motion-reveal) + var(--motion-step));
+      }
+    }
+
+    @media (min-width: 60rem) {
+      .cards li:nth-child(2n) {
+        animation-range: entry 0% entry var(--motion-reveal);
+      }
+
+      .cards li:nth-child(3n + 2) {
+        animation-range: entry var(--motion-step) entry calc(var(--motion-reveal) + var(--motion-step));
+      }
+
+      .cards li:nth-child(3n) {
+        animation-range: entry calc(2 * var(--motion-step)) entry calc(var(--motion-reveal) + 2 * var(--motion-step));
+      }
+    }
+  }
+}
+
+/* Без мыши или без движения кружка у курсора нет вовсе. */
+.cursor {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) and (hover: hover) and (pointer: fine) {
+  /* Языки под мышью меняют фон мягко, а не щелчком. */
+  .langs a {
+    transition: background-color var(--motion-duration) var(--motion-ease);
+  }
+
+  /* Ссылка словами: тонкая линия под ней видна всегда — ссылку отличает не
+     только цвет (WCAG 1.4.1), — а под мышью линия цвета ссылки
+     прорисовывается слева направо и уходит вправо. */
+  footer a {
+    text-decoration: none;
+    background:
+      linear-gradient(currentColor, currentColor) right bottom / 0 0.125rem no-repeat,
+      linear-gradient(var(--border-strong), var(--border-strong)) left bottom / 100% 0.0625rem no-repeat;
+    transition: background-size var(--motion-duration) var(--motion-ease);
+  }
+
+  footer a:hover {
+    background-position: left bottom, left bottom;
+    background-size: 100% 0.125rem, 100% 0.0625rem;
+  }
+
+  /* Кнопка под мышью заливается цветом из точки, где навели курсор,
+     и сжимает заливку в точку, где он ушёл; подпись «перелистывается»
+     вверх — на её место въезжает её же тень цветом заливки (`text-shadow`:
+     второго текста в странице нет). Главная ещё и слегка тянется к курсору,
+     как магнит. */
+  .button {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    translate: calc(var(--pull-x) * var(--motion-pull)) calc(var(--pull-y) * var(--motion-pull));
+    transition: translate var(--motion-follow) var(--motion-ease);
+  }
+
+  .button.secondary {
+    translate: none;
+  }
+
+  .button::before {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--fill-hover);
+    clip-path: circle(0 at calc(var(--pointer-x) * 100%) calc(var(--pointer-y) * 100%));
+    transition: clip-path var(--motion-duration) var(--motion-ease);
+    content: "";
+  }
+
+  .button.secondary::before {
+    background: var(--fill-hover-soft);
+  }
+
+  .button:hover::before {
+    clip-path: circle(150% at calc(var(--pointer-x) * 100%) calc(var(--pointer-y) * 100%));
+  }
+
+  .button .label {
+    text-shadow: 0 var(--motion-flip) var(--on-fill-hover);
+    transition: translate var(--motion-duration) var(--motion-ease);
+  }
+
+  .button.secondary .label {
+    text-shadow: 0 var(--motion-flip) var(--on-fill-hover-soft);
+  }
+
+  .button:hover .label {
+    translate: 0 calc(-1 * var(--motion-flip));
+  }
+
+  /* Карточка под мышью чуть наклоняется вслед за курсором, по ней скользит
+     лёгкий блик. В покое трёхмерного преобразования нет: текст рисуется
+     как всегда. У калькулятора наклона нет — в нём вводят. */
+  [data-tilt] {
+    position: relative;
+    transition: transform var(--motion-follow) var(--motion-ease);
+  }
+
+  [data-tilt]:hover {
+    transform: perspective(75rem)
+      rotateX(calc((0.5 - var(--pointer-y)) * 2 * var(--motion-tilt)))
+      rotateY(calc((var(--pointer-x) - 0.5) * 2 * var(--motion-tilt)));
+  }
+
+  [data-tilt]::after {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: radial-gradient(
+      circle at calc(var(--pointer-x) * 100%) calc(var(--pointer-y) * 100%),
+      var(--decor-glare),
+      transparent 60%
+    );
+    mix-blend-mode: soft-light;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--motion-duration) var(--motion-ease);
+    content: "";
+  }
+
+  [data-tilt]:hover::after {
+    opacity: 1;
+  }
+
+  /* Кружок у курсора (landing.js ведёт его за мышью): плавно догоняет
+     стрелку, растёт над тем, что нажимается, и обращает цвет под собой.
+     Стрелка системы остаётся, а над полем ввода кружка нет. */
+  .cursor {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 1;
+    display: block;
+    width: 1.25rem;
+    height: 1.25rem;
+    margin: -0.625rem 0 0 -0.625rem;
+    border-radius: var(--radius-round);
+    background: var(--decor-cursor);
+    mix-blend-mode: difference;
+    opacity: 0;
+    pointer-events: none;
+    transition: translate var(--motion-follow) var(--motion-ease),
+      scale var(--motion-duration) var(--motion-ease),
+      opacity var(--motion-duration) var(--motion-ease);
+  }
+
+  .cursor[data-over] {
+    opacity: 1;
+  }
+
+  .cursor[data-over="press"] {
+    scale: 2.5;
+  }
+
+  .cursor[data-over="text"] {
+    scale: 0;
+  }
+}

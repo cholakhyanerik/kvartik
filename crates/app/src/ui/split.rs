@@ -136,7 +136,7 @@ fn failed(lang: ReadSignal<Lang>, back: impl Fn() + Copy + Send + Sync + 'static
     view! {
         <p role="alert">{tr(lang, Key::PartFailed)}</p>
         <button type="button" class="secondary" on:click=move |_| back()>
-            {tr(lang, Key::Cancel)}
+            <span class="label">{tr(lang, Key::Cancel)}</span>
         </button>
     }
     .into_any()

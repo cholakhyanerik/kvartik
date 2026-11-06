@@ -466,7 +466,7 @@ fn UpdateCard(lang: ReadSignal<Lang>, program: Program) -> impl IntoView {
                 <h2 id=TITLE tabindex="-1">{tr(lang, Key::UpdateTitle)}</h2>
                 <UpdateNews lang program />
                 <button type="button" class="wide" on:click=move |_| program.dismiss()>
-                    {tr(lang, Key::UpdateGotIt)}
+                    <span class="label">{tr(lang, Key::UpdateGotIt)}</span>
                 </button>
                 <p class="hint">{tr(lang, Key::UpdateKeepsData)}</p>
             </div>
@@ -559,7 +559,7 @@ pub fn InstallSection(lang: ReadSignal<Lang>, program: Program) -> impl IntoView
                         disabled=move || state() == Install::Asking
                         on:click=move |_| program.press_install()
                     >
-                        {tr(lang, Key::InstallButton)}
+                        <span class="label">{tr(lang, Key::InstallButton)}</span>
                     </button>
                     {move || open().then(|| view! {
                         <div class="install-steps">

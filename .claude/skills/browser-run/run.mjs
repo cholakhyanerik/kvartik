@@ -112,6 +112,11 @@ async function screens() {
       for (const width of list(opt.widths).map(Number)) {
         for (const theme of list(opt.themes)) {
           await page.emulate(width, theme);
+          // Снимок раскладки — без движения (задача 86): блок ниже первого
+          // экрана иначе снят бы до прокрутки — ещё не выплывшим. Движение
+          // включает своё `--script`.
+          await page.send("Emulation.setEmulatedMedia", { features: [
+            { name: "prefers-color-scheme", value: theme }, { name: "prefers-reduced-motion", value: "reduce" }] });
           for (const route of list(opt.routes)) {
             await page.eval(`location.hash = ${JSON.stringify(hash(route))}; return true;`);
             await sleep(400);

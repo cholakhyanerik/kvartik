@@ -98,3 +98,105 @@ if (calc) {
   calc.addEventListener("input", update);
   calc.addEventListener("change", update);
 }
+
+// Переход между страницами (landing.css, `@view-transition`) — только между
+// страницами языков. Браузер начинает его и по ссылке в программу или на
+// тексты лицензий, а они переходов не объявляют: Chrome отменяет его уже
+// в новой странице и отвергает там обещание `ready`, которого никто не ждёт,
+// — ошибка в консоли программы (проверено вживую: Chrome 157, 2026-11-06).
+// Поэтому уходящая страница сама снимает переход, когда идёт не на страницу
+// языка: тогда у новой его нет вовсе. Куда идёт, говорит `activation`; не
+// сказал браузер — переход остаётся. Адреса языков — из переключателя.
+addEventListener("pageswap", (event) => {
+  const transition = event.viewTransition;
+  if (!transition) return;
+  transition.ready.catch(() => {});
+  const to = event.activation?.entry?.url;
+  const languages = [...document.querySelectorAll(".langs a")].map((link) => link.href);
+  if (to && !languages.includes(to.split("#")[0])) transition.skipTransition();
+});
+
+// Движение за мышью (задача 86) — то же, что у программы (`ui/motion.rs`):
+// кнопка заливается из точки, где навели курсор, главная тянется к нему,
+// карточка наклоняется вслед, а кружок у курсора догоняет стрелку. Как это
+// выглядит, решает оформление (landing.css): здесь только точка мыши —
+// переменными CSS на самом элементе — и место кружка, а без мыши и при
+// выключенной в системе анимации стили не рисуют ничего. Палец и перо не в
+// счёт: наклон и магнит под пальцем только мешали бы. Работа — только пока
+// мышь движется: в покое ни таймеров, ни опросов (CLAUDE.md, Правило 1).
+{
+  // Над чем кружок растёт и над чем его нет: над полем ввода целятся
+  // текстовым курсором.
+  const press = "a[href], button, label, select, summary";
+  const typing = "input:not([type=checkbox], [type=radio]), textarea";
+  const cursor = document.createElement("div");
+  cursor.className = "cursor";
+  cursor.setAttribute("aria-hidden", "true");
+  document.body.append(cursor);
+
+  // Кнопка и карточка под мышью — с местом на странице, взятым при входе:
+  // кнопка-магнит сама едет к мыши, и её нынешнее место тянуло бы её
+  // дальше.
+  let button = null;
+  let card = null;
+  const place = (element) => {
+    const box = element.getBoundingClientRect();
+    return { element, left: box.left + scrollX, top: box.top + scrollY, width: box.width, height: box.height };
+  };
+  // Точка мыши в долях ширины и высоты элемента, от 0 до 1.
+  const share = (at, event) => [
+    Math.min(Math.max((event.pageX - at.left) / at.width, 0), 1),
+    Math.min(Math.max((event.pageY - at.top) / at.height, 0), 1),
+  ];
+  const write = (element, names, [x, y]) => {
+    element.style.setProperty(names[0], x.toFixed(3));
+    element.style.setProperty(names[1], y.toFixed(3));
+  };
+  const POINTER = ["--pointer-x", "--pointer-y"];
+  const PULL = ["--pull-x", "--pull-y"];
+
+  document.addEventListener("pointerover", (event) => {
+    if (event.pointerType !== "mouse") {
+      delete cursor.dataset.over;
+      return;
+    }
+    const target = event.target;
+    cursor.dataset.over = target.closest(typing) ? "text" : target.closest(press) ? "press" : "";
+    const nextButton = target.closest(".button");
+    if (nextButton && nextButton !== button?.element) {
+      button = place(nextButton);
+      write(nextButton, POINTER, share(button, event));
+    }
+    const nextCard = target.closest("[data-tilt]");
+    if (nextCard && nextCard !== card?.element) card = place(nextCard);
+  });
+
+  document.addEventListener("pointerout", (event) => {
+    if (event.pointerType !== "mouse") return;
+    const next = event.relatedTarget;
+    // Мышь ушла из окна — кружок прячется до её возвращения.
+    if (!next) delete cursor.dataset.over;
+    // Ушла с кнопки — заливка сжимается в точку ухода, кнопка — на место.
+    if (button && !button.element.contains(next)) {
+      write(button.element, POINTER, share(button, event));
+      write(button.element, PULL, [0, 0]);
+      button = null;
+    }
+    // С карточки — она выпрямляется.
+    if (card && !card.element.contains(next)) {
+      write(card.element, POINTER, [0.5, 0.5]);
+      card = null;
+    }
+  });
+
+  document.addEventListener("pointermove", (event) => {
+    if (event.pointerType !== "mouse") return;
+    cursor.style.setProperty("translate", `${event.clientX}px ${event.clientY}px`);
+    // Тяга магнита — от −1 до 1: от середины кнопки к мыши.
+    if (button) {
+      const [x, y] = share(button, event);
+      write(button.element, PULL, [x * 2 - 1, y * 2 - 1]);
+    }
+    if (card) write(card.element, POINTER, share(card, event));
+  });
+}

@@ -35,7 +35,10 @@ console_error_panic_hook = "0.1.7"
 # привязки к нему свои, `src/platform/share.rs`), папка автокопии
 # (`FileSystem…`, `WritableStream`; задача 29 — выбор папки и разрешения
 # в `web-sys` нестабильны, привязки к ним свои,
-# `src/platform/autobackup.rs`). Все три крейта уже
+# `src/platform/autobackup.rs`), где мышь — у кнопок, карточек и кружка
+# у курсора (`PointerEvent`, `MouseEvent`, `DomRect`; задача 86 — переход
+# View Transitions в `web-sys` нестабилен, привязка к нему своя,
+# `src/platform/motion.rs`). Все три крейта уже
 # были в дереве через Leptos — новых авторов
 # нет; версии — те же, что в замке. Фичи `web-sys` — ровно нужные
 # интерфейсы: каждая лишняя — привязки, которые никто не зовёт. Будущее
@@ -55,6 +58,7 @@ web-sys = { version = "0.3.107", features = [
     "CssStyleDeclaration",
     "Document",
     "DomException",
+    "DomRect",
     "Element",
     "Event",
     "EventTarget",
@@ -87,11 +91,13 @@ web-sys = { version = "0.3.107", features = [
     "MediaQueryList",
     "MessageChannel",
     "MessagePort",
+    "MouseEvent",
     "Navigator",
     "Node",
     "OffscreenCanvas",
     "OffscreenCanvasRenderingContext2d",
     "Pbkdf2Params",
+    "PointerEvent",
     "Response",
     "ServiceWorker",
     "ServiceWorkerContainer",
@@ -140,4 +146,5 @@ web-sys = { version = "0.3.107", features = [
     "HtmlSelectElement",
     "KeyboardEventInit",
     "NodeList",
+    "PointerEventInit",
 ] }

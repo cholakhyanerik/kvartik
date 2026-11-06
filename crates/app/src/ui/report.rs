@@ -222,7 +222,7 @@ fn Form(
         <div class="report-all">
             <button type="button" class="secondary" on:click=copy_all>
                 {icon(Icon::Copy)}
-                <span>{tr(lang, Key::ReportCopyAll)}</span>
+                <span class="label">{tr(lang, Key::ReportCopyAll)}</span>
             </button>
             <Status lang last spot=None />
             <p class="hint">{tr(lang, Key::ReportCopyHint)}</p>

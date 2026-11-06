@@ -47,7 +47,7 @@
 //   и мимо service worker (`Network.setBypassServiceWorker`): он при первом
 //   заходе сам скачивает весь сайт и забирает страницу (`clients.claim`
 //   в `sw.js`), и часть пришла бы из его кэша мимо блокировки. Загрузчик
-//   частей (`wasm_split_cli_support` 0.2.4) пишет отказ заблокированной
+//   частей (`wasm_split_cli_support` 0.2.5) пишет отказ заблокированной
 //   части в консоль (`console.error` в `wrapAsyncCb`) — это его код,
 //   человеку он не мешает, и провалом здесь не считается.
 // - «Без сети» — выключенный сервер, а не эмуляция (Правило 2).
@@ -414,6 +414,86 @@ async function office(browser) {
   }
 }
 
+/// Движение (задача 86), на компьютере — ширина 1280, мышь. Переход экрана
+/// снимает только прежний экран: новый живой, и нажатие посреди перехода
+/// попадает в него, а не в снимок страницы (`elementFromPoint`, как
+/// браузер ищет цель нажатия). Под мышью кнопка получает точку входа,
+/// а кружок у курсора встаёт над ней. У того, кто выключил анимацию
+/// в системе, — ни перехода, ни одной анимации, ни кружка. У лендинга —
+/// переход между страницами языков в стилях и кружок под мышью.
+/// В своём контексте браузера: эмуляция медиа не должна попасть в
+/// следующие шаги.
+async function motion(browser) {
+  const page = await browser.page({ context: true });
+  const media = (motion) => page.send("Emulation.setEmulatedMedia", {
+    features: [{ name: "prefers-color-scheme", value: "light" }, { name: "prefers-reduced-motion", value: motion }],
+  });
+  const mouse = (x, y) => page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+  const TRANSITION = `return document.getAnimations().some((a) =>
+    String(a.effect?.pseudoElement ?? "").startsWith("::view-transition")) ? true : null;`;
+  // Середина видимой кнопки раздела, и мышь — туда.
+  const hover = async (scope) => {
+    const at = await page.eval(`const b = [...document.querySelectorAll(${JSON.stringify(`${scope} :is(button, .button)`)})]
+      .find((b) => b.getClientRects().length > 0 && !b.disabled);
+    if (!b) return null; b.scrollIntoView({ block: "center" }); const r = b.getBoundingClientRect();
+    b.dataset.hovered = ""; return { x: r.x + r.width / 2, y: r.y + r.height / 2 };`);
+    if (at) {
+      await mouse(at.x - 40, at.y);
+      await mouse(at.x, at.y);
+      await sleep(100);
+    }
+    return at;
+  };
+  try {
+    await page.emulate(1280);
+    await media("no-preference");
+    await page.go(`${ORIGIN}/app/`);
+    await page.setLang(opt.lang);
+    checks.check("движение: рабочий экран", await page.waitFor(WORKING));
+    await page.eval(`location.hash = "#/clients"; return true;`);
+    checks.check("движение: экран сменился переходом", await page.waitFor(TRANSITION, 3000));
+    checks.check("движение: посреди перехода нажатие — новому экрану, а не снимку", await page.eval(`
+      const h = document.querySelector("#clients h1"); if (!h || !h.getClientRects().length) return null;
+      const r = h.getBoundingClientRect();
+      return document.getElementById("clients").contains(document.elementFromPoint(r.x + 8, r.y + r.height / 2)) || null;`));
+    await sleep(700);
+    checks.check("движение: под мышью у кнопки — точка входа", Boolean(await hover("#clients")) && await page.waitFor(`
+      const b = document.querySelector("[data-hovered]");
+      return b && b.style.getPropertyValue("--pointer-x") !== "" ? true : null;`, 3000));
+    checks.check("движение: кружок у курсора — над кнопкой", await page.waitFor(`const c = document.querySelector(".cursor");
+      return c && c.dataset.over === "press" && getComputedStyle(c).display === "block" ? true : null;`, 3000));
+
+    await media("reduce");
+    await mouse(5, 5);
+    await sleep(700);
+    await page.eval(`location.hash = "#/"; return true;`);
+    await sleep(150);
+    checks.check("без движения: экран сменился без перехода",
+      (await page.waitFor(VISIBLE("#home"), 3000)) && !(await page.eval(TRANSITION)));
+    await hover("#home");
+    checks.check("без движения: ни одной анимации и кружка нет", await page.eval(`
+      return document.getAnimations().length === 0
+        && getComputedStyle(document.querySelector(".cursor")).display === "none" ? true : null;`),
+      await page.eval(`return document.getAnimations().map((a) => a.animationName ?? a.transitionProperty ?? a.constructor.name).join(", ");`));
+
+    await media("no-preference");
+    await page.go(`${ORIGIN}/ru/`);
+    checks.check("движение: у лендинга — переход между страницами", await page.waitFor(`
+      const rules = (list) => [...list].some((r) => r.constructor.name === "CSSViewTransitionRule"
+        || (r.cssRules && rules(r.cssRules)));
+      return [...document.styleSheets].some((sheet) => rules(sheet.cssRules)) ? true : null;`));
+    await hover(".hero");
+    checks.check("движение: у лендинга кружок — над кнопкой", await page.waitFor(`const c = document.querySelector(".cursor");
+      const b = document.querySelector("[data-hovered]");
+      return c?.dataset.over === "press" && b?.style.getPropertyValue("--pointer-x") !== "" ? true : null;`, 3000));
+    checks.check("движение: без плашки сбоя", await page.eval(NO_PANIC));
+    const errors = [...new Set(page.errors)];
+    checks.check("движение: без ошибок в консоли", errors.length === 0, errors.slice(0, 8).join(" | "));
+  } finally {
+    await page.close();
+  }
+}
+
 /// Восстановить последний образец копии: в нём есть выпущенные документы.
 /// Пароль образца станет паролем копий устройства.
 async function restore(page) {
@@ -621,6 +701,7 @@ async function main() {
     await blocked(browser);
     await landing(browser);
     await office(browser);
+    await motion(browser);
 
     const page = await browser.page();
     await page.emulate(360);

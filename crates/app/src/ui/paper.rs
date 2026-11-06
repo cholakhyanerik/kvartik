@@ -232,7 +232,7 @@ pub fn PaperPanel(
             })}
             <div class="actions">
                 <button type="button" class="secondary" on:click=move |_| close()>
-                    {tr(lang, Key::PdfHide)}
+                    <span class="label">{tr(lang, Key::PdfHide)}</span>
                 </button>
             </div>
         </section>
@@ -289,7 +289,7 @@ fn sending(lang: ReadSignal<Lang>, download: &Download) -> impl IntoView {
             {shares.then(|| view! {
                 <button type="button" on:click=send>
                     {icon(Icon::Share)}
-                    <span>{tr(lang, Key::PdfShare)}</span>
+                    <span class="label">{tr(lang, Key::PdfShare)}</span>
                 </button>
             })}
             <a

@@ -92,7 +92,7 @@ pub fn LangSwitch(lang: WindowLang) -> impl IntoView {
                             aria-pressed=move || if chosen() { "true" } else { "false" }
                             on:click=move |_| lang.choose(option)
                         >
-                            {option.native_name()}
+                            <span class="label">{option.native_name()}</span>
                         </button>
                     }
                 })

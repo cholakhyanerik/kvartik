@@ -383,9 +383,9 @@ fn HandoffCard(card: Card) -> impl IntoView {
                 <h2>{tr(lang, Key::HandoffTitle)}</h2>
                 <p>{tr(lang, Key::HandoffAbout)}</p>
                 <ul>{lines}</ul>
-                <button type="button" on:click=move |_| take(offer)>{tr(lang, Key::HandoffTake)}</button>
+                <button type="button" on:click=move |_| take(offer)><span class="label">{tr(lang, Key::HandoffTake)}</span></button>
                 <button type="button" class="link" on:click=move |_| profiles.drop_handoff()>
-                    {tr(lang, Key::HandoffDismiss)}
+                    <span class="label">{tr(lang, Key::HandoffDismiss)}</span>
                 </button>
             </section>
         })
@@ -467,14 +467,14 @@ fn ProfileBody(ctx: Ctx) -> impl IntoView {
                 })}
                 <Summary lang data=profile.data().clone() picture=profiles.picture today open />
                 <button type="button" class="secondary" on:click=move |_| open(None)>
-                    {tr(lang, Key::ProfileEdit)}
+                    <span class="label">{tr(lang, Key::ProfileEdit)}</span>
                 </button>
             }
             .into_any(),
             State::Ready(None) => view! {
                 <p>{tr(lang, Key::ProfileAbout)}</p>
                 <button type="button" on:click=move |_| open(None)>
-                    {tr(lang, Key::ProfileFill)}
+                    <span class="label">{tr(lang, Key::ProfileFill)}</span>
                 </button>
             }
             .into_any(),
@@ -1124,7 +1124,7 @@ fn ProfileForm(
             })}
             <div class="actions">
                 <button type="submit" disabled=move || form.busy.get()>
-                    {tr(lang, Key::ProfileSave)}
+                    <span class="label">{tr(lang, Key::ProfileSave)}</span>
                 </button>
                 <button
                     type="button"
@@ -1132,7 +1132,7 @@ fn ProfileForm(
                     disabled=move || form.busy.get()
                     on:click=move |_| close()
                 >
-                    {tr(lang, Key::Cancel)}
+                    <span class="label">{tr(lang, Key::Cancel)}</span>
                 </button>
             </div>
         </form>
@@ -1363,7 +1363,7 @@ fn LogoRemove(lang: ReadSignal<Lang>, form: Form) -> impl IntoView {
                     form.logo.set(LogoChoice::Remove);
                 }
             >
-                {tr(lang, Key::LogoRemove)}
+                <span class="label">{tr(lang, Key::LogoRemove)}</span>
             </button>
         })
     }
@@ -1449,7 +1449,7 @@ fn Accounts(lang: ReadSignal<Lang>, form: Form) -> impl IntoView {
                         class="secondary"
                         on:click=move |_| form.accounts.update(|rows| rows.retain(|r| r.key != row.key))
                     >
-                        {tr(lang, Key::AccountRemove)}
+                        <span class="label">{tr(lang, Key::AccountRemove)}</span>
                     </button>
                 </div>
             </For>
@@ -1462,7 +1462,7 @@ fn Accounts(lang: ReadSignal<Lang>, form: Form) -> impl IntoView {
                     form.accounts.update(|rows| rows.push(row));
                 }
             >
-                {tr(lang, Key::AccountAdd)}
+                <span class="label">{tr(lang, Key::AccountAdd)}</span>
             </button>
         </fieldset>
     }
@@ -1566,7 +1566,7 @@ fn Activities(
                         class="secondary"
                         on:click=move |_| form.activities.update(|rows| rows.retain(|r| r.key != row.key))
                     >
-                        {tr(lang, Key::Remove)}
+                        <span class="label">{tr(lang, Key::Remove)}</span>
                     </button>
                 </div>
             </For>
@@ -1579,7 +1579,7 @@ fn Activities(
                     form.activities.update(|rows| rows.push(row));
                 }
             >
-                {tr(lang, Key::ActivityAdd)}
+                <span class="label">{tr(lang, Key::ActivityAdd)}</span>
             </button>
             <p class="hint">{tr(lang, Key::ActivityKindHint)}</p>
             <fieldset class="group">
@@ -1747,7 +1747,7 @@ fn PersonFields(lang: ReadSignal<Lang>, form: Form, today: Option<Date>) -> impl
                             class="secondary"
                             on:click=move |_| form.stops.update(|rows| rows.retain(|r| r.key != row.key))
                         >
-                            {tr(lang, Key::Remove)}
+                            <span class="label">{tr(lang, Key::Remove)}</span>
                         </button>
                     </div>
                 </For>
@@ -1760,7 +1760,7 @@ fn PersonFields(lang: ReadSignal<Lang>, form: Form, today: Option<Date>) -> impl
                         form.stops.update(|rows| rows.push(row));
                     }
                 >
-                    {tr(lang, Key::StopAdd)}
+                    <span class="label">{tr(lang, Key::StopAdd)}</span>
                 </button>
             </fieldset>
         </fieldset>

@@ -117,16 +117,16 @@ pub fn Welcome(
                             .collect_view()}
                     </fieldset>
                     <button type="button" class="wide" on:click=move |_| next(None)>
-                        {tr(lang, Key::WelcomeContinue)}
+                        <span class="label">{tr(lang, Key::WelcomeContinue)}</span>
                     </button>
                     <button type="button" class="link" on:click=move |_| next(Some(Screen::Backup))>
-                        {tr(lang, Key::WelcomeHaveBackup)}
+                        <span class="label">{tr(lang, Key::WelcomeHaveBackup)}</span>
                     </button>
                 </div>
                 {move || installing.get().map(|screen| view! {
                     <InstallSection lang program />
                     <button type="button" class="secondary wide" on:click=move |_| close(screen)>
-                        {tr(lang, Key::WelcomeInstallLater)}
+                        <span class="label">{tr(lang, Key::WelcomeInstallLater)}</span>
                     </button>
                 }
                 .into_any())}
@@ -336,10 +336,10 @@ pub fn StepsCard(card: Card) -> impl IntoView {
                 <p>{tr(lang, Key::StepsAbout)}</p>
                 <ol>{rows}</ol>
                 <button type="button" on:click=move |_| act(now)>
-                    {tr(lang, now.action())}
+                    <span class="label">{tr(lang, now.action())}</span>
                 </button>
                 <button type="button" class="link" on:click=move |_| steps.hide()>
-                    {tr(lang, if finishing { Key::StepsFinish } else { Key::StepsHide })}
+                    <span class="label">{tr(lang, if finishing { Key::StepsFinish } else { Key::StepsHide })}</span>
                 </button>
             </section>
         }

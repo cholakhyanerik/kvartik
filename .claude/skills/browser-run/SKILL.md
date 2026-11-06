@@ -59,6 +59,17 @@ node .claude/skills/browser-run/run.mjs <сценарий> --task <номер> [
   `setLang`, `acceptLanguage`, `fresh`.
 - `--port`, `--server own|wrangler`, `--runs 5`, `--path /app/`.
 
+Снимки `screens` — без движения (`prefers-reduced-motion: reduce`, задача
+86): во весь лист блок ниже первого экрана иначе снят бы до прокрутки — ещё
+не выплывшим. Движение включает своё `--script`
+(`Emulation.setEmulatedMedia` с `no-preference`), а середину перехода или
+наведения снимает, заморозив анимации на нужной миллисекунде
+(`document.getAnimations()`: `pause()` и `currentTime`), а не задержкой
+снимка — её разброс больше самого перехода. Морозить только идущие
+(`playState === "running"`): законченная с `fill: both` отмоталась бы назад.
+Мышь — `Input.dispatchMouseEvent`; у кнопки-пилюли угол скруглён, и точка
+у края может оказаться мимо неё.
+
 Примеры:
 
 ```

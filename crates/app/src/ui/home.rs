@@ -69,13 +69,13 @@ pub fn Home(
         <Show when=move || profiles.missing() && steps.hidden()>
             <div class="notice">
                 <p>{tr(lang, Key::HomeProfileMissing)}</p>
-                <a class="button" href=Screen::Profile.href()>{tr(lang, Key::ProfileFill)}</a>
+                <a class="button" href=Screen::Profile.href()><span class="label">{tr(lang, Key::ProfileFill)}</span></a>
             </div>
         </Show>
         <Awaiting lang documents clients />
         <button type="button" class="wide" on:click=new_invoice>
             {icon(Icon::Plus)}
-            <span>{tr(lang, Key::DocNewInvoice)}</span>
+            <span class="label">{tr(lang, Key::DocNewInvoice)}</span>
         </button>
     }
 }

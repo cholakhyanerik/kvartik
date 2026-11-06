@@ -233,14 +233,14 @@ pub(super) fn Export(ctx: Ctx, quarter: Memo<Quarter>) -> impl IntoView {
                 aria-pressed=move || (period.get() == value).to_string()
                 on:click=move |_| period.set(value)
             >
-                {move || {
+                <span class="label">{move || {
                     let lang = lang.get();
                     let quarter = quarter.get();
                     match value {
                         Period::Quarter => i18n::quarter(lang, quarter),
                         Period::Year => fill(t(lang, Key::AnnualYear), &[&quarter.year().to_string()]),
                     }
-                }}
+                }}</span>
             </button>
         }
     };
@@ -268,7 +268,7 @@ pub(super) fn Export(ctx: Ctx, quarter: Memo<Quarter>) -> impl IntoView {
                     fill(t(lang, key), &[&i18n::quarter(lang, shown)])
                 }}</p>
                 <a class="button link" href=Screen::Tax.href() on:click=move |_| chosen.set(Some(shown))>
-                    {tr(lang, Key::ExportDriftOpen)}
+                    <span class="label">{tr(lang, Key::ExportDriftOpen)}</span>
                 </a>
             </div>
             {versions.map(|(then, now)| view! {

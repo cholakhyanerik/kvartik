@@ -286,7 +286,7 @@ fn quarters_open(lang: Lang, access: Access) -> Option<String> {
 /// Ссылка на экран лицензии — из слов о запертом.
 #[component]
 pub(super) fn LicenseLink(lang: ReadSignal<Lang>) -> impl IntoView {
-    view! { <a class="button" href=Screen::License.href()>{tr(lang, Key::LicenseEnter)}</a> }
+    view! { <a class="button" href=Screen::License.href()><span class="label">{tr(lang, Key::LicenseEnter)}</span></a> }
 }
 
 /// Карточка на главном экране: пробный период — сколько осталось, ключ —
@@ -466,7 +466,7 @@ pub(super) fn LicensePage(ctx: tax::Ctx) -> impl IntoView {
             <p class="hint">{tr(lang, Key::LicenseKeyHint)}</p>
             {move || said.get().map(|said| view! { <Said lang said /> })}
             <button type="submit" class="wide" disabled=move || busy.get()>
-                {tr(lang, Key::LicenseEnter)}
+                <span class="label">{tr(lang, Key::LicenseEnter)}</span>
             </button>
         </form>
         <EnteredKeys lang licenses profile_tin />

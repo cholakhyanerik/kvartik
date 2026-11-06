@@ -428,7 +428,7 @@ fn Card(ctx: Ctx) -> impl IntoView {
                 .flatten()
                 .flatten();
             view! {
-                <a class="hero-card" href=Screen::Tax.href() on:click=move |_| chosen.set(Some(quarter))>
+                <a class="hero-card" data-tilt="" href=Screen::Tax.href() on:click=move |_| chosen.set(Some(quarter))>
                     <span class="hero-meta">{move || i18n::quarter(lang.get(), quarter)}</span>
                     <span class="hero-label">{move || {
                         let lang = lang.get();
@@ -463,7 +463,7 @@ fn DriftCard(ctx: Ctx) -> impl IntoView {
             let note = Note::of(&tax, false);
             let chosen = ctx.quarter;
             view! {
-                <a class="hero-card" href=Screen::Tax.href() on:click=move |_| chosen.set(Some(quarter))>
+                <a class="hero-card" data-tilt="" href=Screen::Tax.href() on:click=move |_| chosen.set(Some(quarter))>
                     <span class="hero-meta">{move || i18n::quarter(lang.get(), quarter)}</span>
                     <span class="hero-label">{tr(lang, Key::TaxDrift)}</span>
                     {now.map(|now| view! { <span class="hero-sum">{move || drams(lang.get(), now)}</span> })}
@@ -802,7 +802,7 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
                         disabled=move || busy.get()
                         on:click=move |_| change(id, Closing::restore, Notice::Restored)
                     >
-                        {tr(lang, Key::DocUnannul)}
+                        <span class="label">{tr(lang, Key::DocUnannul)}</span>
                     </button>
                 </div>
             }
@@ -824,7 +824,7 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
                 <div class="notice-row tax-closed">
                     <p role="status">{move || fill(t(lang.get(), Key::TaxClosed), &[&version])}</p>
                     <button type="button" class="secondary" disabled=move || busy.get() on:click=reopen_quarter>
-                        {tr(lang, Key::TaxReopen)}
+                        <span class="label">{tr(lang, Key::TaxReopen)}</span>
                     </button>
                 </div>
                 {move || {
@@ -864,7 +864,7 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
         {move || numbers.get().then(|| view! {
             <a class="button report-open" href=Screen::Report.href()>
                 {icon(Icon::Copy)}
-                <span>{tr(lang, Key::ReportOpen)}</span>
+                <span class="label">{tr(lang, Key::ReportOpen)}</span>
             </a>
         })}
         {move || (ended() && closing.with(Option::is_none) && tax.with(Option::is_some)).then(|| {
@@ -880,7 +880,7 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
                         view! {
                             <button type="button" disabled=move || busy.get() on:click=close_quarter>
                                 {icon(Icon::Check)}
-                                <span>{tr(lang, Key::TaxClose)}</span>
+                                <span class="label">{tr(lang, Key::TaxClose)}</span>
                             </button>
                             <p class="hint">{tr(lang, Key::TaxCloseHint)}</p>
                         }
@@ -935,7 +935,7 @@ fn Quarterly(lang: ReadSignal<Lang>, tax: QuarterTax, closing: Option<Closing>) 
         .collect();
     let this_year = tax.quarter.year();
     view! {
-        <div class="hero-card">
+        <div class="hero-card" data-tilt="">
             <span class="hero-label">{tr(lang, Key::TaxTurnover)}</span>
             {(subtitle != Subtitle::NotCounted).then(|| view! {
                 <span class="hero-sum">{move || drams(lang.get(), sum)}</span>

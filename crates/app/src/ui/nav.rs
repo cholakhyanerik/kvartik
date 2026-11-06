@@ -51,7 +51,7 @@ pub fn Nav(
             <a class="brand" href=Screen::Home.href()>{tr(lang, Key::Brand)}</a>
             <button type="button" class="new" on:click=new_invoice>
                 {icon(Icon::Plus)}
-                <span>{tr(lang, Key::DocNewInvoice)}</span>
+                <span class="label">{tr(lang, Key::DocNewInvoice)}</span>
             </button>
             <ul class="tabs">
                 {TABS

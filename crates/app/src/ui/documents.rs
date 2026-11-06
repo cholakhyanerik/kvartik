@@ -778,7 +778,7 @@ fn DocList(ctx: Ctx) -> impl IntoView {
                                     limit.set(PAGE);
                                 }
                             >
-                                {tr(lang, key)}
+                                <span class="label">{tr(lang, key)}</span>
                             </button>
                         })
                         .collect_view()}
@@ -806,10 +806,10 @@ fn DocList(ctx: Ctx) -> impl IntoView {
                                 limit.set(PAGE);
                             }
                         >
-                            {move || {
+                            <span class="label">{move || {
                                 let key = if unsettled.get() { Key::SettleShowAll } else { Key::SettleShow };
                                 t(lang.get(), key)
-                            }}
+                            }}</span>
                         </button>
                     </div>
                 })
@@ -834,7 +834,7 @@ fn DocList(ctx: Ctx) -> impl IntoView {
         </For>
         {move || (shown.with(Vec::len) > limit.get()).then(|| view! {
             <button type="button" class="secondary" on:click=move |_| limit.update(|limit| *limit += PAGE)>
-                {tr(lang, Key::DocsMore)}
+                <span class="label">{tr(lang, Key::DocsMore)}</span>
             </button>
         })}
         <div class="actions docs-more">
@@ -845,7 +845,7 @@ fn DocList(ctx: Ctx) -> impl IntoView {
                 on:click=move |_| start(DocKind::Act)
             >
                 {icon(Icon::Plus)}
-                <span>{tr(lang, Key::DocNewAct)}</span>
+                <span class="label">{tr(lang, Key::DocNewAct)}</span>
             </button>
         </div>
         // Новый счёт — главное действие экрана: на телефоне круглой кнопкой
@@ -866,7 +866,7 @@ fn DocList(ctx: Ctx) -> impl IntoView {
                 aria-expanded=move || show_deleted.get().to_string()
                 on:click=move |_| show_deleted.update(|open| *open = !*open)
             >
-                {move || {
+                <span class="label">{move || {
                     let lang = lang.get();
                     if show_deleted.get() {
                         t(lang, Key::DocsDeletedHide).to_owned()
@@ -874,7 +874,7 @@ fn DocList(ctx: Ctx) -> impl IntoView {
                         let count = deleted.with(Vec::len) as i64;
                         fill(t(lang, Key::DocsDeleted), &[&i18n::integer(lang, count)])
                     }
-                }}
+                }}</span>
             </button>
             <Show when=move || show_deleted.get()>
                 <ul class="documents deleted">
@@ -894,7 +894,7 @@ fn DocList(ctx: Ctx) -> impl IntoView {
                                         move |_| restore(id)
                                     }
                                 >
-                                    {tr(lang, Key::ClientRestore)}
+                                    <span class="label">{tr(lang, Key::ClientRestore)}</span>
                                 </button>
                             </div>
                         </li>
@@ -1044,7 +1044,7 @@ pub fn SettlementReminder(lang: ReadSignal<Lang>, documents: Documents, today: O
                     fill(t(lang, Key::SettleRemind), &[&documents_count(lang, count)])
                 }}</p>
                 <a class="button" href=Screen::Documents.href() on:click=move |_| documents.show_unsettled()>
-                    {tr(lang, Key::SettleOpen)}
+                    <span class="label">{tr(lang, Key::SettleOpen)}</span>
                 </a>
             </div>
         })
@@ -1132,7 +1132,7 @@ fn NoticeLine(ctx: Ctx, busy: RwSignal<bool>, failure: RwSignal<Option<Problem>>
                                 });
                             }
                         >
-                            {tr(lang, Key::DocUnannul)}
+                            <span class="label">{tr(lang, Key::DocUnannul)}</span>
                         </button>
                     </div>
                 }
@@ -1151,7 +1151,7 @@ fn NoticeLine(ctx: Ctx, busy: RwSignal<bool>, failure: RwSignal<Option<Problem>>
                             });
                         }
                     >
-                        {tr(lang, Key::ClientRestore)}
+                        <span class="label">{tr(lang, Key::ClientRestore)}</span>
                     </button>
                 </div>
             }
@@ -1783,7 +1783,7 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                         </span>
                     </span>
                     <button type="button" class="link" on:click=move |_| step.set(1)>
-                        {tr(lang, Key::Change)}
+                        <span class="label">{tr(lang, Key::Change)}</span>
                     </button>
                 </div>
             }
@@ -2007,7 +2007,7 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                                 class="secondary"
                                 on:click=move |_| form.items.update(|rows| rows.retain(|r| r.key != row.key))
                             >
-                                {tr(lang, Key::Remove)}
+                                <span class="label">{tr(lang, Key::Remove)}</span>
                             </button>
                         })}
                     </div>
@@ -2022,7 +2022,7 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                     }
                 >
                     {icon(Icon::Plus)}
-                    <span>{tr(lang, Key::ItemAdd)}</span>
+                    <span class="label">{tr(lang, Key::ItemAdd)}</span>
                 </button>
                 <p class="total">{total}</p>
                 <p class="hint">{in_drams}</p>
@@ -2068,7 +2068,7 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                 <DateField lang label=Key::DocServiceDate value=form.service_date tried />
                 <p class="hint">{tr(lang, Key::DocServiceDateHint)}</p>
                 <button type="button" class="secondary" on:click=last_day>
-                    {tr(lang, Key::DocLastDay)}
+                    <span class="label">{tr(lang, Key::DocLastDay)}</span>
                 </button>
                 // Вид деятельности дохода — когда без него не узнать строку
                 // налога или режим (задача 19).
@@ -2117,7 +2117,7 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                         aria-expanded=move || preview.with(Option::is_some).to_string()
                         on:click=show_preview
                     >
-                        {tr(lang, Key::DocPreview)}
+                        <span class="label">{tr(lang, Key::DocPreview)}</span>
                     </button>
                 </div>
                 {move || preview.get().map(|request| view! {
@@ -2136,7 +2136,7 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
             {move || match step.get() {
                 1 => None,
                 2 => Some(view! {
-                    <button type="submit" class="wide">{tr(lang, Key::DocNextReview)}</button>
+                    <button type="submit" class="wide"><span class="label">{tr(lang, Key::DocNextReview)}</span></button>
                 }
                 .into_any()),
                 _ => Some(view! {
@@ -2152,7 +2152,7 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                                 disabled=move || form.busy.get()
                                 on:click=move |_| submit(true)
                             >
-                                {tr(lang, Key::DocIssue)}
+                                <span class="label">{tr(lang, Key::DocIssue)}</span>
                             </button>
                         })}
                         // Выпуск заперт — главное действие формы черновик.
@@ -2162,11 +2162,11 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                             class:wide=move || wizard && locked.get().is_some()
                             disabled=move || form.busy.get()
                         >
-                            {tr(lang, Key::DocSaveDraft)}
+                            <span class="label">{tr(lang, Key::DocSaveDraft)}</span>
                         </button>
                         {id.map(|_| view! {
                             <button type="button" class="secondary" disabled=move || form.busy.get() on:click=delete>
-                                {tr(lang, Key::DocDeleteDraft)}
+                                <span class="label">{tr(lang, Key::DocDeleteDraft)}</span>
                             </button>
                         })}
                         <button
@@ -2175,7 +2175,7 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                             disabled=move || form.busy.get()
                             on:click=move |_| leave()
                         >
-                            {tr(lang, Key::Cancel)}
+                            <span class="label">{tr(lang, Key::Cancel)}</span>
                         </button>
                     </div>
                 }
@@ -2459,7 +2459,7 @@ fn DocCard(
         {(awaiting && left.is_some() && ctx.today.is_some()).then(|| view! {
             <button type="button" class="wide" disabled=move || busy.get() on:click=mark_paid>
                 {icon(Icon::Check)}
-                <span>{tr(lang, Key::DocMarkPaid)}</span>
+                <span class="label">{tr(lang, Key::DocMarkPaid)}</span>
             </button>
         })}
         <div class="actions doc-next">
@@ -2477,7 +2477,7 @@ fn DocCard(
                         mode.set(Mode::ActFor(id));
                     }
                 >
-                    {tr(lang, Key::DocActFromInvoice)}
+                    <span class="label">{tr(lang, Key::DocActFromInvoice)}</span>
                 </button>
             })}
             <button
@@ -2487,7 +2487,7 @@ fn DocCard(
                 on:click=move |_| paper.update(|shown| *shown = !*shown)
             >
                 {icon(Icon::Download)}
-                <span>{tr(lang, Key::DocPdf)}</span>
+                <span class="label">{tr(lang, Key::DocPdf)}</span>
             </button>
         </div>
         {move || paper.get().then(|| view! {
@@ -2667,10 +2667,10 @@ fn DocRate(
                     }}</p>
                     <div class="actions">
                         <button type="button" disabled=move || busy.get() on:click=save>
-                            {tr(lang, Key::DocRateSave)}
+                            <span class="label">{tr(lang, Key::DocRateSave)}</span>
                         </button>
                         <button type="button" class="secondary" on:click=move |_| editing.set(false)>
-                            {tr(lang, Key::Cancel)}
+                            <span class="label">{tr(lang, Key::Cancel)}</span>
                         </button>
                     </div>
                 }
@@ -2678,7 +2678,7 @@ fn DocRate(
             } else {
                 view! {
                     <button type="button" class="secondary" on:click=move |_| editing.set(true)>
-                        {tr(lang, if rate.is_some() { Key::DocRateChange } else { Key::DocRateSet })}
+                        <span class="label">{tr(lang, if rate.is_some() { Key::DocRateChange } else { Key::DocRateSet })}</span>
                     </button>
                 }
                 .into_any()
@@ -2728,7 +2728,7 @@ fn DocActivity(
                     <IncomeActivity lang activities chosen date tried required=needed />
                     {move || (chosen.get() != saved).then(|| view! {
                         <button type="button" disabled=move || busy.get() on:click=save>
-                            {tr(lang, Key::DocActivitySave)}
+                            <span class="label">{tr(lang, Key::DocActivitySave)}</span>
                         </button>
                     })}
                 </div>
@@ -2972,7 +2972,7 @@ fn Payments(
                                     disabled=move || busy.get()
                                     on:click=move |_| act(ctx, busy, failure, id, Change::RemovePayment(payment), |_| {})
                                 >
-                                    {tr(lang, Key::Remove)}
+                                    <span class="label">{tr(lang, Key::Remove)}</span>
                                 </button>
                             </li>
                         }).collect_view()}
@@ -3007,7 +3007,7 @@ fn Payments(
                     }
                 })}
                 <button type="button" disabled=move || busy.get() on:click=record>
-                    {tr(lang, Key::PaymentAdd)}
+                    <span class="label">{tr(lang, Key::PaymentAdd)}</span>
                 </button>
             })}
         </fieldset>
@@ -3059,7 +3059,7 @@ fn Signature(
                     <p>{move || fill(t(lang.get(), Key::SignedOn), &[&i18n::date(lang.get(), day)])}</p>
                     {open.then(|| view! {
                         <button type="button" class="secondary" disabled=move || busy.get() on:click=unsign>
-                            {tr(lang, Key::SignRemove)}
+                            <span class="label">{tr(lang, Key::SignRemove)}</span>
                         </button>
                     })}
                 }
@@ -3073,7 +3073,7 @@ fn Signature(
                             .map(|_| t(lang.get(), Key::SignBeforeDate).to_owned())
                     })}
                     <button type="button" disabled=move || busy.get() on:click=mark>
-                        {tr(lang, Key::SignMark)}
+                        <span class="label">{tr(lang, Key::SignMark)}</span>
                     </button>
                 }
                 .into_any(),
@@ -3155,7 +3155,7 @@ fn SettlementMark(
                     <p>{text}</p>
                     {open.then(|| view! {
                         <button type="button" class="secondary" disabled=move || busy.get() on:click=remove>
-                            {tr(lang, Key::SignRemove)}
+                            <span class="label">{tr(lang, Key::SignRemove)}</span>
                         </button>
                     })}
                 }
@@ -3185,7 +3185,7 @@ fn SettlementMark(
                     />
                     <DateField lang label=Key::SettleDate value=date tried />
                     <button type="button" disabled=move || busy.get() on:click=save>
-                        {tr(lang, Key::SettleMark)}
+                        <span class="label">{tr(lang, Key::SettleMark)}</span>
                     </button>
                 }
                 .into_any()
@@ -3286,7 +3286,7 @@ fn DocActions(
                                 disabled=move || busy.get()
                                 on:click=move |_| stop(active.clone())
                             >
-                                {tr(lang, Key::RecurStop)}
+                                <span class="label">{tr(lang, Key::RecurStop)}</span>
                             </button>
                         }
                         .into_any()
@@ -3294,7 +3294,7 @@ fn DocActions(
                     None => view! {
                         <p class="hint">{tr(lang, Key::RecurAbout)}</p>
                         <button type="button" class="secondary" disabled=move || busy.get() on:click=start>
-                            {tr(lang, Key::RecurStart)}
+                            <span class="label">{tr(lang, Key::RecurStart)}</span>
                         </button>
                     }
                     .into_any(),
@@ -3303,7 +3303,7 @@ fn DocActions(
         })}
         <div class="actions">
             <button type="button" class="secondary" disabled=move || busy.get() on:click=annul>
-                {tr(lang, Key::DocAnnul)}
+                <span class="label">{tr(lang, Key::DocAnnul)}</span>
             </button>
         </div>
     })

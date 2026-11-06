@@ -624,7 +624,7 @@ fn LedgerList(ledger: Ledger) -> impl IntoView {
                 <div class="notice-row">
                     <p role="status">{tr(lang, Key::LedgerDeletedNotice)}</p>
                     <button type="button" class="secondary" disabled=move || busy.get() on:click=move |_| restore(id)>
-                        {tr(lang, Key::ClientRestore)}
+                        <span class="label">{tr(lang, Key::ClientRestore)}</span>
                     </button>
                 </div>
             }
@@ -680,11 +680,11 @@ fn LedgerList(ledger: Ledger) -> impl IntoView {
         <div class="actions ledger-add">
             <button type="button" on:click=move |_| start(Flow::Income)>
                 {icon(Icon::Plus)}
-                <span>{tr(lang, Key::LedgerAddIncome)}</span>
+                <span class="label">{tr(lang, Key::LedgerAddIncome)}</span>
             </button>
             <button type="button" class="secondary" on:click=move |_| start(Flow::Expense)>
                 {icon(Icon::Plus)}
-                <span>{tr(lang, Key::LedgerAddExpense)}</span>
+                <span class="label">{tr(lang, Key::LedgerAddExpense)}</span>
             </button>
         </div>
         <p class="hint">{tr(lang, Key::LedgerAbout)}</p>
@@ -700,7 +700,7 @@ fn LedgerList(ledger: Ledger) -> impl IntoView {
                             limit.set(PAGE);
                         }
                     >
-                        {tr(lang, key)}
+                        <span class="label">{tr(lang, key)}</span>
                     </button>
                 })
                 .collect_view()}
@@ -724,7 +724,7 @@ fn LedgerList(ledger: Ledger) -> impl IntoView {
         </For>
         {move || (filtered.with(Vec::len) > limit.get()).then(|| view! {
             <button type="button" class="secondary" on:click=move |_| limit.update(|limit| *limit += PAGE)>
-                {tr(lang, Key::DocsMore)}
+                <span class="label">{tr(lang, Key::DocsMore)}</span>
             </button>
         })}
         <Show when=move || !deleted.with(Vec::is_empty)>
@@ -734,7 +734,7 @@ fn LedgerList(ledger: Ledger) -> impl IntoView {
                 aria-expanded=move || show_deleted.get().to_string()
                 on:click=move |_| show_deleted.update(|open| *open = !*open)
             >
-                {move || {
+                <span class="label">{move || {
                     let lang = lang.get();
                     if show_deleted.get() {
                         t(lang, Key::LedgerDeletedHide).to_owned()
@@ -742,7 +742,7 @@ fn LedgerList(ledger: Ledger) -> impl IntoView {
                         let count = deleted.with(Vec::len) as i64;
                         fill(t(lang, Key::LedgerDeleted), &[&i18n::integer(lang, count)])
                     }
-                }}
+                }}</span>
             </button>
             <Show when=move || show_deleted.get()>
                 <ul class="documents deleted">
@@ -763,7 +763,7 @@ fn LedgerList(ledger: Ledger) -> impl IntoView {
                                         move |_| restore(id)
                                     }
                                 >
-                                    {tr(lang, Key::ClientRestore)}
+                                    <span class="label">{tr(lang, Key::ClientRestore)}</span>
                                 </button>
                             </div>
                         </li>
@@ -1652,15 +1652,15 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
             {move || failure.get().map(|problem| view! { <p role="alert">{tr(lang, problem.key())}</p> })}
             <div class="actions">
                 <button type="submit" disabled=move || form.busy.get() || preparing.get()>
-                    {tr(lang, Key::ProfileSave)}
+                    <span class="label">{tr(lang, Key::ProfileSave)}</span>
                 </button>
                 {id.map(|_| view! {
                     <button type="button" class="secondary" disabled=move || form.busy.get() on:click=delete>
-                        {tr(lang, Key::OpDelete)}
+                        <span class="label">{tr(lang, Key::OpDelete)}</span>
                     </button>
                 })}
                 <button type="button" class="secondary" disabled=move || form.busy.get() on:click=leave>
-                    {tr(lang, Key::Cancel)}
+                    <span class="label">{tr(lang, Key::Cancel)}</span>
                 </button>
             </div>
         </form>
@@ -1835,7 +1835,7 @@ fn FileLine(
                     links.update(|links| links.retain(|(known, _)| *known != key));
                 }
             >
-                {tr(lang, Key::Remove)}
+                <span class="label">{tr(lang, Key::Remove)}</span>
             </button>
         </li>
     }

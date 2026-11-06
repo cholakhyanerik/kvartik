@@ -112,7 +112,7 @@ pub fn DeadlineReminder(ctx: tax::Ctx) -> impl IntoView {
                 <div class="notice due deadline-reminder" role="status">
                     {icon(Icon::Calendar)}
                     <ul>{rows}</ul>
-                    <a class="button" href=Screen::Deadlines.href()>{tr(lang, Key::DeadlinesAll)}</a>
+                    <a class="button" href=Screen::Deadlines.href()><span class="label">{tr(lang, Key::DeadlinesAll)}</span></a>
                 </div>
             }
         })
@@ -189,7 +189,7 @@ fn Gaps(lang: ReadSignal<Lang>, gaps: deadlines::Gaps) -> impl IntoView {
                 {gaps.registered.then(|| view! { <p>{tr(lang, Key::DeadlinesNeedRegistered)}</p> })}
                 {gaps.residency.then(|| view! { <p>{tr(lang, Key::DeadlinesNeedResidency)}</p> })}
                 {profile.then(|| view! {
-                    <a class="button" href=Screen::Profile.href()>{tr(lang, Key::ProfileFill)}</a>
+                    <a class="button" href=Screen::Profile.href()><span class="label">{tr(lang, Key::ProfileFill)}</span></a>
                 })}
                 {gaps.health.then(|| view! {
                     <p>
@@ -321,14 +321,14 @@ fn Calendar(ctx: tax::Ctx, mine: Signal<bool>) -> impl IntoView {
             {move || mine.get().then(|| view! {
                 <a class="button" node_ref=link href=Screen::Deadlines.href() download=FILE_NAME on:click=export.clone()>
                     {icon(Icon::Download)}
-                    <span>{tr(lang, Key::CalendarMine)}</span>
+                    <span class="label">{tr(lang, Key::CalendarMine)}</span>
                 </a>
                 <p class="hint">{tr(lang, Key::CalendarMineHint)}</p>
             })}
             {move || failed.get().then(|| view! { <p role="alert">{tr(lang, Key::CalendarFailed)}</p> })}
             <a class="button secondary" href=subscribe>
                 {icon(Icon::Calendar)}
-                <span>{tr(lang, Key::CalendarSubscribe)}</span>
+                <span class="label">{tr(lang, Key::CalendarSubscribe)}</span>
             </a>
             <p class="hint">{tr(lang, Key::CalendarSubscribeHint)}</p>
             <p class="calendar-address">{shared}</p>

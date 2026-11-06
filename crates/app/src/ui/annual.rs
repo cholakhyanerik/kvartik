@@ -88,7 +88,7 @@ pub fn AnnualCard(ctx: tax::Ctx) -> impl IntoView {
     move || {
         shown.get().map(|(year, total, saving)| {
             view! {
-                <a class="annual-card" href=Screen::Annual.href()>
+                <a class="annual-card" data-tilt="" href=Screen::Annual.href()>
                     <span class="annual-meta">{move || fill(t(lang.get(), Key::AnnualFor), &[&year.to_string()])}</span>
                     {total.due.map(|due| view! {
                         <span class="annual-label">
@@ -218,7 +218,7 @@ pub fn AnnualPage(ctx: tax::Ctx) -> impl IntoView {
         {move || (loaded() && !has_profile.get()).then(|| view! {
             <div class="notice">
                 <p>{tr(lang, Key::AnnualNoProfile)}</p>
-                <a class="button" href=Screen::Profile.href()>{tr(lang, Key::ProfileFill)}</a>
+                <a class="button" href=Screen::Profile.href()><span class="label">{tr(lang, Key::ProfileFill)}</span></a>
             </div>
         })}
         {move || shown.get().map(|(annual, residency)| view! {
@@ -281,7 +281,7 @@ fn Payments(lang: ReadSignal<Lang>, annual: Annual, residency: Option<Residency>
         {(!asks.is_empty()).then(|| view! {
             <div class="notice">
                 {asks.into_iter().map(|key| view! { <p role="alert">{tr(lang, key)}</p> }).collect_view()}
-                <a class="button" href=Screen::Profile.href()>{tr(lang, Key::ProfileEdit)}</a>
+                <a class="button" href=Screen::Profile.href()><span class="label">{tr(lang, Key::ProfileEdit)}</span></a>
             </div>
         })}
         {alerts.into_iter().map(|alert| view! { <p role="alert">{move || alert.text(lang.get())}</p> }).collect_view()}
@@ -303,7 +303,7 @@ fn Summary(lang: ReadSignal<Lang>, annual: Annual, today: Option<Date>) -> impl 
     let kind = Kind::Annual(annual.year);
     let passed = due.zip(today).is_some_and(|(due, today)| due < today);
     view! {
-        <div class="hero-card">
+        <div class="hero-card" data-tilt="">
             {due.map(|due| view! {
                 <span class="hero-meta">
                     {move || {

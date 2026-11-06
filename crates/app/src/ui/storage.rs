@@ -101,7 +101,7 @@ pub fn StorageAlert(lang: ReadSignal<Lang>, storage: RwSignal<Storage>) -> impl 
             <div class="notice">
                 <p role=role>{tr(lang, key)}</p>
                 {failed.then(|| view! {
-                    <button type="button" on:click=|_| platform::reload()>{tr(lang, Key::Reload)}</button>
+                    <button type="button" on:click=|_| platform::reload()><span class="label">{tr(lang, Key::Reload)}</span></button>
                 })}
             </div>
         })

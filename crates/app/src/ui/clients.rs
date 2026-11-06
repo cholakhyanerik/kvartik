@@ -383,7 +383,7 @@ fn ClientList(ctx: Ctx) -> impl IntoView {
                         disabled=move || busy.get()
                         on:click=move |_| act(ctx, busy, failure, id, Action::Restore)
                     >
-                        {tr(lang, Key::ClientRestore)}
+                        <span class="label">{tr(lang, Key::ClientRestore)}</span>
                     </button>
                 </div>
             }
@@ -428,7 +428,7 @@ fn ClientList(ctx: Ctx) -> impl IntoView {
             }
         >
             {icon(Icon::Plus)}
-            <span>{tr(lang, Key::ClientAdd)}</span>
+            <span class="label">{tr(lang, Key::ClientAdd)}</span>
         </button>
         <Show when=move || { !deleted.with(Vec::is_empty) }>
             <button
@@ -437,7 +437,7 @@ fn ClientList(ctx: Ctx) -> impl IntoView {
                 aria-expanded=move || show_deleted.get().to_string()
                 on:click=move |_| show_deleted.update(|open| *open = !*open)
             >
-                {move || {
+                <span class="label">{move || {
                     let lang = lang.get();
                     if show_deleted.get() {
                         t(lang, Key::ClientsDeletedHide).to_owned()
@@ -445,7 +445,7 @@ fn ClientList(ctx: Ctx) -> impl IntoView {
                         let count = deleted.with(Vec::len) as i64;
                         fill(t(lang, Key::ClientsDeleted), &[&i18n::integer(lang, count)])
                     }
-                }}
+                }}</span>
             </button>
             <Show when=move || show_deleted.get()>
                 <ul class="clients deleted">
@@ -517,7 +517,7 @@ fn DeletedRow(
                     disabled=move || busy.get()
                     on:click=move |_| act(ctx, busy, failure, id, Action::Restore)
                 >
-                    {tr(ctx.lang, Key::ClientRestore)}
+                    <span class="label">{tr(ctx.lang, Key::ClientRestore)}</span>
                 </button>
             </div>
         </li>
@@ -925,7 +925,7 @@ fn ClientForm(ctx: Ctx, existing: Option<Client>) -> impl IntoView {
             {move || if step.get() == 1 {
                 view! {
                     <button type="submit" class="wide">
-                        {tr(lang, Key::ClientNextDefaults)}
+                        <span class="label">{tr(lang, Key::ClientNextDefaults)}</span>
                     </button>
                 }
                 .into_any()
@@ -933,7 +933,7 @@ fn ClientForm(ctx: Ctx, existing: Option<Client>) -> impl IntoView {
                 view! {
                     <div class="actions">
                         <button type="submit" disabled=move || form.busy.get()>
-                            {tr(lang, Key::ProfileSave)}
+                            <span class="label">{tr(lang, Key::ProfileSave)}</span>
                         </button>
                         <button
                             type="button"
@@ -941,7 +941,7 @@ fn ClientForm(ctx: Ctx, existing: Option<Client>) -> impl IntoView {
                             disabled=move || form.busy.get()
                             on:click=move |_| leave()
                         >
-                            {tr(lang, Key::Cancel)}
+                            <span class="label">{tr(lang, Key::Cancel)}</span>
                         </button>
                     </div>
                 }
@@ -958,7 +958,7 @@ fn ClientForm(ctx: Ctx, existing: Option<Client>) -> impl IntoView {
                         disabled=move || form.busy.get()
                         on:click=move |_| act(ctx, form.busy, failure, id, Action::Delete)
                     >
-                        {tr(lang, Key::ClientDelete)}
+                        <span class="label">{tr(lang, Key::ClientDelete)}</span>
                     </button>
                 </div>
             })}
@@ -983,7 +983,7 @@ where
     H: Fn() + Copy + Send + Sync + 'static,
 {
     view! {
-        <label class="choice-card">
+        <label class="choice-card" data-tilt="">
             <input
                 type="radio"
                 name="client-where"

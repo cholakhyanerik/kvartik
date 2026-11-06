@@ -111,7 +111,7 @@ pub(super) fn OpeningEntry(ctx: Ctx, quarter: Memo<Quarter>, tax: Memo<Option<Qu
                     <div class="tax-opening">
                         <Carried lang opening />
                         <button type="button" class="secondary" on:click=move |_| editing.set(Some(start))>
-                            {tr(lang, Key::TaxOpeningChange)}
+                            <span class="label">{tr(lang, Key::TaxOpeningChange)}</span>
                         </button>
                     </div>
                 }
@@ -120,7 +120,7 @@ pub(super) fn OpeningEntry(ctx: Ctx, quarter: Memo<Quarter>, tax: Memo<Option<Qu
             unknown.get().map(|start| view! {
                 <div class="tax-opening">
                     <button type="button" class="secondary" on:click=move |_| editing.set(Some(start))>
-                        {tr(lang, Key::TaxOpeningAsk)}
+                        <span class="label">{tr(lang, Key::TaxOpeningAsk)}</span>
                     </button>
                 </div>
             }
@@ -253,10 +253,10 @@ fn OpeningForm(ctx: Ctx, start: Quarter, editing: RwSignal<Option<Quarter>>, sav
             {move || failure.get().map(|error| view! { <p role="alert">{tr(lang, error_key(error))}</p> })}
             <div class="actions">
                 <button type="button" disabled=move || busy.get() on:click=keep>
-                    {tr(lang, Key::TaxOpeningSave)}
+                    <span class="label">{tr(lang, Key::TaxOpeningSave)}</span>
                 </button>
                 <button type="button" class="secondary" on:click=move |_| editing.set(None)>
-                    {tr(lang, Key::Cancel)}
+                    <span class="label">{tr(lang, Key::Cancel)}</span>
                 </button>
             </div>
         </fieldset>

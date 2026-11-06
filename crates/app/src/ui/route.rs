@@ -4,8 +4,9 @@
 //! Адрес, а не только сигнал: кнопка «Назад» на телефоне ведёт на прошлый
 //! экран, а не закрывает программу, и перезагрузка открывает тот же экран.
 //! Экраны при этом остаются в странице и только прячутся: начатое в форме
-//! не пропадает, когда человек заглянул в другой раздел, а переход —
-//! мгновенный, без новой отрисовки (Правило 1).
+//! не пропадает, когда человек заглянул в другой раздел, а переход — без
+//! новой отрисовки (Правило 1): прежний экран растворяется, новый въезжает
+//! снизу (`ui/motion.rs`, задача 86).
 
 use kvartik_core::model::record::RecordId;
 use leptos::ev;
@@ -169,7 +170,12 @@ pub fn shown(screen: Screen) {
 /// Какой экран открыт — один на всё окно.
 #[derive(Clone, Copy)]
 pub struct Router {
+    /// Экран на виду: за ним — разметка окна. Сменяется переходом
+    /// (`ui/motion.rs`) — на кадр-другой позже адреса: прежний экран браузер
+    /// снимает до смены разметки (задача 86).
     screen: RwSignal<Screen>,
+    /// Экран по адресу — сразу. По нему решают переходы и первые шаги.
+    target: RwSignal<Screen>,
     /// Экран, на который привели первые шаги (`ui/onboarding.rs`): его форма,
     /// закрывшись, вернёт на главный экран ([`Router::form_closed`]). Ушёл
     /// человек с него сам — больше не ведём.
@@ -182,20 +188,24 @@ impl Router {
     /// Слушатель снимается вместе с окном: браузерные тесты монтируют окно
     /// много раз.
     pub fn start() -> Self {
-        let screen = RwSignal::new(Screen::from_hash(&platform::hash()));
-        let guided = RwSignal::new(None);
+        let first = Screen::from_hash(&platform::hash());
+        let router = Self {
+            screen: RwSignal::new(first),
+            target: RwSignal::new(first),
+            guided: RwSignal::new(None),
+        };
         let listener = window_event_listener(ev::hashchange, move |_| {
             let next = Screen::from_hash(&platform::hash());
-            if guided.get_untracked() != Some(next) {
-                guided.set(None);
+            if router.guided.get_untracked() != Some(next) {
+                router.guided.set(None);
             }
-            screen.set(next);
+            router.show(next);
         });
         on_cleanup(move || listener.remove());
-        Self { screen, guided }
+        router
     }
 
-    /// Открытый экран — отслеживаемое.
+    /// Открытый экран — отслеживаемое: тот, что на виду.
     pub fn screen(self) -> Screen {
         self.screen.get()
     }
@@ -210,10 +220,28 @@ impl Router {
     /// адрес меняется, и «Назад» вернёт прежний экран.
     pub fn go(self, screen: Screen) {
         self.guided.set(None);
-        if self.screen.get_untracked() != screen {
+        if self.target.get_untracked() != screen {
             platform::set_hash(&screen.href());
-            self.screen.set(screen);
+            self.show(screen);
         }
+    }
+
+    /// Экран по адресу сменился: разметка — переходом. Адрес, который
+    /// поставил [`Router::go`], приходит потом и своим `hashchange` — он уже
+    /// показан. Переходы, начатые один за другим, кончаются последним
+    /// экраном по адресу, а окно, снятое до конца перехода, ничего не ждёт.
+    fn show(self, next: Screen) {
+        let from = self.target.get_untracked();
+        if from == next {
+            return;
+        }
+        self.target.set(next);
+        let (screen, target) = (self.screen, self.target);
+        super::motion::screen(from, next, move || {
+            if let Some(next) = target.try_get_untracked() {
+                screen.try_set(next);
+            }
+        });
     }
 
     /// Перейти на экран по первым шагам: его форма, закрывшись, вернёт на
@@ -226,7 +254,7 @@ impl Router {
     /// Форма закрылась — сохранили или передумали. Если на её экран привели
     /// первые шаги, дальше главный экран: следующий шаг там.
     pub fn form_closed(self) {
-        if self.guided.get_untracked() == Some(self.screen.get_untracked()) {
+        if self.guided.get_untracked() == Some(self.target.get_untracked()) {
             self.go(Screen::Home);
         }
     }

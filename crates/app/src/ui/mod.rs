@@ -18,6 +18,7 @@ mod icon;
 mod lang;
 mod ledger;
 mod license;
+mod motion;
 mod nav;
 mod office;
 mod onboarding;
@@ -150,6 +151,9 @@ pub fn App() -> impl IntoView {
     let window_lang = WindowLang::start();
     let lang = window_lang.signal();
     let router = Router::start();
+    // Кружок у курсора и всё, что следует за мышью (задача 86).
+    let cursor = NodeRef::new();
+    motion::follow(cursor);
     // Первый запуск — пока язык окна не выбран (`ui::onboarding`). Окно под
     // ним открывает базу и готовит экраны, спрятанным.
     let welcome = RwSignal::new(onboarding::needed());
@@ -338,6 +342,7 @@ pub fn App() -> impl IntoView {
             {panic::debug_trigger()}
         </div>
         <UpdateDialog lang program />
+        <div class="cursor" aria-hidden="true" node_ref=cursor></div>
     }
 }
 

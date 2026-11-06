@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.89",
+      "date": "2026-11-06",
+      "hy": [
+        "Էկրանները փոխվում են սահուն. նախորդը մարում է, նորը բարձրանում է ներքևից, իսկ փաստաթուղթը ցուցակից անցնում է իր քարտի վերնագրին։ Կարելի է սեղմել անմիջապես՝ առանց անցման ավարտին սպասելու։",
+        "Համակարգչում մկնիկի տակ կոճակները լցվում են գույնով և «թերթում» իրենց մակագրությունը, քարտերը մի փոքր թեքվում են, իսկ մկնիկի սլաքին հետևում է փոքրիկ շրջան։ Եթե համակարգում անիմացիան անջատված է, ոչինչ չի շարժվում։"
+      ],
+      "ru": [
+        "Экраны сменяются мягко: прежний растворяется, новый въезжает снизу, а документ из списка перетекает в заголовок своей карточки. Нажимать можно сразу, не дожидаясь конца перехода.",
+        "На компьютере кнопки под мышью заливаются цветом и «перелистывают» подпись, карточки чуть наклоняются, а за стрелкой мыши следует кружок. Если анимация в системе выключена, ничего не двигается."
+      ],
+      "en": [
+        "Screens change smoothly: the old one fades out, the new one slides up from below, and a document in the list flows into the heading of its card. You can tap right away, without waiting for the transition to end.",
+        "On a computer, buttons under the mouse fill with color and “flip” their label, cards tilt slightly, and a small circle follows the mouse pointer. If animations are turned off on your system, nothing moves."
+      ]
+    },
+    {
       "version": "0.0.88",
       "date": "2026-11-06",
       "hy": [
@@ -269,25 +285,6 @@
       "en": [
         "A 2025 quarter with catering now says it's calculated by the rules for Yerevan: if you worked only outside Yerevan, calculate it with your accountant.",
         "If you have other income next to catering, the tax screen reminds you about the catering declaration."
-      ]
-    },
-    {
-      "version": "0.0.69",
-      "date": "2026-11-02",
-      "hy": [
-        "Եթե ծնվել եք մինչև 1974 թվականը և ինքներդ եք միացել կուտակային կենսաթոշակային համակարգին, պրոֆիլում նշեք դիմումի օրը. սոցիալական վճարը կհաշվվի դրան հաջորդող ամսից։",
-        "65 և բարձր տարիքի քաղաքացուն պրոֆիլն այժմ հարցնում է՝ Հայաստանի ռեզիդե՞նտ է։ Պատասխանով տարեկան վճարների էկրանը ճշգրիտ ասում է՝ առողջության ապահովագրավճարը վճարում է պետությո՞ւնը, թե՞ դուք։",
-        "Առանց կացության կարգավիճակի ԵԱՏՄ երկրների քաղաքացիներին տարեկան վճարների էկրանն այժմ ասում է, որ սոցիալական վճարի հարցը բաց է. պարզաբանում չկա, ճշտեք հաշվապահի հետ։"
-      ],
-      "ru": [
-        "Если вы родились до 1974 года и вступили в накопительную пенсию сами, укажите в профиле день заявления: соцплатёж посчитается с месяца после него.",
-        "Гражданина 65 лет и старше профиль теперь спрашивает, резидент ли он Армении: с ответом экран годовых платежей говорит точно, платит взнос медстраховки государство или вы сами.",
-        "Гражданам стран ЕАЭС без вида на жительство экран годовых платежей теперь говорит, что вопрос о соцплатеже открыт: разъяснения нет, сверьте с бухгалтером."
-      ],
-      "en": [
-        "If you were born before 1974 and joined the funded pension yourself, add your application day to the profile: the social payment will count from the month after it.",
-        "Citizens aged 65 and over are now asked in the profile whether they're Armenian residents: with the answer, the annual payments screen says exactly whether the state or you pay the health insurance premium.",
-        "For citizens of EAEU countries without residence status, the annual payments screen now says the social payment is an open question: there's no clarification, so check with your accountant."
       ]
     }
   ]

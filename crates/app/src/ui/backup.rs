@@ -591,7 +591,7 @@ pub fn BackupReminder(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView
                 <div class="notice due" role="status">
                     {icon(Icon::Shield)}
                     <p class="reminder">{tr(lang, key)}</p>
-                    <a class="button" href=Screen::Backup.href()>{tr(lang, Key::BackupGoTo)}</a>
+                    <a class="button" href=Screen::Backup.href()><span class="label">{tr(lang, Key::BackupGoTo)}</span></a>
                 </div>
             }
         })
@@ -940,7 +940,7 @@ fn ClientCopy(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl In
             <p class="hint">{counted(lang, Key::BackupClientPasswordHint, MIN_PASSWORD_CHARS as i64)}</p>
             <button type="submit" class="secondary" disabled=busy>
                 {icon(Icon::Download)}
-                <span>{tr(lang, Key::BackupClientMake)}</span>
+                <span class="label">{tr(lang, Key::BackupClientMake)}</span>
             </button>
         </form>
         {move || match making.get() {
@@ -958,7 +958,7 @@ fn ClientCopy(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl In
                     })}
                     <div class="actions backup-file">
                         <a class="button" href=ready.download.url().to_owned() download=ready.download.name()>
-                            {move || fill(t(lang.get(), Key::BackupSaveFile), &[&name])}
+                            <span class="label">{move || fill(t(lang.get(), Key::BackupSaveFile), &[&name])}</span>
                         </a>
                     </div>
                 }.into_any())
@@ -986,7 +986,7 @@ pub(super) fn AutoCards(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoVi
                     {icon(Icon::Shield)}
                     <p class="reminder">{tr(lang, Key::AutoAsk)}</p>
                     <button type="button" on:click=move |_| backups.allow()>
-                        {tr(lang, Key::AutoAllow)}
+                        <span class="label">{tr(lang, Key::AutoAllow)}</span>
                     </button>
                 </div>
             }
@@ -996,7 +996,7 @@ pub(super) fn AutoCards(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoVi
                 <div class="notice due" role="status">
                     {icon(Icon::Shield)}
                     <p class="reminder">{tr(lang, Key::AutoCheckDue)}</p>
-                    <a class="button" href=Screen::Backup.href()>{tr(lang, Key::BackupGoTo)}</a>
+                    <a class="button" href=Screen::Backup.href()><span class="label">{tr(lang, Key::BackupGoTo)}</span></a>
                 </div>
             }
             .into_any())
@@ -1164,9 +1164,9 @@ fn AutoSection(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl I
                 }}
                 <p class="hint">{tr(lang, Key::AutoPasswordNote)}</p>
                 <div class="actions">
-                    <button type="submit" disabled=move || busy.get()>{tr(lang, Key::AutoEnable)}</button>
+                    <button type="submit" disabled=move || busy.get()><span class="label">{tr(lang, Key::AutoEnable)}</span></button>
                     <button type="button" class="secondary" disabled=move || busy.get() on:click=cancel>
-                        {tr(lang, Key::Cancel)}
+                        <span class="label">{tr(lang, Key::Cancel)}</span>
                     </button>
                 </div>
             </form>
@@ -1193,7 +1193,7 @@ fn AutoSection(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl I
                 {move || (!picking()).then(|| view! {
                     <p class="hint">{tr(lang, Key::AutoFolderHint)}</p>
                     <button type="button" class="secondary" disabled=move || busy.get() on:click=pick>
-                        {tr(lang, Key::AutoChoose)}
+                        <span class="label">{tr(lang, Key::AutoChoose)}</span>
                     </button>
                 })}
                 {form}
@@ -1214,7 +1214,7 @@ fn AutoSection(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl I
                     Permission::Granted => None,
                     Permission::Prompt => Some(view! {
                         <p role="alert">{tr(lang, Key::AutoAsk)}</p>
-                        <button type="button" on:click=allow>{tr(lang, Key::AutoAllow)}</button>
+                        <button type="button" on:click=allow><span class="label">{tr(lang, Key::AutoAllow)}</span></button>
                     }.into_any()),
                     Permission::Denied => Some(view! {
                         <p role="alert">{tr(lang, Key::AutoDenied)}</p>
@@ -1222,7 +1222,7 @@ fn AutoSection(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl I
                 }}
                 {hitch}
                 {move || (renewing.get() && !picking()).then(|| view! {
-                    <button type="button" on:click=renew>{tr(lang, Key::AutoRenew)}</button>
+                    <button type="button" on:click=renew><span class="label">{tr(lang, Key::AutoRenew)}</span></button>
                 })}
                 {move || {
                     let unreadable = auto.with(|auto| auto.unreadable) as i64;
@@ -1240,7 +1240,7 @@ fn AutoSection(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl I
                             <input type="password" autocomplete="current-password" bind:value=typed_check />
                         </label>
                         <button type="submit" class="wide" disabled=move || busy.get()>
-                            {tr(lang, Key::AutoCheck)}
+                            <span class="label">{tr(lang, Key::AutoCheck)}</span>
                         </button>
                     </form>
                 })}
@@ -1248,10 +1248,10 @@ fn AutoSection(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl I
                 {move || (!picking()).then(|| view! {
                     <div class="actions auto-actions">
                         <button type="button" class="secondary" disabled=move || busy.get() on:click=pick>
-                            {tr(lang, Key::AutoChange)}
+                            <span class="label">{tr(lang, Key::AutoChange)}</span>
                         </button>
                         <button type="button" class="secondary" disabled=move || busy.get() on:click=off>
-                            {tr(lang, Key::AutoOff)}
+                            <span class="label">{tr(lang, Key::AutoOff)}</span>
                         </button>
                     </div>
                 })}
@@ -1410,7 +1410,7 @@ fn MakeBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms, router: Ro
             }}
             <button type="submit" class="wide" disabled=busy>
                 {icon(Icon::Download)}
-                <span>{tr(lang, Key::BackupMake)}</span>
+                <span class="label">{tr(lang, Key::BackupMake)}</span>
             </button>
             {move || (!new_password()).then(|| view! {
                 <button
@@ -1419,7 +1419,7 @@ fn MakeBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms, router: Ro
                     disabled=busy
                     on:click=move |_| resetting.set(true)
                 >
-                    {tr(lang, Key::BackupForgot)}
+                    <span class="label">{tr(lang, Key::BackupForgot)}</span>
                 </button>
             })}
         </form>
@@ -1461,12 +1461,12 @@ fn MakeBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms, router: Ro
                             download=ready.download.name()
                             on:click=on_save
                         >
-                            {move || fill(t(lang.get(), Key::BackupSaveFile), &[&name])}
+                            <span class="label">{move || fill(t(lang.get(), Key::BackupSaveFile), &[&name])}</span>
                         </a>
                         {shares.then(|| view! {
                             <button type="button" class="secondary" on:click=send>
                                 {icon(Icon::Share)}
-                                <span>{tr(lang, Key::BackupShare)}</span>
+                                <span class="label">{tr(lang, Key::BackupShare)}</span>
                             </button>
                         })}
                     </div>
@@ -2015,7 +2015,7 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl
                             <p role="alert">{move || problem.text(lang.get())}</p>
                         })}
                         <div class="actions">
-                            <button type="submit">{tr(lang, Key::BackupRestore)}</button>
+                            <button type="submit"><span class="label">{tr(lang, Key::BackupRestore)}</span></button>
                             <button
                                 type="button"
                                 class="secondary"
@@ -2024,7 +2024,7 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl
                                     restoring.set(Restoring::Idle);
                                 }
                             >
-                                {tr(lang, Key::Cancel)}
+                                <span class="label">{tr(lang, Key::Cancel)}</span>
                             </button>
                         </div>
                     </form>
@@ -2054,13 +2054,13 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl
                         // ИП потом не разделить одной кнопкой.
                         <div class="actions">
                             <button type="button" on:click=move |_| restoring.set(Restoring::Idle)>
-                                {tr(lang, Key::Cancel)}
+                                <span class="label">{tr(lang, Key::Cancel)}</span>
                             </button>
                             <button type="button" class="secondary" on:click=move |_| answer(RestoreJob::AsNew)>
-                                {tr(lang, Key::BackupOtherIeAsNew)}
+                                <span class="label">{tr(lang, Key::BackupOtherIeAsNew)}</span>
                             </button>
                             <button type="button" class="secondary" on:click=move |_| answer(RestoreJob::Merge)>
-                                {tr(lang, Key::BackupOtherIeMerge)}
+                                <span class="label">{tr(lang, Key::BackupOtherIeMerge)}</span>
                             </button>
                         </div>
                     </div>
@@ -2107,7 +2107,7 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl
                     // перезагружает страницу, и его место там (`ui/office.rs`).
                     Restoring::AsNew => Some(view! {
                         <p role="status">{tr(lang, Key::BackupAsNewDone)}</p>
-                        <a class="button" href=Screen::Office.href()>{tr(lang, Key::OfficeTitle)}</a>
+                        <a class="button" href=Screen::Office.href()><span class="label">{tr(lang, Key::OfficeTitle)}</span></a>
                     }.into_any()),
                     Restoring::Elsewhere(ip) => Some(view! {
                         <p role="alert">{move || {
@@ -2118,7 +2118,7 @@ fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl
                             };
                             fill(t(lang, Key::BackupElsewhere), &[name])
                         }}</p>
-                        <a class="button" href=Screen::Office.href()>{tr(lang, Key::OfficeTitle)}</a>
+                        <a class="button" href=Screen::Office.href()><span class="label">{tr(lang, Key::OfficeTitle)}</span></a>
                     }.into_any()),
                     Restoring::Failed(problem) => Some(view! {
                         <p role="alert">{move || problem.text(lang.get())}</p>

@@ -69,7 +69,8 @@ const PREFERENCE: [&str; 8] = [
 ];
 
 /// Крейты не из wasm, чей код всё же лежит в сайте: загрузчик частей —
-/// шаблон `wasm_split_cli_support` (`src/snippets/split_wasm.js` в 0.2.4),
+/// шаблон `wasm_split_cli_support` (`src/snippets/split_wasm.js` в 0.2.4
+/// и 0.2.5),
 /// который программа разреза дописывает в `kvartik-split-*.js`.
 const EXTRA: &[&str] = &["wasm_split_cli_support"];
 
