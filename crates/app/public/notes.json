@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.88",
+      "date": "2026-11-06",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել. կառուցումը դարձել է ավելի հուսալի։ Դիտարկիչում նրա ստուգումներից մեկը սպասում էր ֆիքսված ժամանակ և դանդաղ մեքենայի վրա երբեմն իզուր էր ձախողվում։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось: сборка стала надёжнее. Одна из её проверок в браузере ждала фиксированное время и на медленной машине изредка срабатывала впустую."
+      ],
+      "en": [
+        "Nothing has changed in the app: the build is more reliable. One of its browser checks waited a fixed time and occasionally failed for no reason on a slow machine."
+      ]
+    },
+    {
       "version": "0.0.87",
       "date": "2026-11-06",
       "hy": [
@@ -275,22 +288,6 @@
         "If you were born before 1974 and joined the funded pension yourself, add your application day to the profile: the social payment will count from the month after it.",
         "Citizens aged 65 and over are now asked in the profile whether they're Armenian residents: with the answer, the annual payments screen says exactly whether the state or you pay the health insurance premium.",
         "For citizens of EAEU countries without residence status, the annual payments screen now says the social payment is an open question: there's no clarification, so check with your accountant."
-      ]
-    },
-    {
-      "version": "0.0.68",
-      "date": "2026-11-01",
-      "hy": [
-        "Եթե եկամուտը վարձակալական վճար, տոկոս, ռոյալթի կամ ակտիվի օտարում է, հաշվում, ակտում և մատյանի գրառման մեջ այժմ կարող եք ընտրել հարկի այդ տողը. հարկը կհաշվարկվի դրանով, ոչ թե գործունեության կոդով։",
-        "Այդպիսի եկամուտ ունեցող եռամսյակում ծախսի ձևը հարցնում է գործունեության տեսակը. ապրանքի և անմիջականորեն կապված ծախսերի համար նշեք կոդը, և դրանք ամբողջությամբ կմտնեն նվազեցման մեջ։"
-      ],
-      "ru": [
-        "Если доход — аренда, проценты, роялти или продажа имущества, теперь у счёта, акта и записи книги можно выбрать эту строку налога: налог посчитается по ней, а не по коду деятельности.",
-        "В квартале с таким доходом форма расхода спрашивает вид деятельности: у товара и прямых расходов укажите код, и они войдут в вычет целиком."
-      ],
-      "en": [
-        "If income is rent, interest, royalties or a sale of assets, you can now choose that tax row on an invoice, an act or a ledger entry: the tax is then calculated by that row, not by your activity code.",
-        "In a quarter with such income, the expense form asks for the activity: choose the code for goods and direct expenses, and they will count towards the deduction in full."
       ]
     }
   ]

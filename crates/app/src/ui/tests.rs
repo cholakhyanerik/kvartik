@@ -621,6 +621,29 @@ fn current_tabs(host: &HtmlElement) -> Vec<String> {
         .collect()
 }
 
+/// Сколько раз по 20 мс `look` ждёт экрана: две секунды. Переход по адресу
+/// и «Назад» браузера приходят событием `hashchange` своей задачей, а не
+/// в самом нажатии, и на занятой машине — позже, чем кажется: в CI «Назад»
+/// пришёл после 200 мс ожидания и перекрыл следующее нажатие вкладки
+/// (Chrome, 2026-11-06). Поэтому тест ждёт состояния, а не времени.
+const LOOK_TRIES: usize = 100;
+
+/// Подождать, пока окно покажет один экран `screen` с открытой вкладкой
+/// `tab`, но не дольше `LOOK_TRIES` раз по 20 мс, — и записать в `wrong`,
+/// что видно, если не дождались.
+async fn look(host: &HtmlElement, step: &str, screen: &str, tab: &str, wrong: &mut Vec<String>) {
+    let mut seen = (Vec::new(), Vec::new());
+    for _ in 0..LOOK_TRIES {
+        seen = (shown_screens(host), current_tabs(host));
+        if seen.0 == [screen] && seen.1 == [tab] {
+            return;
+        }
+        sleep(20).await;
+    }
+    let (shown, current) = seen;
+    wrong.push(format!("{step}: видны {shown:?}, открыта вкладка {current:?}"));
+}
+
 /// Экран — по адресу: окно, открытое с `#/clients`, показывает клиентов,
 /// а остальные экраны прячет; вкладка меню открывает свой экран и отмечена
 /// открытой; «Назад» браузера возвращает прежний экран, а не уводит из
@@ -634,21 +657,13 @@ async fn screens_follow_the_address() {
     Device::new().set_ui_lang(lang);
     let (host, mounted) = mount_at("#/clients");
     let mut wrong = Vec::new();
-    sleep(50).await;
-    let look = |step: &str, screen: &str, tab: &str, wrong: &mut Vec<String>| {
-        let (shown, current) = (shown_screens(&host), current_tabs(&host));
-        if shown != [screen] || current != [tab] {
-            wrong.push(format!("{step}: видны {shown:?}, открыта вкладка {current:?}"));
-        }
-    };
-    look("с #/clients", "clients", "#/clients", &mut wrong);
+    look(&host, "с #/clients", "clients", "#/clients", &mut wrong).await;
 
     match host.query_selector(r##".tabs a[href="#/documents"]"##).ok().flatten() {
         Some(tab) => tab.unchecked_into::<HtmlElement>().click(),
         None => wrong.push("нет вкладки счетов".to_owned()),
     }
-    sleep(100).await;
-    look("вкладка счетов", "documents", "#/documents", &mut wrong);
+    look(&host, "вкладка счетов", "documents", "#/documents", &mut wrong).await;
     if hash() != "#/documents" {
         wrong.push(format!("адрес после вкладки — {}", hash()));
     }
@@ -656,23 +671,19 @@ async fn screens_follow_the_address() {
     if let Some(window) = web_sys::window() {
         let _ = window.history().map(|history| history.back());
     }
-    sleep(200).await;
-    look("«Назад»", "clients", "#/clients", &mut wrong);
+    look(&host, "«Назад»", "clients", "#/clients", &mut wrong).await;
 
     match host.query_selector(r##".tabs a[href="#/ledger"]"##).ok().flatten() {
         Some(tab) => tab.unchecked_into::<HtmlElement>().click(),
         None => wrong.push("нет вкладки книги".to_owned()),
     }
-    sleep(100).await;
-    look("вкладка книги", "ledger", "#/ledger", &mut wrong);
+    look(&host, "вкладка книги", "ledger", "#/ledger", &mut wrong).await;
 
     set_hash("#/backup");
-    sleep(100).await;
-    look("копия", "backup", "#/profile", &mut wrong);
+    look(&host, "копия", "backup", "#/profile", &mut wrong).await;
 
     set_hash("#/nothing");
-    sleep(100).await;
-    look("чужой адрес", "home", "#/", &mut wrong);
+    look(&host, "чужой адрес", "home", "#/", &mut wrong).await;
 
     drop(mounted);
     host.remove();
