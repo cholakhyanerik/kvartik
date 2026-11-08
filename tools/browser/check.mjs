@@ -240,12 +240,9 @@ async function cardClose(page) {
   if (!low?.clip) {
     checks.check("движение, телефон: карточка закрылась переходом", false, low?.error ?? "");
   } else {
-    const menu = async () => (await page.send("Page.captureScreenshot", { format: "png", clip: low.clip })).data;
-    const during = await menu();
-    await page.eval(THAW);
-    await sleep(300);
-    checks.check("движение, телефон: карточка закрылась, строка под меню — меню посреди перехода как после него",
-      during === await menu());
+    const menu = await overMenu(page, low.clip);
+    checks.check("движение, телефон: карточка закрылась, строка под меню — на меню посреди перехода ничего не лежит",
+      menu.ok, menu.detail);
   }
   await go(page, rows.first);
   await sleep(900);
@@ -476,15 +473,49 @@ const freeze = (hash, at = 150) => `
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));`;
 const THAW = `for (const a of window.__frozen ?? []) a.finish(); window.__frozen = null; return true;`;
 
+/// Меню телефона посреди замороженного перехода (`freeze`): ложится ли на
+/// него что-нибудь из перехода — снимок прежнего экрана, вкладки, заголовка
+/// карточки — и та же ли вкладка открыта, что после. Кадр сравнивается
+/// побайтно с тем же кадром, где слой перехода (`::view-transition`)
+/// прозрачен: разница — только то, что кладёт сам переход. Не с кадром
+/// после перехода: без видеокарты, как в CI, Chrome растрирует то же меню
+/// в другом состоянии страницы чуть иначе. При закрытой карточке кадры
+/// разошлись в CI (Chrome 156), хотя на меню не лежало ничего, а у Chrome
+/// 157 с `--disable-gpu` — на 33 точки сглаживания края значка «%»
+/// у «Налога» (2026-11-08); кадры одного состояния совпадают. Вкладка — по
+/// разметке. Отпускает переход (`THAW`).
+async function overMenu(page, clip) {
+  const shot = async () => (await page.send("Page.captureScreenshot", { format: "png", clip })).data;
+  const TAB = `return document.querySelector('.app > .nav a[aria-current="page"]')?.getAttribute("href") ?? "";`;
+  const during = await shot();
+  const tab = await page.eval(TAB);
+  await page.eval(`const sheet = new CSSStyleSheet();
+    sheet.replaceSync("::view-transition { opacity: 0 !important; }");
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    window.__bare = sheet;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    return true;`);
+  const bare = await shot();
+  await page.eval(`document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== window.__bare);
+    window.__bare = null; ${THAW}`);
+  await sleep(300);
+  const after = await page.eval(TAB);
+  return {
+    ok: during === bare && tab === after,
+    detail: `${during === bare ? "" : "на меню лежит переход; "}вкладка ${tab}, после — ${after}`,
+  };
+}
+
 /// Движение (задача 86), на компьютере — ширина 1280, мышь. Переход экрана
 /// снимает только прежний экран: новый живой, и нажатие посреди перехода
 /// попадает в него, а не в снимок страницы (`elementFromPoint`, как
 /// браузер ищет цель нажатия). Под мышью кнопка получает точку входа,
 /// а кружок у курсора встаёт над ней — виден он, только если у системы есть
 /// мышь. На телефоне меню вкладок — внизу, поверх экрана, и посреди перехода
-/// оно такое же, как после него. У того, кто выключил анимацию
-/// в системе, — ни перехода, ни одной анимации, ни кружка. У лендинга —
-/// переход между страницами языков в стилях и кружок под мышью.
+/// на него не ложится ничего, а открыта та же вкладка, что после него. У
+/// того, кто выключил анимацию в системе, — ни перехода, ни одной анимации,
+/// ни кружка. У лендинга — переход между страницами языков в стилях
+/// и кружок под мышью.
 /// В своём контексте браузера: эмуляция медиа не должна попасть в
 /// следующие шаги.
 async function motion(browser) {
@@ -535,8 +566,8 @@ async function motion(browser) {
       return c && c.dataset.over === "press" && getComputedStyle(c).display === ${JSON.stringify(pointing ? "block" : "none")}
         ? true : null;`, 3000));
 
-    // Телефон (найдено на телефоне 2026-11-07): посреди перехода меню вкладок
-    // — пиксель в пиксель как после него. Снимок прежнего экрана браузер
+    // Телефон (найдено на телефоне 2026-11-07): посреди перехода на меню
+    // вкладок не ложится ничего (`overMenu`). Снимок прежнего экрана браузер
     // рисует над страницей, и у книги под меню лежит выгрузка: необрезанный,
     // он лёг бы на вкладки; снятая открытая вкладка переезжала бы к новой
     // значком и подписью и не нажималась бы. «Новый счёт» закреплён у окна,
@@ -563,11 +594,8 @@ async function motion(browser) {
     if (!middle?.clip) {
       checks.check("движение, телефон: экран сменился переходом", false, middle?.error ?? "");
     } else {
-      const menu = async () => (await page.send("Page.captureScreenshot", { format: "png", clip: middle.clip })).data;
-      const during = await menu();
-      await page.eval(THAW);
-      await sleep(300);
-      checks.check("движение, телефон: посреди перехода меню — как после него", during === await menu());
+      const menu = await overMenu(page, middle.clip);
+      checks.check("движение, телефон: посреди перехода на меню ничего не лежит", menu.ok, menu.detail);
       checks.check("движение, телефон: посреди перехода каждая вкладка нажимается", middle.missed.length === 0,
         middle.missed.join(", "));
     }

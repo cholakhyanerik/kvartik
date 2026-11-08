@@ -15,7 +15,10 @@
 //   работает рядом (2026-10-15);
 // - на Linux — `--no-sandbox` и `--disable-dev-shm-usage`, как у раннера
 //   браузерных тестов в том же CI (по исходникам wasm-bindgen-cli 0.2.130,
-//   `headless.rs`): машина CI одноразовая, а открывается только свой сайт.
+//   `headless.rs`): машина CI одноразовая, а открывается только свой сайт;
+// - свои флаги Chrome — переменная CHROME_ARGS. В CI видеокарты нет, и
+//   рисует Chrome там иначе, чем на машине автора: проверку, зелёную здесь
+//   и красную там, повторяет `CHROME_ARGS=--disable-gpu` (2026-11-08).
 
 import { spawn, execSync } from "node:child_process";
 import fs from "node:fs";
@@ -57,7 +60,7 @@ export class Browser {
     fs.rmSync(profile, { recursive: true, force: true });
     const child = spawnTree(CHROME, ["--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`,
       "--no-first-run", "--no-default-browser-check", ...(WINDOWS ? [] : ["--no-sandbox", "--disable-dev-shm-usage"]),
-      "about:blank"], { stdio: "ignore" });
+      ...(process.env.CHROME_ARGS ?? "").split(/\s+/).filter(Boolean), "about:blank"], { stdio: "ignore" });
     let failed;
     child.on("error", (e) => { failed = e; });
     let url;
