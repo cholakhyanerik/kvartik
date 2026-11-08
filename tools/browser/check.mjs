@@ -56,7 +56,7 @@ import { parseArgs } from "node:util";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Browser, Checks, sleep } from "./cdp.mjs";
+import { Browser, Checks, DEVICES, sleep } from "./cdp.mjs";
 import { REPO, newVersion, own } from "./serve.mjs";
 import { samples, t } from "./strings.mjs";
 
@@ -208,6 +208,53 @@ async function card(page, when) {
   if (!checks.check(`${when}: карточка документа`, pdf)) return;
   await press(page, "#documents", s("DocPdf"));
   checks.check(`${when}: PDF собран`, await page.waitFor(TEXT_IN("#documents", s("PdfDownload")), 30000));
+}
+
+/// Карточка документа закрывается на телефоне (найдено 2026-11-08): экран
+/// открывается с начала, и строка документа может оказаться под меню —
+/// тогда заголовок карточки в неё не перетекает, а растворяется: его
+/// снимок, летящий к строке, лёг бы на вкладки. Высота окна — такая, чтобы
+/// верх меню пришёлся на середину последней строки списка. А в строку на
+/// виду (первую) заголовок перетекает по-прежнему.
+async function cardClose(page) {
+  const media = (motion) => page.send("Emulation.setEmulatedMedia", {
+    features: [{ name: "prefers-color-scheme", value: "light" }, { name: "prefers-reduced-motion", value: motion }],
+  });
+  await go(page, "#/documents");
+  const rows = await page.waitFor(`const rows = [...document.querySelectorAll('#documents a.entry[href^="#/documents/"]')]
+      .filter((a) => a.getClientRects().length > 0);
+    if (rows.length < 2) return null;
+    const last = rows.at(-1).getBoundingClientRect();
+    const menu = document.querySelector(".app > .nav").getBoundingClientRect();
+    return { first: rows[0].getAttribute("href"), last: rows.at(-1).getAttribute("href"),
+      height: Math.round(last.top + scrollY + last.height / 2 + menu.height) };`);
+  if (!checks.check("с сетью: в списке документов две строки — для карточки на телефоне", rows)) return;
+  await page.send("Emulation.setDeviceMetricsOverride", { ...DEVICES[360], height: rows.height });
+  await media("no-preference");
+  await go(page, rows.last);
+  await sleep(900);
+  const low = await page.eval(`${freeze("#/documents", 300)}
+    const menu = document.querySelector(".app > .nav").getBoundingClientRect();
+    const top = Math.ceil(menu.top) + 2;
+    return { clip: { x: 0, y: top, width: Math.floor(menu.width), height: Math.floor(menu.bottom) - top, scale: 1 } };`);
+  if (!low?.clip) {
+    checks.check("движение, телефон: карточка закрылась переходом", false, low?.error ?? "");
+  } else {
+    const menu = async () => (await page.send("Page.captureScreenshot", { format: "png", clip: low.clip })).data;
+    const during = await menu();
+    await page.eval(THAW);
+    await sleep(300);
+    checks.check("движение, телефон: карточка закрылась, строка под меню — меню посреди перехода как после него",
+      during === await menu());
+  }
+  await go(page, rows.first);
+  await sleep(900);
+  const seen = await page.eval(`${freeze("#/documents", 300)}
+    return window.__frozen.some((a) => a.effect?.pseudoElement === "::view-transition-group(doc)");`);
+  await page.eval(THAW);
+  checks.check("движение, телефон: карточка закрылась, строка на виду — заголовок перетекает в неё", seen === true,
+    JSON.stringify(seen));
+  await page.emulate(360);
 }
 
 /// Выгрузка для бухгалтера (задача 30) — под списком книги, из её части:
@@ -791,6 +838,7 @@ async function main() {
     await forms(page, "с сетью");
     await screens(page, "с сетью");
     await card(page, "с сетью");
+    await cardClose(page);
     await exported(page, "с сетью");
     await backup(page, sample.password);
     const loaded = await page.eval(`return performance.getEntriesByType("resource").map((e) => e.name);`);

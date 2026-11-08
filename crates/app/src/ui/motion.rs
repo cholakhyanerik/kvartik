@@ -28,7 +28,7 @@ use leptos::ev;
 use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
-use web_sys::{Element, HtmlElement, Node, PointerEvent};
+use web_sys::{DomRect, Element, HtmlElement, Node, PointerEvent};
 
 use super::route::Screen;
 use crate::platform;
@@ -59,7 +59,8 @@ thread_local! {
 /// у прежнего экрана: он растворяется поверх нового, живого, который
 /// въезжает своей анимацией (`style/base.css`). Документ перетекает из своей
 /// строки в списке в заголовок карточки — ему имя даёт оформление, пока
-/// карточка открыта, — и обратно, в строку.
+/// карточка открыта, — и обратно, в строку, если её будет видно
+/// (`seen_whole`).
 pub fn screen(from: Screen, to: Screen, update: impl FnOnce() + 'static) {
     if !platform::motion::allowed() {
         update();
@@ -101,7 +102,7 @@ pub fn screen(from: Screen, to: Screen, update: impl FnOnce() + 'static) {
         update();
         js_sys::futures::future_to_promise(async move {
             leptos::task::tick().await;
-            if let Some(row) = after.and_then(row) {
+            if let Some(row) = after.and_then(row).filter(seen_whole) {
                 name(&row, Some(DOCUMENT));
                 NAMED.with(|named| *named.borrow_mut() = Some(row));
             }
@@ -152,25 +153,53 @@ fn name(element: &HtmlElement, name: Option<&str>) {
 /// колонкой рядом (компьютер) элемента не перекрывает — обрезать нечего.
 /// Снимает обрезку `name` вместе с именем.
 fn clear_of_menu(element: &HtmlElement) {
-    let Some(menu) = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.query_selector(MENU).ok().flatten())
-    else {
+    let own = element.get_bounding_client_rect();
+    let Some(top) = menu_top(&own) else {
         return;
     };
-    let menu = menu.get_bounding_client_rect();
-    let own = element.get_bounding_client_rect();
-    let across = menu.left() < own.right() && menu.right() > own.left();
-    if !across || menu.top() <= own.top() || menu.top() >= own.bottom() {
+    if top <= own.top() || top >= own.bottom() {
         return;
     }
     // От верха элемента до верха меню — целыми точками: запись `f64`
     // тянула бы в главный wasm лишний код (как у `fraction`).
-    let edge = (menu.top() - own.top()).floor() as i32;
+    let edge = (top - own.top()).floor() as i32;
     let _ = element.style().set_property(
         "clip-path",
         &format!("polygon(-100vw -100vh, 200vw -100vh, 200vw {edge}px, -100vw {edge}px)"),
     );
+}
+
+/// Верх меню, когда оно лежит поперёк элемента — вкладками внизу окна, как
+/// на телефоне; меню колонкой рядом (компьютер) — `None`. Меню закреплено
+/// у окна, и прокрутка его верха не двигает.
+fn menu_top(own: &DomRect) -> Option<f64> {
+    let menu = web_sys::window()?
+        .document()?
+        .query_selector(MENU)
+        .ok()
+        .flatten()?
+        .get_bounding_client_rect();
+    (menu.left() < own.right() && menu.right() > own.left()).then(|| menu.top())
+}
+
+/// Строка будет видна целиком — в окне и не под меню, — когда новый экран
+/// встанет. Сменённый экран открывается с начала: `route::shown` прокручивает
+/// страницу в следующем кадре, а новое состояние браузер снимает после него,
+/// поэтому место считается от начала страницы (проверено вживую: Chrome 157,
+/// 2026-11-08 — заголовок прокрученной карточки приходит туда, где строка
+/// после прокрутки). Под меню и за окном заголовок
+/// в строку не перетекает, а растворяется: его снимок, летящий к ней, лёг бы
+/// на вкладки (найдено на телефоне, 2026-11-08).
+fn seen_whole(element: &HtmlElement) -> bool {
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let scrolled = window.scroll_y().unwrap_or(0.0);
+    let own = element.get_bounding_client_rect();
+    let Some(floor) = menu_top(&own).or_else(|| window.inner_height().ok()?.as_f64()) else {
+        return false;
+    };
+    own.height() > 0.0 && own.top() + scrolled >= 0.0 && own.bottom() + scrolled <= floor
 }
 
 /// Кнопка или карточка под мышью — с местом на странице, взятым при входе:

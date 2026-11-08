@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.92",
+      "date": "2026-11-08",
+      "hy": [
+        "Հեռախոսում փաստաթղթի փակված քարտի վերնագիրն այլևս չի անցնում ներքևի ցանկի վրայով. եթե ցուցակում փաստաթղթի տողը հայտնվել է ներքևի ցանկի տակ, վերնագիրը մարում է իր տեղում։"
+      ],
+      "ru": [
+        "На телефоне заголовок закрытой карточки документа больше не пролетает поверх вкладок внизу: если строка документа в списке оказалась под меню, он растворяется на месте."
+      ],
+      "en": [
+        "On a phone, the heading of a closed document card no longer flies over the tabs at the bottom: if the document's row in the list ends up under the menu, the heading fades out in place."
+      ]
+    },
+    {
       "version": "0.0.91",
       "date": "2026-11-08",
       "hy": [
@@ -266,22 +279,6 @@
       "en": [
         "The ledger can now export for your accountant: below the list, download a quarter or the whole year as an Excel file (XLSX) with income and expenses and documents sheets, or as two CSV files.",
         "In Excel and Google Sheets, amounts are numbers and dates are dates, so you can add them up and sort them. Export works without a license too."
-      ]
-    },
-    {
-      "version": "0.0.72",
-      "date": "2026-11-03",
-      "hy": [
-        "Ավտոմատ պատճեն. համակարգչի Chrome-ում և Edge-ում պատճենի էկրանին կարող եք ընտրել OneDrive-ի, Google Drive-ի կամ Dropbox-ի թղթապանակ, և փոփոխություններից հետո պատճենն ինքը կպահվի դրա «Kvartik» թղթապանակում՝ պատճենների գաղտնաբառով։",
-        "Դրա համար գաղտնաբառը մուտքագրվում է մեկ անգամ, իսկ ամիսը մեկ անգամ ծրագիրը կխնդրի նորից մուտքագրել այն, որպեսզի չմոռացվի։ Արված ավտոմատ պատճենը համարվում է պատճեն։"
-      ],
-      "ru": [
-        "Автокопия: в Chrome и Edge на компьютере на экране копии можно выбрать папку OneDrive, Google Drive или Dropbox, и после изменений копия сама ляжет в её папку «Kvartik» под паролем копий.",
-        "Пароль для неё вводится один раз, а раз в месяц программа попросит ввести его снова, чтобы он не забылся. Сделанная автокопия считается копией."
-      ],
-      "en": [
-        "Automatic backup: in Chrome and Edge on a computer, you can choose a OneDrive, Google Drive or Dropbox folder on the Backup screen, and after changes a backup will be saved to its “Kvartik” folder on its own, under your backup password.",
-        "You enter the password for it once, and once a month the app will ask for it again so you don't forget it. An automatic backup counts as a backup."
       ]
     }
   ]
