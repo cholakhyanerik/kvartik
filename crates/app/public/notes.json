@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.93",
+      "date": "2026-11-08",
+      "hy": [
+        "Համակարգչում ցանկի բաց բաժնի գունավոր ֆոնն այժմ ինքն է սահում դեպի նոր բաժինը՝ մակագրությունների տակով. մակագրությունները մնում են իրենց տեղում և միայն փոխում են գույնը, ու ճանապարհի կեսին երկու մակագրություն այլևս չեն միախառնվում։",
+        "Հեռախոսում ներքևի ցանկի բաժինը սեղմելիս դրա պատկերակի և մակագրության վրա այլևս կիսաթափանց ուղղանկյուն չի առկայծում։"
+      ],
+      "ru": [
+        "На компьютере подсветка открытой вкладки в меню теперь переезжает к новой сама, под подписями: подписи стоят на месте и только меняют цвет, а не сливаются посреди пути в одну.",
+        "На телефоне при нажатии на вкладку внизу поверх её значка и подписи больше не мелькает полупрозрачный прямоугольник."
+      ],
+      "en": [
+        "On a computer, the highlight of the open tab in the menu now slides to the new tab by itself, beneath the labels: the labels stay in place and only change color instead of blending into one halfway.",
+        "On a phone, tapping a tab at the bottom no longer flashes a translucent rectangle over its icon and label."
+      ]
+    },
+    {
       "version": "0.0.92",
       "date": "2026-11-08",
       "hy": [
@@ -263,22 +279,6 @@
       "en": [
         "The accountant export now tells you everything in which the file differs from what you filed: if a quarter of the period is closed and the ledger has changed since, you'll see which quarter above the links, with a link to it on the Tax screen.",
         "The Excel file has a new “Closed quarters” sheet: income and tax from the closed return next to what the ledger gives now, and whether they match, so your accountant sees it too."
-      ]
-    },
-    {
-      "version": "0.0.73",
-      "date": "2026-11-03",
-      "hy": [
-        "Մատյանում հայտնվեց արտահանում հաշվապահի համար. ցուցակի տակ կարող եք ներբեռնել եռամսյակը կամ ամբողջ տարին Excel ֆայլով (XLSX)՝ եկամուտների և ծախսերի ու փաստաթղթերի թերթերով, կամ երկու CSV ֆայլով։",
-        "Excel-ում և Google Sheets-ում գումարները թվեր են, իսկ ամսաթվերը՝ ամսաթվեր. դրանք կարելի է գումարել և դասավորել։ Արտահանումն աշխատում է նաև առանց լիցենզիայի։"
-      ],
-      "ru": [
-        "В книге появилась выгрузка для бухгалтера: под списком можно скачать квартал или весь год файлом Excel (XLSX) с листами доходов и расходов и документов или двумя файлами CSV.",
-        "Суммы в Excel и Google Таблицах — числа, а даты — даты: их можно складывать и сортировать. Выгрузка работает и без лицензии."
-      ],
-      "en": [
-        "The ledger can now export for your accountant: below the list, download a quarter or the whole year as an Excel file (XLSX) with income and expenses and documents sheets, or as two CSV files.",
-        "In Excel and Google Sheets, amounts are numbers and dates are dates, so you can add them up and sort them. Export works without a license too."
       ]
     }
   ]

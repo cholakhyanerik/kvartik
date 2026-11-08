@@ -509,7 +509,8 @@ async function overMenu(page, clip) {
 /// Движение (задача 86), на компьютере — ширина 1280, мышь. Переход экрана
 /// снимает только прежний экран: новый живой, и нажатие посреди перехода
 /// попадает в него, а не в снимок страницы (`elementFromPoint`, как
-/// браузер ищет цель нажатия). Под мышью кнопка получает точку входа,
+/// браузер ищет цель нажатия), а подсветка открытой вкладки едет к новой
+/// сдвигом, не снимком. Под мышью кнопка получает точку входа,
 /// а кружок у курсора встаёт над ней — виден он, только если у системы есть
 /// мышь. На телефоне меню вкладок — внизу, поверх экрана, и посреди перехода
 /// на него не ложится ничего, а открыта та же вкладка, что после него. У
@@ -565,6 +566,26 @@ async function motion(browser) {
       await page.waitFor(`const c = document.querySelector(".cursor");
       return c && c.dataset.over === "press" && getComputedStyle(c).display === ${JSON.stringify(pointing ? "block" : "none")}
         ? true : null;`, 3000));
+
+    // Подсветка открытой вкладки едет к новой сама, сдвигом под подписями,
+    // а снимает переход только прежний экран (и документ): снятая вкладка
+    // переезжала вместе с подписью, и посреди пути две подписи сливались
+    // в одну — «Счетая» (2026-11-08). Смотреть — в первых кадрах перехода:
+    // сдвиг идёт полсекунды.
+    const pill = await page.eval(`location.hash = "#/ledger";
+      const moving = () => document.getAnimations().some((a) => String(a.effect?.pseudoElement ?? "").startsWith("::view-transition"));
+      for (let i = 0; i < 300 && !moving(); i++) await new Promise((r) => requestAnimationFrame(r));
+      const all = document.getAnimations();
+      return {
+        moving: moving(),
+        pill: all.some((a) => a instanceof CSSTransition && a.transitionProperty === "translate"
+          && a.effect?.pseudoElement === "::before" && a.effect.target.matches(".tabs > li:first-child")),
+        snapped: [...new Set(all.map((a) => String(a.effect?.pseudoElement ?? ""))
+          .filter((p) => p.startsWith("::view-transition") && !/\\((screen|doc)\\)$/.test(p)))],
+      };`);
+    checks.check("движение: подсветка вкладки едет сдвигом, вкладка не снимается",
+      pill?.moving && pill.pill && pill.snapped?.length === 0, JSON.stringify(pill));
+    await sleep(700);
 
     // Телефон (найдено на телефоне 2026-11-07): посреди перехода на меню
     // вкладок не ложится ничего (`overMenu`). Снимок прежнего экрана браузер
