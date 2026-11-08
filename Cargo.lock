@@ -913,7 +913,7 @@ checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
 
 [[package]]
 name = "kvartik-app"
-version = "0.0.90"
+version = "0.0.91"
 dependencies = [
  "console_error_panic_hook",
  "ed25519-dalek",
@@ -929,7 +929,7 @@ dependencies = [
 
 [[package]]
 name = "kvartik-calc"
-version = "0.0.90"
+version = "0.0.91"
 dependencies = [
  "js-sys",
  "kvartik-core",
@@ -940,7 +940,7 @@ dependencies = [
 
 [[package]]
 name = "kvartik-core"
-version = "0.0.90"
+version = "0.0.91"
 dependencies = [
  "ed25519-dalek",
  "miniz_oxide",
@@ -951,7 +951,7 @@ dependencies = [
 
 [[package]]
 name = "kvartik-keygen"
-version = "0.0.90"
+version = "0.0.91"
 dependencies = [
  "ed25519-dalek",
  "getrandom",
@@ -960,7 +960,7 @@ dependencies = [
 
 [[package]]
 name = "kvartik-sw"
-version = "0.0.90"
+version = "0.0.91"
 dependencies = [
  "base64",
  "kvartik-core",
@@ -1702,9 +1702,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.16.4"
+version = "1.16.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8"
+checksum = "149309498a5f7334b12ddae0cad8aba81ce785fe91755068867e017cf98fee46"
 
 [[package]]
 name = "stable_deref_trait"
@@ -1982,9 +1982,9 @@ checksum = "3a3b425286980a367278453f3b6d28cdcb134b574e5a35824a6ff5eebad50bb6"
 
 [[package]]
 name = "uuid"
-version = "1.29.0"
+version = "1.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a0e2d11620c50695fe12bbbfde96b3477fe606e7284c22d505c12ce51214514"
+checksum = "4a06f08a856b009bc7bbaf7d3e79808595d032dd19074c0c2ef26e49e03e6bdc"
 dependencies = [
  "getrandom",
  "js-sys",

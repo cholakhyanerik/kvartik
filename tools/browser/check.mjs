@@ -414,12 +414,28 @@ async function office(browser) {
   }
 }
 
+/// Начать переход экрана на `hash` и заморозить его на `at` мс: снимки
+/// и въезд экрана стоят, а переходы цвета под мышью доведены до конца — их
+/// ведёт мышь машины, а не переход. Тело функции `page.eval`; отпускает
+/// `THAW`.
+const freeze = (hash, at = 150) => `
+  location.hash = ${JSON.stringify(hash)};
+  const moving = () => document.getAnimations().some((a) => String(a.effect?.pseudoElement ?? "").startsWith("::view-transition"));
+  for (let i = 0; i < 300 && !moving(); i++) await new Promise((r) => requestAnimationFrame(r));
+  if (!moving()) return { error: "перехода нет" };
+  const running = document.getAnimations().filter((a) => a.playState === "running" && a.timeline === document.timeline);
+  for (const a of running) if (a instanceof CSSTransition) a.finish(); else { a.pause(); a.currentTime = ${at}; }
+  window.__frozen = running;
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));`;
+const THAW = `for (const a of window.__frozen ?? []) a.finish(); window.__frozen = null; return true;`;
+
 /// Движение (задача 86), на компьютере — ширина 1280, мышь. Переход экрана
 /// снимает только прежний экран: новый живой, и нажатие посреди перехода
 /// попадает в него, а не в снимок страницы (`elementFromPoint`, как
 /// браузер ищет цель нажатия). Под мышью кнопка получает точку входа,
 /// а кружок у курсора встаёт над ней — виден он, только если у системы есть
-/// мышь. У того, кто выключил анимацию
+/// мышь. На телефоне меню вкладок — внизу, поверх экрана, и посреди перехода
+/// оно такое же, как после него. У того, кто выключил анимацию
 /// в системе, — ни перехода, ни одной анимации, ни кружка. У лендинга —
 /// переход между страницами языков в стилях и кружок под мышью.
 /// В своём контексте браузера: эмуляция медиа не должна попасть в
@@ -471,6 +487,53 @@ async function motion(browser) {
       await page.waitFor(`const c = document.querySelector(".cursor");
       return c && c.dataset.over === "press" && getComputedStyle(c).display === ${JSON.stringify(pointing ? "block" : "none")}
         ? true : null;`, 3000));
+
+    // Телефон (найдено на телефоне 2026-11-07): посреди перехода меню вкладок
+    // — пиксель в пиксель как после него. Снимок прежнего экрана браузер
+    // рисует над страницей, и у книги под меню лежит выгрузка: необрезанный,
+    // он лёг бы на вкладки; снятая открытая вкладка переезжала бы к новой
+    // значком и подписью и не нажималась бы. «Новый счёт» закреплён у окна,
+    // а экран въезжает сдвигом: пока экран не встал, кнопки нет, а не стоит
+    // она не на месте. Экран счетов — сначала показать: он частью wasm.
+    await mouse(5, 5);
+    await page.emulate(360);
+    await media("no-preference");
+    await page.eval(`location.hash = "#/documents"; return true;`);
+    await page.waitFor(`return document.querySelector("#documents .fab") ? true : null;`);
+    await page.eval(`location.hash = "#/ledger"; return true;`);
+    await page.waitFor(VISIBLE("#ledger .export"));
+    await sleep(900);
+    const middle = await page.eval(`${freeze("#/clients")}
+      const menu = document.querySelector(".app > .nav").getBoundingClientRect();
+      const top = Math.ceil(menu.top) + 2;
+      return {
+        missed: [...document.querySelectorAll(".tabs a")].filter((a) => {
+          const r = a.getBoundingClientRect();
+          return !a.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+        }).map((a) => a.getAttribute("href")),
+        clip: { x: 0, y: top, width: Math.floor(menu.width), height: Math.floor(menu.bottom) - top, scale: 1 },
+      };`);
+    if (!middle?.clip) {
+      checks.check("движение, телефон: экран сменился переходом", false, middle?.error ?? "");
+    } else {
+      const menu = async () => (await page.send("Page.captureScreenshot", { format: "png", clip: middle.clip })).data;
+      const during = await menu();
+      await page.eval(THAW);
+      await sleep(300);
+      checks.check("движение, телефон: посреди перехода меню — как после него", during === await menu());
+      checks.check("движение, телефон: посреди перехода каждая вкладка нажимается", middle.missed.length === 0,
+        middle.missed.join(", "));
+    }
+    const FAB = `const b = document.querySelector("#documents .fab"); const r = b.getBoundingClientRect();
+      return { shown: getComputedStyle(b).visibility !== "hidden", at: Math.round(r.left) + "," + Math.round(r.top) };`;
+    const entering = await page.eval(`${freeze("#/documents")} ${FAB}`);
+    await page.eval(THAW);
+    await sleep(1300);
+    const settled = await page.eval(FAB);
+    checks.check("движение, телефон: «Новый счёт», пока экран въезжает, — не на чужом месте",
+      Boolean(entering?.at) && (!entering.shown || entering.at === settled?.at),
+      `посреди ${entering?.at ?? entering?.error}, потом ${settled?.at}`);
+    await page.emulate(1280);
 
     await media("reduce");
     await mouse(5, 5);

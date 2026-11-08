@@ -22,7 +22,7 @@ publish.workspace = true
 # через getrandom 0.4. `serde` — идентификатор в данных и в файле копии
 # строкой `xxxxxxxx-xxxx-…`: так он и записывается, и читается (по
 # исходникам uuid 1.29.0, `src/external/serde_support.rs`; 2026-10-23).
-uuid = { version = "1.29.0", default-features = false, features = ["v4", "serde"] }
+uuid = { version = "1.29.1", default-features = false, features = ["v4", "serde"] }
 # Версионный формат данных и файла копии (`format/`): руками он не пишется
 # («Общее» в CLAUDE.md). Оба крейта уже были в дереве через Leptos, так что
 # новых авторов и лицензий не прибавилось. `derive` выводит запись и чтение

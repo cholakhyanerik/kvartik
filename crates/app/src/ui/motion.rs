@@ -7,7 +7,9 @@
 //! экрана — живого, чтобы нажатия шли ему сразу. Разметку Leptos
 //! перерисовывает не сразу после сигнала, а следующей задачей, поэтому
 //! обещание перехода ждёт её (`tick`): без этого браузер снял бы новое
-//! состояние документа и вкладки до перерисовки. Кто выключил анимацию
+//! состояние документа и вкладки до перерисовки. Снимок браузер рисует над
+//! всей страницей, а меню на телефоне лежит поверх экрана — поэтому снятое
+//! обрезается по его верхнему краю (`clear_of_menu`). Кто выключил анимацию
 //! в системе, видит смену сразу, а чей браузер переходов не знает — только
 //! въезд нового экрана.
 //!
@@ -43,6 +45,8 @@ const CARD: &str = "[data-tilt]";
 /// (`style/base.css`) и у прежнего экрана.
 const DOCUMENT: &str = "doc";
 const SCREEN: &str = "screen";
+/// Меню разделов (`ui/nav.rs`).
+const MENU: &str = ".app > .nav";
 
 thread_local! {
     /// Строка документа, которой дано имя перехода после него: следующий
@@ -76,9 +80,11 @@ pub fn screen(from: Screen, to: Screen, update: impl FnOnce() + 'static) {
     let page = by_id(from.id());
     if let Some(page) = &page {
         name(page, Some(SCREEN));
+        clear_of_menu(page);
     }
     if let Some(row) = &before {
         name(row, Some(DOCUMENT));
+        clear_of_menu(row);
     }
     platform::motion::transition(move || {
         for named in [&page, &before].into_iter().flatten() {
@@ -123,12 +129,48 @@ fn by_id(id: &str) -> Option<HtmlElement> {
         .map(JsCast::unchecked_into)
 }
 
+/// Имя перехода элементу или прочь — и имя, и обрезку под меню.
 fn name(element: &HtmlElement, name: Option<&str>) {
     let style = element.style();
     let _ = match name {
         Some(name) => style.set_property("view-transition-name", name),
-        None => style.remove_property("view-transition-name").map(drop),
+        None => style
+            .remove_property("view-transition-name")
+            .and_then(|_| style.remove_property("clip-path"))
+            .map(drop),
     };
+}
+
+/// Обрезать снимок элемента по верхнему краю меню. На телефоне меню —
+/// вкладки внизу окна, поверх экрана (`position: fixed`), а снимок
+/// перехода браузер рисует над всей страницей: что лежало под вкладками,
+/// на время перехода легло бы на них. Снять само меню нельзя — снятое не
+/// отвечает на нажатия (CSS View Transitions 1, §4.2), — а свой `clip-path`
+/// элемента входит в его снимок (там же, §1.5 и §7.7.1). Обрезано только то,
+/// что ниже верха меню: вбок и вверх граница далеко, и «Новый счёт», который
+/// закреплён у окна и может стоять правее экрана, остаётся в снимке. Меню
+/// колонкой рядом (компьютер) элемента не перекрывает — обрезать нечего.
+/// Снимает обрезку `name` вместе с именем.
+fn clear_of_menu(element: &HtmlElement) {
+    let Some(menu) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.query_selector(MENU).ok().flatten())
+    else {
+        return;
+    };
+    let menu = menu.get_bounding_client_rect();
+    let own = element.get_bounding_client_rect();
+    let across = menu.left() < own.right() && menu.right() > own.left();
+    if !across || menu.top() <= own.top() || menu.top() >= own.bottom() {
+        return;
+    }
+    // От верха элемента до верха меню — целыми точками: запись `f64`
+    // тянула бы в главный wasm лишний код (как у `fraction`).
+    let edge = (menu.top() - own.top()).floor() as i32;
+    let _ = element.style().set_property(
+        "clip-path",
+        &format!("polygon(-100vw -100vh, 200vw -100vh, 200vw {edge}px, -100vw {edge}px)"),
+    );
 }
 
 /// Кнопка или карточка под мышью — с местом на странице, взятым при входе:

@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.91",
+      "date": "2026-11-08",
+      "hy": [
+        "Հեռախոսում էկրանը փոխելիս ներքևի ցանկի պատկերակներն ու մակագրություններն այլևս չեն ընկնում իրար վրա և չեն ծածկվում նախորդ էկրանով. բաց բաժինը պարզապես փոխում է գույնը։",
+        "Հաշիվների էկրանի «+» կլոր կոճակն այլևս չի կանգնում էկրանի մեջտեղում և չի ցատկում ներքև. այն հայտնվում է իր տեղում՝ էկրանից անմիջապես հետո։"
+      ],
+      "ru": [
+        "На телефоне при смене экрана значки и подписи вкладок внизу больше не наезжают друг на друга и не закрываются прежним экраном: открытая вкладка просто меняет цвет.",
+        "Круглая кнопка «+» на экране счетов больше не стоит посреди экрана и не прыгает вниз: она появляется на своём месте сразу после экрана."
+      ],
+      "en": [
+        "On a phone, the icons and labels of the tabs at the bottom no longer pile up on each other or get covered by the previous screen when you switch screens: the open tab simply changes color.",
+        "The round “+” button on the Invoices screen no longer sits in the middle of the screen and jumps down: it appears in its place right after the screen."
+      ]
+    },
+    {
       "version": "0.0.90",
       "date": "2026-11-07",
       "hy": [
@@ -266,22 +282,6 @@
       "en": [
         "Automatic backup: in Chrome and Edge on a computer, you can choose a OneDrive, Google Drive or Dropbox folder on the Backup screen, and after changes a backup will be saved to its “Kvartik” folder on its own, under your backup password.",
         "You enter the password for it once, and once a month the app will ask for it again so you don't forget it. An automatic backup counts as a backup."
-      ]
-    },
-    {
-      "version": "0.0.71",
-      "date": "2026-11-03",
-      "hy": [
-        "Գլխավոր էկրանին հայտնվել են «Առաջին քայլերը»՝ վավերապայմաններից մինչև առաջին հաշիվը և դրա PDF-ը։ Եթե դրանք պետք չեն, կարող եք թաքցնել։",
-        "Պրոֆիլում կոդի տակ այժմ երևում են դրույքաչափը և հաշվարկի ու հարկի վերջին օրը։"
-      ],
-      "ru": [
-        "На главном экране появились «Первые шаги»: от реквизитов до первого счёта и его PDF. Если они не нужны, их можно скрыть.",
-        "В профиле под кодом деятельности теперь видно ставку и последний день расчёта и налога."
-      ],
-      "en": [
-        "Home now has “First steps”: from your business details to your first invoice and its PDF. If you don't need them, you can hide them.",
-        "In the profile, the rate and the last day for the return and tax now appear under the activity code."
       ]
     }
   ]
