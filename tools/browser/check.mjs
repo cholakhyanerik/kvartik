@@ -936,10 +936,19 @@ async function update(page, password) {
     await switched(page, next, running, "всё закрыли");
 
     // Заход на страницу: новую версию находит сам браузер, форм нет.
+    // Страница открывается прежней сборкой — её отдаёт прежний service
+    // worker, — а новую окно включает уже после захода и перезагружает
+    // страницу (`location.reload()`, `platform/pwa.rs`). Прежний кэш новый
+    // удаляет при активации, раньше перезагрузки: ждать надо перезагрузки,
+    // а не нового кэша, иначе «Понятно» нажимается в окне страницы, которая
+    // уже уходит (CI, 2026-11-09: окно встало снова через 0,2 с).
     await srv.stop();
     srv = own(later.dir, PORT, { quality: 5 });
     await page.eval(SEEN("0.0.1"));
     await page.fresh(`${ORIGIN}/app/#/`);
+    checks.check("новая версия: зашли на страницу — страница перезагрузилась сама",
+      await page.waitFor(`return performance.getEntriesByType("navigation")[0]?.type === "reload"
+        && document.readyState === "complete" ? true : null;`, 30000));
     await switched(page, later, running, "зашли на страницу");
 
     // Попытка включить эту версию уже была: она ждёт, а страница стоит.
