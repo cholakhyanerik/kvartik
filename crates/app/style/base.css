@@ -78,10 +78,12 @@ h1[tabindex="-1"]:focus {
 }
 
 /* На телефоне в меню — только вкладки: «Новый счёт» и напоминание о копии
-   есть на главном экране. */
+   есть на главном экране, а настройки — шестерёнкой на нём же (задача 88):
+   седьмая вкладка в 360 точек не помещается. */
 .nav .brand,
 .nav .new,
-.nav .chip {
+.nav .chip,
+.nav .settings-link {
   display: none;
 }
 
@@ -197,9 +199,31 @@ h1[tabindex="-1"]:focus {
     margin: 0 0 var(--space-4);
   }
 
+  /* Настройки (задача 88) — строкой внизу колонки, над меткой копии: видом
+     как вкладка, но отдельно от разделов с данными. Открытые — своей
+     заливкой и жирнее: подсветки вкладок, которая переезжает под ними, пока
+     они открыты, нет. */
+  .nav .settings-link {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-height: 3rem;
+    margin-top: auto;
+    padding: 0 var(--space-4);
+    border-radius: var(--radius-round);
+    color: var(--text);
+    text-decoration: none;
+  }
+
+  .nav .settings-link[aria-current="page"] {
+    background: var(--fill-selected);
+    color: var(--on-fill-selected);
+    font-weight: var(--weight-strong);
+  }
+
   .nav .chip {
     display: flex;
-    margin-top: auto;
+    margin-top: var(--space-3);
   }
 
   .chip.nudge {
@@ -332,9 +356,34 @@ h1[tabindex="-1"]:focus {
 }
 
 /* Главный экран: день недели над приветствием. С заглавной буквы — строка
-   стоит первой, а запись дня (`i18n::day_long`) — по CLDR, со строчной. */
+   стоит первой, а запись дня (`i18n::day_long`) — по CLDR, со строчной.
+   Справа — шестерёнка настроек (задача 88). */
 .greeting {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
   margin-bottom: var(--space-4);
+}
+
+/* Шестерёнка — кружком, как «назад» у форм по шагам, и только на телефоне:
+   на компьютере настройки — строкой в меню. */
+.settings-open {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch);
+  height: var(--touch);
+  border-radius: var(--radius-round);
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+@media (min-width: 56.25rem) {
+  .settings-open {
+    display: none;
+  }
 }
 
 /* Раздел «Установка» на главном (`ui/pwa.rs`) — блоком с тем же отступом,
@@ -1637,6 +1686,119 @@ li.setting .langs button {
   font-weight: var(--weight-strong);
 }
 
+/* Настройки (задача 88): строка-переключатель и строки цветов. Подпись —
+   как текст строки списка, а не мелкая и жирная подпись поля. */
+.switch-row,
+.color-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--control);
+  font-size: var(--font-size-md);
+  font-weight: var(--weight-regular);
+  cursor: pointer;
+}
+
+.switch-row {
+  padding: var(--space-3) 0;
+}
+
+/* Переключатель: дорожка-пилюля и бегунок. Включённый — бегунок справа на
+   заливке кнопок, выключенный — слева на утопленной дорожке: не одним
+   цветом (Правило 4). Сам флажок спрятан (`visually-hidden`), а нажимается
+   вся строка; фокус с клавиатуры — кольцом на дорожке. Бегунок на дорожке —
+   --text-muted на --surface-sunken и --on-accent на --accent: пары
+   tokens.css. */
+.switch {
+  position: relative;
+  flex: none;
+  box-sizing: border-box;
+  width: 3.25rem;
+  height: 2rem;
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius-round);
+  background: var(--surface-sunken);
+}
+
+.switch::before {
+  position: absolute;
+  top: 0.25rem;
+  left: 0.25rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: var(--radius-round);
+  background: var(--text-muted);
+  content: "";
+}
+
+input:checked + .switch {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+input:checked + .switch::before {
+  background: var(--on-accent);
+  translate: 1.25rem 0;
+}
+
+input:focus-visible + .switch {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Строка цвета: название и чей цвет — слева, образец — справа; под ними
+   «Сбросить» и слова о плохо читаемой паре. Образец — поле выбора цвета
+   браузера, пилюлей с рамкой: без неё образец цвета фона на фоне не виден. */
+ul.list > li.color-row {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) 0 var(--space-3);
+}
+
+.color-pick input[type="color"] {
+  flex: none;
+  box-sizing: border-box;
+  width: var(--control);
+  height: var(--touch);
+  margin: 0;
+  padding: 0.1875rem;
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius-round);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.color-pick input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.color-pick input[type="color"]::-webkit-color-swatch {
+  border: 0;
+  border-radius: var(--radius-round);
+}
+
+.color-pick input[type="color"]::-moz-color-swatch {
+  border: 0;
+  border-radius: var(--radius-round);
+}
+
+.color-row > button.link {
+  justify-self: start;
+  margin-top: 0;
+}
+
+/* Пара читается плохо: словами и числом, цвет только помогает. */
+.color-low {
+  color: var(--warning-text);
+  font-size: var(--font-size-sm);
+}
+
+/* «Вернуть цвета программы» — ссылкой под списком: её цвет окно держит
+   читаемым при любых своих цветах, а у кнопки был бы цвет текста. */
+.colors-reset {
+  margin-top: var(--space-4);
+}
+
 .privacy {
   margin-top: var(--space-4);
 }
@@ -2589,6 +2751,14 @@ ul.report-fields {
   }
 }
 
+/* Бегунок переключателя настроек (задача 88) переезжает сдвигом — его
+   ведёт видеокарта, — а цвет дорожки меняется сразу. */
+@media (prefers-reduced-motion: no-preference) {
+  .switch::before {
+    transition: translate var(--motion-follow) var(--motion-ease);
+  }
+}
+
 @keyframes motion-out {
   to {
     opacity: 0;
@@ -2633,7 +2803,8 @@ ul.report-fields {
   }
 }
 
-/* Без мыши или без движения кружка у курсора нет вовсе. */
+/* Без мыши, без движения или не включённого в настройках (задача 88)
+   кружка у курсора нет вовсе. */
 .cursor {
   display: none;
 }
@@ -2643,6 +2814,7 @@ ul.report-fields {
   .seg button,
   .langs button,
   .tabs a,
+  .settings-link,
   .entry {
     transition: background-color var(--motion-duration) var(--motion-ease),
       color var(--motion-duration) var(--motion-ease);
@@ -2798,8 +2970,10 @@ ul.report-fields {
   /* Кружок у курсора (`ui/motion.rs` ведёт его за мышью): плавно догоняет
      стрелку, растёт над тем, что нажимается, и обращает цвет под собой.
      Стрелка системы остаётся — ею целятся, а в поле ввода — текстовый
-     курсор; над полем кружка нет. Не нажимается и не мешает нажатиям. */
-  .cursor {
+     курсор; над полем кружка нет. Не нажимается и не мешает нажатиям.
+     Рисуется он, только когда его включили в настройках (задача 88):
+     `data-cursor` у страницы ставит `platform::look`. */
+  [data-cursor] .cursor {
     position: fixed;
     top: 0;
     left: 0;

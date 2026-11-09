@@ -7,6 +7,11 @@
 //! браузер, и «Назад» возвращает прежний экран. Открытая вкладка —
 //! `aria-current="page"`, жирнее и цветом акцента: не одним цветом
 //! (Правило 4).
+//!
+//! Настройки (задача 88) — не вкладкой, а своей строкой с шестерёнкой внизу
+//! колонки, над меткой копии: это не раздел с данными. На телефоне её нет —
+//! седьмая вкладка не помещается в 360 точек, — там шестерёнка на главном
+//! экране (`ui/home.rs`) и строка в профиле.
 
 use kvartik_core::i18n::{Key, Lang, t};
 use leptos::prelude::*;
@@ -69,6 +74,14 @@ pub fn Nav(
                     })
                     .collect_view()}
             </ul>
+            <a
+                class="settings-link"
+                href=Screen::Settings.href()
+                aria-current=move || (router.screen() == Screen::Settings).then_some("page")
+            >
+                {icon(Icon::Gear)}
+                <span>{tr(lang, Key::SettingsTitle)}</span>
+            </a>
             <BackupChip lang backups />
         </nav>
     }

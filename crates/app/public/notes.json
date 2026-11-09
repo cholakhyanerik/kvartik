@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.95",
+      "date": "2026-11-09",
+      "hy": [
+        "Հայտնվել են կարգավորումներ. հեռախոսում դրանք բացվում են գլխավոր էկրանի ատամնանիվով, համակարգչում՝ ցանկի ներքևի տողով։ Այնտեղ կարող եք ընտրել ֆոնի, կոճակների և տեքստի ձեր գույները. ծրագիրը միանգամից վերաներկվում է, իսկ մնացած գույներն ինքն է ընտրում այնպես, որ տեքստը կարդացվի։",
+        "Մկնիկի կուրսորի մոտի շրջանիկն այժմ անջատված է. այն կարելի է միացնել կարգավորումներում։"
+      ],
+      "ru": [
+        "Появились настройки: на телефоне — шестерёнкой на главном экране, на компьютере — строкой внизу меню. В них можно выбрать свои цвета фона, кнопок и текста: окно перекрашивается сразу, а остальные цвета программа подбирает сама, чтобы текст читался.",
+        "Кружок у курсора мыши теперь выключен; включить его можно в настройках."
+      ],
+      "en": [
+        "There are now settings: the gear on the home screen on a phone, or the line at the bottom of the menu on a computer. You can pick your own colors for the background, buttons and text there: the app recolors right away and picks the other colors itself so that text stays readable.",
+        "The circle by the mouse cursor is now off; you can turn it on in the settings."
+      ]
+    },
+    {
       "version": "0.0.94",
       "date": "2026-11-09",
       "hy": [
@@ -260,22 +276,6 @@
       "en": [
         "The profile has a new “About” screen: the app version, your license term, the tax rules version with the day it was last checked against the law and the acts it is based on, and a note about the calculation.",
         "When you report a problem, mention the app version: it's also shown in the “About” row of the profile."
-      ]
-    },
-    {
-      "version": "0.0.75",
-      "date": "2026-11-03",
-      "hy": [
-        "Մեկ հաշվով կարելի է թողարկել մի քանի ակտ՝ մեկ ծառայության փուլեր. հաշվով եկամուտը կլինի ակտերի գումարը։ Հաշվի քարտը ցույց է տալիս ակտերի գումարը, իսկ ակտի ձևը՝ որքան է մնացել։",
-        "Ակտը, որն արդեն թողարկվածների հետ միասին գերազանցում է հաշիվը, այլևս չի թողարկվում. նախկինում նույն տողերով երկրորդ ակտը լուռ կրկնապատկում էր եկամուտն ու հարկը։"
-      ],
-      "ru": [
-        "По одному счёту можно выпустить несколько актов — этапы одной услуги: доход по счёту будет суммой актов. Карточка счёта показывает, на сколько выпущено актов, а форма акта — сколько осталось.",
-        "Акт, который вместе с уже выпущенными больше счёта, теперь не выпускается: раньше второй акт с теми же строками молча удваивал доход и налог."
-      ],
-      "en": [
-        "You can issue several acts for one invoice, as stages of one service: the invoice's income is the sum of its acts. The invoice card shows how much the acts come to, and the act form shows what's left.",
-        "An act that, together with the acts already issued, is more than the invoice can no longer be issued: before, a second act with the same lines silently doubled the income and the tax."
       ]
     }
   ]

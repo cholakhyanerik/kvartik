@@ -4,7 +4,8 @@
 //! человек уже знает и какую окно уже пробовало включить, — скрыты ли
 //! первые шаги на главном экране (задача 28) и что с автокопией (задача 29):
 //! когда была последняя, когда в последний раз менялись данные, метка
-//! устройства и когда вводили пароль. Папку и ключ автокопии `localStorage`
+//! устройства и когда вводили пароль, — и настройки окна (задача 88): включён
+//! ли кружок у курсора и свои цвета. Папку и ключ автокопии `localStorage`
 //! не держит — это объекты браузера, они в своей базе (`store/autobackup.rs`).
 //!
 //! Это не данные человека, а состояние устройства, поэтому оно лежит не
@@ -27,7 +28,8 @@
 //! Одну запись пишет не окно, а калькулятор лендинга (задача 34): что из
 //! введённого в нём «Открыть Kvartik» взял с собой ([`Device::handoff`]).
 //! У лендинга и программы одно происхождение, и запись видна окну без
-//! переноса.
+//! переноса. А одну запись окна читает лендинг: включён ли кружок у курсора
+//! ([`Device::cursor`]) — у его страниц кружок тот же.
 
 use kvartik_core::format::autobackup::DeviceTag;
 use kvartik_core::format::backup::DeviceKey;
@@ -46,6 +48,10 @@ pub struct Device {
 /// [`Device::new`]: её пишет wasm калькулятора (`crates/calc`) под полным
 /// именем из ядра, и тест ниже держит их вместе.
 const HANDOFF: &str = "calc";
+
+/// Имя записи кружка у курсора: его читает и лендинг (`site/landing.js`)
+/// под полным именем, и тест ниже держит их вместе.
+const CURSOR: &str = "cursor";
 
 impl Device {
     /// Записи программы.
@@ -221,11 +227,36 @@ impl Device {
     /// отказался. `false` — `localStorage` отказал, и предложение встанет
     /// при следующем открытии снова.
     pub fn clear_handoff(&self) -> bool {
-        storage().is_some_and(|storage| {
-            storage
-                .remove_item(&format!("{}{HANDOFF}", self.prefix))
-                .is_ok()
-        })
+        self.remove(HANDOFF)
+    }
+
+    /// Включён ли кружок у курсора (задача 88). По умолчанию — нет (решение
+    /// человека 2026-11-09): запись есть, только пока его включили.
+    pub fn cursor(&self) -> bool {
+        self.get(CURSOR).is_some()
+    }
+
+    /// Включить или выключить кружок у курсора. `false` — `localStorage`
+    /// отказал: при следующем открытии кружок будет прежним.
+    pub fn set_cursor(&self, on: bool) -> bool {
+        if on { self.set(CURSOR, "1") } else { self.remove(CURSOR) }
+    }
+
+    /// Свои цвета окна (задача 88) — текстом записи
+    /// `kvartik_core::theme::Record`; `None` — не выбирали.
+    pub fn colors(&self) -> Option<String> {
+        self.get("colors")
+    }
+
+    /// Запомнить свои цвета. `false` — `localStorage` отказал: окно в них
+    /// и сейчас, а при следующем открытии будет в прежних.
+    pub fn set_colors(&self, record: &str) -> bool {
+        self.set("colors", record)
+    }
+
+    /// Вернуть цвета программы. `false` — `localStorage` отказал.
+    pub fn clear_colors(&self) -> bool {
+        self.remove("colors")
     }
 
     /// Момент под этим именем — как у [`Self::last_backup`].
@@ -250,6 +281,14 @@ impl Device {
         })
     }
 
+    fn remove(&self, name: &str) -> bool {
+        storage().is_some_and(|storage| {
+            storage
+                .remove_item(&format!("{}{name}", self.prefix))
+                .is_ok()
+        })
+    }
+
     /// Стереть записи этого префикса — для тестов.
     #[cfg(all(test, target_arch = "wasm32"))]
     pub(super) fn clear(&self) {
@@ -269,6 +308,8 @@ impl Device {
                 HANDOFF,
                 "office",
                 "base",
+                CURSOR,
+                "colors",
             ] {
                 let _ = storage.remove_item(&format!("{}{name}", self.prefix));
             }
@@ -303,5 +344,15 @@ mod tests {
             format!("{}{HANDOFF}", Device::new().prefix),
             kvartik_core::tax::example::HANDOFF_KEY
         );
+    }
+
+    /// Лендинг ищет запись кружка у курсора там, куда её пишет окно, и тем же
+    /// значением: разойдись они — кружок, включённый в программе, на страницах
+    /// сайта молча не встал бы.
+    #[test]
+    fn the_cursor_is_read_where_the_landing_reads_it() {
+        let landing = include_str!("../../site/landing.js");
+        let read = format!("localStorage.getItem(\"{}{CURSOR}\") === \"1\"", Device::new().prefix);
+        assert!(landing.contains(&read), "в site/landing.js нет «{read}»");
     }
 }

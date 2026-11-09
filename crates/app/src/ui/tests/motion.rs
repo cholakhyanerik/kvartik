@@ -75,12 +75,14 @@ fn property(element: &HtmlElement, name: &str) -> String {
 
 /// Кнопка под мышью: где в неё вошли — переменными CSS на ней (оттуда
 /// растекается заливка), при движении — тяга магнита к мыши, ушла мышь —
-/// тяга в покой, а кружок у курсора над кнопкой — «нажимается». Палец
-/// ничего этого не трогает: наклон и магнит под ним только мешали бы.
+/// тяга в покой, а кружок у курсора — он включён в настройках (задача 88) —
+/// над кнопкой «нажимается». Палец ничего этого не трогает: наклон и магнит
+/// под ним только мешали бы.
 #[wasm_bindgen_test]
 async fn the_mouse_leaves_its_point_on_buttons() {
     // Язык выбран — окно без экрана первого запуска, главный экран виден.
     Device::new().set_ui_lang(Lang::Ru);
+    Device::new().set_cursor(true);
     let (host, mounted) = mount();
     let mut found = None;
     for _ in 0..100 {
@@ -127,6 +129,8 @@ async fn the_mouse_leaves_its_point_on_buttons() {
     drop(mounted);
     host.remove();
     forget_lang();
+    Device::new().set_cursor(false);
+    crate::platform::look::show_cursor(false);
     let mut wrong = Vec::new();
     if !touched.is_empty() {
         wrong.push(format!("палец оставил точку {touched}"));

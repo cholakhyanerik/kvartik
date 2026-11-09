@@ -45,6 +45,10 @@ pub enum Screen {
     About,
     /// ИП в программе — экран внутри профиля (задача 38).
     Office,
+    /// Настройки — свой раздел (задача 88): на компьютере у него своя строка
+    /// внизу меню, а на телефоне вкладки для него нет — шестерёнка на главном
+    /// экране и строка в профиле.
+    Settings,
 }
 
 /// Начало адреса документа: дальше — его идентификатор.
@@ -52,7 +56,7 @@ const DOCUMENT: &str = "#/documents/";
 
 impl Screen {
     /// Экраны без параметров — в порядке разделов.
-    pub const PLAIN: [Screen; 13] = [
+    pub const PLAIN: [Screen; 14] = [
         Screen::Home,
         Screen::Documents,
         Screen::Ledger,
@@ -66,6 +70,7 @@ impl Screen {
         Screen::License,
         Screen::About,
         Screen::Office,
+        Screen::Settings,
     ];
 
     /// Адрес экрана — для ссылок. У главного — `#/`, а не пустой: пустая
@@ -86,6 +91,7 @@ impl Screen {
             Screen::License => "#/license".to_owned(),
             Screen::About => "#/about".to_owned(),
             Screen::Office => "#/office".to_owned(),
+            Screen::Settings => "#/settings".to_owned(),
         }
     }
 
@@ -139,6 +145,7 @@ impl Screen {
             Screen::License => "license",
             Screen::About => "about",
             Screen::Office => "office",
+            Screen::Settings => "settings",
         }
     }
 }
@@ -316,7 +323,16 @@ mod tests {
         assert_eq!(Screen::Office.section(), Screen::Profile);
         assert_eq!(Screen::Office.page(), Screen::Office);
         assert_eq!(Screen::Office.href(), "#/office");
-        for screen in [Screen::Home, Screen::Documents, Screen::Ledger, Screen::Clients, Screen::Tax, Screen::Profile] {
+        assert_eq!(Screen::Settings.href(), "#/settings");
+        for screen in [
+            Screen::Home,
+            Screen::Documents,
+            Screen::Ledger,
+            Screen::Clients,
+            Screen::Tax,
+            Screen::Profile,
+            Screen::Settings,
+        ] {
             assert_eq!(screen.section(), screen);
             assert_eq!(screen.page(), screen);
         }

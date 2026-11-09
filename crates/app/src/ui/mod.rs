@@ -29,6 +29,7 @@ mod pwa;
 mod opening;
 mod report;
 mod route;
+mod settings;
 mod split;
 mod storage;
 mod tax;
@@ -59,6 +60,7 @@ use profile::{ProfileSection, Profiles};
 use pwa::{Program, UpdateDialog, UpdateNotice};
 use report::ReportScreen;
 use route::{Router, Screen};
+use settings::{Look, SettingsEntry, SettingsScreen};
 use storage::{Storage, StorageAlert, StorageSection};
 use tax::{Closings, Sources, TaxScreen};
 
@@ -134,7 +136,9 @@ impl Base {
 /// платежами (их карточки на главном экране — тоже из части, задачи 19
 /// и 20).
 /// «Программа» на экране профиля — копия и язык окна — не в части: язык
-/// меняют и тогда, когда часть не загрузилась.
+/// меняют и тогда, когда часть не загрузилась. Настройки — свой раздел
+/// (задача 88): свои цвета окно ставит до первой отрисовки, а экран и расчёт
+/// палитры — часть настроек.
 ///
 /// Над экранами — то, о чём окно обязано сказать, где бы человек ни был:
 /// беда с хранилищем и новая версия, пришедшая, пока открыта форма. Новая
@@ -151,9 +155,13 @@ pub fn App() -> impl IntoView {
     let window_lang = WindowLang::start();
     let lang = window_lang.signal();
     let router = Router::start();
-    // Кружок у курсора и всё, что следует за мышью (задача 86).
+    // Свои цвета — тоже до первой отрисовки: окно не мигает цветами
+    // программы (задача 88).
+    let look = Look::start();
+    // Кружок у курсора — если его включили в настройках, — и всё, что
+    // следует за мышью (задачи 86 и 88).
     let cursor = NodeRef::new();
-    motion::follow(cursor);
+    motion::follow(cursor, look.cursor());
     // Первый запуск — пока язык окна не выбран (`ui::onboarding`). Окно под
     // ним открывает базу и готовит экраны, спрятанным.
     let welcome = RwSignal::new(onboarding::needed());
@@ -315,6 +323,9 @@ pub fn App() -> impl IntoView {
                             <LangSwitch lang=window_lang />
                         </li>
                         <li>
+                            <SettingsEntry lang />
+                        </li>
+                        <li>
                             <AboutEntry lang />
                         </li>
                     </ul>
@@ -337,6 +348,9 @@ pub fn App() -> impl IntoView {
                 </section>
                 <section id=Screen::Office.id() class="screen" hidden=hidden(Screen::Office)>
                     <OfficeScreen ctx=office_ctx router />
+                </section>
+                <section id=Screen::Settings.id() class="screen" hidden=hidden(Screen::Settings)>
+                    <SettingsScreen lang look backups router />
                 </section>
             </main>
             {panic::debug_trigger()}

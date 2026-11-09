@@ -129,10 +129,26 @@ addEventListener("pageswap", (event) => {
   // текстовым курсором.
   const press = "a[href], button, label, select, summary";
   const typing = "input:not([type=checkbox], [type=radio]), textarea";
-  const cursor = document.createElement("div");
-  cursor.className = "cursor";
-  cursor.setAttribute("aria-hidden", "true");
-  document.body.append(cursor);
+  // Кружок — только если его включили в настройках программы (задача 88):
+  // запись устройства у лендинга и программы общая, а по умолчанию кружка
+  // нет. `localStorage` закрыт — кружка тоже нет.
+  let circle = false;
+  try {
+    circle = localStorage.getItem("kvartik.cursor") === "1";
+  } catch {
+    circle = false;
+  }
+  const cursor = circle ? document.createElement("div") : null;
+  if (cursor) {
+    cursor.className = "cursor";
+    cursor.setAttribute("aria-hidden", "true");
+    document.body.append(cursor);
+  }
+  const over = (value) => {
+    if (!cursor) return;
+    if (value === null) delete cursor.dataset.over;
+    else cursor.dataset.over = value;
+  };
 
   // Кнопка и карточка под мышью — с местом на странице, взятым при входе:
   // кнопка-магнит сама едет к мыши, и её нынешнее место тянуло бы её
@@ -157,11 +173,11 @@ addEventListener("pageswap", (event) => {
 
   document.addEventListener("pointerover", (event) => {
     if (event.pointerType !== "mouse") {
-      delete cursor.dataset.over;
+      over(null);
       return;
     }
     const target = event.target;
-    cursor.dataset.over = target.closest(typing) ? "text" : target.closest(press) ? "press" : "";
+    over(target.closest(typing) ? "text" : target.closest(press) ? "press" : "");
     const nextButton = target.closest(".button");
     if (nextButton && nextButton !== button?.element) {
       button = place(nextButton);
@@ -175,7 +191,7 @@ addEventListener("pageswap", (event) => {
     if (event.pointerType !== "mouse") return;
     const next = event.relatedTarget;
     // Мышь ушла из окна — кружок прячется до её возвращения.
-    if (!next) delete cursor.dataset.over;
+    if (!next) over(null);
     // Ушла с кнопки — заливка сжимается в точку ухода, кнопка — на место.
     if (button && !button.element.contains(next)) {
       write(button.element, POINTER, share(button, event));
@@ -191,7 +207,7 @@ addEventListener("pageswap", (event) => {
 
   document.addEventListener("pointermove", (event) => {
     if (event.pointerType !== "mouse") return;
-    cursor.style.setProperty("translate", `${event.clientX}px ${event.clientY}px`);
+    cursor?.style.setProperty("translate", `${event.clientX}px ${event.clientY}px`);
     // Тяга магнита — от −1 до 1: от середины кнопки к мыши.
     if (button) {
       const [x, y] = share(button, event);

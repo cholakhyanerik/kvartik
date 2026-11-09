@@ -15,3 +15,4 @@ pub mod license;
 pub mod model;
 pub mod release;
 pub mod tax;
+pub mod theme;

@@ -18,8 +18,11 @@
 //! карточке `data-tilt` — точка мыши (наклон и блик), кружку у курсора —
 //! место и то, над чем он. Всё это — переменные CSS на самом элементе, а
 //! рисовать ли, решают стили: без мыши и без движения они не рисуют ничего.
-//! Касание пальцем и пером не в счёт. Работа — только пока мышь движется
-//! (Правило 1). То же делает `site/landing.js` у лендинга.
+//! Кружок — ещё и только когда его включили в настройках (задача 88; по
+//! умолчанию его нет — решение человека 2026-11-09): иначе стили его не
+//! рисуют, и место ему не пишется. Касание пальцем и пером не в счёт.
+//! Работа — только пока мышь движется (Правило 1). То же делает
+//! `site/landing.js` у лендинга.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -278,11 +281,13 @@ struct Hover {
     card: Option<Spot>,
 }
 
-/// Следить за мышью, пока окно открыто. `cursor` — кружок у курсора.
-pub fn follow(cursor: NodeRef<html::Div>) {
+/// Следить за мышью, пока окно открыто. `cursor` — кружок у курсора, `shown`
+/// — включён ли он: выключенный стили не рисуют, и писать ему нечего.
+pub fn follow(cursor: NodeRef<html::Div>, shown: RwSignal<bool>) {
     let hover = Rc::new(RefCell::new(Hover::default()));
+    let circle = move || cursor.get_untracked().filter(|_| shown.get_untracked());
     let mark = move |over: Option<&str>| {
-        if let Some(cursor) = cursor.get_untracked() {
+        if let Some(cursor) = circle() {
             let _ = match over {
                 Some(over) => cursor.set_attribute("data-over", over),
                 None => cursor.remove_attribute("data-over"),
@@ -351,7 +356,7 @@ pub fn follow(cursor: NodeRef<html::Div>) {
         if event.pointer_type() != "mouse" {
             return;
         }
-        if let Some(cursor) = cursor.get_untracked() {
+        if let Some(cursor) = circle() {
             let place = format!("{}px {}px", event.client_x(), event.client_y());
             // `style` у `HtmlElement`, а не одноимённый метод Leptos для разметки.
             let _ = HtmlElement::style(&cursor).set_property("translate", &place);

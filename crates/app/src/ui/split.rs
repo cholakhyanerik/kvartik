@@ -177,7 +177,9 @@ where
 /// Все части — в память. Зовёт окно, когда рабочий экран готов и страницей
 /// правит service worker: части приходят из его кэша, без сети. Не
 /// загрузилась — не беда: загрузится по нажатию. Экраны — первыми: вкладку
-/// нажимают раньше, чем открывают форму.
+/// нажимают раньше, чем открывают форму. Последним — свои цвета заново по
+/// выбору (задача 88): у новой версии могли смениться цвета программы,
+/// а часть настроек уже в памяти.
 pub async fn preload() {
     let _ = super::documents::preload_screen().await;
     let _ = super::ledger::preload_book().await;
@@ -189,6 +191,8 @@ pub async fn preload() {
     let _ = super::backup::preload_open().await;
     let _ = super::backup::preload_restore().await;
     let _ = super::office::preload_office().await;
+    let _ = super::settings::preload_settings().await;
+    super::settings::refresh().await;
 }
 
 #[cfg(all(test, target_arch = "wasm32"))]

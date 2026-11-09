@@ -487,6 +487,130 @@ fn every_used_variable_is_declared() {
     assert!(wrong.is_empty(), "переменной нет в tokens.css: {wrong:#?}");
 }
 
+/// Свои цвета человека (задача 88): ядро читает `tokens.css` так же, как этот
+/// тест, — те же цвета в обеих темах. Разойдись разборы — палитра из своих
+/// цветов брала бы не те цвета программы, и никто бы не заметил.
+#[test]
+fn own_colors_read_the_same_palette() {
+    use kvartik_core::theme::palettes;
+    let (light, dark) = read_themes();
+    let text = fs::read_to_string(app_dir().join("style/tokens.css")).expect("tokens.css читается");
+    let (own_light, own_dark) = palettes(&text);
+    for (theme, tokens, own) in [("светлая", &light, &own_light), ("тёмная", &dark, &own_dark)] {
+        let colors: BTreeMap<String, String> = tokens
+            .iter()
+            .filter(|(_, token)| matches!(hex(&token.value), Some(Ok(_))))
+            .map(|(name, token)| (name.clone(), token.value.to_ascii_lowercase()))
+            .collect();
+        let read: BTreeMap<String, String> = own.iter().map(|(name, color)| (name.to_owned(), color.hex())).collect();
+        assert_eq!(read, colors, "{theme} тема");
+    }
+}
+
+/// Палитра из своих цветов (`kvartik_core::theme::paint`) на настоящих темах
+/// держит те же пороги, что палитра программы, — кроме пар, которые выбрал
+/// сам человек: о них окно говорит словами (`theme::low`), но цвет
+/// применяет (решение человека 2026-11-09). Бумаги в ней нет. Перебор —
+/// фоны, кнопки и тексты разной светлоты и насыщенности; провалы — списком.
+#[test]
+fn own_colors_keep_every_derived_pair() {
+    use kvartik_core::theme::{Choice, Pick, Rgb, Scheme, paint, palettes};
+    let text = fs::read_to_string(app_dir().join("style/tokens.css")).expect("tokens.css читается");
+    let (light, dark) = palettes(&text);
+    let rgb = Rgb::from_u32;
+    let backgrounds: Vec<Option<u32>> = [
+        0xffffff, 0xf5ead8, 0xe8f0ff, 0xfff3b0, 0xc0c0c0, 0x8a8a8a, 0x767676, 0x777777, 0x3366cc, 0xcc3333,
+        0x2e7d32, 0x1d1b18, 0x0b1d33, 0x000000,
+    ]
+    .into_iter()
+    .map(Some)
+    .chain([None])
+    .collect();
+    let buttons = [None, Some(0x2266cc), Some(0xffd400), Some(0x111111), Some(0xf5f5f5)];
+    let texts = [None, Some(0x101010), Some(0xf0f0f0)];
+    let mut choices = Vec::new();
+    for scheme in [Scheme::Light, Scheme::Dark] {
+        for &background in &backgrounds {
+            for &button in &buttons {
+                for &own_text in &texts {
+                    for button_text in [None, Some(0xffffff)] {
+                        let mut choice = Choice::new(scheme);
+                        choice.set(Pick::Background, background.map(rgb));
+                        choice.set(Pick::Buttons, button.map(rgb));
+                        choice.set(Pick::Text, own_text.map(rgb));
+                        choice.set(Pick::ButtonText, button_text.map(rgb));
+                        if !choice.is_empty() {
+                            choices.push(choice);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let mut wrong = Vec::new();
+    for choice in &choices {
+        let painted = paint(choice, &light, &dark).expect("выбран цвет");
+        let colors: Theme = painted
+            .colors
+            .iter()
+            .map(|(name, color)| {
+                let token = Token {
+                    value: color.hex(),
+                    comment: String::new(),
+                };
+                (name.to_owned(), token)
+            })
+            .collect();
+        let color = |name: &str| match colors.get(name).map(|token| hex(&token.value)) {
+            Some(Some(Ok(rgb))) => Some(rgb),
+            _ => None,
+        };
+        let surfaces: Vec<&String> = colors
+            .keys()
+            .filter(|name| matches!(need(name), Some(Need::Surface)))
+            .collect();
+        let picked = |pick: Pick| choice.get(pick).is_some();
+        // Пары, которые выбрал человек: им окно не указ.
+        let chosen = |name: &str, background: &str| match name {
+            "--text" => picked(Pick::Text),
+            "--on-accent" => picked(Pick::ButtonText),
+            "--on-fill-hover" => picked(Pick::ButtonText) && background == "--fill-hover",
+            "--accent" => picked(Pick::Buttons) || picked(Pick::Background),
+            _ => false,
+        };
+        for name in colors.keys() {
+            if name.contains("paper") {
+                wrong.push(format!("{choice:?}: бумага {name} в своей палитре"));
+            }
+            let Some(rgb) = color(name) else {
+                continue;
+            };
+            let pairs: Vec<(String, f64)> = match need(name) {
+                Some(Need::OnSurfaces(min)) => surfaces.iter().map(|s| ((*s).clone(), min)).collect(),
+                Some(Need::On(fill, min)) => vec![(on_fill(&fill, &colors), min)],
+                Some(Need::Surface | Need::Fill | Need::Decorative) | None => Vec::new(),
+            };
+            for (background, min) in pairs {
+                let Some(back) = color(&background) else {
+                    continue;
+                };
+                let ratio = contrast(rgb, back);
+                if ratio < min && !chosen(name, &background) {
+                    wrong.push(format!("{choice:?}: {name} на {background} — {ratio:.2}, порог {min}"));
+                }
+            }
+        }
+    }
+    assert!(choices.len() > 500, "перебор слишком мал: {}", choices.len());
+    assert!(
+        wrong.is_empty(),
+        "{} провалов из {} выборов: {:#?}",
+        wrong.len(),
+        choices.len(),
+        &wrong[..wrong.len().min(20)]
+    );
+}
+
 /// Цвета PDF (`kvartik_core::doc::pdf::rgb`) — копии переменных бумаги
 /// светлой темы: превью в окне рисует ими же, и в превью тот же цвет, что
 /// в PDF (Правило 2). Поменяли цвет в `tokens.css` и забыли ядро — PDF

@@ -34,6 +34,7 @@ mod motion;
 mod office;
 mod onboarding;
 mod report;
+mod settings;
 mod share;
 mod tax;
 mod update;

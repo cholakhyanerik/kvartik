@@ -341,6 +341,47 @@ strings! {
     NavDocuments = "Счета", "Invoices", "Հաշիվներ";
     NavProfile = "Профиль", "Profile", "Պրոֆիլ";
 
+    /// Настройки (задача 88): шестерёнкой внизу меню на компьютере, в углу
+    /// главного экрана на телефоне и строкой в профиле.
+    SettingsTitle = "Настройки", "Settings", "Կարգավորումներ";
+    /// Под строкой «Настройки» в профиле — что в них.
+    SettingsAbout = "Цвета и кружок у курсора", "Colors and the cursor circle", "Գույներ և շրջանիկը կուրսորի մոտ";
+    SettingsMouse = "Мышь", "Mouse", "Մկնիկ";
+    SettingsCursor = "Кружок у курсора", "Circle by the cursor", "Շրջանիկ կուրսորի մոտ";
+    SettingsCursorHint =
+        "Догоняет стрелку мыши и растёт над тем, что нажимается. Виден только с мышью и когда анимация на устройстве не выключена.",
+        "Follows the mouse pointer and grows over things you can click. It shows only with a mouse and only when animations aren't turned off on your device.",
+        "Հետևում է մկնիկի սլաքին և մեծանում այն ամենի վրա, ինչը սեղմվում է։ Երևում է միայն մկնիկով, և երբ սարքում անիմացիաներն անջատված չեն։";
+    SettingsColors = "Цвета", "Colors", "Գույներ";
+    /// Свои цвета — одни и днём, и ночью (решение человека 2026-11-09).
+    SettingsColorsAbout =
+        "Свои цвета действуют всегда, и днём, и ночью: пока они выбраны, окно не переключает светлую и тёмную тему вслед за устройством. Остальные цвета окно подбирает под них само, чтобы текст читался. Цвета\u{A0}— только на этом устройстве, а счета и акты остаются прежними.",
+        "Your colors stay day and night: while they're set, the app doesn't switch between the light and dark theme with your device. The app picks the other colors to match so that text stays readable. Colors apply only on this device, and invoices and acts stay as they are.",
+        "Ձեր գույները գործում են միշտ՝ և՛ ցերեկը, և՛ գիշերը. քանի դեռ դրանք ընտրված են, ծրագիրը չի փոխում բաց և մուգ թեման սարքի հետ միասին։ Մնացած գույները ծրագիրն ինքն է ընտրում դրանց համապատասխան, որպեսզի տեքստը կարդացվի։ Գույները միայն այս սարքում են, իսկ հաշիվներն ու ակտերը մնում են նույնը։";
+    ColorBackground = "Фон", "Background", "Ֆոն";
+    ColorButtons = "Кнопки", "Buttons", "Կոճակներ";
+    ColorButtonText = "Текст на кнопках", "Button text", "Կոճակների տեքստ";
+    ColorText = "Текст", "Text", "Տեքստ";
+    /// Под названием цвета: выбрал его человек или он — программы.
+    ColorOwn = "Свой цвет", "Your color", "Ձեր գույնը";
+    ColorApp = "Цвет программы", "App color", "Ծրագրի գույնը";
+    ColorReset = "Сбросить", "Reset", "Վերակայել";
+    ColorsResetAll = "Вернуть цвета программы", "Restore the app's colors", "Վերադարձնել ծրագրի գույները";
+    /// Выбранная пара читается плохо (`theme::low`). Шаблоны: контраст пары
+    /// и порог — «2,1» и «4,5».
+    ColorLowText =
+        "Текст на фоне читается плохо: контраст {}, а нужен хотя бы {}.",
+        "Text is hard to read on the background: contrast {}, and at least {} is needed.",
+        "Տեքստը ֆոնի վրա վատ է կարդացվում. կոնտրաստը {} է, իսկ անհրաժեշտ է առնվազն {}։";
+    ColorLowButtonText =
+        "Текст на кнопках читается плохо: контраст {}, а нужен хотя бы {}.",
+        "Button text is hard to read: contrast {}, and at least {} is needed.",
+        "Կոճակների տեքստը վատ է կարդացվում. կոնտրաստը {} է, իսկ անհրաժեշտ է առնվազն {}։";
+    ColorLowButtons =
+        "Кнопки плохо видно на фоне: контраст {}, а нужен хотя бы {}.",
+        "Buttons are hard to see on the background: contrast {}, and at least {} is needed.",
+        "Կոճակները ֆոնի վրա վատ են երևում. կոնտրաստը {} է, իսկ անհրաժեշտ է առնվազն {}։";
+
     /// Главный экран: приветствие вместо заголовка, как в дизайне. Без имени:
     /// какое слово в имени ИП — имя человека, программа не знает.
     HomeHello = "Здравствуйте", "Hello", "Բարև Ձեզ";

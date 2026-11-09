@@ -3,7 +3,7 @@
 //! ՊԵԿ, налог квартала, незаполненный профиль, неоплаченные счета, — и главное
 //! действие, «Новый счёт».
 
-use kvartik_core::i18n::{self, Key, Lang};
+use kvartik_core::i18n::{self, Key, Lang, t};
 use leptos::prelude::*;
 
 use super::backup::{BackupReminder, Backups};
@@ -52,10 +52,21 @@ pub fn Home(
     };
     view! {
         <header class="greeting">
-            {today.map(|day| view! {
-                <p class="today">{move || i18n::day_long(lang.get(), day)}</p>
-            })}
-            <h1 tabindex="-1">{tr(lang, Key::HomeHello)}</h1>
+            <div>
+                {today.map(|day| view! {
+                    <p class="today">{move || i18n::day_long(lang.get(), day)}</p>
+                })}
+                <h1 tabindex="-1">{tr(lang, Key::HomeHello)}</h1>
+            </div>
+            // Настройки на телефоне (задача 88): вкладки для них внизу нет.
+            // На компьютере их строка — в меню, и шестерёнки здесь нет.
+            <a
+                class="settings-open"
+                href=Screen::Settings.href()
+                aria-label=move || t(lang.get(), Key::SettingsTitle)
+            >
+                {icon(Icon::Gear)}
+            </a>
         </header>
         <BackupReminder lang backups />
         // Установка — выше всего о данных: на iPhone программу ставят до

@@ -24,7 +24,8 @@
 //    перезагрузкой, и первый открывается снова.
 // 2. С сетью: восстановление образца копии, экраны и их формы, карточка
 //    выпущенного документа, PDF, выгрузка с закрытым кварталом, разошедшимся
-//    с поданным, новая копия — каждая из девяти частей;
+//    с поданным, новая копия, свои цвета настроек и они же после
+//    перезагрузки (задача 88) — каждая из десяти частей;
 //    и все части `dist/app/split_*.wasm` загружены. «Установить» на
 //    главном экране — и без вопроса браузера, и раскладка, которую видно
 //    только с настоящим CSS: кнопка не вплотную к карточке налога под ней.
@@ -125,10 +126,11 @@ const FORMS = [
 
 /// Экраны без формы: их содержимое рисует часть экрана — налог (задача 19),
 /// годовые платежи (задача 20), сроки (задача 21), числа для расчёта
-/// (задача 24), лицензия (задача 25) и «О программе» (задача 31). «Сверьте
-/// расчёт с бухгалтером» части годовых платежей и сроков, слова о полях
-/// формы — часть чисел, о ключе — часть лицензии, а правила налога — часть
-/// «О программе» рисуют всегда, и с профилем, и без него.
+/// (задача 24), лицензия (задача 25), «О программе» (задача 31) и настройки
+/// (задача 88). «Сверьте расчёт с бухгалтером» части годовых платежей
+/// и сроков, слова о полях формы — часть чисел, о ключе — часть лицензии,
+/// правила налога — часть «О программе», а слова о кружке у курсора — часть
+/// настроек рисуют всегда, и с профилем, и без него.
 const SCREENS = [
   { name: "Налог", hash: "#/tax", shown: TEXT_IN("#tax", s("TaxTurnover")) },
   { name: "Годовые платежи", hash: "#/annual", shown: TEXT_IN("#annual", s("TaxCheck")) },
@@ -136,6 +138,7 @@ const SCREENS = [
   { name: "Числа для расчёта", hash: "#/report", shown: TEXT_IN("#report", s("ReportAbout")) },
   { name: "Лицензия", hash: "#/license", shown: TEXT_IN("#license", s("LicenseAbout")) },
   { name: "О программе", hash: "#/about", shown: TEXT_IN("#about", s("AboutRules")) },
+  { name: "Настройки", hash: "#/settings", shown: TEXT_IN("#settings", s("SettingsCursorHint")) },
 ];
 
 async function screens(page, when) {
@@ -164,6 +167,39 @@ async function licenses(page, when) {
       leptos: text.includes("leptos 0.") && text.includes("Copyright (c) 2022 Greg Johnston"),
       wide: document.documentElement.scrollWidth > document.documentElement.clientWidth };`);
   checks.check(`${when}: тексты лицензий`, got && got.parts.length === 0 && got.leptos && !got.wide, JSON.stringify(got));
+}
+
+/// Свои цвета (задача 88) на собранном сайте. Пока своих нет, образец фона —
+/// фон темы устройства, и тема, сменившаяся при открытом экране, меняет
+/// и его: экран, показанный однажды, не снимается (найдено глазным прогоном
+/// задачи 88 — образцы оставались светлыми в тёмной теме). Выбранный фон
+/// встаёт на страницу сразу — его ставит часть настроек, — а после
+/// перезагрузки его ставит главный wasm из записи устройства, ещё до части.
+/// «Вернуть цвета программы» снимает его со страницы и с устройства.
+async function settings(page) {
+  const SURFACE = `getComputedStyle(document.documentElement).getPropertyValue("--surface").trim()`;
+  const SWATCH = `return document.querySelector("#settings input[type=color]")?.value === ${SURFACE} ? true : null;`;
+  await go(page, "#/settings");
+  checks.check("настройки: образец фона — фон темы устройства", await page.waitFor(SWATCH));
+  await page.emulate(360, "dark");
+  checks.check("настройки: тема сменилась — образец фона за ней", await page.waitFor(SWATCH, 3000));
+  await page.emulate(360);
+  checks.check("настройки: и обратно", await page.waitFor(SWATCH, 3000));
+  const picked = await page.waitFor(`const field = document.querySelector("#settings input[type=color]");
+    if (!field || !field.getClientRects().length) return null;
+    field.value = "#0b1d33";
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    return ${SURFACE} === "#0b1d33" ? true : null;`);
+  checks.check("настройки: свой фон встал на страницу", picked);
+  await page.reload();
+  checks.check("настройки: свой фон — и после перезагрузки",
+    (await page.waitFor(WORKING)) && (await page.eval(`return ${SURFACE};`)) === "#0b1d33");
+  await go(page, "#/settings");
+  const reset = await page.waitFor(`return ${BUTTON("#settings", s("ColorsResetAll"))} ? true : null;`);
+  checks.check("настройки: «Вернуть цвета программы» есть", reset && await press(page, "#settings", s("ColorsResetAll")));
+  checks.check("настройки: цвета программы вернулись", await page.waitFor(`
+    return document.documentElement.style.getPropertyValue("--surface") === ""
+      && localStorage.getItem("kvartik.colors") === null ? true : null;`));
 }
 
 /// Главный экран: кнопка «Установить» есть всегда, пока программа не
@@ -573,6 +609,17 @@ async function motion(browser) {
     await page.go(`${ORIGIN}/app/`);
     await page.setLang(opt.lang);
     checks.check("движение: рабочий экран", await page.waitFor(WORKING));
+    // Кружок у курсора — только когда его включили в настройках (задача 88):
+    // по умолчанию у страницы нет метки `data-cursor`, и стили его не рисуют
+    // и с мышью. Дальше он включён — запись устройства, как её пишет
+    // переключатель, — и у лендинга тоже.
+    checks.check("движение: кружка у курсора нет, пока его не включили", await page.eval(`
+      return !document.documentElement.hasAttribute("data-cursor")
+        && getComputedStyle(document.querySelector(".cursor")).display === "none" ? true : null;`));
+    await page.eval(`localStorage.setItem("kvartik.cursor", "1"); return true;`);
+    await page.reload();
+    checks.check("движение: рабочий экран с кружком у курсора", (await page.waitFor(WORKING))
+      && (await page.waitFor(`return document.documentElement.hasAttribute("data-cursor") ? true : null;`)));
     await page.eval(`location.hash = "#/clients"; return true;`);
     checks.check("движение: экран сменился переходом", await page.waitFor(TRANSITION, 3000));
     checks.check("движение: посреди перехода нажатие — новому экрану, а не снимку", await page.eval(`
@@ -681,6 +728,11 @@ async function motion(browser) {
     checks.check("движение: у лендинга кружок — над кнопкой", await page.waitFor(`const c = document.querySelector(".cursor");
       const b = document.querySelector("[data-hovered]");
       return c?.dataset.over === "press" && b?.style.getPropertyValue("--pointer-x") !== "" ? true : null;`, 3000));
+    // Выключили в программе — у лендинга кружка нет.
+    await page.eval(`localStorage.removeItem("kvartik.cursor"); return true;`);
+    await page.reload();
+    checks.check("движение: у лендинга кружка нет, пока его не включили в программе", await page.waitFor(`
+      return document.querySelector(".hero") && !document.querySelector(".cursor") ? true : null;`));
     checks.check("движение: без плашки сбоя", await page.eval(NO_PANIC));
     const errors = [...new Set(page.errors)];
     checks.check("движение: без ошибок в консоли", errors.length === 0, errors.slice(0, 8).join(" | "));
@@ -913,6 +965,7 @@ async function main() {
     checks.check("первые шаги: у копии с документами карточки нет", await page.waitFor(HIDDEN("#home .first-steps")));
     await forms(page, "с сетью");
     await screens(page, "с сетью");
+    await settings(page);
     await card(page, "с сетью");
     await cardClose(page);
     await exported(page, "с сетью");
