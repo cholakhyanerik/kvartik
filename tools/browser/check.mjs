@@ -371,8 +371,11 @@ async function landing(browser) {
         const button = document.querySelector('a.button[href="/app/"]');
         return button && getComputedStyle(document.querySelector("h1")).fontFamily.includes("Kvartik Serif")
           && getComputedStyle(button).borderTopLeftRadius !== "0px" ? true : null;`));
-      checks.check(`лендинг ${at}: без прокрутки вбок на 360`,
-        await page.eval(`return document.documentElement.scrollWidth <= innerWidth ? true : null;`));
+      // С `clientWidth`, а не `innerWidth`: у страницы шире экрана телефон
+      // растит `innerWidth` вместе с ней, и прежняя проверка (с 0.0.82)
+      // прокрутки вбок не видела (Chrome 157, 2026-11-09).
+      checks.check(`лендинг ${at}: без прокрутки вбок на 360`, await page.eval(`const d = document.documentElement;
+        return d.clientWidth === 360 && d.scrollWidth <= d.clientWidth ? true : null;`));
     }
     // Юридические тексты (задача 32): у каждого языка — свои условия
     // и политика, страницами из утверждённых файлов docs/legal/*.md, с тем же
@@ -387,9 +390,8 @@ async function landing(browser) {
           === ${JSON.stringify(lang)} && document.querySelector("article.legal h1")?.textContent === ${JSON.stringify(title)}
           && document.querySelectorAll("article.legal h2").length >= 5
           && getComputedStyle(document.querySelector("h1")).fontFamily.includes("Kvartik Serif") ? true : null;`));
-        // С `clientWidth`, а не `innerWidth`: у страницы шире экрана телефон
-        // растит `innerWidth` вместе с ней (418 при ширине 360, Chrome 157,
-        // 2026-11-09), и сравнение с ним не видит прокрутки вбок.
+        // Как у страниц языков: с `clientWidth` (418 против 360 у политики,
+        // которой это не было видно, — глазной прогон задачи 32).
         checks.check(`текст ${at}: без прокрутки вбок на 360`, await page.eval(`const d = document.documentElement;
           return d.clientWidth === 360 && d.scrollWidth <= d.clientWidth ? true : null;`));
       }
