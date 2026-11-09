@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.96",
+      "date": "2026-11-09",
+      "hy": [
+        "Բանալին այժմ կարելի է գնել. «Լիցենզիա» էկրանին «Գնել բանալի» տողը բացում է կայքի «Գնել» էջը։ Այնտեղ գինն է (մեկ տարվա «Ստանդարտ» բանալին՝ 24 000 ֏), վաճառողի հաշիվը և գնման երեք քայլերը՝ նամակ, փոխանցում և բանալին աշխատանքային օրվա ընթացքում։"
+      ],
+      "ru": [
+        "Ключ теперь можно купить: на экране «Лицензия» строка «Купить ключ» открывает страницу «Купить» на сайте. На ней цена (ключ «Стандарт» на год — 24 000 ֏), счёт продавца и три шага покупки: письмо, перевод и ключ в течение рабочего дня."
+      ],
+      "en": [
+        "You can now buy a key: on the “License” screen, the “Buy a key” line opens the “Buy” page on the site. It has the price (a “Standard” key for a year is AMD 24,000), the seller's account and the three steps to buy: an email, a transfer, and the key within a business day."
+      ]
+    },
+    {
       "version": "0.0.95",
       "date": "2026-11-09",
       "hy": [
@@ -260,22 +273,6 @@
       ],
       "en": [
         "The License screen now shows the backup label under its title when it's time to make a backup: the app reminds you about backups on every screen."
-      ]
-    },
-    {
-      "version": "0.0.76",
-      "date": "2026-11-04",
-      "hy": [
-        "Պրոֆիլում հայտնվեց «Ծրագրի մասին» էկրանը՝ ծրագրի տարբերակը, լիցենզիայի ժամկետը, հարկային կանոնների տարբերակը՝ օրենքի հետ վերջին ստուգման օրով և այն ակտերով, որոնց վրա դրանք հիմնված են, և նշում հաշվարկի մասին։",
-        "Խնդրի մասին հայտնելիս նշեք ծրագրի տարբերակը. այն երևում է նաև պրոֆիլի «Ծրագրի մասին» տողում։"
-      ],
-      "ru": [
-        "В профиле появился экран «О программе»: версия программы, срок лицензии, версия налоговых правил с днём их последней сверки с законом и актами, на которых они стоят, и оговорка о расчёте.",
-        "Сообщая о проблеме, назовите версию программы: она видна и в строке «О программе» на экране профиля."
-      ],
-      "en": [
-        "The profile has a new “About” screen: the app version, your license term, the tax rules version with the day it was last checked against the law and the acts it is based on, and a note about the calculation.",
-        "When you report a problem, mention the app version: it's also shown in the “About” row of the profile."
       ]
     }
   ]

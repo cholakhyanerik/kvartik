@@ -21,6 +21,7 @@ use kvartik_core::i18n::{self, Key, Lang, fill, plural, t};
 use kvartik_core::license::{self, Access, KeyError, License, PUBLIC_KEY_BYTES, Plan, Term};
 use kvartik_core::model::date::{Date, Quarter};
 use kvartik_core::model::tin::Tin;
+use kvartik_core::release;
 use leptos::ev::SubmitEvent;
 use leptos::prelude::*;
 
@@ -283,6 +284,31 @@ fn quarters_open(lang: Lang, access: Access) -> Option<String> {
         .map(|term| fill(t(lang, Key::LicenseQuartersOpen), &[&i18n::date(lang, term.last())]))
 }
 
+/// Строка «Купить ключ» с тарифом и ценой (задача 35): ссылка на страницу
+/// «Купить» сайта на языке окна — в новой вкладке, как условия лицензии
+/// в «О программе»: страница вне программы, и программа остаётся на своём
+/// экране. Цена — из ядра (`release::PRICE`), та же, что на сайте.
+#[component]
+fn BuyEntry(lang: ReadSignal<Lang>) -> impl IntoView {
+    view! {
+        <ul class="list">
+            <li>
+                <a class="entry" href=move || release::buy_path(lang.get()) target="_blank" rel="noopener">
+                    <span class="entry-main">
+                        <span class="entry-title">{tr(lang, Key::LicenseBuy)}</span>
+                        <span class="entry-meta">{move || {
+                            let lang = lang.get();
+                            let price = i18n::money(lang, release::PRICE);
+                            fill(t(lang, Key::LicenseBuyPrice), &[t(lang, Key::PlanStandard), &price])
+                        }}</span>
+                    </span>
+                    {icon(Icon::Forward)}
+                </a>
+            </li>
+        </ul>
+    }
+}
+
 /// Ссылка на экран лицензии — из слов о запертом.
 #[component]
 pub(super) fn LicenseLink(lang: ReadSignal<Lang>) -> impl IntoView {
@@ -444,6 +470,7 @@ pub(super) fn LicensePage(ctx: tax::Ctx) -> impl IntoView {
     view! {
         {move || status().map(|lines| view! { <div class="notice" role="status">{lines}</div> })}
         <p class="hint">{tr(lang, Key::LicenseAbout)}</p>
+        <BuyEntry lang />
         {move || licenses.failure().map(|error| view! { <p role="alert">{tr(lang, error_key(error))}</p> })}
         {move || (licenses.unreadable() > 0).then(|| view! {
             <p role="alert">{move || {

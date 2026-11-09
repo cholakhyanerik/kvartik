@@ -458,6 +458,76 @@ footer .links {
   overflow-wrap: break-word;
 }
 
+/* Цена ключа (задача 35) — на лендинге и на странице «Купить»: крупно,
+   шрифтом «Kvartik» и крупных сумм окна, как суммы на его главном
+   экране. */
+.price {
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-display);
+  font-size: var(--font-size-hero);
+  line-height: var(--leading-tight);
+}
+
+/* Страница «Купить»: читается, как юридический текст (`.legal`), а шаги
+   покупки отделены воздухом больше, чем строки внутри шага. */
+.buy .plan {
+  margin-block: var(--space-6);
+}
+
+.buy .steps > li + li {
+  margin-top: var(--space-6);
+}
+
+/* Две кнопки шага — в строку, а где не помещаются, одна под другой. */
+.buy .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+/* Слова согласия, банк, владелец и номер счёта выделяются целиком одним
+   касанием: их копируют в письмо и в перевод, и номер, выделенный не
+   весь, ушёл бы в перевод без цифр. Плашка слов согласия — тот же фон, что
+   у дорожки языков (--surface-sunken), и текст на ней тот же (--text). */
+.phrase {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  font-weight: var(--weight-strong);
+  user-select: all;
+}
+
+.copy {
+  user-select: all;
+}
+
+/* Реквизиты перевода: подпись над значением, на любой ширине — номер
+   счёта и армянское имя банка рядом с подписью на телефоне не поместились
+   бы. Пояснение — под значением, тише. */
+.requisites {
+  margin: var(--space-4) 0 0;
+}
+
+.requisites dt {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.requisites dd {
+  margin: 0 0 var(--space-3);
+  font-weight: var(--weight-strong);
+  overflow-wrap: anywhere;
+}
+
+.requisites dd:last-child {
+  margin-bottom: 0;
+}
+
+.requisites .note {
+  display: block;
+  font-weight: var(--weight-regular);
+}
+
 @media (min-width: 40rem) {
   .cards,
   .fields {

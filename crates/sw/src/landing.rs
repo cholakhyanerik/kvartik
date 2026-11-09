@@ -17,6 +17,14 @@
 //! Шапка, подвал и оформление у них те же, что у страницы языка, а в подвале
 //! каждой страницы — ссылки на оба текста и почта и Telegram продавца.
 //!
+//! И страница «Купить» (задача 35), `buy/` в той же папке
+//! (`release::buy_path`): тариф и цена, шаги покупки по условиям (п. 2)
+//! и реквизиты перевода. Её текст — таблица строк, а числа — ядро: цена,
+//! счёт, банк, владелец счёта и ՀՎՀՀ продавца (`release`). Условия зовут
+//! её по имени и берут с неё цену на день оплаты (п. 5), поэтому слова
+//! согласия, которые она просит написать, сборка сверяет с условиями своего
+//! языка: новая редакция условий без новых слов на странице сайт не соберёт.
+//!
 //! Рядом — оформление и скрипт, одним файлом каждый, с хэшем содержимого
 //! в имени (`kvartik-site-<хэш>.css` и `.js`): они кэшируются на год
 //! (`_headers`), а новая сборка — новое имя. CSS — это `tokens.css`
@@ -41,7 +49,7 @@ use std::path::Path;
 use kvartik_core::i18n::{self, Key, Lang, fill, plural, t};
 use kvartik_core::license::TRIAL_DAYS;
 use kvartik_core::model::date::Date;
-use kvartik_core::release::{EMAIL, LICENSES, Legal, TELEGRAM};
+use kvartik_core::release::{ACCOUNT, BANK, EMAIL, HOLDER, LICENSES, Legal, PRICE, SELLER_TIN, TELEGRAM, buy_path};
 use kvartik_core::tax::{calendar, example, rules, turnover};
 
 use super::{digest, legal};
@@ -124,10 +132,16 @@ pub fn write(staging: &Path, site: &Path, style: &Path, legal: &Path, app: &str,
         }
         let pairs: Vec<(Lang, &legal::Doc)> = texts.iter().map(|(lang, text)| (*lang, text)).collect();
         legal::same_shape(doc.name(), &pairs)?;
+        if doc == Legal::Terms {
+            agreed(&texts)?;
+        }
         for (lang, text) in &texts {
             let html = legal_page(*lang, doc, text, &css_name, &js_name, app, checked);
             files.push((page_file(doc.path(*lang)), html));
         }
+    }
+    for lang in Lang::ALL {
+        files.push((page_file(buy_path(lang)), buy_page(lang, &css_name, &js_name, app, checked)));
     }
     files.push(("robots.txt".to_owned(), robots()));
     files.push(("sitemap.xml".to_owned(), sitemap()));
@@ -144,10 +158,30 @@ pub fn write(staging: &Path, site: &Path, style: &Path, legal: &Path, app: &str,
         fs::write(&target, text).map_err(|error| format!("{}: {error}", target.display()))?;
     }
     Ok(format!(
-        "лендинг: страниц {}, юридических текстов {}",
+        "лендинг: страниц {}, «Купить» {}, юридических текстов {}",
+        Lang::ALL.len(),
         Lang::ALL.len(),
         Legal::ALL.len() * Lang::ALL.len()
     ))
+}
+
+/// Слова согласия, которые просит написать страница «Купить»
+/// (`Key::BuyAccept`), — в условиях лицензии того же языка (п. 2.1), иначе
+/// сборка останавливается: покупатель написал бы согласие с редакцией,
+/// которой на сайте нет. `terms` — разобранные условия трёх языков.
+fn agreed(terms: &[(Lang, legal::Doc)]) -> Result<(), String> {
+    for (lang, text) in terms {
+        let words = t(*lang, Key::BuyAccept);
+        if !legal::contains(text, words) {
+            return Err(format!(
+                "{}.{}.md: нет слов согласия «{words}», которые просит написать страница «Купить» — \
+                 новая редакция условий? Тогда и новые слова в Key::BuyAccept (crates/core/src/i18n.rs)",
+                Legal::Terms.name(),
+                lang.code()
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Оформление лендинга одним файлом: переменные, шрифты, свои правила —
@@ -264,9 +298,7 @@ fn calculator(lang: Lang, calc: &Calc, app: &str) -> String {
 /// `checked` — день последней сверки правил: нет его — нет и строки о нём.
 fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option<Date>) -> String {
     let text = |key: Key| escape(t(lang, key));
-    let days = u64::from(TRIAL_DAYS.unsigned_abs());
-    let days = fill(plural(lang, days, Key::DaysOne, Key::DaysFew, Key::DaysMany), &[&days.to_string()]);
-    let trial = escape(&fill(t(lang, Key::WelcomeTrial), &[&days]));
+    let trial = trial(lang);
     let calendar = format!("{SITE}/{}", calendar::path(lang));
     let webcal = calendar.replacen("https://", "webcal://", 1);
     let own = url(lang);
@@ -323,7 +355,7 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
         <p>{fit_text}</p>
         <p class="actions"><a class="button" href="{app}" data-handoff><span class="label">{open}</span></a></p>
       </section>
-    </main>
+{price}    </main>
 {footer}  </body>
 </html>
 "#,
@@ -331,6 +363,15 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
         top = top(lang, own, url),
         footer = footer(lang, app, checked),
         calculator = calculator(lang, calc, app),
+        price = plan_card(
+            lang,
+            "price",
+            &format!(
+                "        <p class=\"actions\"><a class=\"button\" href=\"{}\"><span class=\"label\">{}</span></a></p>\n",
+                buy_path(lang),
+                text(Key::BuyLink)
+            )
+        ),
         headline = text(Key::WelcomeHeadline),
         lead = text(Key::LandingLead),
         open = text(Key::LandingOpen),
@@ -365,6 +406,151 @@ fn legal_page(
         body = legal::html(text, escape),
         footer = footer(lang, app, checked),
     )
+}
+
+/// Срок пробного периода словами — «14 дней бесплатно, без регистрации.» —
+/// из ядра (`license::TRIAL_DAYS`), экранирован.
+fn trial(lang: Lang) -> String {
+    let days = u64::from(TRIAL_DAYS.unsigned_abs());
+    let days = fill(plural(lang, days, Key::DaysOne, Key::DaysFew, Key::DaysMany), &[&days.to_string()]);
+    escape(&fill(t(lang, Key::WelcomeTrial), &[&days]))
+}
+
+/// Карточка тарифа (задача 35): «Ключ «Стандарт» на год», цена из ядра
+/// (`release::PRICE`) крупно и что даёт ключ, а под ними `below` — готовая
+/// разметка: на лендинге — ссылка на страницу «Купить», на ней самой —
+/// пробный период. `id` — якорь заголовка.
+fn plan_card(lang: Lang, id: &str, below: &str) -> String {
+    format!(
+        r#"      <section class="card plan" aria-labelledby="{id}" data-tilt>
+        <h2 id="{id}">{title}</h2>
+        <p class="price">{price}</p>
+        <p>{about}</p>
+{below}      </section>
+"#,
+        title = escape(&fill(t(lang, Key::BuyPlan), &[t(lang, Key::PlanStandard)])),
+        price = escape(&i18n::money(lang, PRICE)),
+        about = escape(t(lang, Key::BuyPlanText)),
+    )
+}
+
+/// Страница «Купить» на языке `lang` (задача 35) — рядом со страницей языка,
+/// с её шапкой, оформлением и подвалом: карточка тарифа, шаги покупки — те,
+/// что в условиях лицензии (п. 2), — и реквизиты перевода. «Написать
+/// письмо» открывает почту покупателя с темой, строками, которые он
+/// дополнит, и словами согласия: страница сама ничего не отправляет.
+/// Реквизиты — как их выдал банк, а владелец счёта и банк — по-армянски
+/// (`lang="hy"`): их и вписывают в перевод, и выделяются они целиком одним
+/// касанием (`copy`).
+fn buy_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -> String {
+    let text = |key: Key| escape(t(lang, key));
+    let price = i18n::money(lang, PRICE);
+    let plan = t(lang, Key::PlanStandard);
+    let meta = format!(
+        "    <meta name=\"description\" content=\"{}\" />\n",
+        escape(&fill(t(lang, Key::BuyDescription), &[plan, &price]))
+    );
+    let mail = format!(
+        "mailto:{EMAIL}?subject={}&body={}",
+        mailto_part(t(lang, Key::BuyMailSubject)),
+        mailto_part(&fill(t(lang, Key::BuyMailBody), &[t(lang, Key::BuyAccept)]))
+    );
+    let write = linked(t(lang, Key::BuyStepWrite), &format!("<a href=\"mailto:{EMAIL}\">{EMAIL}</a>"));
+    let pay = escape(&fill(t(lang, Key::BuyStepPay), &[&price]));
+    let key = escape(&fill(t(lang, Key::BuyStepKey), &[t(lang, Key::NavProfile), t(lang, Key::LicenseTitle)]));
+    let holder_note = escape(&fill(t(lang, Key::BuyHolderNote), &[SELLER_TIN]));
+    format!(
+        r#"{head}  <body>
+{top}    <main>
+      <article class="legal buy">
+        <h1>{title}</h1>
+{plan_card}        <h2>{how}</h2>
+        <ol class="steps">
+          <li>
+            <p>{write}</p>
+            <p class="phrase">{accept}</p>
+            <p class="actions"><a class="button" href="{mail}"><span class="label">{write_button}</span></a> <a class="button secondary" href="{terms}"><span class="label">{terms_label}</span></a></p>
+          </li>
+          <li>
+            <p>{pay}</p>
+            <dl class="requisites">
+              <dt>{bank_label}</dt>
+              <dd><span class="copy" lang="hy">{bank}</span> <span class="note">{bank_note}</span></dd>
+              <dt>{holder_label}</dt>
+              <dd><span class="copy" lang="hy">{holder}</span> <span class="note">{holder_note}</span></dd>
+              <dt>{account_label}</dt>
+              <dd><span class="copy">{ACCOUNT}</span></dd>
+              <dt>{amount_label}</dt>
+              <dd>{amount}</dd>
+              <dt>{purpose_label}</dt>
+              <dd>{purpose}</dd>
+            </dl>
+          </li>
+          <li>
+            <p>{key}</p>
+          </li>
+        </ol>
+        <p class="hint">{only}</p>
+      </article>
+    </main>
+{footer}  </body>
+</html>
+"#,
+        head = head(lang, &text(Key::BuyTitle), buy_path, &meta, css, js, app),
+        top = top(lang, url(lang), buy_path),
+        footer = footer(lang, app, checked),
+        title = text(Key::BuyTitle),
+        plan_card = plan_card(lang, "plan", &format!("        <p class=\"hint\">{}</p>\n", trial(lang))),
+        how = text(Key::BuyHow),
+        accept = text(Key::BuyAccept),
+        mail = escape(&mail),
+        write_button = text(Key::BuyWrite),
+        terms = Legal::Terms.path(lang),
+        terms_label = text(Key::LegalTerms),
+        bank_label = text(Key::BuyBank),
+        bank = escape(BANK),
+        bank_note = text(Key::BuyBankNote),
+        holder_label = text(Key::BuyHolder),
+        holder = escape(HOLDER),
+        account_label = text(Key::BuyAccount),
+        amount_label = text(Key::BuyAmount),
+        amount = escape(&price),
+        purpose_label = text(Key::BuyPurpose),
+        purpose = text(Key::BuyPurposeValue),
+        only = text(Key::BuyOnly),
+    )
+}
+
+/// Шаблон с одним `{}`, на месте которого — готовая разметка `link`:
+/// текст вокруг экранирован, а сама ссылка — нет.
+fn linked(template: &str, link: &str) -> String {
+    match template.split_once("{}") {
+        Some((before, after)) => format!("{}{link}{}", escape(before), escape(after)),
+        None => escape(template),
+    }
+}
+
+/// Тема или текст письма в адресе `mailto:` (RFC 6068): всё, кроме
+/// незарезервированных знаков URI, — байтами UTF-8 через `%`, а перенос
+/// строки — `%0D%0A`, как RFC велит для текста письма (п. 5).
+fn mailto_part(text: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut out = String::with_capacity(text.len() * 3);
+    let mut bytes = [0; 4];
+    for c in text.chars() {
+        if c == '\n' {
+            out.push_str("%0D%0A");
+        } else if c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | '~') {
+            out.push(c);
+        } else {
+            for byte in c.encode_utf8(&mut bytes).bytes() {
+                out.push('%');
+                out.push(char::from(HEX[usize::from(byte >> 4)]));
+                out.push(char::from(HEX[usize::from(byte & 0xF)]));
+            }
+        }
+    }
+    out
 }
 
 /// Начало документа до `<body>`: язык, заголовок, та же страница на каждом
@@ -434,9 +620,10 @@ fn top(lang: Lang, home: &str, path: impl Fn(Lang) -> &'static str) -> String {
 }
 
 /// Подвал каждой страницы: оговорка о расчёте, день сверки правил (нет его —
-/// нет и строки), юридические тексты своего языка, тексты лицензий рядом
-/// с программой и как написать продавцу — почтой и в Telegram
-/// (`release::EMAIL`, `release::TELEGRAM`).
+/// нет и строки), страница «Купить» и юридические тексты своего языка —
+/// условия зовут её по имени, и с их страницы до неё один шаг (задача 35), —
+/// тексты лицензий рядом с программой и как написать продавцу — почтой
+/// и в Telegram (`release::EMAIL`, `release::TELEGRAM`).
 fn footer(lang: Lang, app: &str, checked: Option<Date>) -> String {
     let text = |key: Key| escape(t(lang, key));
     let rules = checked
@@ -448,10 +635,12 @@ fn footer(lang: Lang, app: &str, checked: Option<Date>) -> String {
     format!(
         r#"    <footer>
       <p>{disclaimer}</p>
-{rules}      <p class="links"><a href="{terms}">{terms_label}</a> <a href="{privacy}">{privacy_label}</a> <a href="{app}{LICENSES}">{licenses}</a></p>
+{rules}      <p class="links"><a href="{buy}">{buy_label}</a> <a href="{terms}">{terms_label}</a> <a href="{privacy}">{privacy_label}</a> <a href="{app}{LICENSES}">{licenses}</a></p>
       <p class="links"><span>{contact}</span> <a href="mailto:{EMAIL}">{EMAIL}</a> <a href="{TELEGRAM}">{telegram}</a></p>
     </footer>
 "#,
+        buy = buy_path(lang),
+        buy_label = text(Key::BuyLink),
         telegram = text(Key::ContactTelegram),
         disclaimer = text(Key::LandingDisclaimer),
         terms = Legal::Terms.path(lang),
@@ -470,10 +659,10 @@ fn robots() -> String {
     format!("User-agent: *\nAllow: /\n\nSitemap: {SITE}/sitemap.xml\n")
 }
 
-/// Карта сайта: страницы трёх языков и юридические тексты к ним, у каждой —
-/// она же на всех трёх и «по умолчанию» армянская (как `hreflang` в самих
-/// страницах). Без `lastmod`: дня сборки в ней нет, иначе одна и та же
-/// сборка давала бы разные байты.
+/// Карта сайта: страницы трёх языков, страница «Купить» и юридические тексты
+/// к ним, у каждой — она же на всех трёх и «по умолчанию» армянская (как
+/// `hreflang` в самих страницах). Без `lastmod`: дня сборки в ней нет, иначе
+/// одна и та же сборка давала бы разные байты.
 fn sitemap() -> String {
     let mut out = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
@@ -481,7 +670,7 @@ fn sitemap() -> String {
     );
     let terms = |lang: Lang| Legal::Terms.path(lang);
     let privacy = |lang: Lang| Legal::Privacy.path(lang);
-    let pages: [&dyn Fn(Lang) -> &'static str; 3] = [&url, &terms, &privacy];
+    let pages: [&dyn Fn(Lang) -> &'static str; 4] = [&url, &buy_path, &terms, &privacy];
     for path in pages {
         for lang in Lang::ALL {
             out.push_str(&format!("  <url>\n    <loc>{SITE}{}</loc>\n", path(lang)));
@@ -549,16 +738,23 @@ mod tests {
         legal_page(lang, doc, &text, "kvartik-site-a.css", "kvartik-site-b.js", "/app/", checked())
     }
 
-    /// Все страницы сайта: три страницы языков и шесть юридических.
+    /// Все страницы сайта: три страницы языков, три «Купить» и шесть
+    /// юридических.
     fn every_page() -> Vec<(String, String)> {
         let mut out = Vec::new();
         for lang in Lang::ALL {
             out.push((format!("{lang:?} {}", url(lang)), sample(lang)));
+            out.push((format!("{lang:?} {}", buy_path(lang)), buy_sample(lang)));
             for doc in Legal::ALL {
                 out.push((format!("{lang:?} {}", doc.path(lang)), legal_sample(doc, lang)));
             }
         }
         out
+    }
+
+    /// Страница «Купить».
+    fn buy_sample(lang: Lang) -> String {
+        buy_page(lang, "kvartik-site-a.css", "kvartik-site-b.js", "/app/", checked())
     }
 
     /// Модуль калькулятора в тестах страниц.
@@ -718,8 +914,9 @@ mod tests {
         assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
-    /// Подвал каждой страницы ведёт на оба юридических текста своего языка,
-    /// на тексты лицензий и к продавцу — почтой и в Telegram.
+    /// Подвал каждой страницы ведёт на страницу «Купить» и оба юридических
+    /// текста своего языка, на тексты лицензий и к продавцу — почтой
+    /// и в Telegram.
     #[test]
     fn every_footer_leads_to_the_terms_and_the_seller() {
         let mut wrong = Vec::new();
@@ -730,6 +927,7 @@ mod tests {
                 .expect("язык страницы");
             let footer = &html[html.find("<footer>").expect("подвал")..];
             for piece in [
+                format!("<a href=\"{}\">{}</a>", buy_path(lang), escape(t(lang, Key::BuyLink))),
                 format!("<a href=\"{}\">{}</a>", Legal::Terms.path(lang), escape(t(lang, Key::LegalTerms))),
                 format!("<a href=\"{}\">{}</a>", Legal::Privacy.path(lang), escape(t(lang, Key::LegalPrivacy))),
                 format!("<a href=\"/app/{LICENSES}\">"),
@@ -745,8 +943,9 @@ mod tests {
         assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
-    /// Числа страницы — из ядра, а не написаны ею: срок пробного периода
-    /// и день последней сверки правил.
+    /// Числа страницы — из ядра, а не написаны ею: срок пробного периода,
+    /// день последней сверки правил и цена ключа — у лендинга и у страницы
+    /// «Купить» одна, и лендинг ведёт к ней.
     #[test]
     fn numbers_come_from_the_core() {
         let html = sample(Lang::Ru);
@@ -754,6 +953,96 @@ mod tests {
         let day = checked().expect("правила сверены");
         assert!(html.contains(&escape(&i18n::date(Lang::Ru, day))), "нет дня сверки правил");
         assert!(!page(Lang::Ru, "a.css", "b.js", "/app/", &CALC, None).contains("сверены с законом"));
+        let mut wrong = Vec::new();
+        for lang in Lang::ALL {
+            let price = format!("<p class=\"price\">{}</p>", escape(&i18n::money(lang, PRICE)));
+            if !sample(lang).contains(&price) || !buy_sample(lang).contains(&price) {
+                wrong.push(format!("{lang:?}: нет цены {price}"));
+            }
+            if !sample(lang).contains(&format!("<a class=\"button\" href=\"{}\">", buy_path(lang))) {
+                wrong.push(format!("{lang:?}: карточка цены не ведёт на «Купить»"));
+            }
+        }
+        assert!(sample(Lang::Ru).contains("24\u{A0}000\u{A0}֏"), "цена в рублёвой записи");
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// Страница «Купить» (задача 35) — на своём языке, рядом со страницей
+    /// языка: тариф и цена, шаги условий (п. 2) со словами согласия,
+    /// письмом и ссылкой на условия своего языка, реквизиты перевода из
+    /// ядра — банк и владелец счёта по-армянски, как их выдал банк, счёт,
+    /// сумма, ՀՎՀՀ продавца — и кому продаётся.
+    #[test]
+    fn the_buy_page_names_the_price_and_the_account() {
+        let mut wrong = Vec::new();
+        for lang in Lang::ALL {
+            let html = buy_sample(lang);
+            let mut need = vec![
+                format!("<html lang=\"{}\">", lang.code()),
+                format!("<title>{}</title>", escape(t(lang, Key::BuyTitle))),
+                format!("<h1>{}</h1>", escape(t(lang, Key::BuyTitle))),
+                format!("<link rel=\"canonical\" href=\"https://kvartik.com{}\" />", buy_path(lang)),
+                "<link rel=\"alternate\" hreflang=\"x-default\" href=\"https://kvartik.com/buy/\" />".to_owned(),
+                format!("<a class=\"brand\" href=\"{}\">", url(lang)),
+                format!("<p class=\"phrase\">{}</p>", escape(t(lang, Key::BuyAccept))),
+                format!("<a href=\"mailto:{EMAIL}\">{EMAIL}</a>"),
+                format!("<a class=\"button secondary\" href=\"{}\">", Legal::Terms.path(lang)),
+                format!("<span class=\"copy\" lang=\"hy\">{}</span>", escape(BANK)),
+                format!("<span class=\"copy\" lang=\"hy\">{}</span>", escape(HOLDER)),
+                format!("<span class=\"copy\">{ACCOUNT}</span>"),
+                format!("<dd>{}</dd>", escape(&i18n::money(lang, PRICE))),
+                escape(&fill(t(lang, Key::BuyHolderNote), &[SELLER_TIN])),
+                escape(&fill(t(lang, Key::BuyStepPay), &[&i18n::money(lang, PRICE)])),
+                escape(t(lang, Key::BuyPurposeValue)),
+                escape(t(lang, Key::BuyOnly)),
+                escape(&fill(t(lang, Key::BuyStepKey), &[t(lang, Key::NavProfile), t(lang, Key::LicenseTitle)])),
+                trial(lang),
+                format!(
+                    "<meta name=\"description\" content=\"{}\" />",
+                    escape(&fill(t(lang, Key::BuyDescription), &[t(lang, Key::PlanStandard), &i18n::money(lang, PRICE)]))
+                ),
+            ];
+            for other in Lang::ALL {
+                need.push(format!(
+                    "<link rel=\"alternate\" hreflang=\"{}\" href=\"https://kvartik.com{}\" />",
+                    other.code(),
+                    buy_path(other)
+                ));
+                need.push(format!("<a href=\"{}\" hreflang=\"{}\"", buy_path(other), other.code()));
+            }
+            for piece in need {
+                if !html.contains(&piece) {
+                    wrong.push(format!("{lang:?}: нет {piece}"));
+                }
+            }
+            if html.matches("aria-current=\"page\"").count() != 1 {
+                wrong.push(format!("{lang:?}: текущий язык не один"));
+            }
+            // Письмо — тем же адресом, с темой и текстом, где слова
+            // согласия; `&` между ними — ссылкой на знак (Правило 13).
+            let mail = format!(
+                "href=\"mailto:{EMAIL}?subject={}&amp;body={}\"",
+                mailto_part(t(lang, Key::BuyMailSubject)),
+                mailto_part(&fill(t(lang, Key::BuyMailBody), &[t(lang, Key::BuyAccept)]))
+            );
+            if !html.contains(&mail) {
+                wrong.push(format!("{lang:?}: нет письма {mail}"));
+            }
+            if html.contains("og:") || html.contains("{}") {
+                wrong.push(format!("{lang:?}: разметка лендинга или незаполненный шаблон"));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// Адрес письма: незарезервированные знаки — как есть, остальное —
+    /// байтами UTF-8, перенос строки — CRLF (RFC 6068).
+    #[test]
+    fn mail_text_is_percent_encoded() {
+        assert_eq!(mailto_part("Kvartik-1.0_~"), "Kvartik-1.0_~");
+        assert_eq!(mailto_part("a b&c=d?e"), "a%20b%26c%3Dd%3Fe");
+        assert_eq!(mailto_part("ИП:\n\n֏"), "%D0%98%D0%9F%3A%0D%0A%0D%0A%D6%8F");
+        assert_eq!(mailto_part("ՀՎՀՀ\u{A0}"), "%D5%80%D5%8E%D5%80%D5%80%C2%A0");
     }
 
     /// Ни встроенного скрипта, ни стиля, ни атрибута `style` или
@@ -809,11 +1098,12 @@ mod tests {
         let map = sitemap();
         for lang in Lang::ALL {
             assert!(map.contains(&format!("<loc>https://kvartik.com{}</loc>", url(lang))), "{lang:?}");
+            assert!(map.contains(&format!("<loc>https://kvartik.com{}</loc>", buy_path(lang))), "«Купить» {lang:?}");
             for doc in Legal::ALL {
                 assert!(map.contains(&format!("<loc>https://kvartik.com{}</loc>", doc.path(lang))), "{doc:?} {lang:?}");
             }
         }
-        assert_eq!(map.matches("<url>").count(), Lang::ALL.len() * (1 + Legal::ALL.len()));
+        assert_eq!(map.matches("<url>").count(), Lang::ALL.len() * (2 + Legal::ALL.len()));
         assert!(robots().contains("Sitemap: https://kvartik.com/sitemap.xml\n"));
     }
 
@@ -875,10 +1165,11 @@ mod tests {
         out
     }
 
-    /// Лендинг ложится в корень сборки: три страницы, шесть юридических,
-    /// карта, `robots.txt` и по одному файлу оформления и скрипта, на которые
-    /// страницы ссылаются. Та же сборка — те же имена и байты. Файл на месте
-    /// файла лендинга — ошибка, а не молча затёртый файл.
+    /// Лендинг ложится в корень сборки: три страницы, три «Купить», шесть
+    /// юридических, карта, `robots.txt` и по одному файлу оформления
+    /// и скрипта, на которые страницы ссылаются. Та же сборка — те же имена
+    /// и байты. Файл на месте файла лендинга — ошибка, а не молча затёртый
+    /// файл.
     #[test]
     fn writes_the_site_and_refuses_to_overwrite() {
         let temp = Temp::new("write");
@@ -891,6 +1182,7 @@ mod tests {
         let js: Vec<&String> = written.iter().filter(|n| n.starts_with("kvartik-site-") && n.ends_with(".js")).collect();
         assert_eq!((css.len(), js.len()), (1, 1), "{written:?}");
         let mut pages: Vec<String> = Lang::ALL.into_iter().map(|lang| page_file(url(lang))).collect();
+        pages.extend(Lang::ALL.into_iter().map(|lang| page_file(buy_path(lang))));
         for doc in Legal::ALL {
             pages.extend(Lang::ALL.into_iter().map(|lang| page_file(doc.path(lang))));
         }
@@ -923,6 +1215,11 @@ mod tests {
         clash.put("stage/ru/terms/index.html", "root page");
         let error = build(&clash).expect_err("файл корня на месте юридического текста");
         assert!(error.contains("лёг бы на файл лендинга"), "{error}");
+        let clash = Temp::new("clash-buy");
+        sources(&clash);
+        clash.put("stage/buy/index.html", "root page");
+        let error = build(&clash).expect_err("файл корня на месте страницы «Купить»");
+        assert!(error.contains("лёг бы на файл лендинга"), "{error}");
     }
 
     /// Утверждённый текст, который не разобрался или разошёлся с переводом,
@@ -949,5 +1246,18 @@ mod tests {
         fs::remove_file(missing.0.join("legal/privacy.ru.md")).expect("файл удаляется");
         let error = build(&missing).expect_err("нет перевода");
         assert!(error.contains("privacy.ru.md"), "{error}");
+
+        // Новая редакция условий со своими словами согласия, а страница
+        // «Купить» просит прежние (задача 35): сборка останавливается,
+        // и в сайт ничего не ложится.
+        let edition = Temp::new("edition");
+        sources(&edition);
+        fs::create_dir_all(edition.0.join("stage")).expect("папка сборки");
+        let (_, terms) = LEGAL.iter().find(|(name, _)| *name == "terms.en.md").expect("текст есть");
+        assert!(terms.contains("November 9, 2026"), "в условиях — та редакция, что ждёт тест");
+        edition.put("legal/terms.en.md", &terms.replace("November 9, 2026", "December 1, 2026"));
+        let error = build(&edition).expect_err("слов согласия нет в условиях");
+        assert!(error.contains("terms.en.md") && error.contains("Key::BuyAccept"), "{error}");
+        assert!(names(&edition.0.join("stage")).is_empty(), "в сайт что-то легло");
     }
 }

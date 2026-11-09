@@ -77,6 +77,14 @@ const PORT = Number(opt.port);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const s = (key) => t(key, opt.lang);
 const checks = new Checks();
+// Страница «Купить» (задача 35) на языке `lang` — `release::buy_path`,
+// а цена и счёт продавца — константы `release.rs`: проверка читает их оттуда
+// же, откуда их берёт сборка, а не держит свою копию.
+const buyPath = (lang) => (lang === "hy" ? "/buy/" : `/${lang}/buy/`);
+const RELEASE = fs.readFileSync(path.join(REPO, "crates/core/src/release.rs"), "utf8");
+const ACCOUNT = RELEASE.match(/pub const ACCOUNT: &str = "(\d+)";/)?.[1];
+const PRICE = RELEASE.match(/pub const PRICE: Money = Money::new\(([\d_]+), Currency::Amd\);/)?.[1]?.replaceAll("_", "");
+if (!ACCOUNT || !PRICE) throw new Error("в crates/core/src/release.rs не нашлись ACCOUNT и PRICE");
 
 // Рабочий экран: база открыта, разделы прочитаны — встаёт поле выбора файла
 // копии (с 0.0.20; так же в skill browser-run).
@@ -128,15 +136,17 @@ const FORMS = [
 /// годовые платежи (задача 20), сроки (задача 21), числа для расчёта
 /// (задача 24), лицензия (задача 25), «О программе» (задача 31) и настройки
 /// (задача 88). «Сверьте расчёт с бухгалтером» части годовых платежей
-/// и сроков, слова о полях формы — часть чисел, о ключе — часть лицензии,
-/// правила налога — часть «О программе», а слова о кружке у курсора — часть
+/// и сроков, слова о полях формы — часть чисел, о ключе и ссылку на
+/// страницу «Купить» своего языка (задача 35) — часть лицензии, правила
+/// налога — часть «О программе», а слова о кружке у курсора — часть
 /// настроек рисуют всегда, и с профилем, и без него.
 const SCREENS = [
   { name: "Налог", hash: "#/tax", shown: TEXT_IN("#tax", s("TaxTurnover")) },
   { name: "Годовые платежи", hash: "#/annual", shown: TEXT_IN("#annual", s("TaxCheck")) },
   { name: "Сроки", hash: "#/deadlines", shown: TEXT_IN("#deadlines", s("DeadlinesShiftRule")) },
   { name: "Числа для расчёта", hash: "#/report", shown: TEXT_IN("#report", s("ReportAbout")) },
-  { name: "Лицензия", hash: "#/license", shown: TEXT_IN("#license", s("LicenseAbout")) },
+  { name: "Лицензия", hash: "#/license", shown: `return document.querySelector('#license a[href="${buyPath(opt.lang)}"]')
+      && document.querySelector("#license")?.innerText.includes(${JSON.stringify(s("LicenseAbout"))}) ? true : null;` },
   { name: "О программе", hash: "#/about", shown: TEXT_IN("#about", s("AboutRules")) },
   { name: "Настройки", hash: "#/settings", shown: TEXT_IN("#settings", s("SettingsCursorHint")) },
 ];
@@ -412,6 +422,24 @@ async function landing(browser) {
       // прокрутки вбок не видела (Chrome 157, 2026-11-09).
       checks.check(`лендинг ${at}: без прокрутки вбок на 360`, await page.eval(`const d = document.documentElement;
         return d.clientWidth === 360 && d.scrollWidth <= d.clientWidth ? true : null;`));
+      checks.check(`лендинг ${at}: карточка цены ведёт на «Купить»`, await page.eval(`return document
+        .querySelector('section.plan .price')?.textContent.replace(/\\D/g, "") === ${JSON.stringify(PRICE)}
+        && document.querySelector('section.plan a.button[href="${buyPath(lang)}"]') ? true : null;`));
+    }
+    // Страница «Купить» (задача 35): своего языка, с ценой, счётом продавца
+    // и письмом со словами согласия, без прокрутки вбок на 360.
+    for (const lang of ["hy", "ru", "en"]) {
+      const at = buyPath(lang);
+      await page.go(`${ORIGIN}${at}`);
+      checks.check(`«Купить» ${at}: свой язык, цена, счёт и письмо`, await page.waitFor(`return document.documentElement.lang
+        === ${JSON.stringify(lang)} && document.querySelector("article.buy h1")?.textContent === ${JSON.stringify(t("BuyTitle", lang))}
+        && document.querySelector("article.buy .price")?.textContent.replace(/\\D/g, "") === ${JSON.stringify(PRICE)}
+        && [...document.querySelectorAll("article.buy .requisites .copy")].some((e) => e.textContent === ${JSON.stringify(ACCOUNT)})
+        && decodeURIComponent(document.querySelector('article.buy a.button[href^="mailto:"]')?.href ?? "")
+          .includes(${JSON.stringify(t("BuyAccept", lang))})
+        && getComputedStyle(document.querySelector("h1")).fontFamily.includes("Kvartik Serif") ? true : null;`));
+      checks.check(`«Купить» ${at}: без прокрутки вбок на 360`, await page.eval(`const d = document.documentElement;
+        return d.clientWidth === 360 && d.scrollWidth <= d.clientWidth ? true : null;`));
     }
     // Юридические тексты (задача 32): у каждого языка — свои условия
     // и политика, страницами из утверждённых файлов docs/legal/*.md, с тем же
@@ -437,6 +465,11 @@ async function landing(browser) {
     await page.eval(`document.querySelector('footer a[href="/ru/terms/"]').click(); return true;`);
     checks.check("лендинг: подвал ведёт к условиям своего языка", await page.waitFor(`return location.pathname
       === "/ru/terms/" && document.querySelector("article.legal") ? true : null;`));
+    // Условия зовут страницу «Купить» по имени (п. 2), и с их страницы до
+    // неё — ссылка подвала.
+    await page.eval(`document.querySelector('footer a[href="/ru/buy/"]').click(); return true;`);
+    checks.check("условия: подвал ведёт на «Купить» своего языка", await page.waitFor(`return location.pathname
+      === "/ru/buy/" && document.querySelector("article.buy") ? true : null;`));
     // Калькулятор (задача 34, этап 2): wasm ядра грузится при первом касании
     // формы и отвечает словами страницы. IT 1 000 000 ֏ — 1 % (НК, ст. 258,
     // ч. 1, строка 8): 10 000 ֏; поля, нужные не всегда, не видны, пока ответ

@@ -193,6 +193,17 @@ pub fn same_shape(name: &str, docs: &[(Lang, &Doc)]) -> Result<(), String> {
     Ok(())
 }
 
+/// Есть ли в тексте слова `words` — в названии или в одном блоке, как
+/// они на странице: строки абзаца и пункта уже слиты через пробел. Так
+/// страница «Купить» сверяет с условиями слова согласия (задача 35).
+pub fn contains(doc: &Doc, words: &str) -> bool {
+    doc.title.contains(words)
+        || doc.blocks.iter().any(|block| match block {
+            Block::Edition(text) | Block::Section(text) | Block::Paragraph(text) => text.contains(words),
+            Block::List(items) => items.iter().any(|item| item.contains(words)),
+        })
+}
+
 /// Текст страницей: название, редакция, разделы — разметкой, текст
 /// экранирован `escape`.
 pub fn html(doc: &Doc, escape: impl Fn(&str) -> String) -> String {
@@ -218,7 +229,8 @@ pub fn html(doc: &Doc, escape: impl Fn(&str) -> String) -> String {
 mod tests {
     use super::*;
 
-    use kvartik_core::release::{EMAIL, Legal};
+    use kvartik_core::i18n::{Key, t};
+    use kvartik_core::release::{EMAIL, Legal, SELLER_TIN};
 
     /// Утверждённые тексты — настоящие файлы: проверка ловит правку, после
     /// которой сборка их не разобрала бы.
@@ -258,6 +270,17 @@ mod tests {
                 if !page.contains(EMAIL) {
                     wrong.push(format!("{} {}: нет почты {EMAIL}", doc.name(), lang.code()));
                 }
+                // Условия называют продавца тем ՀՎՀՀ, что на странице «Купить»
+                // рядом со счётом, и те слова согласия, которые она просит
+                // написать (задача 35).
+                if doc == Legal::Terms {
+                    if !contains(parsed_doc, SELLER_TIN) {
+                        wrong.push(format!("terms {}: нет ՀՎՀՀ продавца {SELLER_TIN}", lang.code()));
+                    }
+                    if !contains(parsed_doc, t(*lang, Key::BuyAccept)) {
+                        wrong.push(format!("terms {}: нет слов согласия страницы «Купить»", lang.code()));
+                    }
+                }
                 if !matches!(parsed_doc.blocks.first(), Some(Block::Edition(text)) if text.contains("2026")) {
                     wrong.push(format!("{} {}: первым идёт не строка редакции", doc.name(), lang.code()));
                 }
@@ -288,6 +311,18 @@ mod tests {
         );
         let page = html(&doc, |text| text.replace('<', "&lt;"));
         assert!(page.contains("<h2>1. Раздел</h2>") && page.contains("<li>второй.</li>") && !page.contains("заметка"));
+        // Слова ищутся так, как они на странице: через перенос строки
+        // абзаца и пункта, но не в заметке для человека.
+        for (words, found) in [
+            ("строка вторая", true),
+            ("пункт с продолжением", true),
+            ("Редакция от 09.11.2026", true),
+            ("Название", true),
+            ("заметка", false),
+            ("строка\nвторая", false),
+        ] {
+            assert_eq!(contains(&doc, words), found, "{words:?}");
+        }
     }
 
     /// Чего разбор не знает, — ошибка с именем файла и строкой, а не
