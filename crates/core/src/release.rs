@@ -56,6 +56,56 @@ pub const MAX_NOTES: usize = 20;
 /// другого имени вела бы на 404.
 pub const LICENSES: &str = "licenses.txt";
 
+/// Юридический текст сайта (задача 32): условия лицензии или политика
+/// конфиденциальности. Страницы на трёх языках пишет программа сборки из
+/// утверждённых файлов `docs/legal/<имя>.<код языка>.md`
+/// (`crates/sw/src/legal.rs`), а ведут на них подвал лендинга и экран
+/// «О программе». Адрес — один на всех, иначе ссылка вела бы на 404.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Legal {
+    Terms,
+    Privacy,
+}
+
+impl Legal {
+    pub const ALL: [Legal; 2] = [Legal::Terms, Legal::Privacy];
+
+    /// Имя файла текста и папки страницы: `terms`, `privacy`.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Legal::Terms => "terms",
+            Legal::Privacy => "privacy",
+        }
+    }
+
+    /// Адрес страницы на языке `lang` от корня сайта — рядом со страницей
+    /// лендинга того же языка: армянская в корне (`/terms/`), русская
+    /// и английская — в своих папках (`/ru/terms/`). Адрес — навсегда: им
+    /// делятся, и его запоминают поисковики.
+    pub const fn path(self, lang: Lang) -> &'static str {
+        match (self, lang) {
+            (Legal::Terms, Lang::Am) => "/terms/",
+            (Legal::Terms, Lang::Ru) => "/ru/terms/",
+            (Legal::Terms, Lang::En) => "/en/terms/",
+            (Legal::Privacy, Lang::Am) => "/privacy/",
+            (Legal::Privacy, Lang::Ru) => "/ru/privacy/",
+            (Legal::Privacy, Lang::En) => "/en/privacy/",
+        }
+    }
+}
+
+/// Почта продавца и автора — та же, что в условиях лицензии и политике
+/// конфиденциальности (задача 32): на неё пишут ՀՎՀՀ и согласие с условиями,
+/// жалобы и запросы о данных. Почты на kvartik.com нет (решение человека
+/// 2026-11-09). Что тексты называют её же, держит тест программы сборки.
+pub const EMAIL: &str = "cholakhyanerik@gmail.com";
+
+/// Telegram продавца — для вопросов (решение человека 2026-11-09): ссылкой
+/// в подвале сайта и в «О программе», а не в тексте условий — личный адрес
+/// продавец сменит, а новая редакция ради этого не нужна. ՀՎՀՀ и согласие
+/// с условиями — только почтой (условия, п. 2; политика, п. 5).
+pub const TELEGRAM: &str = "https://t.me/cholakhyanerik";
+
 /// Версия программы — три числа `major.minor.patch`, как `version`
 /// в `Cargo.toml` (Правило 5). Сравнивается по числам: 0.0.10 новее 0.0.9.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -276,6 +326,24 @@ mod tests {
 
     fn file(notes: &[String]) -> String {
         format!(r#"{{"notes": [{}]}}"#, notes.join(", "))
+    }
+
+    /// Страница юридического текста — у каждого текста и языка своя, рядом
+    /// со страницей лендинга этого языка, и в адресе — имя текста: шесть
+    /// разных адресов, и ни один не ложится на чужой.
+    #[test]
+    fn legal_pages_have_their_own_addresses() {
+        let mut seen = Vec::new();
+        for doc in Legal::ALL {
+            for lang in Lang::ALL {
+                let path = doc.path(lang);
+                let home = if lang == Lang::Am { "/".to_owned() } else { format!("/{}/", lang.code()) };
+                assert_eq!(path, format!("{home}{}/", doc.name()), "{doc:?} {lang:?}");
+                assert!(!seen.contains(&path), "{path} — дважды");
+                seen.push(path);
+            }
+        }
+        assert!(EMAIL.contains('@') && TELEGRAM.starts_with("https://t.me/"));
     }
 
     /// Версии сравниваются по числам, а не строками: 0.0.10 новее 0.0.9,

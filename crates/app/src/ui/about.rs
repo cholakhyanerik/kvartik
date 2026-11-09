@@ -1,6 +1,13 @@
 //! О программе (задача 31): версия программы и формат данных, срок
 //! лицензии, правила налога с актами, на которых они стоят, оговорка
-//! о расчёте и тексты лицензий чужого кода и шрифтов (задача 51).
+//! о расчёте, как написать продавцу и где условия лицензии и политика
+//! конфиденциальности (задача 32), и тексты лицензий чужого кода и шрифтов
+//! (задача 51).
+//!
+//! Условия и политика — ссылками на страницы сайта (`release::Legal`),
+//! в новой вкладке, а не текстом в окне: их пишет сборка из утверждённых
+//! файлов, и копия в wasm разошлась бы с ними. Без сети страницы сайта не
+//! открываются — они вне папки программы, и service worker их не хранит.
 //!
 //! Экран — внутри профиля, а его содержимое — в части книги, как у экрана
 //! лицензии (`ui/license.rs`): правила разбирает и подпись ключа проверяет
@@ -12,7 +19,7 @@
 
 use kvartik_core::format::FORMAT_VERSION;
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
-use kvartik_core::release::LICENSES;
+use kvartik_core::release::{EMAIL, LICENSES, Legal, TELEGRAM};
 use kvartik_core::tax::rules;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -134,6 +141,11 @@ pub(super) fn AboutPage(ctx: tax::Ctx) -> impl IntoView {
             </li>
         </ul>
         <p class="hint">{tr(lang, Key::AboutReport)}</p>
+        <p class="hint contacts">
+            <span>{tr(lang, Key::Contact)}</span>
+            <a href=format!("mailto:{EMAIL}")>{EMAIL}</a>
+            <a href=TELEGRAM target="_blank" rel="noopener">{tr(lang, Key::ContactTelegram)}</a>
+        </p>
         <h2>{tr(lang, Key::AboutRules)}</h2>
         <p>{move || {
             let lang = lang.get();
@@ -148,9 +160,30 @@ pub(super) fn AboutPage(ctx: tax::Ctx) -> impl IntoView {
         <p class="hint">{tr(lang, Key::AboutActsHint)}</p>
         <h2>{tr(lang, Key::AboutCalculation)}</h2>
         <p>{tr(lang, Key::AboutDisclaimer)}</p>
+        <h2>{tr(lang, Key::AboutLegal)}</h2>
+        <ul class="list">
+            <LegalEntry lang doc=Legal::Terms title=Key::LegalTerms />
+            <LegalEntry lang doc=Legal::Privacy title=Key::LegalPrivacy />
+        </ul>
         <h2>{tr(lang, Key::AboutLicenses)}</h2>
         <p>{tr(lang, Key::AboutLicensesText)}</p>
         <Licenses lang />
+    }
+}
+
+/// Строка юридического текста: ссылка на его страницу сайта на языке окна —
+/// в новой вкладке, и программа остаётся на своём экране.
+#[component]
+fn LegalEntry(lang: ReadSignal<Lang>, doc: Legal, title: Key) -> impl IntoView {
+    view! {
+        <li>
+            <a class="entry" href=move || doc.path(lang.get()) target="_blank" rel="noopener">
+                <span class="entry-main">
+                    <span class="entry-title">{tr(lang, title)}</span>
+                </span>
+                {icon(Icon::Forward)}
+            </a>
+        </li>
     }
 }
 

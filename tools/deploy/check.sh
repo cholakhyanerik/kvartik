@@ -118,13 +118,14 @@ check_page() {
 }
 check_page
 
-# Корень и страницы языков — лендинг (задача 34, с 0.0.82): 200 и байт
-# в байт та страница, что собрана, — с CSP и без долгого кэша. Зона
-# вписывает свой скрипт в любой ответ `text/html` (выше), и на лендинге
-# тоже. До 0.0.82 корень вёл в программу переадресацией 302.
+# Корень и страницы языков — лендинг (задача 34, с 0.0.82), и юридические
+# тексты к каждой (задача 32, с 0.0.94): 200 и байт в байт та страница, что
+# собрана, — с CSP и без долгого кэша. Зона вписывает свой скрипт в любой
+# ответ `text/html` (выше), и на лендинге тоже. До 0.0.82 корень вёл
+# в программу переадресацией 302.
 check_landing() {
   local path code got
-  for path in "" ru/ en/; do
+  for path in "" ru/ en/ terms/ ru/terms/ en/terms/ privacy/ ru/privacy/ en/privacy/; do
     while :; do
       code="$(curl -sS --compressed -o "$work/landing" -D "$work/landing-head" -w '%{http_code}' \
         -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' "$site/$path" || true)"

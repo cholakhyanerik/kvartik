@@ -1,10 +1,10 @@
 # Kvartik Privacy Policy
 
 > Перевод [privacy.ru.md](privacy.ru.md), утверждённого 2026-11-06. Блоки
-> «Для проверки» — только в русском тексте. Квадратные скобки заполняются
-> вместе с русским текстом, после регистрации ИП продавца.
+> «Для проверки» — только в русском тексте. Квадратные скобки заполнены
+> 2026-11-09 вместе с русским текстом.
 
-**Edition of [date].**
+**Edition of November 9, 2026.**
 
 ## In short
 
@@ -14,8 +14,7 @@ data, no accounts, no analytics, no counters and no ads.
 ## 1. Who is responsible
 
 Kvartik is an app for individual entrepreneurs of Armenia at kvartik.com.
-Individual entrepreneur Erik Cholakhyan (TIN (ՀՎՀՀ) [number], [address or
-city]) is responsible for it; the address for letters is [email].
+Individual entrepreneur Erik Cholakhyan (TIN (ՀՎՀՀ) 58111423, Yerevan) is responsible for it; the address for letters is cholakhyanerik@gmail.com.
 
 ## 2. Data in the app
 
@@ -64,7 +63,7 @@ To issue a license key the seller needs the TIN (ՀՎՀՀ) of your IE, its
 name and a contact to send the key to. Without a TIN no key can be issued:
 it is issued to a TIN and does not work with another. The seller receives
 the payment details from their bank or from the payment service named on
-the "Buy" page.
+the “Buy” page.
 
 The seller uses these data only to issue the key, to issue the settlement
 document and to meet tax obligations. The basis is the license contract
@@ -72,8 +71,12 @@ you make by paying, and tax law. The seller keeps these data and the
 purchase correspondence for five years from the quarter of the sale, then
 deletes them. They are passed only to the tax authorities when the law
 requires it; letters to the seller go through their mail service
-[Cloudflare and Google, USA]. The seller sends no mailings or advertising
+Gmail (Google, USA). The seller sends no mailings or advertising
 to them.
+
+You can also ask the seller questions in Telegram: the link is on the site
+and in “About”. Messages there go through Telegram and under its rules, so
+send your TIN (ՀՎՀՀ) and your acceptance of the terms by email.
 
 ## 6. Your rights
 
@@ -94,4 +97,4 @@ browser erases everything, so make a backup first.
 ## 7. Changes
 
 A new edition is published here with its date, and the app tells you about
-it in the "What's new" window.
+it in the “What's new” window.

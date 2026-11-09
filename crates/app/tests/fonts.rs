@@ -19,7 +19,7 @@ use kvartik_core::i18n::{self, ALL_KEYS, Key, Lang, t};
 use kvartik_core::model::country::Country;
 use kvartik_core::model::date::Date;
 use kvartik_core::model::money::{Currency, Money};
-use kvartik_core::release::Notes;
+use kvartik_core::release::{Legal, Notes};
 use kvartik_core::tax::rules;
 
 fn app_dir() -> PathBuf {
@@ -300,6 +300,17 @@ fn needed() -> BTreeSet<char> {
     // (задача 31), на любом языке окна — армянскими, как на arlis.am.
     for act in rules::armenia().acts() {
         text += act.name;
+    }
+    // Юридические тексты сайта (задача 32): их страницы — теми же шрифтами,
+    // что окно. Цитатные блоки — заметки для человека — на страницу не идут.
+    for doc in Legal::ALL {
+        for lang in Lang::ALL {
+            let path = app_dir().join(format!("../../docs/legal/{}.{}.md", doc.name(), lang.code()));
+            let source = fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+            for line in source.lines().filter(|line| !line.starts_with('>')) {
+                text += line;
+            }
+        }
     }
     text += "№«»“”‘’—–…֏€$";
     text.extend((' '..='~').chain('А'..='я').chain(['Ё', 'ё']));

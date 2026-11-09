@@ -10,6 +10,13 @@
 //! общего календаря (`tax::calendar::path`). Страница, обещающая не то, что
 //! делает программа, разошлась бы с ней молча.
 //!
+//! Рядом с каждой — юридические тексты того же языка (задача 32): условия
+//! лицензии и политика конфиденциальности, `terms/` и `privacy/` в папке
+//! страницы (`release::Legal`). Их текст — не таблица строк, а утверждённые
+//! файлы `docs/legal/*.md` (`legal.rs`): опубликовано ровно утверждённое.
+//! Шапка, подвал и оформление у них те же, что у страницы языка, а в подвале
+//! каждой страницы — ссылки на оба текста и почта и Telegram продавца.
+//!
 //! Рядом — оформление и скрипт, одним файлом каждый, с хэшем содержимого
 //! в имени (`kvartik-site-<хэш>.css` и `.js`): они кэшируются на год
 //! (`_headers`), а новая сборка — новое имя. CSS — это `tokens.css`
@@ -34,10 +41,10 @@ use std::path::Path;
 use kvartik_core::i18n::{self, Key, Lang, fill, plural, t};
 use kvartik_core::license::TRIAL_DAYS;
 use kvartik_core::model::date::Date;
-use kvartik_core::release::LICENSES;
+use kvartik_core::release::{EMAIL, LICENSES, Legal, TELEGRAM};
 use kvartik_core::tax::{calendar, example, rules, turnover};
 
-use super::digest;
+use super::{digest, legal};
 
 /// Происхождение сайта — навсегда (CLAUDE.md, Архитектура). Канонические
 /// адреса страниц, карта сайта и подписка на календарь — с ним, а не
@@ -82,17 +89,18 @@ pub fn url(lang: Lang) -> &'static str {
     }
 }
 
-/// Файл страницы языка в сборке: адрес плюс `index.html`.
-fn page_file(lang: Lang) -> String {
-    format!("{}index.html", url(lang).trim_start_matches('/'))
+/// Файл страницы в сборке: её адрес от корня плюс `index.html`.
+fn page_file(path: &str) -> String {
+    format!("{}index.html", path.trim_start_matches('/'))
 }
 
 /// Лендинг в папку сборки `staging`: оформление и скрипт с хэшем в имени,
-/// страницы трёх языков, `robots.txt` и `sitemap.xml`. Источники — из папки
-/// `site`, оформление окна — из `style`, адрес программы — `app` (`/app/`),
+/// страницы трёх языков и юридические тексты к каждой, `robots.txt`
+/// и `sitemap.xml`. Источники — из папки `site`, оформление окна — из `style`,
+/// утверждённые тексты — из `legal`, адрес программы — `app` (`/app/`),
 /// `calc` — модуль калькулятора в корне (`wasm::calculator`). Файл на месте
 /// любого из них — ошибка, а не молча затёртый файл.
-pub fn write(staging: &Path, site: &Path, style: &Path, app: &str, calc: &Calc) -> Result<String, String> {
+pub fn write(staging: &Path, site: &Path, style: &Path, legal: &Path, app: &str, calc: &Calc) -> Result<String, String> {
     let read = |path: &Path| fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()));
     let css = stylesheet(
         &read(&style.join(TOKENS))?,
@@ -106,7 +114,20 @@ pub fn write(staging: &Path, site: &Path, style: &Path, app: &str, calc: &Calc) 
     let checked = rules::armenia().checked();
     let mut files = Vec::new();
     for lang in Lang::ALL {
-        files.push((page_file(lang), page(lang, &css_name, &js_name, app, calc, checked)));
+        files.push((page_file(url(lang)), page(lang, &css_name, &js_name, app, calc, checked)));
+    }
+    for doc in Legal::ALL {
+        let mut texts = Vec::new();
+        for lang in Lang::ALL {
+            let name = format!("{}.{}.md", doc.name(), lang.code());
+            texts.push((lang, legal::parse(&name, &read(&legal.join(&name))?)?));
+        }
+        let pairs: Vec<(Lang, &legal::Doc)> = texts.iter().map(|(lang, text)| (*lang, text)).collect();
+        legal::same_shape(doc.name(), &pairs)?;
+        for (lang, text) in &texts {
+            let html = legal_page(*lang, doc, text, &css_name, &js_name, app, checked);
+            files.push((page_file(doc.path(*lang)), html));
+        }
     }
     files.push(("robots.txt".to_owned(), robots()));
     files.push(("sitemap.xml".to_owned(), sitemap()));
@@ -122,7 +143,11 @@ pub fn write(staging: &Path, site: &Path, style: &Path, app: &str, calc: &Calc) 
         }
         fs::write(&target, text).map_err(|error| format!("{}: {error}", target.display()))?;
     }
-    Ok(format!("лендинг: страниц {}", Lang::ALL.len()))
+    Ok(format!(
+        "лендинг: страниц {}, юридических текстов {}",
+        Lang::ALL.len(),
+        Legal::ALL.len() * Lang::ALL.len()
+    ))
 }
 
 /// Оформление лендинга одним файлом: переменные, шрифты, свои правила —
@@ -244,38 +269,12 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
     let trial = escape(&fill(t(lang, Key::WelcomeTrial), &[&days]));
     let calendar = format!("{SITE}/{}", calendar::path(lang));
     let webcal = calendar.replacen("https://", "webcal://", 1);
-    let code = lang.code();
     let own = url(lang);
     let locale = match lang {
         Lang::Am => "hy_AM",
         Lang::Ru => "ru_RU",
         Lang::En => "en_US",
     };
-    let mut alternates = String::new();
-    for other in Lang::ALL {
-        alternates.push_str(&format!(
-            "    <link rel=\"alternate\" hreflang=\"{}\" href=\"{SITE}{}\" />\n",
-            other.code(),
-            url(other)
-        ));
-    }
-    alternates.push_str(&format!(
-        "    <link rel=\"alternate\" hreflang=\"x-default\" href=\"{SITE}{}\" />\n",
-        url(Lang::Am)
-    ));
-    // Язык — ссылкой на свою страницу, именем на нём самом (как
-    // переключатель окна, `Lang::native_name`). Текущий — `aria-current`:
-    // им же его выделяет оформление, не одним цветом (Правило 4).
-    let mut langs = String::new();
-    for other in Lang::ALL {
-        let current = if other == lang { " aria-current=\"page\"" } else { "" };
-        langs.push_str(&format!(
-            "<a href=\"{}\" hreflang=\"{c}\" lang=\"{c}\"{current}>{}</a>",
-            url(other),
-            escape(other.native_name()),
-            c = other.code()
-        ));
-    }
     let mut features = String::new();
     for (title, about) in FEATURES {
         features.push_str(&format!(
@@ -284,42 +283,23 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
             text(about)
         ));
     }
-    let rules = checked
-        .map(|day| {
-            let line = fill(t(lang, Key::LandingRulesChecked), &[&i18n::date(lang, day)]);
-            format!("      <p>{}</p>\n", escape(&line))
-        })
-        .unwrap_or_default();
-    format!(
-        r#"<!doctype html>
-<html lang="{code}">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light dark" />
-    <title>{title}</title>
-    <meta name="description" content="{description}" />
-    <link rel="canonical" href="{SITE}{own}" />
-{alternates}    <meta property="og:type" content="website" />
+    let title = text(Key::LandingTitle);
+    let description = text(Key::LandingDescription);
+    let meta = format!(
+        r#"    <meta name="description" content="{description}" />
+    <meta property="og:type" content="website" />
     <meta property="og:site_name" content="{name}" />
     <meta property="og:title" content="{title}" />
     <meta property="og:description" content="{description}" />
     <meta property="og:url" content="{SITE}{own}" />
     <meta property="og:image" content="{SITE}{app}icons/icon-512.png" />
     <meta property="og:locale" content="{locale}" />
-    <link rel="icon" href="{app}icons/icon-32.png" sizes="32x32" type="image/png" />
-    <link rel="icon" href="{app}icons/icon-192.png" sizes="192x192" type="image/png" />
-    <link rel="apple-touch-icon" href="{app}icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/{css}" />
-    <script src="/{js}" defer></script>
-  </head>
-  <body>
-    <div class="decor" aria-hidden="true"><span></span><span></span></div>
-    <header class="top">
-      <a class="brand" href="{own}">{brand}</a>
-      <nav class="langs" aria-label="{language}">{langs}</nav>
-    </header>
-    <main>
+"#,
+        name = text(Key::AppName),
+    );
+    format!(
+        r#"{head}  <body>
+{top}    <main>
       <section class="hero">
         <h1>{headline}</h1>
         <p class="lead">{lead}</p>
@@ -344,19 +324,13 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
         <p class="actions"><a class="button" href="{app}" data-handoff><span class="label">{open}</span></a></p>
       </section>
     </main>
-    <footer>
-      <p>{disclaimer}</p>
-{rules}      <p><a href="{app}{LICENSES}">{licenses}</a></p>
-    </footer>
-  </body>
+{footer}  </body>
 </html>
 "#,
+        head = head(lang, &title, url, &meta, css, js, app),
+        top = top(lang, own, url),
+        footer = footer(lang, app, checked),
         calculator = calculator(lang, calc, app),
-        title = text(Key::LandingTitle),
-        description = text(Key::LandingDescription),
-        name = text(Key::AppName),
-        brand = text(Key::Brand),
-        language = text(Key::Language),
         headline = text(Key::WelcomeHeadline),
         lead = text(Key::LandingLead),
         open = text(Key::LandingOpen),
@@ -368,8 +342,124 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
         subscribe_hint = text(Key::CalendarSubscribeHint),
         fit_title = text(Key::LandingFitTitle),
         fit_text = text(Key::LandingFitText),
+    )
+}
+
+/// Страница юридического текста `doc` на языке `lang` — рядом со страницей
+/// языка: та же шапка, оформление и подвал, а языки ведут к тому же тексту
+/// на другом языке. Описания для поисковиков нет — его заменит сам текст.
+fn legal_page(
+    lang: Lang,
+    doc: Legal,
+    text: &legal::Doc,
+    css: &str,
+    js: &str,
+    app: &str,
+    checked: Option<Date>,
+) -> String {
+    let path = |other: Lang| doc.path(other);
+    format!(
+        "{head}  <body>\n{top}    <main>\n      <article class=\"legal\">\n{body}      </article>\n    </main>\n{footer}  </body>\n</html>\n",
+        head = head(lang, &escape(&text.title), path, "", css, js, app),
+        top = top(lang, url(lang), path),
+        body = legal::html(text, escape),
+        footer = footer(lang, app, checked),
+    )
+}
+
+/// Начало документа до `<body>`: язык, заголовок, та же страница на каждом
+/// языке (`path`) — своя каноническая, армянская «по умолчанию», — `meta` —
+/// описание страницы, если оно есть, значки, оформление и скрипт. `title`
+/// уже экранирован.
+fn head(lang: Lang, title: &str, path: impl Fn(Lang) -> &'static str, meta: &str, css: &str, js: &str, app: &str) -> String {
+    let own = path(lang);
+    let mut alternates = String::new();
+    for other in Lang::ALL {
+        alternates.push_str(&format!(
+            "    <link rel=\"alternate\" hreflang=\"{}\" href=\"{SITE}{}\" />\n",
+            other.code(),
+            path(other)
+        ));
+    }
+    alternates.push_str(&format!(
+        "    <link rel=\"alternate\" hreflang=\"x-default\" href=\"{SITE}{}\" />\n",
+        path(Lang::Am)
+    ));
+    format!(
+        r#"<!doctype html>
+<html lang="{code}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>{title}</title>
+    <link rel="canonical" href="{SITE}{own}" />
+{alternates}{meta}    <link rel="icon" href="{app}icons/icon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="{app}icons/icon-192.png" sizes="192x192" type="image/png" />
+    <link rel="apple-touch-icon" href="{app}icons/apple-touch-icon.png" />
+    <link rel="stylesheet" href="/{css}" />
+    <script src="/{js}" defer></script>
+  </head>
+"#,
+        code = lang.code(),
+    )
+}
+
+/// Шапка страницы: круги украшения, «Kvartik» — ссылкой на страницу языка
+/// `home` — и языки ссылками на ту же страницу на каждом (`path`).
+fn top(lang: Lang, home: &str, path: impl Fn(Lang) -> &'static str) -> String {
+    // Язык — ссылкой на свою страницу, именем на нём самом (как
+    // переключатель окна, `Lang::native_name`). Текущий — `aria-current`:
+    // им же его выделяет оформление, не одним цветом (Правило 4).
+    let mut langs = String::new();
+    for other in Lang::ALL {
+        let current = if other == lang { " aria-current=\"page\"" } else { "" };
+        langs.push_str(&format!(
+            "<a href=\"{}\" hreflang=\"{c}\" lang=\"{c}\"{current}>{}</a>",
+            path(other),
+            escape(other.native_name()),
+            c = other.code()
+        ));
+    }
+    format!(
+        r#"    <div class="decor" aria-hidden="true"><span></span><span></span></div>
+    <header class="top">
+      <a class="brand" href="{home}">{brand}</a>
+      <nav class="langs" aria-label="{language}">{langs}</nav>
+    </header>
+"#,
+        brand = escape(t(lang, Key::Brand)),
+        language = escape(t(lang, Key::Language)),
+    )
+}
+
+/// Подвал каждой страницы: оговорка о расчёте, день сверки правил (нет его —
+/// нет и строки), юридические тексты своего языка, тексты лицензий рядом
+/// с программой и как написать продавцу — почтой и в Telegram
+/// (`release::EMAIL`, `release::TELEGRAM`).
+fn footer(lang: Lang, app: &str, checked: Option<Date>) -> String {
+    let text = |key: Key| escape(t(lang, key));
+    let rules = checked
+        .map(|day| {
+            let line = fill(t(lang, Key::LandingRulesChecked), &[&i18n::date(lang, day)]);
+            format!("      <p>{}</p>\n", escape(&line))
+        })
+        .unwrap_or_default();
+    format!(
+        r#"    <footer>
+      <p>{disclaimer}</p>
+{rules}      <p class="links"><a href="{terms}">{terms_label}</a> <a href="{privacy}">{privacy_label}</a> <a href="{app}{LICENSES}">{licenses}</a></p>
+      <p class="links"><span>{contact}</span> <a href="mailto:{EMAIL}">{EMAIL}</a> <a href="{TELEGRAM}">{telegram}</a></p>
+    </footer>
+"#,
+        telegram = text(Key::ContactTelegram),
         disclaimer = text(Key::LandingDisclaimer),
+        terms = Legal::Terms.path(lang),
+        terms_label = text(Key::LegalTerms),
+        privacy = Legal::Privacy.path(lang),
+        privacy_label = text(Key::LegalPrivacy),
         licenses = text(Key::LandingLicenses),
+        contact = text(Key::Contact),
     )
 }
 
@@ -380,27 +470,33 @@ fn robots() -> String {
     format!("User-agent: *\nAllow: /\n\nSitemap: {SITE}/sitemap.xml\n")
 }
 
-/// Карта сайта: страницы трёх языков, у каждой — все три и «по умолчанию»
-/// армянская (как `hreflang` в самих страницах). Без `lastmod`: дня сборки
-/// в ней нет, иначе одна и та же сборка давала бы разные байты.
+/// Карта сайта: страницы трёх языков и юридические тексты к ним, у каждой —
+/// она же на всех трёх и «по умолчанию» армянская (как `hreflang` в самих
+/// страницах). Без `lastmod`: дня сборки в ней нет, иначе одна и та же
+/// сборка давала бы разные байты.
 fn sitemap() -> String {
     let mut out = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
          <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\" xmlns:xhtml=\"http://www.w3.org/1999/xhtml\">\n",
     );
-    for lang in Lang::ALL {
-        out.push_str(&format!("  <url>\n    <loc>{SITE}{}</loc>\n", url(lang)));
-        for other in Lang::ALL {
+    let terms = |lang: Lang| Legal::Terms.path(lang);
+    let privacy = |lang: Lang| Legal::Privacy.path(lang);
+    let pages: [&dyn Fn(Lang) -> &'static str; 3] = [&url, &terms, &privacy];
+    for path in pages {
+        for lang in Lang::ALL {
+            out.push_str(&format!("  <url>\n    <loc>{SITE}{}</loc>\n", path(lang)));
+            for other in Lang::ALL {
+                out.push_str(&format!(
+                    "    <xhtml:link rel=\"alternate\" hreflang=\"{}\" href=\"{SITE}{}\" />\n",
+                    other.code(),
+                    path(other)
+                ));
+            }
             out.push_str(&format!(
-                "    <xhtml:link rel=\"alternate\" hreflang=\"{}\" href=\"{SITE}{}\" />\n",
-                other.code(),
-                url(other)
+                "    <xhtml:link rel=\"alternate\" hreflang=\"x-default\" href=\"{SITE}{}\" />\n  </url>\n",
+                path(Lang::Am)
             ));
         }
-        out.push_str(&format!(
-            "    <xhtml:link rel=\"alternate\" hreflang=\"x-default\" href=\"{SITE}{}\" />\n  </url>\n",
-            url(Lang::Am)
-        ));
     }
     out.push_str("</urlset>\n");
     out
@@ -435,6 +531,35 @@ mod tests {
     const FONTS_CSS: &str = include_str!("../../app/style/fonts.css");
     const LANDING_CSS: &str = include_str!("../../app/site/landing.css");
     const LANDING_JS: &str = include_str!("../../app/site/landing.js");
+    /// Утверждённые юридические тексты (задача 32) — те, что берёт сборка.
+    const LEGAL: [(&str, &str); 6] = [
+        ("terms.hy.md", include_str!("../../../docs/legal/terms.hy.md")),
+        ("terms.ru.md", include_str!("../../../docs/legal/terms.ru.md")),
+        ("terms.en.md", include_str!("../../../docs/legal/terms.en.md")),
+        ("privacy.hy.md", include_str!("../../../docs/legal/privacy.hy.md")),
+        ("privacy.ru.md", include_str!("../../../docs/legal/privacy.ru.md")),
+        ("privacy.en.md", include_str!("../../../docs/legal/privacy.en.md")),
+    ];
+
+    /// Страница юридического текста из утверждённого файла.
+    fn legal_sample(doc: Legal, lang: Lang) -> String {
+        let name = format!("{}.{}.md", doc.name(), lang.code());
+        let (_, source) = LEGAL.iter().find(|(file, _)| *file == name).expect("текст есть");
+        let text = legal::parse(&name, source).expect("текст разбирается");
+        legal_page(lang, doc, &text, "kvartik-site-a.css", "kvartik-site-b.js", "/app/", checked())
+    }
+
+    /// Все страницы сайта: три страницы языков и шесть юридических.
+    fn every_page() -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for lang in Lang::ALL {
+            out.push((format!("{lang:?} {}", url(lang)), sample(lang)));
+            for doc in Legal::ALL {
+                out.push((format!("{lang:?} {}", doc.path(lang)), legal_sample(doc, lang)));
+            }
+        }
+        out
+    }
 
     /// Модуль калькулятора в тестах страниц.
     const CALC: Calc = Calc {
@@ -543,6 +668,83 @@ mod tests {
         assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
+    /// Юридический текст (задача 32) — на своём языке, рядом со страницей
+    /// этого языка: канонический адрес — свой, переводы и языки шапки ведут
+    /// к тому же тексту на другом языке, «Kvartik» — на страницу языка,
+    /// заголовок — название из файла, а заметок для человека на странице нет.
+    #[test]
+    fn legal_pages_link_their_translations() {
+        let mut wrong = Vec::new();
+        for doc in Legal::ALL {
+            for lang in Lang::ALL {
+                let html = legal_sample(doc, lang);
+                let name = format!("{}.{}.md", doc.name(), lang.code());
+                let (_, source) = LEGAL.iter().find(|(file, _)| *file == name).expect("текст есть");
+                let title = source.lines().next().and_then(|line| line.strip_prefix("# ")).expect("название");
+                let mut need = vec![
+                    format!("<html lang=\"{}\">", lang.code()),
+                    format!("<title>{}</title>", escape(title)),
+                    format!("<link rel=\"canonical\" href=\"https://kvartik.com{}\" />", doc.path(lang)),
+                    format!(
+                        "<link rel=\"alternate\" hreflang=\"x-default\" href=\"https://kvartik.com{}\" />",
+                        doc.path(Lang::Am)
+                    ),
+                    format!("<a class=\"brand\" href=\"{}\">", url(lang)),
+                    format!("<h1>{}</h1>", escape(title)),
+                    "<article class=\"legal\">".to_owned(),
+                    format!("<a href=\"mailto:{EMAIL}\">"),
+                ];
+                for other in Lang::ALL {
+                    need.push(format!(
+                        "<link rel=\"alternate\" hreflang=\"{}\" href=\"https://kvartik.com{}\" />",
+                        other.code(),
+                        doc.path(other)
+                    ));
+                    need.push(format!("<a href=\"{}\" hreflang=\"{}\"", doc.path(other), other.code()));
+                }
+                for piece in need {
+                    if !html.contains(&piece) {
+                        wrong.push(format!("{name}: нет {piece}"));
+                    }
+                }
+                if html.matches("aria-current=\"page\"").count() != 1 {
+                    wrong.push(format!("{name}: текущий язык не один"));
+                }
+                if html.contains("Для проверки") || html.contains("og:") {
+                    wrong.push(format!("{name}: заметка для человека или разметка лендинга"));
+                }
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// Подвал каждой страницы ведёт на оба юридических текста своего языка,
+    /// на тексты лицензий и к продавцу — почтой и в Telegram.
+    #[test]
+    fn every_footer_leads_to_the_terms_and_the_seller() {
+        let mut wrong = Vec::new();
+        for (name, html) in every_page() {
+            let lang = Lang::ALL
+                .into_iter()
+                .find(|lang| html.contains(&format!("<html lang=\"{}\">", lang.code())))
+                .expect("язык страницы");
+            let footer = &html[html.find("<footer>").expect("подвал")..];
+            for piece in [
+                format!("<a href=\"{}\">{}</a>", Legal::Terms.path(lang), escape(t(lang, Key::LegalTerms))),
+                format!("<a href=\"{}\">{}</a>", Legal::Privacy.path(lang), escape(t(lang, Key::LegalPrivacy))),
+                format!("<a href=\"/app/{LICENSES}\">"),
+                format!("<a href=\"mailto:{EMAIL}\">{EMAIL}</a>"),
+                format!("<a href=\"{TELEGRAM}\">{}</a>", escape(t(lang, Key::ContactTelegram))),
+                escape(t(lang, Key::LandingDisclaimer)),
+            ] {
+                if !footer.contains(&piece) {
+                    wrong.push(format!("{name}: в подвале нет {piece}"));
+                }
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
     /// Числа страницы — из ядра, а не написаны ею: срок пробного периода
     /// и день последней сверки правил.
     #[test]
@@ -560,19 +762,18 @@ mod tests {
     #[test]
     fn nothing_inline_for_the_csp_to_block() {
         let mut wrong = Vec::new();
-        for lang in Lang::ALL {
-            let html = sample(lang);
+        for (page, html) in every_page() {
             if html.matches("<script").count() != html.matches("<script src=").count() {
-                wrong.push(format!("{lang:?}: встроенный скрипт"));
+                wrong.push(format!("{page}: встроенный скрипт"));
             }
             if html.contains("<style") || html.contains(" style=") {
-                wrong.push(format!("{lang:?}: встроенный стиль"));
+                wrong.push(format!("{page}: встроенный стиль"));
             }
             for (at, _) in html.match_indices(" on") {
                 let rest = &html[at + 3..];
                 let name = rest.chars().take_while(char::is_ascii_alphabetic).count();
                 if name > 0 && rest[name..].starts_with('=') {
-                    wrong.push(format!("{lang:?}: обработчик on{}", &rest[..name]));
+                    wrong.push(format!("{page}: обработчик on{}", &rest[..name]));
                 }
             }
         }
@@ -608,8 +809,11 @@ mod tests {
         let map = sitemap();
         for lang in Lang::ALL {
             assert!(map.contains(&format!("<loc>https://kvartik.com{}</loc>", url(lang))), "{lang:?}");
+            for doc in Legal::ALL {
+                assert!(map.contains(&format!("<loc>https://kvartik.com{}</loc>", doc.path(lang))), "{doc:?} {lang:?}");
+            }
         }
-        assert_eq!(map.matches("<url>").count(), Lang::ALL.len());
+        assert_eq!(map.matches("<url>").count(), Lang::ALL.len() * (1 + Legal::ALL.len()));
         assert!(robots().contains("Sitemap: https://kvartik.com/sitemap.xml\n"));
     }
 
@@ -642,52 +846,68 @@ mod tests {
         temp.put("style/fonts.css", FONTS_CSS);
         temp.put("site/landing.css", LANDING_CSS);
         temp.put("site/landing.js", LANDING_JS);
+        for (name, text) in LEGAL {
+            temp.put(&format!("legal/{name}"), text);
+        }
     }
 
-    /// Лендинг ложится в корень сборки: три страницы, карта, `robots.txt`
-    /// и по одному файлу оформления и скрипта, на которые страницы
-    /// ссылаются. Та же сборка — те же имена и байты. Файл на месте файла
-    /// лендинга — ошибка, а не молча затёртый файл.
-    #[test]
-    fn writes_the_site_and_refuses_to_overwrite() {
-        let names = |dir: &Path| -> Vec<String> {
-            let mut out = Vec::new();
-            for entry in fs::read_dir(dir).expect("папка читается") {
-                let entry = entry.expect("запись папки");
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if entry.path().is_dir() {
-                    for inner in fs::read_dir(entry.path()).expect("папка читается") {
-                        out.push(format!("{name}/{}", inner.expect("запись").file_name().to_string_lossy()));
-                    }
+    fn build(temp: &Temp) -> Result<String, String> {
+        let at = |name: &str| temp.0.join(name);
+        write(&at("stage"), &at("site"), &at("style"), &at("legal"), "/app/", &CALC)
+    }
+
+    /// Файлы папки со всеми вложенными — путями от неё, по порядку.
+    fn names(dir: &Path) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut folders = vec![dir.to_path_buf()];
+        while let Some(folder) = folders.pop() {
+            for entry in fs::read_dir(&folder).expect("папка читается") {
+                let path = entry.expect("запись папки").path();
+                if path.is_dir() {
+                    folders.push(path);
                 } else {
+                    let name = path.strip_prefix(dir).expect("внутри папки").to_string_lossy().replace('\\', "/");
                     out.push(name);
                 }
             }
-            out.sort();
-            out
-        };
+        }
+        out.sort();
+        out
+    }
+
+    /// Лендинг ложится в корень сборки: три страницы, шесть юридических,
+    /// карта, `robots.txt` и по одному файлу оформления и скрипта, на которые
+    /// страницы ссылаются. Та же сборка — те же имена и байты. Файл на месте
+    /// файла лендинга — ошибка, а не молча затёртый файл.
+    #[test]
+    fn writes_the_site_and_refuses_to_overwrite() {
         let temp = Temp::new("write");
         sources(&temp);
         let stage = temp.0.join("stage");
         fs::create_dir_all(&stage).expect("папка сборки");
-        write(&stage, &temp.0.join("site"), &temp.0.join("style"), "/app/", &CALC).expect("лендинг пишется");
+        build(&temp).expect("лендинг пишется");
         let written = names(&stage);
         let css: Vec<&String> = written.iter().filter(|n| n.starts_with("kvartik-site-") && n.ends_with(".css")).collect();
         let js: Vec<&String> = written.iter().filter(|n| n.starts_with("kvartik-site-") && n.ends_with(".js")).collect();
         assert_eq!((css.len(), js.len()), (1, 1), "{written:?}");
-        for name in ["index.html", "ru/index.html", "en/index.html", "robots.txt", "sitemap.xml"] {
+        let mut pages: Vec<String> = Lang::ALL.into_iter().map(|lang| page_file(url(lang))).collect();
+        for doc in Legal::ALL {
+            pages.extend(Lang::ALL.into_iter().map(|lang| page_file(doc.path(lang))));
+        }
+        for name in pages.iter().map(String::as_str).chain(["robots.txt", "sitemap.xml"]) {
             assert!(written.iter().any(|n| n == name), "нет {name}: {written:?}");
         }
-        for lang in Lang::ALL {
-            let html = fs::read_to_string(stage.join(page_file(lang))).expect("страница читается");
+        assert_eq!(written.len(), pages.len() + 4, "{written:?}");
+        for page in &pages {
+            let html = fs::read_to_string(stage.join(page)).expect("страница читается");
             assert!(html.contains(&format!("href=\"/{}\"", css[0])) && html.contains(&format!("src=\"/{}\"", js[0])));
         }
 
         let again = Temp::new("again");
         sources(&again);
+        fs::create_dir_all(again.0.join("stage")).expect("папка сборки");
+        build(&again).expect("лендинг пишется");
         let stage_again = again.0.join("stage");
-        fs::create_dir_all(&stage_again).expect("папка сборки");
-        write(&stage_again, &again.0.join("site"), &again.0.join("style"), "/app/", &CALC).expect("лендинг пишется");
         assert_eq!(names(&stage_again), written, "та же сборка — те же имена");
         for name in &written {
             assert_eq!(fs::read(stage.join(name)).ok(), fs::read(stage_again.join(name)).ok(), "{name}");
@@ -696,8 +916,38 @@ mod tests {
         let clash = Temp::new("clash");
         sources(&clash);
         clash.put("stage/ru/index.html", "root page");
-        let error = write(&clash.0.join("stage"), &clash.0.join("site"), &clash.0.join("style"), "/app/", &CALC)
-            .expect_err("файл корня на месте страницы лендинга");
+        let error = build(&clash).expect_err("файл корня на месте страницы лендинга");
         assert!(error.contains("лёг бы на файл лендинга"), "{error}");
+        let clash = Temp::new("clash-legal");
+        sources(&clash);
+        clash.put("stage/ru/terms/index.html", "root page");
+        let error = build(&clash).expect_err("файл корня на месте юридического текста");
+        assert!(error.contains("лёг бы на файл лендинга"), "{error}");
+    }
+
+    /// Утверждённый текст, который не разобрался или разошёлся с переводом,
+    /// останавливает сборку словами с именем файла, а не уходит на сайт.
+    #[test]
+    fn a_broken_legal_text_stops_the_build() {
+        let broken = Temp::new("broken");
+        sources(&broken);
+        fs::create_dir_all(broken.0.join("stage")).expect("папка сборки");
+        broken.put("legal/terms.en.md", "# Terms\n\n**Edition.**\n\nText with *markup*.\n");
+        let error = build(&broken).expect_err("разметка, которой разбор не знает");
+        assert!(error.contains("terms.en.md"), "{error}");
+
+        let short = Temp::new("short");
+        sources(&short);
+        fs::create_dir_all(short.0.join("stage")).expect("папка сборки");
+        short.put("legal/privacy.hy.md", "# Գաղտնիություն\n\n**Խմբագրություն։**\n\nՏեքստ։\n");
+        let error = build(&short).expect_err("перевод без разделов");
+        assert!(error.contains("privacy") && error.contains("разошлись"), "{error}");
+
+        let missing = Temp::new("missing");
+        sources(&missing);
+        fs::create_dir_all(missing.0.join("stage")).expect("папка сборки");
+        fs::remove_file(missing.0.join("legal/privacy.ru.md")).expect("файл удаляется");
+        let error = build(&missing).expect_err("нет перевода");
+        assert!(error.contains("privacy.ru.md"), "{error}");
     }
 }

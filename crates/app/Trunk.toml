@@ -35,7 +35,8 @@ serve_base = "/"
 # Trunk она перекладывает в папку программы (`public_url`), а в корень
 # кладёт файлы корня сайта из `public/root/` (задача 65) и лендинг: страницы
 # трёх языков из таблицы строк ядра, стили и скрипт из `site/` на
-# оформлении окна из `style/` и wasm калькулятора из пакета `kvartik-calc`
+# оформлении окна из `style/`, юридические тексты из утверждённых файлов
+# `docs/legal/` (задача 32) и wasm калькулятора из пакета `kvartik-calc`
 # (задача 34). Wasm она собирает
 # сама, а не Trunk: окно режется на части, которые грузятся по нажатию
 # (задача 58), а Trunk резать не умеет (шапка `crates/sw/src/wasm.rs`).
@@ -48,4 +49,4 @@ serve_base = "/"
 [[hooks]]
 stage = "post_build"
 command = "cargo"
-command_arguments = ["run", "--quiet", "--package", "kvartik-sw", "--", "--root", "public/root", "--site", "site", "--style", "style", "--calc", "kvartik-calc", "--wasm", "kvartik-app", "public/sw.js"]
+command_arguments = ["run", "--quiet", "--package", "kvartik-sw", "--", "--root", "public/root", "--site", "site", "--style", "style", "--legal", "../../docs/legal", "--calc", "kvartik-calc", "--wasm", "kvartik-app", "public/sw.js"]

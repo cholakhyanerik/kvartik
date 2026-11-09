@@ -271,12 +271,12 @@ fn wasm_and_service_worker_go_through_the_hook() {
     let trunk = fs::read_to_string(app_dir().join("Trunk.toml")).expect("Trunk.toml читается");
     assert!(
         trunk.contains(
-            r#"command_arguments = ["run", "--quiet", "--package", "kvartik-sw", "--", "--root", "public/root", "--site", "site", "--style", "style", "--calc", "kvartik-calc", "--wasm", "kvartik-app", "public/sw.js"]"#
+            r#"command_arguments = ["run", "--quiet", "--package", "kvartik-sw", "--", "--root", "public/root", "--site", "site", "--style", "style", "--legal", "../../docs/legal", "--calc", "kvartik-calc", "--wasm", "kvartik-app", "public/sw.js"]"#
         ),
         "хук kvartik-sw в Trunk.toml не найден"
     );
     assert!(app_dir().join("public/sw.js").is_file());
-    for source in ["site/landing.css", "site/landing.js", "style/tokens.css", "style/fonts.css"] {
+    for source in ["site/landing.css", "site/landing.js", "style/tokens.css", "style/fonts.css", "../../docs/legal/terms.ru.md"] {
         assert!(app_dir().join(source).is_file(), "нет {source}: лендинг из него собирается");
     }
     let page = fs::read_to_string(app_dir().join("index.html")).expect("index.html читается");

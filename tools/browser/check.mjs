@@ -374,6 +374,31 @@ async function landing(browser) {
       checks.check(`лендинг ${at}: без прокрутки вбок на 360`,
         await page.eval(`return document.documentElement.scrollWidth <= innerWidth ? true : null;`));
     }
+    // Юридические тексты (задача 32): у каждого языка — свои условия
+    // и политика, страницами из утверждённых файлов docs/legal/*.md, с тем же
+    // оформлением, а подвал страницы языка ведёт к ним.
+    for (const doc of ["terms", "privacy"]) {
+      for (const [lang, home] of [["hy", "/"], ["ru", "/ru/"], ["en", "/en/"]]) {
+        const at = `${home}${doc}/`;
+        const source = fs.readFileSync(path.join(REPO, "docs/legal", `${doc}.${lang}.md`), "utf8");
+        const title = source.split(/\r?\n/)[0].replace(/^# /, "");
+        await page.go(`${ORIGIN}${at}`);
+        checks.check(`текст ${at}: свой язык и название из файла`, await page.waitFor(`return document.documentElement.lang
+          === ${JSON.stringify(lang)} && document.querySelector("article.legal h1")?.textContent === ${JSON.stringify(title)}
+          && document.querySelectorAll("article.legal h2").length >= 5
+          && getComputedStyle(document.querySelector("h1")).fontFamily.includes("Kvartik Serif") ? true : null;`));
+        // С `clientWidth`, а не `innerWidth`: у страницы шире экрана телефон
+        // растит `innerWidth` вместе с ней (418 при ширине 360, Chrome 157,
+        // 2026-11-09), и сравнение с ним не видит прокрутки вбок.
+        checks.check(`текст ${at}: без прокрутки вбок на 360`, await page.eval(`const d = document.documentElement;
+          return d.clientWidth === 360 && d.scrollWidth <= d.clientWidth ? true : null;`));
+      }
+    }
+    await page.go(`${ORIGIN}/ru/`);
+    await page.waitFor(`return document.querySelector('footer a[href="/ru/terms/"]') ? true : null;`);
+    await page.eval(`document.querySelector('footer a[href="/ru/terms/"]').click(); return true;`);
+    checks.check("лендинг: подвал ведёт к условиям своего языка", await page.waitFor(`return location.pathname
+      === "/ru/terms/" && document.querySelector("article.legal") ? true : null;`));
     // Калькулятор (задача 34, этап 2): wasm ядра грузится при первом касании
     // формы и отвечает словами страницы. IT 1 000 000 ֏ — 1 % (НК, ст. 258,
     // ч. 1, строка 8): 10 000 ֏; поля, нужные не всегда, не видны, пока ответ

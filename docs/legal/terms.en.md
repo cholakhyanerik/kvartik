@@ -1,25 +1,24 @@
 # Kvartik License Terms
 
 > Перевод [terms.ru.md](terms.ru.md), утверждённого 2026-11-06. Блоки
-> «Для проверки» — только в русском тексте. Квадратные скобки заполняются
-> вместе с русским текстом, после регистрации ИП продавца.
+> «Для проверки» — только в русском тексте. Квадратные скобки заполнены
+> 2026-11-09 вместе с русским текстом.
 
-**Edition of [date]. Public offer.**
+**Edition of November 9, 2026. Public offer.**
 
 ## 1. Parties and subject
 
-Individual entrepreneur Erik Cholakhyan (TIN (ՀՎՀՀ) [number], [address or
-city]; the "seller") offers every individual entrepreneur who runs their
-business in the app (the "user") a non-exclusive license to the Kvartik
+Individual entrepreneur Erik Cholakhyan (TIN (ՀՎՀՀ) 58111423, Yerevan; the “seller”) offers every individual entrepreneur who runs their
+business in the app (the “user”) a non-exclusive license to the Kvartik
 app at kvartik.com on the terms below. The app is sold only to individual
 entrepreneurs and only for their business.
 
 ## 2. How the contract is made
 
-1. The user picks a plan on the "Buy" page and writes to the seller at
-   [email]: the TIN (ՀՎՀՀ) of their IE, its name, a contact to send the
-   key to, and the words "I accept the Kvartik license terms in the
-   edition of [date]".
+1. The user picks a plan on the “Buy” page and writes to the seller at
+   cholakhyanerik@gmail.com: the TIN (ՀՎՀՀ) of their IE, its name, a contact to send the
+   key to, and the words “I accept the Kvartik license terms in the
+   edition of November 9, 2026”.
 2. The user pays for the key. The contract is made upon payment.
 3. The seller sends the key to that contact within one business day after
    payment, together with the settlement document.
@@ -33,7 +32,7 @@ buying.
 ## 4. The license: what you may do and for how long
 
 1. The key is issued to the TIN (ՀՎՀՀ) of an individual entrepreneur for
-   the plan's term stated on the "Buy" page, counted from the day of
+   the plan's term stated on the “Buy” page, counted from the day of
    issue, and works on any number of their devices, with no territorial
    limit. It does not work with another TIN.
 2. The user may open the app in a browser, enter and keep their data in
@@ -50,7 +49,7 @@ buying.
 
 ## 5. Price and payment
 
-The plan's price and term are those on the "Buy" page on the day of
+The plan's price and term are those on the “Buy” page on the day of
 payment; the whole term is paid up front. Payment methods are listed on
 the same page.
 
@@ -78,8 +77,8 @@ reach all users, including after the key's term has ended.
 
 Kvartik calculates taxes from the text of Armenian law as the app's author
 reads it; it helps with the calculation and is not tax advice (see
-"About"). The user is responsible for the returns filed and the taxes
-paid. The app is provided "as is": the seller is not liable for
+“About”). The user is responsible for the returns filed and the taxes
+paid. The app is provided “as is”: the seller is not liable for
 calculation errors, loss of data on the user's device or interruptions
 of the site, except for a deliberate breach of the contract and where the
 law does not allow such a disclaimer.
@@ -87,11 +86,11 @@ law does not allow such a disclaimer.
 ## 9. Third-party code
 
 Kvartik contains code and fonts by other authors under their licenses.
-Their texts are in "About", section "Licenses".
+Their texts are in “About”, section “Licenses”.
 
 ## 10. Complaints and disputes
 
-Complaints go to the seller at [email]; the seller answers within five
+Complaints go to the seller at cholakhyanerik@gmail.com; the seller answers within five
 business days. If no agreement is reached, the dispute is decided by
 a court of the Republic of Armenia. The terms are governed by the law of
 the Republic of Armenia.
@@ -104,5 +103,4 @@ and earlier editions stay on the site, each at its own address.
 
 ## 12. Seller
 
-Individual entrepreneur Erik Cholakhyan, TIN (ՀՎՀՀ) [number], [address or
-city], [email].
+Individual entrepreneur Erik Cholakhyan, TIN (ՀՎՀՀ) 58111423, Yerevan, cholakhyanerik@gmail.com.

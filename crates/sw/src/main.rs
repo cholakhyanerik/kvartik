@@ -7,8 +7,8 @@
 //! дописан (по исходникам trunk 0.22.0-rc.2, `src/pipelines/html.rs`).
 //! Папку она берёт из переменной `TRUNK_STAGING_DIR`, адрес программы —
 //! из `TRUNK_PUBLIC_URL`, а остальное — из аргументов:
-//! `kvartik-sw [--root <папка> [--site <папка> --style <папка> --calc <пакет>]]
-//! [--wasm <пакет>] <шаблон sw.js>`.
+//! `kvartik-sw [--root <папка> [--site <папка> --style <папка> --legal <папка>
+//! --calc <пакет>]] [--wasm <пакет>] <шаблон sw.js>`.
 //!
 //! Программа живёт в папке сайта — `/app/`, `public_url` в `Trunk.toml`, —
 //! а корень отдан лендингу (задача 65). Trunk кладёт всё собранное в корень
@@ -20,8 +20,9 @@
 //! и `data-target-path`), но имя папки стояло бы тогда в восьми местах,
 //! а не в одном `public_url`. С `--site` в корень ложится и лендинг: его
 //! стили и скрипт — из `--site`, оформление окна, на котором он стоит, — из
-//! `--style`, текст — из таблицы строк ядра, а wasm калькулятора — из пакета
-//! `--calc` (`wasm::calculator`).
+//! `--style`, текст — из таблицы строк ядра, юридические тексты — из
+//! утверждённых файлов в `--legal` (задача 32, `legal.rs`), а wasm
+//! калькулятора — из пакета `--calc` (`wasm::calculator`).
 //!
 //! С `--wasm` она собирает wasm пакета и вписывает его запуск в страницу,
 //! рядом кладёт тексты лицензий всего, из чего wasm собран, и шрифтов
@@ -50,6 +51,7 @@ use kvartik_core::release::LICENSES;
 use kvartik_core::tax::calendar;
 
 mod landing;
+mod legal;
 mod licenses;
 mod wasm;
 
@@ -87,13 +89,14 @@ fn run() -> Result<String, String> {
         .map_err(|_| "нет TRUNK_PUBLIC_URL: программу зовёт хук Trunk (crates/app/Trunk.toml)")?;
     let app = app_folder(&public_url)?;
     let (mut root, mut package, mut template_path) = (None, None, None);
-    let (mut site, mut style, mut calc) = (None, None, None);
+    let (mut site, mut style, mut legal, mut calc) = (None, None, None, None);
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--root" => root = Some(PathBuf::from(args.next().ok_or("после --root ожидалась папка")?)),
             "--site" => site = Some(PathBuf::from(args.next().ok_or("после --site ожидалась папка")?)),
             "--style" => style = Some(PathBuf::from(args.next().ok_or("после --style ожидалась папка")?)),
+            "--legal" => legal = Some(PathBuf::from(args.next().ok_or("после --legal ожидалась папка")?)),
             "--calc" => calc = Some(args.next().ok_or("после --calc ожидалось имя пакета")?),
             "--wasm" => package = Some(args.next().ok_or("после --wasm ожидалось имя пакета")?),
             _ if template_path.is_none() => template_path = Some(PathBuf::from(arg)),
@@ -105,25 +108,26 @@ fn run() -> Result<String, String> {
         .map_err(|error| format!("{}: {error}", template_path.display()))?;
     // Лендинг ложится в корень рядом с файлами корня: без раскладки ему
     // некуда, без оформления окна он не соберётся, а без калькулятора
-    // (задача 34) его страница обещала бы то, чего нет.
-    let landing = match (&root, &site, &style, &calc) {
-        (Some(_), Some(site), Some(style), Some(calc)) => Some((site, style, calc)),
-        (_, None, None, None) => None,
-        _ => return Err("--site, --style и --calc идут вместе и только с --root".to_owned()),
+    // (задача 34) и юридических текстов (задача 32) его страница обещала бы
+    // то, чего нет.
+    let landing = match (&root, &site, &style, &legal, &calc) {
+        (Some(_), Some(site), Some(style), Some(legal), Some(calc)) => Some((site, style, legal, calc)),
+        (_, None, None, None, None) => None,
+        _ => return Err("--site, --style, --legal и --calc идут вместе и только с --root".to_owned()),
     };
     if let Some(root) = &root {
         lay_out(&staging, app, root)?;
     }
     let mut crates = BTreeSet::new();
     let site = match landing {
-        Some((site, style, calc)) => {
+        Some((site, style, legal, calc)) => {
             let calculator = wasm::calculator(calc, &staging)?;
             crates.extend(calculator.crates);
             let calc = landing::Calc {
                 module: &calculator.module,
                 wasm: &calculator.wasm,
             };
-            format!(", {}", landing::write(&staging, site, style, &public_url, &calc)?)
+            format!(", {}", landing::write(&staging, site, style, legal, &public_url, &calc)?)
         }
         None => String::new(),
     };

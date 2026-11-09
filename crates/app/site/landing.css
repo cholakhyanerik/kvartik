@@ -393,6 +393,71 @@ footer p {
   max-width: 48rem;
 }
 
+/* Ссылки подвала — юридические тексты, лицензии, почта и Telegram
+   (задача 32): в строку с промежутком, без знаков-разделителей, а на
+   телефоне — переносом между ссылками, а не посреди адреса почты. */
+footer .links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-4);
+}
+
+/* Юридический текст (задача 32): читается, а не листается, — строка не
+   длиннее ~70 знаков, название — ниже кругов украшения, как заголовок
+   первого экрана (`.hero`), разделы — с воздухом над заголовком. */
+.legal {
+  max-width: 44rem;
+  padding-block: 6rem 0;
+}
+
+/* Название на телефоне — мельче, чем у первого экрана: «конфиденциальности»
+   и «քաղաքականություն» размером 3xl не помещались в 360 точек и сдвигали
+   страницу вбок, а 2xl рвал русское слово посреди (глазной прогон задачи
+   32). Разделы на телефоне — размером подзаголовков окна (base.css).
+   Слово длиннее строки всё равно переносится, а не уезжает за край. */
+.legal h1 {
+  margin-bottom: var(--space-3);
+  font-size: var(--font-size-xl);
+  overflow-wrap: break-word;
+}
+
+.legal .edition {
+  margin-bottom: var(--space-6);
+  color: var(--text-muted);
+}
+
+.legal h2 {
+  margin: var(--space-6) 0 var(--space-3);
+  font-size: var(--font-size-lg);
+}
+
+@media (min-width: 40rem) {
+  .legal h1 {
+    font-size: var(--font-size-3xl);
+  }
+
+  .legal h2 {
+    margin-top: var(--space-7);
+    font-size: var(--font-size-xl);
+  }
+}
+
+.legal ol {
+  margin: 0 0 var(--space-3);
+  padding-inline-start: var(--space-6);
+}
+
+.legal li + li {
+  margin-top: var(--space-2);
+}
+
+/* Адрес почты и ссылка без пробелов не вылезают за край телефона. */
+.legal p,
+.legal li {
+  overflow-wrap: break-word;
+}
+
 @media (min-width: 40rem) {
   .cards,
   .fields {
