@@ -955,6 +955,71 @@ async fn an_annulled_invoice_asks_for_no_payment() {
     assert!(wrong.is_empty(), "аннулированный счёт: {wrong:#?}");
 }
 
+/// «Убрать» у оплаты говорит, что оплата убрана, а «Вернуть» рядом
+/// возвращает её — и тоже словами (полный прогон 0.0.96: «Убрать» молчал,
+/// а над карточкой оставалось прежнее «Оплата отмечена.»).
+#[wasm_bindgen_test]
+async fn a_removed_payment_is_said_and_can_be_returned() {
+    let client = fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let today = clock::today().expect("часы с датой");
+    let now = clock::now();
+    let payment = Payment { date: today, amount: 100_000 };
+    let invoice = Document::create(invoice_data(&client), now)
+        .expect("черновик")
+        .issue(&[], 0, Some(&profile()), &client, now)
+        .expect("выпущен")
+        .add_payment(payment, now)
+        .expect("оплата отмечена");
+    let mut writes = Writes::default();
+    writes.insert(&invoice);
+    commit(writes).await;
+    let stored_payments = || async {
+        let (documents, _) = stored().await;
+        documents
+            .iter()
+            .find(|document| document.id() == invoice.id())
+            .map(|document| document.payments().to_vec())
+    };
+
+    let address = Screen::Document(invoice.id()).href();
+    let (host, mounted) = mount_at(&address);
+    let mut wrong = Vec::new();
+    let line = fill(
+        t(lang, Key::PaymentLine),
+        &[&i18n::date(lang, today), &i18n::money(lang, Money::new(100_000, Currency::Usd))],
+    );
+    if wait_for(&host, &line).await {
+        match button(&host, &[t(lang, Key::Remove)]) {
+            Some(remove) => remove.click(),
+            None => wrong.push("у оплаты нет «Убрать»".to_owned()),
+        }
+        if !wait_for(&host, t(lang, Key::PaymentRemoved)).await {
+            wrong.push("«Убрать» не сказал, что оплата убрана".to_owned());
+        }
+        if stored_payments().await != Some(Vec::new()) {
+            wrong.push(format!("после «Убрать» в базе оплаты {:?}", stored_payments().await));
+        }
+        match button(&host, &[t(lang, Key::DocUnannul)]) {
+            Some(back) => back.click(),
+            None => wrong.push("рядом со словами нет «Вернуть»".to_owned()),
+        }
+        if !wait_for(&host, t(lang, Key::PaymentReturned)).await {
+            wrong.push("«Вернуть» не сказал, что оплата возвращена".to_owned());
+        }
+        if stored_payments().await != Some(vec![payment]) {
+            wrong.push(format!("после «Вернуть» в базе оплаты {:?}", stored_payments().await));
+        }
+    } else {
+        wrong.push(format!("в карточке нет оплаты «{line}»"));
+    }
+    drop(mounted);
+    host.remove();
+    forget_device();
+    assert!(wrong.is_empty(), "убранная оплата: {wrong:#?}");
+}
+
 /// Файлы шрифтов документа — те же байты, что лежат в `public/fonts/`:
 /// раннер тестов раздаёт только свой wasm, а не папку шрифтов сайта.
 const FONT_FILES: [(&str, &[u8]); 11] = [

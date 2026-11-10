@@ -320,6 +320,11 @@ enum Notice {
     Deleted(RecordId),
     Restored,
     Paid,
+    /// Оплата документа убрана — с кнопкой «Вернуть» рядом: «Убрать» молчал,
+    /// и над карточкой оставалось прежнее «Оплата отмечена.» (полный прогон
+    /// 0.0.96).
+    PaymentRemoved(RecordId, Payment),
+    PaymentReturned,
     /// Курс документа сохранён (задача 14).
     RateSaved,
     /// Вид деятельности документа сохранён (задача 19).
@@ -1098,6 +1103,25 @@ fn NoticeLine(ctx: Ctx, busy: RwSignal<bool>, failure: RwSignal<Option<Problem>>
         notice.get().map(|shown| match shown {
             Notice::Saved => view! { <p role="status">{tr(lang, Key::DocSaved)}</p> }.into_any(),
             Notice::Paid => view! { <p role="status">{tr(lang, Key::PaymentSaved)}</p> }.into_any(),
+            Notice::PaymentReturned => view! { <p role="status">{tr(lang, Key::PaymentReturned)}</p> }.into_any(),
+            Notice::PaymentRemoved(id, payment) => view! {
+                <div class="notice-row">
+                    <p role="status">{tr(lang, Key::PaymentRemoved)}</p>
+                    <button
+                        type="button"
+                        class="secondary"
+                        disabled=move || busy.get()
+                        on:click=move |_| {
+                            act(ctx, busy, failure, id, Change::AddPayment(payment), move |_| {
+                                ctx.notice.set(Some(Notice::PaymentReturned));
+                            });
+                        }
+                    >
+                        <span class="label">{tr(lang, Key::DocUnannul)}</span>
+                    </button>
+                </div>
+            }
+            .into_any(),
             Notice::RateSaved => view! { <p role="status">{tr(lang, Key::DocRateSaved)}</p> }.into_any(),
             Notice::ActivitySaved => view! { <p role="status">{tr(lang, Key::DocActivitySaved)}</p> }.into_any(),
             Notice::IncomeKindSaved => view! { <p role="status">{tr(lang, Key::DocIncomeKindSaved)}</p> }.into_any(),
@@ -2989,7 +3013,11 @@ fn Payments(
                                     type="button"
                                     class="secondary"
                                     disabled=move || busy.get()
-                                    on:click=move |_| act(ctx, busy, failure, id, Change::RemovePayment(payment), |_| {})
+                                    on:click=move |_| {
+                                        act(ctx, busy, failure, id, Change::RemovePayment(payment), move |_| {
+                                            notice.set(Some(Notice::PaymentRemoved(id, payment)));
+                                        });
+                                    }
                                 >
                                     <span class="label">{tr(lang, Key::Remove)}</span>
                                 </button>

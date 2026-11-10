@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.100",
+      "date": "2026-11-10",
+      "hy": [
+        "Վճարման «Հեռացնել» կոճակն այժմ ասում է, որ վճարումը հեռացվեց, և կողքին կա «Հետ բերել»՝ եթե սխալմամբ եք սեղմել, վճարումը կվերադառնա նույն օրով և գումարով։"
+      ],
+      "ru": [
+        "«Убрать» у оплаты теперь говорит, что оплата убрана, а рядом — «Вернуть»: если нажали по ошибке, оплата вернётся с тем же днём и суммой."
+      ],
+      "en": [
+        "“Remove” on a payment now says that the payment was removed, with “Undo” next to it: if you pressed it by mistake, the payment comes back with the same date and amount."
+      ]
+    },
+    {
       "version": "0.0.99",
       "date": "2026-11-10",
       "hy": [
@@ -260,19 +273,6 @@
       ],
       "en": [
         "Nothing has changed in the app: its code is now compressed by a newer version of the build tool, and the app's size and opening speed stay the same."
-      ]
-    },
-    {
-      "version": "0.0.80",
-      "date": "2026-11-04",
-      "hy": [
-        "«Ծրագրի մասին» էկրանին լիցենզիաների տեքստերում բաժինների և գրադարանների միջև գծերը հեռախոսում այլևս չեն կտրվում երկու տողի։"
-      ],
-      "ru": [
-        "В текстах лицензий на экране «О программе» черты между разделами и библиотеками на телефоне больше не рвутся на две строки."
-      ],
-      "en": [
-        "In the license texts on the “About” screen, the lines between sections and libraries no longer break in two on a phone."
       ]
     }
   ]

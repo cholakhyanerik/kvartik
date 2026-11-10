@@ -1685,6 +1685,9 @@ strings! {
         "The payment amount must be more than zero.",
         "Վճարման գումարը պետք է լինի զրոյից մեծ։";
     PaymentSaved = "Оплата отмечена.", "Payment recorded.", "Վճարումը նշվեց։";
+    /// Оплату убрали — сообщение с «Вернуть» рядом; вернули — тоже словами.
+    PaymentRemoved = "Оплата убрана.", "Payment removed.", "Վճարումը հեռացվեց։";
+    PaymentReturned = "Оплата возвращена.", "Payment restored.", "Վճարումը հետ բերվեց։";
     /// Шаблон: сколько оплачено сверх итога (`Document::overpaid`).
     PaymentOverpaid = "Переплата: {}", "Overpaid: {}", "Գերավճար՝ {}";
     /// Шаблон: на сколько сумма оплаты больше остатка (`Doubts::over`) — сразу
