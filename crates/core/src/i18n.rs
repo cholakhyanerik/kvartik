@@ -1104,6 +1104,13 @@ strings! {
         "This looks like a typo: the check digit doesn't match the rest of the number. Compare it with your bank details, or, if the bank isn't Armenian, save it as it is.",
         "Կարծես վրիպակ կա. համարի ստուգիչ նիշը չի համապատասխանում մյուս թվանշաններին։ Համեմատեք համարը բանկի վավերապայմանների հետ, իսկ եթե բանկը հայկական չէ, պահպանեք այնպես, ինչպես կա։";
     AccountBank = "Банк", "Bank", "Բանկ";
+    /// Банк латиницей (`BankAccount::bank_latin`, полный прогон 2026-11-10,
+    /// п. 8) — для счёта и акта не на армянском.
+    AccountBankLatin = "Банк латиницей", "Bank name in Latin letters", "Բանկը լատինատառ";
+    AccountBankLatinHint =
+        "Как его пишет сам банк, например Ameriabank CJSC: так он будет в\u{A0}счетах и актах на русском и английском. Пусто\u{A0}— в них пойдёт название выше.",
+        "As the bank writes it, e.g. Ameriabank CJSC: this is how it will appear in invoices and acts in English and Russian. If empty, the name above is used.",
+        "Ինչպես գրում է բանկը, օրինակ՝ Ameriabank CJSC. այդպես այն կլինի ռուսերեն և անգլերեն հաշիվներում և ակտերում։ Եթե դատարկ է, կօգտագործվի վերևի անվանումը։";
     AccountSwift = "SWIFT-код банка", "Bank SWIFT code", "Բանկի SWIFT կոդը";
     /// Формат — ISO 9362 (`model::bank::Swift`).
     SwiftInvalid =
@@ -1474,6 +1481,13 @@ strings! {
     /// в редакции ՀՕ-309-Ն; по закону: arlis.am, сверено 2026-10-13,
     /// разведка задачи 11). Окно говорит это у клиента из Армении (решение
     /// человека 2026-10-13).
+    /// Счёт в долларах или евро без счёта ИП в этой валюте с SWIFT-кодом
+    /// банка (`bank::payable_abroad`, полный прогон 2026-11-10, п. 8).
+    /// Шаблон: код валюты.
+    DocNotPayableAbroad =
+        "В профиле нет счёта в\u{A0}{} с SWIFT-кодом банка: иностранный клиент не сможет оплатить по этим реквизитам. Добавьте такой счёт в профиле.",
+        "Your profile has no {} account with the bank's SWIFT code: a foreign client won't be able to pay using these details. Add such an account in your profile.",
+        "Պրոֆիլում չկա {} հաշիվ՝ բանկի SWIFT կոդով. արտասահմանյան հաճախորդը չի կարողանա վճարել այս վավերապայմաններով։ Ավելացրեք այդպիսի հաշիվ պրոֆիլում։";
     DocCashReceipt =
         "Когда население платит вам наличными или картой, чек выдаёт контрольно-кассовая машина (ՀԴՄ), и счёт программы его не заменяет (Налоговый кодекс, ст.\u{A0}380, 381).",
         "When individuals pay you in cash or by card, the receipt comes from a cash register (ՀԴՄ), and the app's invoice doesn't replace it (Tax Code, Art.\u{A0}380, 381).",

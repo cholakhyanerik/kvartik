@@ -64,6 +64,21 @@ const SELLER: &str = concat!(
 /// Выпущенный счёт на языке `lang`: иностранный клиент, две строки,
 /// итого 5 500,00 $.
 fn invoice(lang: Lang) -> Document {
+    invoice_with(lang, SELLER)
+}
+
+/// Реквизиты ИП, у долларового счёта которого банк записан по-армянски,
+/// а латиницей — отдельно (формат 17, полный прогон 2026-11-10, п. 8).
+fn latin_seller() -> String {
+    SELLER.replacen(
+        r#""bank":"Ameriabank CJSC","swift":"ARMIAM22","#,
+        r#""bank":"«Ամերիաբանկ» ՓԲԸ","bank_latin":"Ameriabank CJSC","swift":"ARMIAM22","#,
+        1,
+    )
+}
+
+/// Тот же счёт с реквизитами ИП `seller`.
+fn invoice_with(lang: Lang, seller: &str) -> Document {
     let json = format!(
         concat!(
             r#"{{"meta":{{"id":"7c9e6679-7425-40de-944b-e07fc1f90ae7","modified":1760000000000,"deleted":null}},"#,
@@ -78,7 +93,7 @@ fn invoice(lang: Lang) -> Document {
             r#""annulled":null,"payments":[]}}"#
         ),
         lang = lang.code(),
-        seller = SELLER
+        seller = seller,
     );
     serde_json::from_str(&json).expect("счёт читается")
 }
@@ -381,6 +396,32 @@ fn invoice_text_is_in_the_pdf_in_every_language() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
+/// Банк — на языке документа (полный прогон 2026-11-10, п. 8): у счёта
+/// с названием латиницей армянский PDF пишет банк, как он записан, а русский
+/// и английский — латиницей. Без латиницы, как у документов, выпущенных до
+/// формата 17, — как записан, на всех языках (тест выше).
+#[test]
+fn the_bank_is_written_in_the_documents_letters() {
+    let latin = latin_seller();
+    assert_ne!(latin, SELLER, "подмена не сработала");
+    let mut wrong = Vec::new();
+    for lang in Lang::ALL {
+        let (_, bytes, _) = make(&invoice_with(lang, &latin), None, None);
+        let text = all_text(&read_text(&bytes));
+        let (shown, hidden) = match lang {
+            Lang::Am => ("«Ամերիաբանկ» ՓԲԸ", "Ameriabank CJSC"),
+            Lang::Ru | Lang::En => ("Ameriabank CJSC", "«Ամերիաբանկ» ՓԲԸ"),
+        };
+        if !text.contains(shown) {
+            wrong.push(format!("{lang:?}: в PDF нет «{shown}»"));
+        }
+        if text.contains(hidden) {
+            wrong.push(format!("{lang:?}: в PDF «{hidden}»"));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// Акт: основание, слова о приёмке и подписи сторон на языке документа,
 /// ՀՎՀՀ армянской фирмы.
 #[test]
@@ -562,6 +603,8 @@ fn look_pdf() {
         fs::write(dir.join(format!("invoice-{}.pdf", lang.code())), bytes).expect("запись");
         let (_, bytes, _) = make(&act(lang), Some(number(2026, 7)), None);
         fs::write(dir.join(format!("act-{}.pdf", lang.code())), bytes).expect("запись");
+        let (_, bytes, _) = make(&invoice_with(lang, &latin_seller()), None, Some(&logo()));
+        fs::write(dir.join(format!("invoice-latin-bank-{}.pdf", lang.code())), bytes).expect("запись");
     }
     let mut long = serde_json::to_value(invoice(Lang::Am)).expect("в JSON");
     let item = long["data"]["items"][0].clone();

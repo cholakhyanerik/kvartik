@@ -40,7 +40,7 @@ const INVOICE: &str = concat!(
     r#""tin":"07654321","registration":"271.1234567","#,
     r#""address":{"hy":"ք. Երևան, Աբովյան 1","ru":"г. Ереван, ул. Абовяна 1","en":"Abovyan St 1, Yerevan"},"#,
     r#""phone":"+374 91 123456","email":"aram@example.com","#,
-    r#""accounts":[{"currency":"USD","number":"127027482877","bank":"Ameriabank CJSC","swift":"ARMIAM22","#,
+    r#""accounts":[{"currency":"USD","number":"127027482877","bank":"Ameriabank CJSC","bank_latin":"","swift":"ARMIAM22","#,
     r#""correspondent":"Citibank N.A., New York"}]},"#,
     r#""buyer":{"name":"Beispiel GmbH","country":"DE","address":"Hauptstraße 1\n10115 Berlin","tin":null,"#,
     r#""tax_id":"DE123456789","currency":"EUR","lang":"en","payment_days":14}},"#,

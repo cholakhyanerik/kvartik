@@ -30,6 +30,7 @@ use std::sync::Arc;
 use kvartik_core::format::Stored;
 use kvartik_core::i18n::{self, Key, Lang, ParseError, fill, plural, t};
 use kvartik_core::model::activity::{ActivityCode, IncomeKind};
+use kvartik_core::model::bank::payable_abroad;
 use kvartik_core::model::client::Client;
 use kvartik_core::model::country::Country;
 use kvartik_core::model::date::Date;
@@ -2133,6 +2134,22 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                 })}
                 {move || (local() == Some(true)).then(|| view! {
                     <p class="hint">{tr(lang, Key::DocCashReceipt)}</p>
+                })}
+                // Счёт в долларах или евро, а по реквизитам профиля из-за
+                // границы не заплатить (полный прогон 2026-11-10, п. 8): PDF
+                // даст драмовый счёт или счёт без SWIFT. Выпустить не мешает —
+                // клиент может платить и из банка Армении. Пока профиль
+                // читается, слов нет.
+                {(form.kind == DocKind::Invoice).then_some(move || {
+                    let currency = form.currency.get().filter(|currency| *currency != Currency::Amd)?;
+                    let payable = ctx
+                        .profiles
+                        .with(|profile| profile.map(|profile| payable_abroad(&profile.accounts, currency)));
+                    (payable == Some(false)).then(|| view! {
+                        <p class="warning" role="alert">
+                            {move || fill(t(lang.get(), Key::DocNotPayableAbroad), &[currency_code(currency)])}
+                        </p>
+                    })
                 })}
                 <div class="actions">
                     <button

@@ -4,8 +4,19 @@
 //! для иностранных. У валютного счёта в реквизитах ещё и банк-корреспондент:
 //! через него идёт перевод, и без него иностранный клиент платёж не отправит.
 //!
-//! В данных: `{"currency":"USD","number":"…","bank":"…","swift":"ARMIAM22",
-//! "correspondent":"…"}`; `swift` — `null`, если не указан.
+//! В данных: `{"currency":"USD","number":"…","bank":"…","bank_latin":"…",
+//! "swift":"ARMIAM22","correspondent":"…"}`; `swift` — `null`, если не
+//! указан.
+//!
+//! Название банка латиницей (`bank_latin`, с формата 17) — для счёта и акта
+//! не на армянском: в реквизитах банк пишут, как его называет сам банк,
+//! а «ԱյԴի Բանկ ՓԲԸ» армянскими буквами клиенту из США ничего не скажет
+//! (полный прогон 2026-11-10, п. 8). Перевести название за человека
+//! программа не может.
+//!
+//! Валютный счёт без SWIFT-кода банка в реквизитах — не реквизиты для
+//! иностранного клиента: перевод из-за границы идёт по нему
+//! ([`payable_abroad`]).
 //!
 //! У номера счёта в банке Армении есть контрольная цифра (задача 56), и
 //! опечатку в нём окно называет сразу при вводе (`BankAccount::mistyped`):
@@ -31,6 +42,7 @@ use serde::{Deserialize, Serialize};
 
 use super::money::Currency;
 use super::text::{Line, Lines};
+use crate::i18n::Lang;
 
 /// Счёт в банке.
 ///
@@ -43,6 +55,7 @@ pub struct BankAccount {
     currency: Currency,
     number: Line,
     bank: Line,
+    bank_latin: Line,
     swift: Option<Swift>,
     correspondent: Lines,
 }
@@ -54,6 +67,9 @@ struct BankAccountFields {
     currency: Currency,
     number: Line,
     bank: Line,
+    /// С версии формата 17: у счёта прежних версий — пусто.
+    #[serde(default)]
+    bank_latin: Line,
     swift: Option<Swift>,
     correspondent: Lines,
 }
@@ -81,9 +97,16 @@ impl BankAccount {
             currency,
             number,
             bank,
+            bank_latin: Line::default(),
             swift,
             correspondent,
         })
+    }
+
+    /// Тот же счёт с названием банка латиницей; пустое — названия нет.
+    #[must_use]
+    pub fn with_bank_latin(self, bank_latin: Line) -> Self {
+        Self { bank_latin, ..self }
     }
 
     /// Валюта счёта.
@@ -99,6 +122,21 @@ impl BankAccount {
     /// Банк.
     pub const fn bank(&self) -> &Line {
         &self.bank
+    }
+
+    /// Банк латиницей — для документа не на армянском; пусто — не указан.
+    pub const fn bank_latin(&self) -> &Line {
+        &self.bank_latin
+    }
+
+    /// Банк в реквизитах документа на языке `lang`: на армянском — как
+    /// записан, на других — латиницей, если она есть.
+    pub fn bank_for(&self, lang: Lang) -> &Line {
+        match lang {
+            Lang::Am => &self.bank,
+            Lang::Ru | Lang::En if !self.bank_latin.is_empty() => &self.bank_latin,
+            Lang::Ru | Lang::En => &self.bank,
+        }
     }
 
     /// SWIFT-код банка; `None` — не указан.
@@ -146,6 +184,22 @@ impl BankAccount {
     }
 }
 
+/// Заплатит ли иностранный клиент по счетам `accounts` в валюте `currency`:
+/// драмы — да, это не перевод из-за границы; доллары и евро — только если
+/// среди счетов есть счёт в этой валюте с SWIFT-кодом банка. Без такого PDF
+/// счёта даёт драмовый счёт или счёт без SWIFT (`doc::sheet`, «в валюте
+/// документа, а нет — все»), и перевод из-за границы по нему не уйдёт (полный
+/// прогон 2026-11-10, п. 8). Окно говорит это при выпуске счёта, а выпустить
+/// не мешает: клиент может платить и из банка Армении.
+pub fn payable_abroad(accounts: &[BankAccount], currency: Currency) -> bool {
+    match currency {
+        Currency::Amd => true,
+        Currency::Usd | Currency::Eur => accounts
+            .iter()
+            .any(|account| account.currency == currency && account.swift.is_some()),
+    }
+}
+
 /// Обязательных цифр в номере счёта банка Армении; последняя из них —
 /// контрольная (решение ЦБ № 178-Ն, п. 29–30).
 const ARMENIAN_DIGITS_CHECKED: usize = 12;
@@ -174,10 +228,12 @@ impl<'de> Deserialize<'de> for BankAccount {
             currency,
             number,
             bank,
+            bank_latin,
             swift,
             correspondent,
         } = BankAccountFields::deserialize(deserializer)?;
         Self::new(currency, number, bank, swift, correspondent)
+            .map(|account| account.with_bank_latin(bank_latin))
             .map_err(|_| de::Error::custom("счёт без номера"))
     }
 }
@@ -389,6 +445,72 @@ mod tests {
         assert!(wrong.is_empty(), "контрольная цифра: {wrong:#?}");
     }
 
+    /// Счёт с SWIFT-кодом банка в валюте документа.
+    fn account(currency: Currency, swift: Option<&str>) -> BankAccount {
+        BankAccount::new(
+            currency,
+            line("11815068174000"),
+            line("ԱյԴի Բանկ ՓԲԸ"),
+            swift.map(|code| Swift::parse(code).expect("годный код")),
+            Lines::default(),
+        )
+        .expect("счёт с номером")
+    }
+
+    /// Иностранный клиент заплатит по счёту в долларах или евро, только если
+    /// у ИП есть счёт в этой валюте с SWIFT-кодом банка (полный прогон
+    /// 2026-11-10, п. 8): драмовый счёт и валютный без SWIFT — не реквизиты
+    /// для перевода из-за границы. Драмы — всегда.
+    #[test]
+    fn foreign_clients_pay_by_swift_in_the_currency() {
+        let amd = account(Currency::Amd, None);
+        let usd_bare = account(Currency::Usd, None);
+        let usd = account(Currency::Usd, Some("IDBKAM22"));
+        let eur = account(Currency::Eur, Some("IDBKAM22"));
+        let cases: [(&[BankAccount], Currency, bool); 9] = [
+            (&[], Currency::Amd, true),
+            (&[], Currency::Usd, false),
+            (std::slice::from_ref(&amd), Currency::Usd, false),
+            (std::slice::from_ref(&usd_bare), Currency::Usd, false),
+            (&[amd.clone(), usd.clone()], Currency::Usd, true),
+            (&[amd.clone(), usd.clone()], Currency::Eur, false),
+            (&[usd_bare.clone(), usd.clone()], Currency::Usd, true),
+            (std::slice::from_ref(&eur), Currency::Eur, true),
+            (std::slice::from_ref(&amd), Currency::Amd, true),
+        ];
+        let wrong: Vec<String> = cases
+            .iter()
+            .filter(|(accounts, currency, expected)| payable_abroad(accounts, *currency) != *expected)
+            .map(|(accounts, currency, expected)| format!("{currency:?} при {} счетах: не {expected}", accounts.len()))
+            .collect();
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// Банк в документе: на армянском — как записан, на русском и английском —
+    /// латиницей, а латиницы нет — как записан.
+    #[test]
+    fn the_bank_follows_the_documents_language() {
+        let bare = account(Currency::Amd, None);
+        let latin = account(Currency::Amd, None).with_bank_latin(line("IDBank CJSC"));
+        let got: Vec<(&str, &str)> = Lang::ALL
+            .into_iter()
+            .map(|lang| (bare.bank_for(lang).as_str(), latin.bank_for(lang).as_str()))
+            .collect();
+        let expected: Vec<(&str, &str)> = Lang::ALL
+            .into_iter()
+            .map(|lang| match lang {
+                Lang::Am => ("ԱյԴի Բանկ ՓԲԸ", "ԱյԴի Բանկ ՓԲԸ"),
+                Lang::Ru | Lang::En => ("ԱյԴի Բանկ ՓԲԸ", "IDBank CJSC"),
+            })
+            .collect();
+        assert_eq!(got, expected);
+        // Счёт формата до 17 — без поля — читается без латиницы.
+        let old = r#"{"currency":"AMD","number":"11815068174000","bank":"ԱյԴի Բանկ ՓԲԸ","swift":null,"correspondent":""}"#;
+        let read: BankAccount = serde_json::from_str(old).expect("счёт прежнего формата читается");
+        assert_eq!(read, bare);
+        assert!(read.bank_latin().is_empty());
+    }
+
     /// Без номера счёта нет — ни из формы, ни из данных.
     #[test]
     fn account_needs_a_number() {
@@ -402,7 +524,7 @@ mod tests {
             ),
             Err(AccountError::NoNumber)
         );
-        let json = r#"{"currency":"USD","number":"","bank":"Ameriabank","swift":null,"correspondent":""}"#;
+        let json = r#"{"currency":"USD","number":"","bank":"Ameriabank","bank_latin":"","swift":null,"correspondent":""}"#;
         assert!(serde_json::from_str::<BankAccount>(json).is_err());
     }
 
@@ -410,9 +532,11 @@ mod tests {
     /// обратно, слово в слово. Строчный SWIFT в данных — порча.
     #[test]
     fn data_shape_is_pinned() {
-        let sample = r#"{"currency":"USD","number":"1570012345678900","bank":"Ameriabank CJSC","swift":"ARMIAM22","correspondent":"Citibank N.A., New York\nSWIFT: CITIUS33"}"#;
+        let sample = r#"{"currency":"USD","number":"1570012345678900","bank":"«Ամերիաբանկ» ՓԲԸ","bank_latin":"Ameriabank CJSC","swift":"ARMIAM22","correspondent":"Citibank N.A., New York\nSWIFT: CITIUS33"}"#;
         let account: BankAccount = serde_json::from_str(sample).expect("образец читается");
         assert_eq!(account.currency(), Currency::Usd);
+        assert_eq!(account.bank().as_str(), "«Ամերիաբանկ» ՓԲԸ");
+        assert_eq!(account.bank_latin().as_str(), "Ameriabank CJSC");
         assert_eq!(account.swift().map(Swift::as_str), Some("ARMIAM22"));
         assert_eq!(
             serde_json::to_string(&account).ok().as_deref(),

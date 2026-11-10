@@ -669,6 +669,9 @@ struct AccountRow {
     currency: RwSignal<Currency>,
     number: RwSignal<String>,
     bank: RwSignal<String>,
+    /// Банк латиницей — для документа не на армянском (полный прогон
+    /// 2026-11-10, п. 8).
+    bank_latin: RwSignal<String>,
     swift: RwSignal<String>,
     correspondent: RwSignal<String>,
 }
@@ -795,6 +798,7 @@ impl Form {
             let row = form.account_row(account.currency());
             row.number.set(account.number().as_str().to_owned());
             row.bank.set(account.bank().as_str().to_owned());
+            row.bank_latin.set(account.bank_latin().as_str().to_owned());
             row.swift.set(account.swift().map(|swift| swift.as_str().to_owned()).unwrap_or_default());
             row.correspondent.set(account.correspondent().as_str().to_owned());
             row
@@ -827,6 +831,7 @@ impl Form {
             currency: RwSignal::new(currency),
             number: RwSignal::new(String::new()),
             bank: RwSignal::new(String::new()),
+            bank_latin: RwSignal::new(String::new()),
             swift: RwSignal::new(String::new()),
             correspondent: RwSignal::new(String::new()),
         }
@@ -1014,7 +1019,7 @@ fn past_day(text: &str, today: Option<Date>) -> Option<Date> {
 impl AccountRow {
     /// Пустая строка счёта не сохраняется и ошибкой не считается.
     fn is_blank(&self) -> bool {
-        [self.number, self.bank, self.swift, self.correspondent]
+        [self.number, self.bank, self.bank_latin, self.swift, self.correspondent]
             .iter()
             .all(|field| field.get_untracked().trim().is_empty())
     }
@@ -1029,6 +1034,8 @@ impl AccountRow {
             Lines::new(&self.correspondent.get_untracked()).ok()?,
         )
         .ok()
+        .zip(Line::new(&self.bank_latin.get_untracked()).ok())
+        .map(|(account, latin)| account.with_bank_latin(latin))
     }
 }
 
@@ -1462,7 +1469,7 @@ fn Accounts(lang: ReadSignal<Lang>, form: Form) -> impl IntoView {
                         lang
                         tried
                         error=move || {
-                            let started = [row.bank, row.swift, row.correspondent]
+                            let started = [row.bank, row.bank_latin, row.swift, row.correspondent]
                                 .iter()
                                 .any(|field| field.with(|text| !text.trim().is_empty()));
                             let missing = row.number.with(|text| text.trim().is_empty());
@@ -1480,6 +1487,14 @@ fn Accounts(lang: ReadSignal<Lang>, form: Form) -> impl IntoView {
                             })
                     }}
                     <TextField lang label=Key::AccountBank value=row.bank tried autocomplete="off" />
+                    <TextField
+                        lang
+                        label=Key::AccountBankLatin
+                        value=row.bank_latin
+                        tried
+                        autocomplete="off"
+                        hint=Key::AccountBankLatinHint
+                    />
                     <TextField
                         lang
                         label=Key::AccountSwift

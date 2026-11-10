@@ -29,7 +29,7 @@ const SAMPLE: &str = concat!(
     r#""address":{"hy":"ք. Երևան, Աբովյան 1, բն. 5","ru":"г. Ереван, ул. Абовяна 1, кв. 5","#,
     r#""en":"Abovyan St 1, apt 5\nYerevan 0001, Armenia"},"#,
     r#""phone":"+374 91 123456","email":"aram@example.com","#,
-    r#""accounts":[{"currency":"USD","number":"127027482877","bank":"Ameriabank CJSC","#,
+    r#""accounts":[{"currency":"USD","number":"127027482877","bank":"Ameriabank CJSC","bank_latin":"","#,
     r#""swift":"ARMIAM22","correspondent":"Citibank N.A., New York\nSWIFT: CITIUS33"}],"#,
     r#""activities":["62.01.0","70.22.0"],"kinds":{"70.22.0":"other"},"regime":"turnover","#,
     r#""person":{"birth_year":1970,"pension_joined":true,"pension_applied":"2019-03-14","#,
@@ -179,7 +179,7 @@ fn data_rejects_what_the_types_forbid() {
         SAMPLE.replace(r#""registered":"2022-05-12""#, r#""registered":"2022-02-30""#),
         SAMPLE.replace(r#""registered":"2022-05-12""#, r#""registered":"12.05.2022""#),
         SAMPLE.replace(r#""swift":"ARMIAM22""#, r#""swift":"armiam22""#),
-        SAMPLE.replace(r#""accounts":[{"currency":"USD","number":"127027482877","bank":"Ameriabank CJSC","swift":"ARMIAM22","correspondent":"Citibank N.A., New York\nSWIFT: CITIUS33"}]"#, &accounts),
+        SAMPLE.replace(r#""accounts":[{"currency":"USD","number":"127027482877","bank":"Ameriabank CJSC","bank_latin":"","swift":"ARMIAM22","correspondent":"Citibank N.A., New York\nSWIFT: CITIUS33"}]"#, &accounts),
         SAMPLE.replace(r#""deleted":null},"data""#, r#""deleted":null},"extra":1,"data""#),
         SAMPLE.replace(r#""en":"IE Aram Petrosyan"},"#, r#""en":"IE Aram Petrosyan","fr":""},"#),
     ];

@@ -833,8 +833,11 @@ fn payment(
             )
         };
         pairs.push((label(Key::AccountNumber), number));
-        if !account.bank().is_empty() {
-            pairs.push((label(Key::AccountBank), account.bank().as_str().to_owned()));
+        // Банк — на языке документа: на армянском — как записан, на других —
+        // латиницей, если она есть (полный прогон 2026-11-10, п. 8).
+        let bank = account.bank_for(lang);
+        if !bank.is_empty() {
+            pairs.push((label(Key::AccountBank), bank.as_str().to_owned()));
         }
         if let Some(swift) = account.swift() {
             pairs.push((label(Key::AccountSwift), swift.as_str().to_owned()));

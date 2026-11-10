@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.103",
+      "date": "2026-11-10",
+      "hy": [
+        "Դոլարով կամ եվրոյով հաշիվն այժմ զգուշացնում է, եթե պրոֆիլում չկա այդ արժույթով հաշիվ՝ բանկի SWIFT կոդով. նման վավերապայմաններով արտասահմանյան հաճախորդը չի կարող վճարել։",
+        "Պրոֆիլի բանկային հաշիվն ունի նոր դաշտ՝ «Բանկը լատինատառ». ռուսերեն և անգլերեն հաշիվներում և ակտերում բանկը կգրվի այդպես, օրինակ՝ IDBank CJSC։"
+      ],
+      "ru": [
+        "Счёт в долларах или евро теперь предупреждает, если в профиле нет счёта в этой валюте с SWIFT-кодом банка: по таким реквизитам иностранный клиент не заплатит.",
+        "У банковского счёта в профиле появилось поле «Банк латиницей»: в счетах и актах на русском и английском банк будет написан так, например IDBank CJSC."
+      ],
+      "en": [
+        "An invoice in dollars or euros now warns you if your profile has no account in that currency with the bank's SWIFT code: a foreign client can't pay using such details.",
+        "Bank accounts in your profile have a new field, “Bank name in Latin letters”: invoices and acts in English and Russian will show the bank this way, e.g. IDBank CJSC."
+      ]
+    },
+    {
       "version": "0.0.102",
       "date": "2026-11-10",
       "hy": [
@@ -263,19 +279,6 @@
       ],
       "en": [
         "Nothing has changed in the app: the website is now built only from the library versions the author has checked, and with any others the app will not be published."
-      ]
-    },
-    {
-      "version": "0.0.83",
-      "date": "2026-11-05",
-      "hy": [
-        "Ծրագրում ոչինչ չի փոխվել, իսկ kvartik.com կայքի գլխավոր էջում այժմ կա շրջանառության հարկի հաշվիչ. այն ցույց է տալիս եռամսյակի հարկի և տարեկան վճարների օրինակ՝ նույն կանոններով, ինչ ծրագիրը։"
-      ],
-      "ru": [
-        "В программе ничего не изменилось, а на главной странице kvartik.com появился калькулятор налога с оборота: он показывает пример налога квартала и годовых платежей по тем же правилам, что программа."
-      ],
-      "en": [
-        "Nothing has changed in the app, and the kvartik.com home page now has a turnover tax calculator: it shows an example of the quarterly tax and annual payments using the same rules as the app."
       ]
     }
   ]

@@ -237,6 +237,13 @@ async fn invoice_flow(host: &HtmlElement, client: &Client, lang: Lang, today: Da
     if step() != Some(3) {
         wrong.push(format!("верная строка не пустила к проверке: шаг {:?}", step()));
     }
+    // Счёт в долларах, а в профиле нет счёта в долларах с SWIFT (полный
+    // прогон 2026-11-10, п. 8): шаг проверки говорит это, а выпустить не
+    // мешает.
+    let abroad = fill(t(lang, Key::DocNotPayableAbroad), &["USD"]);
+    if !host.text_content().unwrap_or_default().contains(&abroad) {
+        wrong.push("счёт в долларах без счёта ИП в долларах — а о реквизитах ни слова".to_owned());
+    }
     press(t(lang, Key::DocIssue), &mut wrong);
     let first = numbered(Key::KindInvoice, 1);
     if !wait_for(host, &fill(t(lang, Key::DocIssuedNotice), &[&first])).await {
