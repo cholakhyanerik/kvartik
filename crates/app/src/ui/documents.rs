@@ -2421,7 +2421,9 @@ fn DocCard(
                     <dt>{tr(lang, Key::DocServiceDate)}</dt>
                     <dd>{move || i18n::date(lang.get(), data.service_date)}</dd>
                 </div>
-                {data.due.map(|due| view! {
+                // Аннулированный ни о чём не просит: «Оплатить до» у него читалось
+                // бы как ещё действующий срок (полный прогон 0.0.96).
+                {data.due.filter(|_| open).map(|due| view! {
                     <div>
                         <dt>{tr(lang, Key::DocDue)}</dt>
                         <dd class="dotted">
@@ -2997,7 +2999,9 @@ fn Payments(
                 }
                 .into_any()
             }}
-            {left.filter(|left| left.minor() > 0).map(|left| view! {
+            // У аннулированного оплачивать нечего: остатка нет, а поступления,
+            // которые были, — видны (полный прогон 0.0.96).
+            {left.filter(|left| open && left.minor() > 0).map(|left| view! {
                 <p class="total">{move || fill(t(lang.get(), Key::PaymentLeft), &[&i18n::money(lang.get(), left)])}</p>
             })}
             {overpaid.map(|over| view! {

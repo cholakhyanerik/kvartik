@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.99",
+      "date": "2026-11-10",
+      "hy": [
+        "Չեղարկված հաշվի քարտում այլևս չկան «Վճարել մինչև» և «Մնացել է վճարել» տողերը. չեղարկված հաշիվը վճարելու կարիք չկա։ Դրանով եղած վճարումները երևում են, ինչպես նախկինում։"
+      ],
+      "ru": [
+        "В карточке аннулированного счёта больше нет строк «Оплатить до» и «Осталось оплатить»: оплачивать аннулированный счёт не нужно. Поступления, которые по нему были, видны, как раньше."
+      ],
+      "en": [
+        "An annulled invoice's card no longer shows “Due date” and “Left to pay”: there's nothing to pay on an annulled invoice. Payments that came in on it are still shown."
+      ]
+    },
+    {
       "version": "0.0.98",
       "date": "2026-11-10",
       "hy": [
@@ -260,19 +273,6 @@
       ],
       "en": [
         "In the license texts on the “About” screen, the lines between sections and libraries no longer break in two on a phone."
-      ]
-    },
-    {
-      "version": "0.0.79",
-      "date": "2026-11-04",
-      "hy": [
-        "Ծրագրում ոչինչ չի փոխվել. գրադարանները, որոնցից այն կառուցված է, այժմ ամեն շաբաթ ստուգվում են հայտնի խոցելիությունների բազայով, նույնիսկ երբ նոր տարբերակ չկա։"
-      ],
-      "ru": [
-        "В программе ничего не изменилось: библиотеки, из которых она собрана, теперь каждую неделю сверяются с базой известных уязвимостей, даже когда новых версий нет."
-      ],
-      "en": [
-        "Nothing has changed in the app: the libraries it is built from are now checked against a database of known vulnerabilities every week, even when there is no new version."
       ]
     }
   ]

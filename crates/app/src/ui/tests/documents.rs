@@ -7,7 +7,7 @@ use kvartik_core::model::activity::{ActivityCode, IncomeKind};
 use kvartik_core::model::client::{Client, ClientData};
 use kvartik_core::model::country::Country;
 use kvartik_core::model::date::Date;
-use kvartik_core::model::document::{DocKind, Document, DocumentData, Item, Settlement, Status};
+use kvartik_core::model::document::{DocKind, Document, DocumentData, Item, Payment, Settlement, Status};
 use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::model::profile::{Profile, ProfileData};
 use kvartik_core::model::record::RecordId;
@@ -887,6 +887,72 @@ async fn documents_are_found_opened_and_marked_paid() {
     host.remove();
     forget_device();
     assert!(wrong.is_empty(), "экран документов: {wrong:#?}");
+}
+
+/// Аннулированный счёт ни о чём не просит: в карточке нет ни «Оплатить до»,
+/// ни «Осталось оплатить», а поступление, которое было, видно. У действующего
+/// такого же счёта есть оба (полный прогон 0.0.96: аннулированный просил
+/// оплатить остаток до срока).
+#[wasm_bindgen_test]
+async fn an_annulled_invoice_asks_for_no_payment() {
+    let client = fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let today = clock::today().expect("часы с датой");
+    let now = clock::now();
+    let data = DocumentData {
+        due: today.add_days(15),
+        ..invoice_data(&client)
+    };
+    let issue = |before: &[Document]| {
+        Document::create(data.clone(), now)
+            .expect("черновик")
+            .issue(before, 0, Some(&profile()), &client, now)
+            .expect("выпущен")
+            .add_payment(Payment { date: today, amount: 100_000 }, now)
+            .expect("оплата отмечена")
+    };
+    let live = issue(&[]);
+    let annulled = issue(std::slice::from_ref(&live))
+        .annul(today, now)
+        .expect("выпущен")
+        .expect("аннулирован");
+    let mut writes = Writes::default();
+    writes.insert(&live);
+    writes.insert(&annulled);
+    commit(writes).await;
+
+    let paid = i18n::money(lang, Money::new(100_000, Currency::Usd));
+    let left = fill(t(lang, Key::PaymentLeft), &[&i18n::money(lang, Money::new(140_000, Currency::Usd))]);
+    let mut wrong = Vec::new();
+    for (document, asks) in [(&live, true), (&annulled, false)] {
+        let address = Screen::Document(document.id()).href();
+        let (host, mounted) = mount_at(&address);
+        if !wait_selector(&host, ".docs-detail fieldset.payments").await {
+            wrong.push(format!("карточка {:?} не открылась", document.number()));
+        }
+        let detail = host
+            .query_selector(".docs-detail")
+            .ok()
+            .flatten()
+            .and_then(|detail| detail.text_content())
+            .unwrap_or_default();
+        let due = detail.contains(t(lang, Key::DocDue));
+        if due != asks || detail.contains(&left) != asks {
+            wrong.push(format!(
+                "{}: «Оплатить до» — {due}, «{left}» — {}, а ждали {asks}",
+                if asks { "действующий" } else { "аннулированный" },
+                detail.contains(&left)
+            ));
+        }
+        if !detail.contains(&paid) {
+            wrong.push(format!("поступления {paid} не видно"));
+        }
+        drop(mounted);
+        host.remove();
+    }
+    forget_device();
+    assert!(wrong.is_empty(), "аннулированный счёт: {wrong:#?}");
 }
 
 /// Файлы шрифтов документа — те же байты, что лежат в `public/fonts/`:
