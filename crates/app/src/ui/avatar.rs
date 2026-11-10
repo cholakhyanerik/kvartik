@@ -7,13 +7,40 @@ use leptos::prelude::*;
 
 /// Инициалы: первые буквы двух первых слов, заглавными. Кавычки и знаки
 /// вокруг слова не в счёт, слово без букв и цифр пропускается:
-/// «Brightline LLC» — «BL», ««Արարատ» ՍՊԸ» — «ԱՍ».
+/// «Brightline LLC» — «BL», ««Արարատ» ՍՊԸ» — «ԱՍ». Форма собственности
+/// впереди имени — не слово имени (полный прогон 2026-11-10, п. 15): «ԱՁ Արամ
+/// Պետրոսյան» — «ԱՊ», а не «ԱԱ», «ИП Ани Саргсян» — «АС». Имя из одной формы —
+/// само себе инициалы.
 pub fn initials(name: &str) -> String {
-    name.split_whitespace()
+    let words: Vec<&str> = name.split_whitespace().collect();
+    let named = match words.split_first() {
+        Some((first, rest)) if legal_form(first) && !rest.is_empty() => rest,
+        _ => words.as_slice(),
+    };
+    named
+        .iter()
         .filter_map(|word| word.chars().find(|c| c.is_alphanumeric()))
         .take(2)
         .flat_map(char::to_uppercase)
         .collect()
+}
+
+/// Формы собственности, которые пишут перед именем: ИП и фирмы — по-армянски,
+/// по-русски и по-английски. Сравниваются заглавными и одними буквами —
+/// без кавычек, точек и косой черты: «Ա/Ձ» и «ООО.» — те же «ԱՁ» и «ООО».
+const LEGAL_FORMS: &[&str] = &[
+    "ԱՁ", "ՍՊԸ", "ՓԲԸ", "ԲԲԸ", "ՀԿ", "ՊՈԱԿ", "ՀՈԱԿ", "ИП", "ООО", "ОАО", "ЗАО", "ПАО", "АО", "IE",
+    "PE", "LLC", "CJSC", "OJSC", "JSC", "LLP", "LTD",
+];
+
+/// Форма ли собственности слово `word`.
+fn legal_form(word: &str) -> bool {
+    let bare: String = word
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_uppercase)
+        .collect();
+    LEGAL_FORMS.contains(&bare.as_str())
 }
 
 /// Оттенок кружка — один из четырёх, по идентификатору записи: у клиента
@@ -47,7 +74,15 @@ mod tests {
         for (name, expected) in [
             ("Brightline LLC", "BL"),
             ("«Արարատ» ՍՊԸ", "ԱՍ"),
-            ("ООО Семён и партнёры", "ОС"),
+            ("ООО «Семён и партнёры»", "СИ"),
+            ("ԱՁ Արամ Պետրոսյան", "ԱՊ"),
+            ("Ա/Ձ Արամ Պետրոսյան", "ԱՊ"),
+            ("ИП Ани Саргсян", "АС"),
+            ("IE Erik Cholakhyan", "EC"),
+            ("Ипполит Сидоров", "ИС"),
+            ("ՍՊԸ «Արարատ»", "Ա"),
+            ("LLC. Brightline Labs", "BL"),
+            ("ИП", "И"),
             ("  acme   inc. ", "AI"),
             ("Kestrel", "K"),
             ("— Studio", "S"),

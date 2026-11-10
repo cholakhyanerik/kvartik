@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.110",
+      "date": "2026-11-11",
+      "hy": [
+        "Սկզբնատառերով շրջանակն այլևս սեփականության ձևն անվան բառ չի համարում. «ԱՁ Արամ Պետրոսյան»-ի մոտ այն «ԱՊ» է, ոչ թե «ԱԱ»։"
+      ],
+      "ru": [
+        "Кружок с инициалами больше не считает форму собственности словом имени: у «ИП Ани Саргсян» теперь «АС», а не «ИА»."
+      ],
+      "en": [
+        "The initials circle no longer counts the legal form as part of the name: “IE Erik Cholakhyan” now shows “EC”, not “IE”."
+      ]
+    },
+    {
       "version": "0.0.109",
       "date": "2026-11-11",
       "hy": [
@@ -260,19 +273,6 @@
       "en": [
         "On a phone, the icons and labels of the tabs at the bottom no longer pile up on each other or get covered by the previous screen when you switch screens: the open tab simply changes color.",
         "The round “+” button on the Invoices screen no longer sits in the middle of the screen and jumps down: it appears in its place right after the screen."
-      ]
-    },
-    {
-      "version": "0.0.90",
-      "date": "2026-11-07",
-      "hy": [
-        "Մկնիկի տակ շարժումը դարձել է ավելի սահուն և թեթև համակարգչի համար. կոճակների լցումը, հղումների տակի գիծը և քարտերի փայլն այժմ նկարում է վիդեոքարտը, և էջն ամեն կադր չի վերանկարվում։"
-      ],
-      "ru": [
-        "Движение под мышью стало плавнее и легче для компьютера: заливку кнопок, линию под ссылками и блик на карточках теперь рисует видеокарта, и страница не перерисовывается каждый кадр."
-      ],
-      "en": [
-        "Motion under the mouse is smoother and lighter on your computer: the button fill, the line under links and the glare on cards are now drawn by the graphics card, so the page is no longer repainted every frame."
       ]
     }
   ]
