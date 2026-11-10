@@ -1320,6 +1320,26 @@ ul.items li.payment button {
   white-space: nowrap;
 }
 
+/* «К содержимому» (полный прогон 2026-11-10, п. 23): спрятана, как поле
+   выше, пока на ней нет фокуса, а в фокусе — кнопкой поверх меню в углу
+   окна. Мыши и пальцу её не видно. */
+.skip-link:not(:focus) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.skip-link:focus {
+  position: fixed;
+  top: var(--space-3);
+  inset-inline-start: var(--space-3);
+  z-index: 10;
+  margin: 0;
+}
+
 /* Фокус на спрятанном поле рисуется на его подписи-кнопке. */
 .file:focus-within {
   outline: 2px solid var(--focus);

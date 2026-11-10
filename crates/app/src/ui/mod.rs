@@ -272,6 +272,20 @@ pub fn App() -> impl IntoView {
             </div>
         })}
         <div class="app" hidden=move || welcome.get() inert=inert>
+            // «К содержимому» — первой при переходе клавишей Tab: иначе до
+            // экрана — десять пунктов меню (полный прогон 2026-11-10, п. 23).
+            // Видна только в фокусе и ведёт к заголовку открытого экрана, а не
+            // по адресу `#…`: адрес здесь — экран (`ui/route.rs`).
+            <a
+                class="button skip-link"
+                href=move || router.screen().href()
+                on:click=move |event: leptos::ev::MouseEvent| {
+                    event.prevent_default();
+                    route::shown(router.screen());
+                }
+            >
+                {tr(lang, Key::SkipToContent)}
+            </a>
             <Nav lang router documents clients backups />
             <main>
                 <UpdateNotice lang program forms />

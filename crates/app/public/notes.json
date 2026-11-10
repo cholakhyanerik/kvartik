@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.116",
+      "date": "2026-11-11",
+      "hy": [
+        "Tab ստեղնով առաջին հղումն այժմ «Անցնել բովանդակությանը» է. այն տանում է բաց էկրանին՝ առանց ընտրացանկի տասը կետերի։"
+      ],
+      "ru": [
+        "Первая ссылка клавишей Tab теперь «К содержимому»: она ведёт к открытому экрану мимо десяти пунктов меню."
+      ],
+      "en": [
+        "The first link you reach with the Tab key is now “Skip to content”: it takes you to the open screen past the ten menu items."
+      ]
+    },
+    {
       "version": "0.0.115",
       "date": "2026-11-11",
       "hy": [
@@ -251,19 +264,6 @@
       ],
       "en": [
         "Quarters that ended before your IE registration date are now named as such on the “Tax” screen: you weren't an IE yet, there's no return for them, and they can't be closed. Before, they looked like ordinary empty quarters."
-      ]
-    },
-    {
-      "version": "0.0.96",
-      "date": "2026-11-09",
-      "hy": [
-        "Բանալին այժմ կարելի է գնել. «Լիցենզիա» էկրանին «Գնել բանալի» տողը բացում է կայքի «Գնել» էջը։ Այնտեղ գինն է (մեկ տարվա «Ստանդարտ» բանալին՝ 24 000 ֏), վաճառողի հաշիվը և գնման երեք քայլերը՝ նամակ, փոխանցում և բանալին աշխատանքային օրվա ընթացքում։"
-      ],
-      "ru": [
-        "Ключ теперь можно купить: на экране «Лицензия» строка «Купить ключ» открывает страницу «Купить» на сайте. На ней цена (ключ «Стандарт» на год — 24 000 ֏), счёт продавца и три шага покупки: письмо, перевод и ключ в течение рабочего дня."
-      ],
-      "en": [
-        "You can now buy a key: on the “License” screen, the “Buy a key” line opens the “Buy” page on the site. It has the price (a “Standard” key for a year is AMD 24,000), the seller's account and the three steps to buy: an email, a transfer, and the key within a business day."
       ]
     }
   ]

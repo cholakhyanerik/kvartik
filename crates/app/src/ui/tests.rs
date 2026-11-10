@@ -1788,3 +1788,48 @@ async fn a_client_number_is_kept_whole() {
     documents::forget_device();
     assert!(wrong.is_empty(), "номер клиента: {wrong:#?}");
 }
+
+/// «К содержимому» (полный прогон 2026-11-10, п. 23): первая нажимаемая
+/// ссылка окна — раньше десяти пунктов меню; нажатая, она ставит фокус на
+/// заголовок открытого экрана, а адрес — экран — не меняет.
+#[wasm_bindgen_test]
+async fn the_skip_link_leads_past_the_menu() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at("#/clients");
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::ClientsAbout)).await {
+        wrong.push("экран клиентов не открылся".to_owned());
+    }
+    match host.query_selector(".app a[href], .app button").ok().flatten() {
+        Some(first) if first.text_content().as_deref().map(str::trim) == Some(t(lang, Key::SkipToContent)) => {
+            first.unchecked_into::<HtmlElement>().click();
+        }
+        other => wrong.push(format!(
+            "первое нажимаемое — не «К содержимому»: {:?}",
+            other.and_then(|element| element.text_content())
+        )),
+    }
+    let mut focused = false;
+    for _ in 0..40 {
+        focused = document()
+            .active_element()
+            .is_some_and(|element| element.tag_name() == "H1" && element.closest("#clients").ok().flatten().is_some());
+        if focused {
+            break;
+        }
+        sleep(50).await;
+    }
+    if !focused {
+        wrong.push("фокус не на заголовке экрана клиентов".to_owned());
+    }
+    if crate::platform::hash() != "#/clients" {
+        wrong.push(format!("адрес сменился: {}", crate::platform::hash()));
+    }
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "«К содержимому»: {wrong:#?}");
+}
