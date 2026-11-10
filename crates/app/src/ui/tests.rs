@@ -1752,3 +1752,39 @@ async fn a_chosen_backup_hides_making_one() {
     documents::forget_device();
     assert!(wrong.is_empty(), "восстановление и новая копия: {wrong:#?}");
 }
+
+/// Номер клиента в его строке — отдельным элементом `.tax-number`, который
+/// стили не переносят (полный прогон 2026-11-10, п. 19): налоговый номер
+/// «12-3456789» на телефоне рвался после дефиса. Подпись — рядом, по шаблону
+/// языка.
+#[wasm_bindgen_test]
+async fn a_client_number_is_kept_whole() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let mut data = documents::acme();
+    data.tax_id = documents::line("12-3456789");
+    let client = Client::create(data, crate::platform::clock::now()).expect("годный клиент");
+    let mut writes = Writes::default();
+    writes.insert(&client);
+    documents::commit(writes).await;
+    let (host, mounted) = mount_at("#/clients");
+    let mut wrong = Vec::new();
+    if !wait_for(&host, "Acme Inc.").await {
+        wrong.push("клиента нет в списке".to_owned());
+    }
+    match host.query_selector("#clients .tax-number").ok().flatten() {
+        Some(number) if number.text_content().as_deref() == Some("12-3456789") => {
+            let fact = number.parent_element().and_then(|fact| fact.text_content()).unwrap_or_default();
+            if fact != fill(t(lang, Key::TaxIdShort), &["12-3456789"]) {
+                wrong.push(format!("сведение о номере: «{fact}»"));
+            }
+        }
+        other => wrong.push(format!("номер не отдельным элементом: {:?}", other.and_then(|e| e.text_content()))),
+    }
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "номер клиента: {wrong:#?}");
+}

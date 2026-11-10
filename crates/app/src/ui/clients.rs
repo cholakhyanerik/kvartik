@@ -489,7 +489,7 @@ fn ClientRow(
                 <span class="entry-main">
                     <span class="entry-title client-name">{name}</span>
                     <span class="entry-meta">
-                        {move || facts(lang.get(), &data).into_iter().map(|fact| view! { <span>{fact}</span> }).collect_view()}
+                        {move || facts(lang.get(), &data).into_iter().map(Fact::view).collect_view()}
                     </span>
                 </span>
                 {icon(Icon::Forward)}
@@ -524,24 +524,45 @@ fn DeletedRow(
     }
 }
 
+/// Короткое сведение о клиенте в его строке. Номер — ՀՎՀՀ или налоговый
+/// номер — стоит отдельно и не переносится: «12-3456789» на телефоне рвался
+/// на «12-» и «3456789» (полный прогон 2026-11-10, п. 19).
+enum Fact {
+    Text(String),
+    /// Шаблон с местом для номера и сам номер.
+    Number(&'static str, String),
+}
+
+impl Fact {
+    fn view(self) -> AnyView {
+        match self {
+            Self::Text(text) => view! { <span>{text}</span> }.into_any(),
+            Self::Number(template, number) => {
+                let (before, after) = template.split_once("{}").unwrap_or((template, ""));
+                view! { <span>{before}<span class="tax-number">{number}</span>{after}</span> }.into_any()
+            }
+        }
+    }
+}
+
 /// Короткие сведения о клиенте на языке окна: страна, ՀՎՀՀ, валюта, язык
 /// документов и срок оплаты — что заполнено.
-fn facts(lang: Lang, data: &ClientData) -> Vec<String> {
+fn facts(lang: Lang, data: &ClientData) -> Vec<Fact> {
     let mut facts = Vec::new();
     if let Some(country) = data.country {
-        facts.push(country.name(lang).to_owned());
+        facts.push(Fact::Text(country.name(lang).to_owned()));
     }
     if let Some(tin) = &data.tin {
-        facts.push(fill(t(lang, Key::TinShort), &[tin.as_str()]));
+        facts.push(Fact::Number(t(lang, Key::TinShort), tin.as_str().to_owned()));
     }
     if !data.tax_id.is_empty() {
-        facts.push(fill(t(lang, Key::TaxIdShort), &[data.tax_id.as_str()]));
+        facts.push(Fact::Number(t(lang, Key::TaxIdShort), data.tax_id.as_str().to_owned()));
     }
     if let Some(currency) = data.currency {
-        facts.push(currency_code(currency).to_owned());
+        facts.push(Fact::Text(currency_code(currency).to_owned()));
     }
     if let Some(doc_lang) = data.lang {
-        facts.push(doc_lang.native_name().to_owned());
+        facts.push(Fact::Text(doc_lang.native_name().to_owned()));
     }
     if let Some(days) = data.payment_days {
         let n = u64::from(days);
@@ -549,7 +570,7 @@ fn facts(lang: Lang, data: &ClientData) -> Vec<String> {
             plural(lang, n, Key::DaysOne, Key::DaysFew, Key::DaysMany),
             &[&i18n::integer(lang, i64::from(days))],
         );
-        facts.push(fill(t(lang, Key::ClientPaymentTerm), &[&count]));
+        facts.push(Fact::Text(fill(t(lang, Key::ClientPaymentTerm), &[&count])));
     }
     facts
 }

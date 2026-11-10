@@ -480,6 +480,19 @@ ul.list > li + li {
   content: "\a0· ";
 }
 
+/* Номер клиента — ՀՎՀՀ или налоговый номер — целиком на одной строке:
+   «12-3456789» рвался на телефоне после дефиса (полный прогон 2026-11-10,
+   п. 19). Слишком длинный обрезается многоточием, а не тянет страницу
+   вбок. */
+.tax-number {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
 .entry-side {
   display: grid;
   justify-items: end;

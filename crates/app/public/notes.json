@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.112",
+      "date": "2026-11-11",
+      "hy": [
+        "Գծիկով հարկային համարը հաճախորդների ցանկում նեղ էկրանին այլևս չի կիսվում երկու տողի։"
+      ],
+      "ru": [
+        "Налоговый номер с дефисом больше не рвётся на две строки в списке клиентов на узком экране."
+      ],
+      "en": [
+        "A tax number with a hyphen no longer breaks across two lines in the client list on a narrow screen."
+      ]
+    },
+    {
       "version": "0.0.111",
       "date": "2026-11-11",
       "hy": [
@@ -257,19 +270,6 @@
       "en": [
         "On a computer, the highlight of the open tab in the menu now slides to the new tab by itself, beneath the labels: the labels stay in place and only change color instead of blending into one halfway.",
         "On a phone, tapping a tab at the bottom no longer flashes a translucent rectangle over its icon and label."
-      ]
-    },
-    {
-      "version": "0.0.92",
-      "date": "2026-11-08",
-      "hy": [
-        "Հեռախոսում փաստաթղթի փակված քարտի վերնագիրն այլևս չի անցնում ներքևի ցանկի վրայով. եթե ցուցակում փաստաթղթի տողը հայտնվել է ներքևի ցանկի տակ, վերնագիրը մարում է իր տեղում։"
-      ],
-      "ru": [
-        "На телефоне заголовок закрытой карточки документа больше не пролетает поверх вкладок внизу: если строка документа в списке оказалась под меню, он растворяется на месте."
-      ],
-      "en": [
-        "On a phone, the heading of a closed document card no longer flies over the tabs at the bottom: if the document's row in the list ends up under the menu, the heading fades out in place."
       ]
     }
   ]
