@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.108",
+      "date": "2026-11-11",
+      "hy": [
+        "Մեծ լոգոտիպն այլևս չի մերժվում «փոքրացրեք այն» բառերով. ծրագիրը փոքրացնում է այն ինքը, ինչպես մատյանի կտրոնների լուսանկարները։"
+      ],
+      "ru": [
+        "Большой логотип больше не отвергается словами «уменьшите её»: программа уменьшает его сама, как фото чеков в книге."
+      ],
+      "en": [
+        "A large logo is no longer refused with “make it smaller”: the app makes it smaller itself, like receipt photos in the ledger."
+      ]
+    },
+    {
       "version": "0.0.107",
       "date": "2026-11-11",
       "hy": [
@@ -263,19 +276,6 @@
       "en": [
         "Screens change smoothly: the old one fades out, the new one slides up from below, and a document in the list flows into the heading of its card. You can tap right away, without waiting for the transition to end.",
         "On a computer, buttons under the mouse fill with color and “flip” their label, cards tilt slightly, and a small circle follows the mouse pointer. If animations are turned off on your system, nothing moves."
-      ]
-    },
-    {
-      "version": "0.0.88",
-      "date": "2026-11-06",
-      "hy": [
-        "Ծրագրում ոչինչ չի փոխվել. կառուցումը դարձել է ավելի հուսալի։ Դիտարկիչում նրա ստուգումներից մեկը սպասում էր ֆիքսված ժամանակ և դանդաղ մեքենայի վրա երբեմն իզուր էր ձախողվում։"
-      ],
-      "ru": [
-        "В программе ничего не изменилось: сборка стала надёжнее. Одна из её проверок в браузере ждала фиксированное время и на медленной машине изредка срабатывала впустую."
-      ],
-      "en": [
-        "Nothing has changed in the app: the build is more reliable. One of its browser checks waited a fixed time and occasionally failed for no reason on a slow machine."
       ]
     }
   ]

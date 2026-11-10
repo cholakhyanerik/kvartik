@@ -49,6 +49,7 @@ use super::tax;
 use super::{Base, tr};
 use crate::platform::clock;
 use crate::platform::file::{self, FileError, Picture};
+use crate::platform::image;
 use crate::store::device::Device;
 use crate::store::{Store, StoreError, Writes};
 
@@ -1321,6 +1322,30 @@ fn Requisites(
     }
 }
 
+/// Сколько байтов файла логотипа читать — как у фото книги: снимок
+/// с телефона в несколько мегабайт уменьшится (полный прогон 2026-11-10,
+/// п. 13), а больше — не картинка для логотипа.
+const LOGO_PICK_LIMIT: u64 = 20 * 1024 * 1024;
+
+/// Картинка логотипа из байтов файла типа `mime`: PNG или JPEG в пределе
+/// записи — как есть; больше предела или другого вида, который браузер
+/// открывает (WebP, HEIC), — уменьшенная им (`platform::image::logo`), как
+/// фото книги, а не отказ «уменьшите её» (полный прогон 2026-11-10, п. 13).
+async fn fitted(bytes: Vec<u8>, mime: &str) -> Result<Image, LogoProblem> {
+    if bytes.len() <= logo::MAX_BYTES {
+        match Image::new(bytes.clone()) {
+            Ok(image) => return Ok(image),
+            Err(ImageError::NotSupported) if !mime.starts_with("image/") => return Err(LogoProblem::NotSupported),
+            Err(ImageError::NotSupported | ImageError::TooLarge) => {}
+        }
+    }
+    let smaller = image::logo(&bytes, mime, logo::MAX_BYTES).await.map_err(|_| {
+        if mime.starts_with("image/") { LogoProblem::Unreadable } else { LogoProblem::NotSupported }
+    })?;
+    let smaller = smaller.ok_or(LogoProblem::TooLarge)?;
+    Image::new(smaller).map_err(|_| LogoProblem::TooLarge)
+}
+
 /// Логотип: показать, выбрать другой, убрать.
 #[component]
 fn LogoField(lang: ReadSignal<Lang>, form: Form) -> impl IntoView {
@@ -1330,15 +1355,13 @@ fn LogoField(lang: ReadSignal<Lang>, form: Form) -> impl IntoView {
         let Some(chosen) = file::chosen(&input) else {
             return;
         };
+        let mime = chosen.type_();
         leptos::task::spawn_local(async move {
-            let read = file::read_bytes(&chosen, logo::MAX_BYTES as u64).await;
+            let read = file::read_bytes(&chosen, LOGO_PICK_LIMIT).await;
             // Тот же файл можно будет выбрать снова.
             input.set_value("");
             let image = match read {
-                Ok(bytes) => Image::new(bytes).map_err(|error| match error {
-                    ImageError::TooLarge => LogoProblem::TooLarge,
-                    ImageError::NotSupported => LogoProblem::NotSupported,
-                }),
+                Ok(bytes) => fitted(bytes, &mime).await,
                 Err(FileError::TooLarge) => Err(LogoProblem::TooLarge),
                 Err(FileError::NotText | FileError::Unreadable) => Err(LogoProblem::Unreadable),
             };
