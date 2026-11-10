@@ -12,7 +12,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_test::wasm_bindgen_test;
 use web_sys::HtmlElement;
 
-use super::{mount, sleep};
+use super::{mount, mount_at, sleep, wait_for};
 use crate::platform::pwa::Browser;
 use crate::store::device::Device;
 use crate::ui::pwa::manual_words;
@@ -212,4 +212,40 @@ async fn install_is_always_offered() {
         let _ = storage.remove_item("kvartik.lang");
     }
     assert!(wrong.is_empty(), "установка: {wrong:#?}");
+}
+
+/// «Установка» на главном — ниже карточек налога, сроков и счетов, которые
+/// ждут оплаты (полный прогон 2026-11-10, п. 21): в Chrome программа
+/// с экрана «Домой» видит данные браузера, и ставить её первой незачем, а на
+/// телефоне она отодвигала налог и счета. С главного экрана она не уходит.
+#[wasm_bindgen_test]
+async fn install_comes_after_the_cards_where_data_is_shared() {
+    super::documents::fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at("#/");
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::HomeAwaiting)).await {
+        wrong.push("на главном нет «Ждут оплаты»".to_owned());
+    }
+    let install = host.query_selector("#home .install").ok().flatten();
+    let awaiting = host.query_selector_all("#home h2").ok().and_then(|headings| {
+        (0..headings.length())
+            .filter_map(|at| headings.item(at))
+            .find(|heading| heading.text_content().as_deref() == Some(t(lang, Key::HomeAwaiting)))
+    });
+    match (install, awaiting) {
+        (Some(install), Some(awaiting)) => {
+            if awaiting.compare_document_position(&install) & web_sys::Node::DOCUMENT_POSITION_FOLLOWING == 0 {
+                wrong.push("«Установка» выше «Ждут оплаты»".to_owned());
+            }
+        }
+        (None, _) => wrong.push("на главном нет «Установки»".to_owned()),
+        (_, None) => wrong.push("на главном нет заголовка «Ждут оплаты»".to_owned()),
+    }
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    super::documents::forget_device();
+    assert!(wrong.is_empty(), "место «Установки»: {wrong:#?}");
 }

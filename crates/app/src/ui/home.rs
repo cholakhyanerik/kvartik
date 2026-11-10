@@ -50,6 +50,12 @@ pub fn Home(
         documents.new_invoice(clients);
         router.go(Screen::Documents);
     };
+    // Установка на iPhone, iPad и Mac — выше всего о данных: программа
+    // с экрана «Домой» данных браузера не видит (Правило 6). У остальных —
+    // ниже карточек налога, сроков и счетов: на телефоне она стояла сверху
+    // и отодвигала их (полный прогон 2026-11-10, п. 21). С главного экрана
+    // она не уходит (Правило 2).
+    let first = program.install_first();
     view! {
         <header class="greeting">
             <div>
@@ -69,9 +75,7 @@ pub fn Home(
             </a>
         </header>
         <BackupReminder lang backups />
-        // Установка — выше всего о данных: на iPhone программу ставят до
-        // того, как вводить данные (Правило 6).
-        <InstallSection lang program />
+        {first.then(|| view! { <InstallSection lang program /> })}
         // Введённое в калькуляторе лендинга — до первых шагов: первый шаг —
         // тот же профиль.
         <HandoffOffer card welcome />
@@ -84,6 +88,7 @@ pub fn Home(
             </div>
         </Show>
         <Awaiting lang documents clients />
+        {(!first).then(|| view! { <InstallSection lang program /> })}
         <button type="button" class="wide" on:click=new_invoice>
             {icon(Icon::Plus)}
             <span class="label">{tr(lang, Key::DocNewInvoice)}</span>

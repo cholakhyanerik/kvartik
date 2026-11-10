@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.114",
+      "date": "2026-11-11",
+      "hy": [
+        "Գլխավոր էկրանին «Տեղադրում» բաժինն այժմ հարկի, ժամկետների և չվճարված հաշիվների քարտերից ներքև է։ iPhone-ում, iPad-ում և Mac-ում այն, ինչպես նախկինում, վերևում է։"
+      ],
+      "ru": [
+        "Блок «Установка» на главном экране теперь стоит ниже карточек налога, сроков и неоплаченных счетов. На iPhone, iPad и Mac он, как и раньше, сверху."
+      ],
+      "en": [
+        "The “Installing the app” block on the home screen now comes after the tax, deadline and unpaid invoice cards. On iPhone, iPad and Mac it stays at the top as before."
+      ]
+    },
+    {
       "version": "0.0.113",
       "date": "2026-11-11",
       "hy": [
@@ -254,19 +267,6 @@
       "en": [
         "There are now settings: the gear on the home screen on a phone, or the line at the bottom of the menu on a computer. You can pick your own colors for the background, buttons and text there: the app recolors right away and picks the other colors itself so that text stays readable.",
         "The circle by the mouse cursor is now off; you can turn it on in the settings."
-      ]
-    },
-    {
-      "version": "0.0.94",
-      "date": "2026-11-09",
-      "hy": [
-        "Կայքում հայտնվել են լիցենզիայի պայմանները և գաղտնիության քաղաքականությունը՝ երեք լեզվով։ Դրանց հղումները, ինչպես նաև վաճառողի email-ը և Telegram-ը կայքի յուրաքանչյուր էջի ներքևում են և «Ծրագրի մասին» էջում։"
-      ],
-      "ru": [
-        "На сайте появились условия лицензии и политика конфиденциальности на трёх языках. Ссылки на них, почта и Telegram продавца — внизу каждой страницы сайта и на экране «О программе»."
-      ],
-      "en": [
-        "The site now has the license terms and the privacy policy in three languages. Links to them, and the seller's email and Telegram, are at the bottom of every page of the site and on the “About” screen."
       ]
     }
   ]

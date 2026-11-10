@@ -28,7 +28,7 @@
 //    перезагрузки (задача 88) — каждая из десяти частей;
 //    и все части `dist/app/split_*.wasm` загружены. «Установить» на
 //    главном экране — и без вопроса браузера, и раскладка, которую видно
-//    только с настоящим CSS: кнопка не вплотную к карточке налога под ней.
+//    только с настоящим CSS: раздел с отступом под карточкой налога.
 // 3. Сервер выключен: программа открывается из кэша service worker, и те же
 //    экраны, формы, карточка, PDF и тексты лицензий работают без сети.
 // 4. Новая версия (задача 67): на сервере — копия сборки новой версией. Пока
@@ -215,19 +215,27 @@ async function settings(page) {
 /// Главный экран: кнопка «Установить» есть всегда, пока программа не
 /// установлена (задача 55), — и без вопроса браузера: Chrome в CI может его
 /// и не прислать, а Firefox и Safari не присылают никогда. Раздел
-/// «Установка» — блоком с отступом, как карточки под ним, а не кнопкой
-/// вплотную к карточке налога (найдено глазным прогоном задачи 20). Отступ
-/// блоков — `--space-4`, 16 точек. Кнопку проверка не нажимает: пришёл
-/// настоящий вопрос — она открыла бы окно установки Chrome.
+/// «Установка» — блоком с отступом, как карточки над ним, а не кнопкой
+/// вплотную к соседнему блоку (найдено глазным прогоном задачи 20). Отступ
+/// блоков — `--space-4`, 16 точек. Вне iPhone, iPad и Mac раздел — ниже
+/// карточки налога (с 0.0.114): сверху он отодвигал её на телефоне. Кнопку
+/// проверка не нажимает: пришёл настоящий вопрос — она открыла бы окно
+/// установки Chrome.
 async function home(page) {
   await go(page, "#/");
-  const gap = await page.waitFor(`const button = ${BUTTON("#home", s("InstallButton"))};
+  const place = await page.waitFor(`const button = ${BUTTON("#home", s("InstallButton"))};
     const card = [...document.querySelectorAll("#home .hero-card")].find((c) => c.getClientRects().length > 0);
-    if (!button || !card) return null;
-    return { gap: card.getBoundingClientRect().top - button.getBoundingClientRect().bottom };`);
-  checks.check("главная: «Установить» без вопроса браузера, не вплотную к карточке налога",
-    gap !== null && gap.gap >= 12,
-    gap === null ? "нет кнопки «Установить» или карточки налога" : `зазор ${gap.gap} точек`);
+    const section = button && button.closest("section.install");
+    if (!section || !card) return null;
+    let above = section.previousElementSibling;
+    while (above && above.getClientRects().length === 0) above = above.previousElementSibling;
+    if (!above) return null;
+    const top = section.getBoundingClientRect().top;
+    return { below: card.getBoundingClientRect().bottom <= top, gap: top - above.getBoundingClientRect().bottom };`);
+  checks.check("главная: «Установить» без вопроса браузера — блоком с отступом под карточкой налога",
+    place !== null && place.below && place.gap >= 12,
+    place === null ? "нет раздела «Установка», карточки налога или блока над разделом"
+      : `${place.below ? "ниже" : "выше"} карточки налога, зазор ${place.gap} точек`);
 }
 
 async function forms(page, when) {
