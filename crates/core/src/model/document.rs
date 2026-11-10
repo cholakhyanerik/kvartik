@@ -534,6 +534,20 @@ pub struct Payment {
     pub amount: i64,
 }
 
+/// Что в оплате, которую отмечают, похоже на опечатку ([`Document::doubts`]).
+/// Окно говорит это до записи, а записать не мешает: клиент мог заплатить
+/// больше остатка, а часы устройства — отставать (CLAUDE.md, Правило 6).
+/// Раньше лишний ноль в сумме и день из будущего закрывали счёт молча
+/// (полный прогон 0.0.96, 2026-11-10).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct Doubts {
+    /// На сколько сумма больше того, что осталось оплатить; `None` — не
+    /// больше.
+    pub over: Option<Money>,
+    /// День поступления позже сегодняшнего.
+    pub ahead: bool,
+}
+
 /// Расчётный документ в системе ՊԵԿ, который ИП выписал по этой поставке
 /// сам (задача 23): день и номер — как их показала система. Номер
 /// человек может не записать: отметка «выписан» важнее, а номер нужен, чтобы
@@ -1211,6 +1225,32 @@ impl Document {
             (total.minor() - paid.minor()).max(0),
             self.data.currency,
         ))
+    }
+
+    /// Сколько оплачено сверх итога: поступления минус итог, а у оплаченного
+    /// не целиком — ноль. Переплату программа не запрещает, но называет:
+    /// в «осталось оплатить» её не видно.
+    pub fn overpaid(&self) -> Result<Money, MoneyError> {
+        let (total, paid) = (self.total()?, self.paid()?);
+        Ok(Money::new(
+            (paid.minor() - total.minor()).max(0),
+            self.data.currency,
+        ))
+    }
+
+    /// Что в оплате похоже на опечатку ([`Doubts`]): день `date` и сумма
+    /// `amount` в младших единицах валюты счёта — то, что уже читается
+    /// в полях формы, — в день `today`. Чего нет — о том и не сказано.
+    pub fn doubts(&self, date: Option<Date>, amount: Option<i64>, today: Option<Date>) -> Doubts {
+        // Остаток не меньше нуля: разность не переполняется.
+        let over = amount
+            .zip(self.left().ok())
+            .filter(|(amount, left)| *amount > left.minor())
+            .map(|(amount, left)| Money::new(amount - left.minor(), self.data.currency));
+        Doubts {
+            over,
+            ahead: date.zip(today).is_some_and(|(date, today)| date > today),
+        }
     }
 
     /// Где документ на день `today`: просрочен счёт со сроком раньше

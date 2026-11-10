@@ -2906,12 +2906,29 @@ fn Payments(
     let currency = document.data().currency;
     let open = document.annulled().is_none();
     let left = document.left().ok();
+    // Переплату программа не запрещает, но называет: в остатке её не видно.
+    let overpaid = document.overpaid().ok().filter(|over| over.minor() > 0);
     let date = RwSignal::new(ctx.today.map(Date::iso).unwrap_or_default());
     let amount = RwSignal::new(
         left.filter(|left| left.minor() > 0)
             .map(|left| i18n::amount(lang.get_untracked(), left))
             .unwrap_or_default(),
     );
+    // Сумма больше остатка и день из будущего — сразу, до записи, и записать
+    // не мешают (`Doubts`): раньше опечатка закрывала счёт молча.
+    let doubts = {
+        let document = document.clone();
+        let today = ctx.today;
+        Memo::new(move |_| {
+            let lang = lang.get();
+            let day = date.with(|text| Date::from_iso(text));
+            let sum = amount
+                .with(|text| i18n::parse_money(lang, text, currency).ok())
+                .map(Money::minor)
+                .filter(|sum| *sum > 0);
+            document.doubts(day, sum, today)
+        })
+    };
     let tried = RwSignal::new(false);
     let filled = (date.get_untracked(), amount.get_untracked());
     ctx.forms.hold_while(move || date.with(|day| *day != filled.0) || amount.with(|sum| *sum != filled.1));
@@ -2983,8 +3000,14 @@ fn Payments(
             {left.filter(|left| left.minor() > 0).map(|left| view! {
                 <p class="total">{move || fill(t(lang.get(), Key::PaymentLeft), &[&i18n::money(lang.get(), left)])}</p>
             })}
+            {overpaid.map(|over| view! {
+                <p class="total">{move || fill(t(lang.get(), Key::PaymentOverpaid), &[&i18n::money(lang.get(), over)])}</p>
+            })}
             {open.then(|| view! {
                 <DateField lang label=Key::PaymentDate value=date tried />
+                {move || doubts.with(|doubts| doubts.ahead).then(|| view! {
+                    <p class="warning" role="alert">{tr(lang, Key::PaymentAhead)}</p>
+                })}
                 <TextField
                     lang
                     label=Key::PaymentAmount
@@ -3005,6 +3028,12 @@ fn Payments(
                             Some(number_problem(lang, error, &example))
                         }
                     }
+                })}
+                {move || doubts.with(|doubts| doubts.over).map(|over| view! {
+                    <p class="warning" role="alert">{move || {
+                        let lang = lang.get();
+                        fill(t(lang, Key::PaymentOver), &[&i18n::money(lang, over)])
+                    }}</p>
                 })}
                 <button type="button" disabled=move || busy.get() on:click=record>
                     <span class="label">{tr(lang, Key::PaymentAdd)}</span>

@@ -718,7 +718,8 @@ fn listed_rows(host: &HtmlElement) -> Vec<String> {
 /// акты» сужают список; документы — под заголовком своего месяца; строка
 /// выпущенного открывает его карточку по своему адресу; «Отметить, что
 /// оплачен» вносит остаток сегодняшним днём — статус «оплачен», в истории —
-/// поступление; «назад» возвращает к списку.
+/// поступление; сумму сверх остатка и день из будущего форма называет до
+/// записи, а переплату — карточка; «назад» возвращает к списку.
 #[wasm_bindgen_test]
 async fn documents_are_found_opened_and_marked_paid() {
     let client = fresh_base_with_client().await;
@@ -846,6 +847,32 @@ async fn documents_are_found_opened_and_marked_paid() {
     match documents.iter().find(|d| d.id() == first.id()).map(Document::payments) {
         Some([paid]) if paid.date == today && paid.amount == 240_000 => {}
         other => wrong.push(format!("оплаты в базе: {other:?}")),
+    }
+
+    // Оплаченному целиком любая сумма — сверх остатка, а день через месяц
+    // ещё не наступил: форма говорит это до записи, а записать не мешает, и
+    // переплата — строкой в карточке (полный прогон 0.0.96: молчала).
+    let ahead = today.add_days(30).map(Date::iso).unwrap_or_default();
+    for (label, value) in [(Key::PaymentDate, ahead.as_str()), (Key::PaymentAmount, "10")] {
+        match field(&host, t(lang, label), 0) {
+            Some(input) => type_into(&input, value),
+            None => wrong.push(format!("нет поля {label:?}")),
+        }
+    }
+    sleep(100).await;
+    let ten = i18n::money(lang, Money::new(1_000, Currency::Usd));
+    let said = host.text_content().unwrap_or_default();
+    for doubt in [fill(t(lang, Key::PaymentOver), &[&ten]), t(lang, Key::PaymentAhead).to_owned()] {
+        if !said.contains(&doubt) {
+            wrong.push(format!("форма оплаты не сказала «{doubt}»"));
+        }
+    }
+    match button(&host, &[t(lang, Key::PaymentAdd)]) {
+        Some(add) => add.click(),
+        None => wrong.push("нет «Отметить оплату»".to_owned()),
+    }
+    if !wait_for(&host, &fill(t(lang, Key::PaymentOverpaid), &[&ten])).await {
+        wrong.push("переплата не названа в карточке".to_owned());
     }
 
     match host.query_selector(".docs-detail a.back").ok().flatten() {

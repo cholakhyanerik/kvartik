@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.98",
+      "date": "2026-11-10",
+      "hy": [
+        "Վճարումը նշելիս ծրագիրն այժմ միանգամից զգուշացնում է, եթե գումարը գերազանցում է մնացորդը կամ ստացման օրը դեռ չի եկել. դա սովորաբար տառասխալ է։ Նշել հնարավոր է նաև այդպես, իսկ գերավճարը երևում է հաշվի քարտում։"
+      ],
+      "ru": [
+        "Когда вы отмечаете оплату, программа теперь сразу говорит, если сумма больше остатка или день поступления ещё не наступил: обычно это опечатка. Отметить можно и так, а переплата видна в карточке счёта."
+      ],
+      "en": [
+        "When you record a payment, the app now tells you at once if the amount is more than is left to pay or the date received hasn't come yet: that's usually a typo. You can still record it, and an overpayment shows on the invoice card."
+      ]
+    },
+    {
       "version": "0.0.97",
       "date": "2026-11-10",
       "hy": [
@@ -260,19 +273,6 @@
       ],
       "en": [
         "Nothing has changed in the app: the libraries it is built from are now checked against a database of known vulnerabilities every week, even when there is no new version."
-      ]
-    },
-    {
-      "version": "0.0.78",
-      "date": "2026-11-04",
-      "hy": [
-        "«Ծրագրի մասին» էկրանին այժմ կան այլ հեղինակների կոդի և տառատեսակների լիցենզիաների տեքստերը, որոնցից կառուցված է Kvartik-ը. դրանց լիցենզիաները պահանջում են, որ տեքստերը տրվեն ծրագրի հետ։ Բաժինը բացվում է սեղմելով, նաև առանց ինտերնետի։"
-      ],
-      "ru": [
-        "На экране «О программе» теперь есть тексты лицензий кода и шрифтов других авторов, из которых собран Kvartik: их лицензии требуют, чтобы тексты шли вместе с программой. Блок раскрывается по нажатию, и без интернета тоже."
-      ],
-      "en": [
-        "The “About” screen now has the license texts of the code and fonts by other authors that Kvartik is built from: their licenses require these texts to come with the app. The section opens on a tap, also without an internet connection."
       ]
     }
   ]

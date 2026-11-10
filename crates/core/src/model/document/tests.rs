@@ -848,6 +848,71 @@ fn payments_move_the_status() {
     assert_eq!(act.status(after), Status::Issued);
 }
 
+/// Переплата и день поступления из будущего не запрещены, но названы:
+/// в полном прогоне 0.0.96 оплаты 40 000 и 20 000 ֏ по счёту на 36 000 ֏
+/// закрыли его молча, как и оплата 01.03.2027, отмеченная 10.11.2026. Счёт —
+/// 100 000 ֏; числа посчитаны вручную.
+#[test]
+fn an_overpayment_and_a_day_ahead_are_named() {
+    let client = client();
+    let invoice = issued(DocKind::Invoice, &client, day(2026, 11, 2), &[]);
+    let amd = |minor| Money::new(minor, Currency::Amd);
+    let today = Some(day(2026, 11, 10));
+    let march = Some(day(2027, 3, 1));
+    let over = |minor| Doubts {
+        over: Some(amd(minor)),
+        ahead: false,
+    };
+    let ahead = Doubts {
+        over: None,
+        ahead: true,
+    };
+    let paid = |document: &Document, date: Date, amount: i64| {
+        document
+            .add_payment(Payment { date, amount }, at(4_000))
+            .expect("переплата не запрещена")
+    };
+    let part = paid(&invoice, day(2026, 11, 5), 40_000);
+    let whole = paid(&part, day(2026, 11, 6), 60_000);
+    let twice = paid(&whole, day(2026, 11, 7), 24_000);
+    let mut wrong = Vec::new();
+    for (name, got, expected) in [
+        ("весь остаток", invoice.doubts(today, Some(100_000), today), Doubts::default()),
+        ("на 4 000 больше", invoice.doubts(today, Some(104_000), today), over(4_000)),
+        ("часть", invoice.doubts(today, Some(1), today), Doubts::default()),
+        ("после части — больше остатка", part.doubts(today, Some(100_000), today), over(40_000)),
+        ("оплаченному — любая сумма", whole.doubts(today, Some(5_000), today), over(5_000)),
+        ("день из будущего", invoice.doubts(march, None, today), ahead),
+        ("сегодня", invoice.doubts(today, None, today), Doubts::default()),
+        ("часы без даты", invoice.doubts(march, None, None), Doubts::default()),
+        ("пустые поля", invoice.doubts(None, None, today), Doubts::default()),
+        (
+            "оба сразу",
+            whole.doubts(march, Some(1), today),
+            Doubts {
+                over: Some(amd(1)),
+                ahead: true,
+            },
+        ),
+    ] {
+        if got != expected {
+            wrong.push(format!("{name}: {got:?}, а ждали {expected:?}"));
+        }
+    }
+    for (name, document, overpaid, left, status) in [
+        ("без оплат", &invoice, 0, 100_000, Status::Unpaid),
+        ("часть", &part, 0, 60_000, Status::PartlyPaid),
+        ("ровно", &whole, 0, 0, Status::Paid),
+        ("с переплатой", &twice, 24_000, 0, Status::Paid),
+    ] {
+        let got = (document.overpaid(), document.left(), document.status(day(2026, 11, 10)));
+        if got != (Ok(amd(overpaid)), Ok(amd(left)), status) {
+            wrong.push(format!("{name}: переплата, остаток и статус — {got:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// Акт из счёта: тот же клиент, язык, валюта, строки и дата услуги, дата
 /// акта — сегодня, основание — счёт. Из черновика и из аннулированного —
 /// нельзя.
