@@ -2496,10 +2496,16 @@ fn DocCard(
             {basis.map(|number| view! {
                 <p class="hint">{move || fill(t(lang.get(), Key::DocBasis), &[&number])}</p>
             })}
+            // Акты на весь счёт — «закрывают его целиком»: «на X, а сам счёт
+            // — на X» звучало бы расхождением (полный прогон 2026-11-10, п. 10).
             {move || staged.get().and_then(|staged| Some((staged.worth_saying()?, staged.whole))).map(|(acted, whole)| view! {
                 <p class="hint">{move || {
                     let lang = lang.get();
-                    fill(t(lang, Key::DocActsSoFar), &[&i18n::money(lang, acted), &i18n::money(lang, whole)])
+                    if acted == whole {
+                        t(lang, Key::DocActsWhole).to_owned()
+                    } else {
+                        fill(t(lang, Key::DocActsSoFar), &[&i18n::money(lang, acted), &i18n::money(lang, whole)])
+                    }
                 }}</p>
             })}
         </div>

@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.105",
+      "date": "2026-11-10",
+      "hy": [
+        "Ակտերով ամբողջությամբ ծածկված հաշվի քարտն այժմ ասում է «Այս հաշվով ակտերը ծածկում են այն ամբողջությամբ»՝ երկու նույն գումարը «իսկ»-ով կողք կողքի դնելու փոխարեն։"
+      ],
+      "ru": [
+        "Карточка счёта, который акты закрыли целиком, теперь говорит «Акты по этому счёту закрывают его целиком», а не ставит рядом две одинаковые суммы через «а»."
+      ],
+      "en": [
+        "The card of an invoice fully covered by acts now says “The acts for this invoice cover it in full” instead of putting two equal amounts side by side as if they differed."
+      ]
+    },
+    {
       "version": "0.0.104",
       "date": "2026-11-10",
       "hy": [
@@ -266,19 +279,6 @@
       ],
       "en": [
         "“Open Kvartik” on kvartik.com now brings along what you entered in the calculator: your type of activity, year of birth and citizenship. The app offers to add them to your profile, and you save them yourself in the profile form."
-      ]
-    },
-    {
-      "version": "0.0.85",
-      "date": "2026-11-05",
-      "hy": [
-        "Այլ ԱՁ-ի պահուստային պատճենն այլևս լուռ չի միավորվում ծրագրի տվյալների հետ. ծրագիրը նշում է երկու ԱՁ-ի անունն ու ՀՎՀՀ-ն և հարցնում է՝ միավորել, թե ոչ։ Նույն ԱՁ-ի պատճենը վերականգնվում է ինչպես նախկինում։"
-      ],
-      "ru": [
-        "Резервная копия другого ИП больше не сливается с данными программы молча: программа называет оба ИП по имени и ИНН (ՀՎՀՀ) и спрашивает, сливать ли. Копия того же ИП восстанавливается, как раньше."
-      ],
-      "en": [
-        "A backup of a different individual entrepreneur is no longer merged into the app's data silently: the app names both by name and TIN (ՀՎՀՀ) and asks whether to merge. A backup of the same entrepreneur restores as before."
       ]
     }
   ]

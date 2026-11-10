@@ -1501,6 +1501,53 @@ async fn the_next_act_stage_shows_what_is_left_once() {
     assert!(wrong.is_empty(), "второй акт-этап: {wrong:#?}");
 }
 
+/// Два акта-этапа закрыли счёт целиком (полный прогон 2026-11-10, п. 10):
+/// карточка счёта говорит «Акты по этому счёту закрывают его целиком», а не
+/// «на 2 400,00 $, а сам счёт — на 2 400,00 $» — «а» звучало расхождением.
+#[wasm_bindgen_test]
+async fn acts_covering_the_invoice_say_so_plainly() {
+    let client = fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let now = clock::now();
+    let today = clock::today().expect("часы с датой");
+    let invoice = Document::create(invoice_data(&client), now)
+        .expect("черновик счёта")
+        .issue(&[], 0, Some(&profile()), &client, now)
+        .expect("счёт выпущен");
+    let mut half = invoice.act_data(today).expect("акт по счёту");
+    half.items[0].price = 120_000;
+    let first = Document::create(half.clone(), now)
+        .expect("черновик акта")
+        .issue(std::slice::from_ref(&invoice), 0, Some(&profile()), &client, now)
+        .expect("первый акт выпущен");
+    let second = Document::create(half, now)
+        .expect("черновик второго акта")
+        .issue(&[invoice.clone(), first.clone()], 0, Some(&profile()), &client, now)
+        .expect("второй акт выпущен");
+    let mut writes = Writes::default();
+    writes.insert(&invoice);
+    writes.insert(&first);
+    writes.insert(&second);
+    commit(writes).await;
+
+    let address = format!("#/documents/{}", invoice.id());
+    let (host, mounted) = mount_at(&address);
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::DocActsWhole)).await {
+        wrong.push("у счёта, закрытого двумя актами, нет «закрывают его целиком»".to_owned());
+    }
+    let so_far = t(lang, Key::DocActsSoFar).split("{}").next().unwrap_or_default();
+    if host.text_content().unwrap_or_default().contains(so_far) {
+        wrong.push("у счёта, закрытого актами целиком, — «на …, а сам счёт — на …»".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "акты на весь счёт: {wrong:#?}");
+}
+
 /// Строка налога выпущенного документа — в его карточке, свёрнутым вопросом:
 /// сам выбор сохраняет её, номер и строки документа не меняются, а сохранённая
 /// строка раскрывает вопрос. Акт по этому счёту берёт её в свою форму и в свой
