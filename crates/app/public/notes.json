@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.106",
+      "date": "2026-11-10",
+      "hy": [
+        "Կայքի էջի «Բացել Kvartik-ը» կոճակն այժմ ծրագիրը բացում է այդ էջի լեզվով, այլ ոչ թե դիտարկիչի լեզվով։ Այն կհիշվի, երբ սեղմեք «Շարունակել»։"
+      ],
+      "ru": [
+        "«Открыть Kvartik» на странице сайта теперь открывает программу на языке этой страницы, а не на языке браузера. Запомнится он, когда вы нажмёте «Продолжить»."
+      ],
+      "en": [
+        "“Open Kvartik” on a website page now opens the app in that page's language rather than your browser's. It's remembered once you press “Continue”."
+      ]
+    },
+    {
       "version": "0.0.105",
       "date": "2026-11-10",
       "hy": [
@@ -266,19 +279,6 @@
       "en": [
         "You can now keep several entrepreneurs in one app: add, open and remove them under “Entrepreneurs in the app” in your profile. Each has their own invoices, ledger and tax.",
         "With several entrepreneurs, the backup holds all of them in one file, and you can make a backup of one of them for the client under a separate password the app doesn't remember."
-      ]
-    },
-    {
-      "version": "0.0.86",
-      "date": "2026-11-06",
-      "hy": [
-        "kvartik.com-ում «Բացել Kvartik-ը» կոճակն այժմ իր հետ է բերում հաշվիչում մուտքագրածը՝ գործունեության տեսակը, ծննդյան տարեթիվը և քաղաքացիությունը։ Ծրագիրը կառաջարկի դրանք ավելացնել պրոֆիլում, իսկ պահելու եք ինքներդ՝ պրոֆիլի ձևում։"
-      ],
-      "ru": [
-        "«Открыть Kvartik» на kvartik.com теперь берёт с собой то, что вы ввели в калькуляторе: вид деятельности, год рождения и гражданство. Программа предложит взять это в профиль, а сохраните вы сами — в форме профиля."
-      ],
-      "en": [
-        "“Open Kvartik” on kvartik.com now brings along what you entered in the calculator: your type of activity, year of birth and citizenship. The app offers to add them to your profile, and you save them yourself in the profile form."
       ]
     }
   ]

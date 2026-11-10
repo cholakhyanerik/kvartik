@@ -17,13 +17,22 @@ pub struct WindowLang(RwSignal<Lang>);
 
 impl WindowLang {
     /// Язык при открытии: выбранный на этом устройстве, а не выбирали —
-    /// по языкам браузера (`Lang::preferred`). Читается синхронно, до первой
-    /// отрисовки, — окно не мигает чужим языком, — и сразу ставится
-    /// у страницы: паника в первой же отрисовке скажет на нём (`ui::panic`).
+    /// язык страницы сайта, с которой пришли (`/app/?lang=ru`, полный прогон
+    /// 2026-11-10, п. 11), а нет его — по языкам браузера (`Lang::preferred`).
+    /// Язык страницы сайта только предлагается: запоминает его экран первого
+    /// запуска — «Продолжить» или переключатель ([`Self::keep`]). Читается
+    /// синхронно, до первой отрисовки, — окно не мигает чужим языком, —
+    /// и сразу ставится у страницы: паника в первой же отрисовке скажет на
+    /// нём (`ui::panic`).
     pub fn start() -> Self {
         let lang = Self::remembered().unwrap_or_else(|| {
-            let browser = platform::languages();
-            Lang::preferred(browser.iter().map(String::as_str))
+            platform::address_lang()
+                .as_deref()
+                .and_then(Lang::from_code)
+                .unwrap_or_else(|| {
+                    let browser = platform::languages();
+                    Lang::preferred(browser.iter().map(String::as_str))
+                })
         });
         mark_page(lang);
         Self(RwSignal::new(lang))

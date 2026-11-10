@@ -631,3 +631,60 @@ async fn a_returning_person_continues_from_the_data() {
     forget_device();
     assert!(wrong.is_empty(), "возвращение: {wrong:#?}");
 }
+
+/// Язык страницы лендинга приходит строкой запроса (`/app/?lang=ru`, полный
+/// прогон 2026-11-10, п. 11): экран первого запуска — на нём, хоть языки
+/// браузера и другие, а запоминает его «Продолжить», не само открытие.
+/// Незнакомый язык в адресе — как будто его нет.
+#[wasm_bindgen_test]
+async fn the_landing_language_is_offered_and_kept_on_continue() {
+    let window = web_sys::window().expect("окно есть");
+    let history = window.history().expect("history есть");
+    let location = window.location();
+    let original = format!(
+        "{}{}{}",
+        location.pathname().unwrap_or_default(),
+        location.search().unwrap_or_default(),
+        location.hash().unwrap_or_default()
+    );
+    let address = |query: &str| {
+        let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(query));
+    };
+    let mut wrong = Vec::new();
+    let browser = Lang::preferred(crate::platform::languages().iter().map(String::as_str));
+    let site = if browser == Lang::Ru { Lang::En } else { Lang::Ru };
+
+    forget_device();
+    address(&format!("?lang={}", site.code()));
+    let (host, mounted) = mount_welcome(Browser::Chrome);
+    sleep(100).await;
+    if !host.text_content().unwrap_or_default().contains(t(site, Key::WelcomeContinue)) {
+        wrong.push(format!("экран первого запуска не на языке сайта {site:?}"));
+    }
+    if Device::new().ui_lang().is_some() {
+        wrong.push("язык сайта запомнен без «Продолжить»".to_owned());
+    }
+    match button(&host, &[t(site, Key::WelcomeContinue)]) {
+        Some(proceed) => proceed.click(),
+        None => wrong.push("нет «Продолжить» на языке сайта".to_owned()),
+    }
+    sleep(100).await;
+    if Device::new().ui_lang() != Some(site) {
+        wrong.push(format!("«Продолжить» запомнило {:?}, а не {site:?}", Device::new().ui_lang()));
+    }
+    drop(mounted);
+    host.remove();
+
+    forget_device();
+    address("?lang=xx");
+    let (host, mounted) = mount_welcome(Browser::Chrome);
+    sleep(100).await;
+    if !host.text_content().unwrap_or_default().contains(t(browser, Key::WelcomeContinue)) {
+        wrong.push(format!("с незнакомым языком в адресе — не язык браузера {browser:?}"));
+    }
+    drop(mounted);
+    host.remove();
+    address(&original);
+    forget_device();
+    assert!(wrong.is_empty(), "язык сайта: {wrong:#?}");
+}

@@ -68,6 +68,18 @@ pub fn set_hash(hash: &str) {
     }
 }
 
+/// Язык страницы сайта, с которой пришли, — `lang` строки запроса адреса:
+/// «Открыть Kvartik» лендинга ведёт на `/app/?lang=ru` (полный прогон
+/// 2026-11-10, п. 11). `None` — его нет. Что это за язык, решает окно.
+pub fn address_lang() -> Option<String> {
+    let search = web_sys::window()?.location().search().ok()?;
+    search
+        .trim_start_matches('?')
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("lang="))
+        .map(str::to_owned)
+}
+
 /// Языки браузера по убыванию предпочтения (`navigator.languages`, а нет
 /// его — `navigator.language`); пусто — браузер не сказал.
 pub fn languages() -> Vec<String> {

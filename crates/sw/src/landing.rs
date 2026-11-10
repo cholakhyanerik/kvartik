@@ -277,7 +277,7 @@ fn calculator(lang: Lang, calc: &Calc, app: &str) -> String {
         </div>
         <p class="note" data-state="loading" hidden>{loading}</p>
         <p class="note" data-state="failed" role="alert" hidden>{failed}</p>
-        <p class="actions"><a class="button" href="{app}" data-handoff><span class="label">{open}</span></a></p>
+        <p class="actions"><a class="button" href="{link}" data-handoff><span class="label">{open}</span></a></p>
         <p class="hint">{handoff}</p>
       </section>
 "#,
@@ -290,7 +290,19 @@ fn calculator(lang: Lang, calc: &Calc, app: &str) -> String {
         failed = text(Key::CalcFailed),
         open = text(Key::LandingOpen),
         handoff = text(Key::CalcHandoffHint),
+        link = app_link(app, lang),
     )
+}
+
+/// Адрес ссылки «Открыть Kvartik» со страницы языка `lang` — с языком
+/// страницы строкой запроса: `/app/?lang=ru` (полный прогон 2026-11-10,
+/// п. 11). Экран первого запуска открывается на нём, а запоминает язык
+/// человек — «Продолжить» или переключатель (`ui/lang.rs`); выбравшему
+/// язык раньше строка ничего не меняет. Страницу программы со строкой
+/// запроса отдают и хостинг, и service worker (`ignoreSearch` у переходов,
+/// `crates/app/public/sw.js`).
+fn app_link(app: &str, lang: Lang) -> String {
+    format!("{app}?lang={}", lang.code())
 }
 
 /// Страница языка `lang`. `css` и `js` — имена файлов оформления и скрипта
@@ -335,7 +347,7 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
       <section class="hero">
         <h1>{headline}</h1>
         <p class="lead">{lead}</p>
-        <p class="actions"><a class="button" href="{app}" data-handoff><span class="label">{open}</span></a></p>
+        <p class="actions"><a class="button" href="{link}" data-handoff><span class="label">{open}</span></a></p>
         <p class="trial">{trial} {after_trial}</p>
       </section>
 {calculator}      <section aria-labelledby="features">
@@ -353,7 +365,7 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
       <section class="card" aria-labelledby="fit" data-tilt>
         <h2 id="fit">{fit_title}</h2>
         <p>{fit_text}</p>
-        <p class="actions"><a class="button" href="{app}" data-handoff><span class="label">{open}</span></a></p>
+        <p class="actions"><a class="button" href="{link}" data-handoff><span class="label">{open}</span></a></p>
       </section>
 {price}    </main>
 {footer}  </body>
@@ -363,6 +375,7 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
         top = top(lang, own, url),
         footer = footer(lang, app, checked),
         calculator = calculator(lang, calc, app),
+        link = app_link(app, lang),
         price = plan_card(
             lang,
             "price",
@@ -811,9 +824,15 @@ mod tests {
             if !html.contains(&escape(t(lang, Key::CalcHandoffHint))) {
                 wrong.push(format!("{lang:?}: не сказано, что ссылка возьмёт с собой"));
             }
-            let links = html.matches("href=\"/app/\"").count();
-            if links != 3 || html.matches("href=\"/app/\" data-handoff>").count() != links {
-                wrong.push(format!("{lang:?}: не у всех трёх ссылок в программу есть data-handoff"));
+            // Ссылка в программу — с языком страницы (полный прогон
+            // 2026-11-10, п. 11), и голой `/app/` не осталось.
+            let link = format!("href=\"/app/?lang={}\"", lang.code());
+            let links = html.matches(&link).count();
+            if links != 3 || html.matches(&format!("{link} data-handoff>")).count() != links {
+                wrong.push(format!("{lang:?}: не у всех трёх ссылок в программу есть data-handoff и язык"));
+            }
+            if html.contains("href=\"/app/\"") {
+                wrong.push(format!("{lang:?}: ссылка в программу без языка страницы"));
             }
         }
         assert!(wrong.is_empty(), "{wrong:#?}");
@@ -838,7 +857,7 @@ mod tests {
                 "<link rel=\"alternate\" hreflang=\"x-default\" href=\"https://kvartik.com/\" />".to_owned(),
                 "<link rel=\"stylesheet\" href=\"/kvartik-site-a.css\" />".to_owned(),
                 "<script src=\"/kvartik-site-b.js\" defer></script>".to_owned(),
-                "<a class=\"button\" href=\"/app/\" data-handoff>".to_owned(),
+                format!("<a class=\"button\" href=\"/app/?lang={}\" data-handoff>", lang.code()),
                 format!("href=\"webcal://kvartik.com/calendar/{}.ics\"", lang.code()),
                 format!("<a href=\"/app/{LICENSES}\">"),
                 escape(t(lang, Key::WelcomeHeadline)),

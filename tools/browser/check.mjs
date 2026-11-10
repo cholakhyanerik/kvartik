@@ -414,7 +414,7 @@ async function landing(browser) {
         === ${JSON.stringify(t("WelcomeHeadline", lang))} ? true : null;`));
       // Оформление пришло: заголовок — засечками окна, кнопка — пилюлей.
       checks.check(`лендинг ${at}: оформление и ссылка в программу`, await page.waitFor(`
-        const button = document.querySelector('a.button[href="/app/"]');
+        const button = document.querySelector('a.button[href="/app/?lang=${lang}"]');
         return button && getComputedStyle(document.querySelector("h1")).fontFamily.includes("Kvartik Serif")
           && getComputedStyle(button).borderTopLeftRadius !== "0px" ? true : null;`));
       // С `clientWidth`, а не `innerWidth`: у страницы шире экрана телефон
@@ -501,9 +501,19 @@ async function landing(browser) {
       if (location.pathname !== "/app/") return null;
       const handed = JSON.parse(localStorage.getItem("kvartik.calc") ?? "null");
       return handed?.kind === "trade" && handed.birth_year === 1985 && handed.residency === "citizen" ? true : null;`));
+    // Язык страницы лендинга (/ru/) приходит в программу строкой запроса
+    // (полный прогон 2026-11-10, п. 11): экран первого запуска — по-русски,
+    // а запомнит язык человек — «Продолжить», не раньше.
+    checks.check("программа: первый запуск на языке страницы лендинга, ещё не запомненном", await page.waitFor(`
+      return location.search === "?lang=ru" && document.documentElement.lang === "ru"
+        && localStorage.getItem("kvartik.lang") === null
+        && [...document.querySelectorAll(".welcome button")].some((b) => b.textContent.trim()
+          === ${JSON.stringify(t("WelcomeContinue", "ru"))}) ? true : null;`));
     const proceed = JSON.stringify(["hy", "ru", "en"].map((lang) => t("WelcomeContinue", lang)));
     await page.waitFor(`const b = [...document.querySelectorAll(".welcome button")].find((b) =>
       ${proceed}.includes(b.textContent.trim())); if (!b) return null; b.click(); return true;`);
+    checks.check("программа: «Продолжить» запомнило язык страницы лендинга",
+      await page.waitFor(`return localStorage.getItem("kvartik.lang") === "ru" ? true : null;`));
     checks.check("программа: предлагает взять введённое в калькуляторе", await page.waitFor(`
       const card = document.querySelector("#home .handoff");
       return card && card.getClientRects().length > 0 && card.innerText.includes("1985") ? true : null;`));
