@@ -938,7 +938,7 @@ fn ClientCopy(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl In
         <p class="hint">{tr(lang, Key::BackupClientAbout)}</p>
         <form class="backup" on:submit=submit>
             <label>
-                {tr(lang, Key::BackupClientPassword)}
+                {tr(lang, Key::BackupFilePassword)}
                 <input type="password" autocomplete="new-password" bind:value=password />
             </label>
             <label>
