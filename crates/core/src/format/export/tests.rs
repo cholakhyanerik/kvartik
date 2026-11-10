@@ -391,6 +391,37 @@ fn ledger_sheet_lists_documents_and_records() {
     );
 }
 
+/// Строки одного дня — по виду и номеру документа, а запись книги — за
+/// ними: по одному случайному идентификатору акт 2026-003 вставал раньше
+/// 2026-002 (полный прогон 0.0.96). Восемь документов одного дня — случайный
+/// порядок совпал бы с номерами раз на десятки тысяч; в список они идут
+/// задом наперёд.
+#[test]
+fn ledger_sheet_orders_a_day_by_kind_and_number() {
+    let client = client();
+    let october = day(2026, 10, 10);
+    let mut documents = Vec::new();
+    for kind in [DocKind::Invoice, DocKind::Act] {
+        for _ in 0..4 {
+            let data = DocumentData {
+                kind,
+                due: None,
+                ..invoice_data(&client, october, october)
+            };
+            let document = issue(data, &client, &documents);
+            documents.push(document);
+        }
+    }
+    documents.reverse();
+    let record = income(october, 5_000, Currency::Amd);
+    let sheet = ledger_sheet(Lang::Ru, &documents, &[record], &[client], october, october);
+    let got: Vec<&Cell> = sheet.rows.iter().map(|row| &row[2]).collect();
+    let mut expected: Vec<Cell> = (1..=4).map(|seq| text(&format!("Счёт №\u{A0}2026-00{seq}"))).collect();
+    expected.extend((1..=4).map(|seq| text(&format!("Акт сдачи-приёмки №\u{A0}2026-00{seq}"))));
+    expected.push(Cell::Empty);
+    assert_eq!(got, expected.iter().collect::<Vec<_>>());
+}
+
 /// Лист документов периода: выпущенные счета и акты по дате документа,
 /// и аннулированные; черновика и удалённого нет. Статус и остаток — на день
 /// выгрузки, у акта — счёт-основание, отметка о расчётном документе ՊԵԿ —

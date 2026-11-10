@@ -50,7 +50,7 @@ use serde::{Deserialize, Serialize};
 use super::activity::{ActivityCode, IncomeKind};
 use super::attachment::{Attachment, AttachmentRef, FileBytes};
 use super::date::{Date, Quarter};
-use super::document::{DocKind, Document};
+use super::document::{DocKind, Document, Number};
 use super::money::{Currency, ExchangeRate, Lumas, Money, MoneyError, RateError, RateSource};
 use super::record::{RecordId, RecordMeta, Timestamp};
 use super::text::Line;
@@ -545,13 +545,25 @@ impl Row<'_> {
             Source::Operation(operation) => operation.id(),
         }
     }
+
+    /// Место строки среди строк того же дня и вида: документы — по виду
+    /// и номеру, за ними записи книги. Идентификатор — случайный UUID — решает
+    /// только между записями без номера: по нему одному акт 2026-003 вставал
+    /// раньше 2026-002 (полный прогон 0.0.96, выгрузка).
+    pub fn in_day(&self) -> (u8, Option<(DocKind, Option<Number>)>, RecordId) {
+        match self.source {
+            Source::Document(document) => (0, Some((document.data().kind, document.number())), document.id()),
+            Source::Operation(operation) => (1, None, operation.id()),
+        }
+    }
 }
 
 /// Строки книги за квартал: доход из документов и живые операции, свежие
-/// сверху; в один день — доходы выше расходов.
+/// сверху; в один день — доходы выше расходов, а среди них — тоже свежие
+/// сверху: документ с большим номером выше ([`Row::in_day`]).
 pub fn rows<'a>(documents: &'a [Document], operations: &'a [Operation], quarter: Quarter) -> Vec<Row<'a>> {
     let mut rows = between(documents, operations, quarter.first_day(), quarter.last_day());
-    rows.sort_by(|a, b| (b.date, a.flow, b.id()).cmp(&(a.date, b.flow, a.id())));
+    rows.sort_by(|a, b| (b.date, a.flow, b.in_day()).cmp(&(a.date, b.flow, a.in_day())));
     rows
 }
 

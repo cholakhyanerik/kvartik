@@ -477,6 +477,33 @@ fn rows_are_live_and_newest_first() {
     assert_eq!(ids, [earned.id(), spent.id(), first.id()]);
 }
 
+/// В один день документы — тоже свежие сверху: по виду и номеру, а не по
+/// случайному идентификатору, по которому акт 2026-003 вставал в выгрузке
+/// раньше 2026-002 (полный прогон 0.0.96). Восемь документов одного дня:
+/// случайный порядок совпал бы с номерами раз на десятки тысяч.
+#[test]
+fn documents_of_a_day_follow_their_numbers() {
+    let client = client();
+    let october = day(2026, 10, 9);
+    let mut documents = Vec::new();
+    for kind in [DocKind::Invoice, DocKind::Act] {
+        for _ in 0..4 {
+            let document = issue(document_data(kind, &client, october, october, 100_000), &client, &documents);
+            documents.push(document);
+        }
+    }
+    let got: Vec<String> = rows(&documents, &[], quarter(2026, 4))
+        .iter()
+        .filter_map(|row| match row.source {
+            Source::Document(document) => Some(format!("{:?} {}", document.data().kind, document.number()?)),
+            Source::Operation(_) => None,
+        })
+        .collect();
+    let mut expected: Vec<String> = (1..=4).rev().map(|seq| format!("Act 2026-00{seq}")).collect();
+    expected.extend((1..=4).rev().map(|seq| format!("Invoice 2026-00{seq}")));
+    assert_eq!(got, expected);
+}
+
 /// Итог в драмах — сумма переведённых строк с лумами. Три поступления по
 /// 10,00 $ по 361,93: каждое — 3 619,30 ֏, доход — 10 857,90 ֏; до драма
 /// его доводит строка расчёта налога, а не книга. Строка в евро без курса

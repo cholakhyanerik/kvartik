@@ -273,7 +273,8 @@ fn document_title(lang: Lang, document: &Document) -> String {
 }
 
 /// Лист книги с дня `from` по день `until` включительно: строки — по дню
-/// для налога, в один день доходы выше расходов (`model::ledger`).
+/// для налога, в один день доходы выше расходов, а документы — по виду
+/// и номеру (`Row::in_day`).
 pub fn ledger_sheet(
     lang: Lang,
     documents: &[Document],
@@ -283,7 +284,7 @@ pub fn ledger_sheet(
     until: Date,
 ) -> Sheet {
     let mut rows = ledger::between(documents, operations, from, until);
-    rows.sort_by_key(|row| (row.date, row.flow, row.id()));
+    rows.sort_by_key(|row| (row.date, row.flow, row.in_day()));
     let client_name = |id| {
         clients
             .iter()

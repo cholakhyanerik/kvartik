@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.101",
+      "date": "2026-11-10",
+      "hy": [
+        "Նույն օրվա փաստաթղթերն այժմ դասավորված են ըստ համարների՝ հաշվապահի համար արտահանման մեջ և «Մատյան» էկրանին։ Նախկինում դրանք պատահական հերթականությամբ էին, և 2026-003 ակտը կարող էր լինել 2026-002-ից առաջ։"
+      ],
+      "ru": [
+        "Документы одного дня теперь стоят по номерам — и в выгрузке для бухгалтера, и на экране «Книга». Раньше они шли в случайном порядке, и акт 2026-003 мог оказаться раньше 2026-002."
+      ],
+      "en": [
+        "Documents of the same day are now in number order, both in the export for your accountant and on the “Ledger” screen. Before, they came in random order, and act 2026-003 could come before 2026-002."
+      ]
+    },
+    {
       "version": "0.0.100",
       "date": "2026-11-10",
       "hy": [
@@ -260,19 +273,6 @@
       ],
       "en": [
         "Nothing has changed in the app, and the kvartik.com website now has a home page in three languages about what Kvartik does, with a subscription to the shared deadline calendar. The app itself still opens at kvartik.com/app/."
-      ]
-    },
-    {
-      "version": "0.0.81",
-      "date": "2026-11-05",
-      "hy": [
-        "Ծրագրում ոչինչ չի փոխվել. կայքը կառուցելիս ծրագրի կոդն այժմ սեղմում է գործիքի նոր տարբերակը, իսկ ծրագրի չափը և բացվելու արագությունը նույնն են։"
-      ],
-      "ru": [
-        "В программе ничего не изменилось: при сборке сайта её код теперь сжимает новая версия инструмента, а размер программы и скорость открытия остались прежними."
-      ],
-      "en": [
-        "Nothing has changed in the app: its code is now compressed by a newer version of the build tool, and the app's size and opening speed stay the same."
       ]
     }
   ]
