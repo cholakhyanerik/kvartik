@@ -1436,6 +1436,71 @@ async fn an_invoice_with_an_act_leaves_the_rate_to_the_act() {
     assert!(wrong.is_empty(), "курс у счёта с актом: {wrong:#?}");
 }
 
+/// Второй акт-этап (полный прогон 2026-11-10, п. 9): счёт на 2 400,00 $,
+/// первый акт — на 1 200,00 $. «Акт по этому счёту» открывает форму со
+/// строками счёта, а под итогом — «Осталось актировать по счёту: 1 200,00 $».
+/// Форма на всю сумму счёта говорит под итогом, что акт больше остатка, а
+/// «Выпустить» не повторяет тех же слов ещё раз внизу формы.
+#[wasm_bindgen_test]
+async fn the_next_act_stage_shows_what_is_left_once() {
+    let client = fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let now = clock::now();
+    let today = clock::today().expect("часы с датой");
+    let invoice = Document::create(invoice_data(&client), now)
+        .expect("черновик счёта")
+        .issue(&[], 0, Some(&profile()), &client, now)
+        .expect("счёт выпущен");
+    let mut half = invoice.act_data(today).expect("акт по счёту");
+    half.items[0].price = 120_000;
+    let act = Document::create(half, now)
+        .expect("черновик акта")
+        .issue(std::slice::from_ref(&invoice), 0, Some(&profile()), &client, now)
+        .expect("первый акт выпущен");
+    let mut writes = Writes::default();
+    writes.insert(&invoice);
+    writes.insert(&act);
+    commit(writes).await;
+
+    let address = format!("#/documents/{}", invoice.id());
+    let (host, mounted) = mount_at(&address);
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::DocActFromInvoice)).await {
+        wrong.push("нет «Акт по этому счёту»".to_owned());
+    }
+    match button(&host, &[t(lang, Key::DocActFromInvoice)]) {
+        Some(open) => open.click(),
+        None => wrong.push("нет кнопки «Акт по этому счёту»".to_owned()),
+    }
+    let left = fill(t(lang, Key::DocActLeft), &[&i18n::money(lang, Money::new(120_000, Currency::Usd))]);
+    if !wait_for(&host, &left).await {
+        wrong.push(format!("в форме акта нет «{left}»"));
+    }
+    match field(&host, t(lang, Key::ItemText), 0) {
+        Some(input) if input.value() == "Software development" => {}
+        other => wrong.push(format!("строки акта — не как в счёте: {:?}", other.map(|input| input.value()))),
+    }
+    let refusal = t(lang, Key::DocActsOverInvoice);
+    let said = |host: &HtmlElement| host.text_content().unwrap_or_default().matches(refusal).count();
+    if said(&host) != 1 {
+        wrong.push(format!("до выпуска слова отказа — {} раз", said(&host)));
+    }
+    match button(&host, &[t(lang, Key::DocIssue)]) {
+        Some(issue) => issue.click(),
+        None => wrong.push("нет «Выпустить»".to_owned()),
+    }
+    sleep(500).await;
+    if said(&host) != 1 {
+        wrong.push(format!("после «Выпустить» слова отказа — {} раз", said(&host)));
+    }
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "второй акт-этап: {wrong:#?}");
+}
+
 /// Строка налога выпущенного документа — в его карточке, свёрнутым вопросом:
 /// сам выбор сохраняет её, номер и строки документа не меняются, а сохранённая
 /// строка раскрывает вопрос. Акт по этому счёту берёт её в свою форму и в свой

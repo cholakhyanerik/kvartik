@@ -1779,18 +1779,21 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
             Some((invoice.acts(list).count(), acted, invoice.total().ok()?))
         })
     });
-    let over_invoice = move || {
+    // Чем акт по счёту не годится — словами под итогом, сразу при вводе.
+    // Выпуск откажет теми же словами, и внизу формы они не повторяются
+    // (полный прогон 2026-11-10, п. 9).
+    let over_key = move || {
         let (_, acted, whole) = stage.get()?;
         let sum = total_money(lang.get())?;
-        let key = if sum.currency() != whole.currency() {
-            Key::DocActCurrency
+        if sum.currency() != whole.currency() {
+            Some(Key::DocActCurrency)
         } else if acted.minor().saturating_add(sum.minor()) > whole.minor() {
-            Key::DocActsOverInvoice
+            Some(Key::DocActsOverInvoice)
         } else {
-            return None;
-        };
-        Some(view! { <p role="alert">{tr(lang, key)}</p> })
+            None
+        }
     };
+    let over_invoice = move || over_key().map(|key| view! { <p role="alert">{tr(lang, key)}</p> });
     // Выбранный клиент карточкой — на втором и третьем шаге: что о нём
     // знает документ и «Изменить», которое возвращает к выбору.
     let picked = move || {
@@ -2050,12 +2053,21 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                     <span class="label">{tr(lang, Key::ItemAdd)}</span>
                 </button>
                 <p class="total">{total}</p>
-                <p class="hint">{in_drams}</p>
+                // Акт-этап: сколько осталось по счёту — прямо под итогом,
+                // чтобы сравнить; строки — как в счёте (полный прогон
+                // 2026-11-10, п. 9).
                 {move || stage.get().filter(|(count, ..)| *count > 0).map(|(_, acted, whole)| view! {
-                    <p class="hint">{move || {
+                    <p class="act-left">{move || {
                         let lang = lang.get();
                         let left = Money::new(whole.minor().saturating_sub(acted.minor()).max(0), whole.currency());
-                        fill(t(lang, Key::DocActStage), &[&i18n::money(lang, acted), &i18n::money(lang, left)])
+                        fill(t(lang, Key::DocActLeft), &[&i18n::money(lang, left)])
+                    }}</p>
+                })}
+                <p class="hint">{in_drams}</p>
+                {move || stage.get().filter(|(count, ..)| *count > 0).map(|(_, acted, _)| view! {
+                    <p class="hint">{move || {
+                        let lang = lang.get();
+                        fill(t(lang, Key::DocActStage), &[&i18n::money(lang, acted)])
                     }}</p>
                 })}
                 {over_invoice}
@@ -2171,7 +2183,8 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                     t(lang.get(), fix)
                 }}</p>
             })}
-            {move || failure.get().map(|problem| view! {
+            // Отказ, который уже сказан под итогом, второй раз не повторяется.
+            {move || failure.get().filter(|problem| over_key() != Some(problem.key())).map(|problem| view! {
                 <p role="alert">{tr(lang, problem.key())}</p>
             })}
             {move || match step.get() {

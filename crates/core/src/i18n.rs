@@ -1519,13 +1519,19 @@ strings! {
         "One of the acts for this invoice is in another currency: the acts can't be compared with the invoice, and no new act can be issued for it. Cancel the act in the other currency and issue it again in the invoice's currency.",
         "Այս հաշվի ակտերից մեկն այլ արժույթով է. ակտերի գումարը հաշվի հետ հնարավոր չէ համեմատել, և դրանով նոր ակտ թողարկել հնարավոր չէ։ Չեղարկեք այլ արժույթով ակտը և նորից թողարկեք այն հաշվի արժույթով։";
     /// Шаблон формы акта по счёту, у которого уже есть действующие акты:
-    /// сколько выпущено и сколько осталось до суммы счёта. День этапа почти
+    /// сколько выпущено (остаток — строкой `DocActLeft` под итогом). День этапа почти
     /// всегда другой, чем у счёта, а по нему доход идёт в квартал и берётся
     /// курс ЦБ (НК, ст. 16), — подсказка о них напоминает.
     DocActStage =
-        "По этому счёту уже выпущены акты на {}. Этот акт\u{A0}— следующий этап: доход по счёту станет суммой актов, поэтому укажите в нём только сделанное на этом этапе и дату оказания этого этапа, а у суммы в валюте\u{A0}— курс ЦБ для неё. До суммы счёта осталось {}.",
-        "Acts for {} have already been issued for this invoice. This act is the next stage: the invoice's income becomes the sum of its acts, so put in it only what was done at this stage and the stage's date of service, and for a foreign currency the CBA rate for that date. Up to the invoice total, {} is left.",
-        "Այս հաշվով արդեն թողարկված են ակտեր {} գումարով։ Այս ակտը հաջորդ փուլն է. հաշվով եկամուտը կդառնա ակտերի գումարը, ուստի դրանում նշեք միայն այս փուլում արվածը և այս փուլի մատուցման ամսաթիվը, իսկ արժույթով գումարի դեպքում՝ ԿԲ փոխարժեքն այդ օրվա համար։ Մինչև հաշվի գումարը մնացել է {}։";
+        "По этому счёту уже выпущены акты на {}. Этот акт\u{A0}— следующий этап: доход по счёту станет суммой актов, поэтому укажите в нём только сделанное на этом этапе и дату оказания этого этапа, а у суммы в валюте\u{A0}— курс ЦБ для неё.",
+        "Acts for {} have already been issued for this invoice. This act is the next stage: the invoice's income becomes the sum of its acts, so put in it only what was done at this stage and the stage's date of service, and for a foreign currency the CBA rate for that date.",
+        "Այս հաշվով արդեն թողարկված են ակտեր {} գումարով։ Այս ակտը հաջորդ փուլն է. հաշվով եկամուտը կդառնա ակտերի գումարը, ուստի դրանում նշեք միայն այս փուլում արվածը և այս փուլի մատուցման ամսաթիվը, իսկ արժույթով գումարի դեպքում՝ ԿԲ փոխարժեքն այդ օրվա համար։";
+    /// Шаблон под итогом формы акта-этапа: сколько осталось по счёту до его
+    /// суммы (полный прогон 2026-11-10, п. 9).
+    DocActLeft =
+        "Осталось актировать по счёту: {}",
+        "Left to cover with acts on this invoice: {}",
+        "Այս հաշվով ակտերի համար մնացել է՝ {}";
     /// Аннулированный акт не вернуть (`DocError::ReturnOverInvoice`): пока он
     /// был аннулирован, по счёту выпустили другой.
     DocReturnOverInvoice =
