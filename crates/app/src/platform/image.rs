@@ -121,7 +121,7 @@ async fn bitmap(bytes: &[u8], mime: &str) -> Result<ImageBitmap, Unreadable> {
         .map_err(|error| log("createImageBitmap", &error))?;
     Ok(promise
         .await
-        .map_err(|error| log("createImageBitmap", &error))?
+        .map_err(|error| refused("createImageBitmap", &error))?
         .unchecked_into())
 }
 
@@ -185,6 +185,14 @@ fn log(context: &str, error: &JsValue) -> Unreadable {
     Unreadable
 }
 
+/// Браузер не разобрал файл картинкой: это ответ на выбор человека — текст
+/// под именем `.gif`, — а не сбой программы, и окно говорит его словами.
+/// В консоль — предупреждением: ошибка в консоли выглядела бы сбоем (полный
+/// прогон 2026-11-10, п. 22).
+fn refused(context: &str, error: &JsValue) -> Unreadable {
+    web_sys::console::warn_2(&format!("Kvartik, фото ({context}):").into(), error);
+    Unreadable
+}
 
 #[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
@@ -289,5 +297,33 @@ mod tests {
             other => wrong.push(format!("в один байт: {:?}", other.map(|bytes| bytes.map(|b| b.len())))),
         }
         assert!(wrong.is_empty(), "логотип: {wrong:#?}");
+    }
+
+    /// Текст под именем `.gif` (полный прогон 2026-11-10, п. 22): картинкой
+    /// он не разбирается, окно говорит это словами, а в консоли —
+    /// предупреждение, не ошибка.
+    #[wasm_bindgen_test]
+    async fn a_text_posing_as_an_image_is_a_warning_not_an_error() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        use js_sys::Reflect;
+        use wasm_bindgen::closure::Closure;
+
+        let console = Reflect::get(&js_sys::global(), &"console".into()).expect("console есть");
+        let error = Reflect::get(&console, &"error".into()).expect("console.error есть");
+        let warn = Reflect::get(&console, &"warn".into()).expect("console.warn есть");
+        let errors = Rc::new(Cell::new(0));
+        let warnings = Rc::new(Cell::new(0));
+        let (seen_error, seen_warning) = (Rc::clone(&errors), Rc::clone(&warnings));
+        let on_error = Closure::<dyn Fn()>::new(move || seen_error.set(seen_error.get() + 1));
+        let on_warning = Closure::<dyn Fn()>::new(move || seen_warning.set(seen_warning.get() + 1));
+        Reflect::set(&console, &"error".into(), on_error.as_ref()).expect("console.error подменён");
+        Reflect::set(&console, &"warn".into(), on_warning.as_ref()).expect("console.warn подменён");
+        let read = super::shrink("это не картинка".as_bytes(), "image/gif", false).await;
+        Reflect::set(&console, &"error".into(), &error).expect("console.error вернулся");
+        Reflect::set(&console, &"warn".into(), &warn).expect("console.warn вернулся");
+        assert!(read.is_err(), "текст разобран картинкой");
+        assert_eq!((errors.get(), warnings.get()), (0, 1), "ошибок и предупреждений в консоли");
     }
 }
