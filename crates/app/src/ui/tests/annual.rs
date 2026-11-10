@@ -128,6 +128,7 @@ async fn annual_payments_are_shown_on_home_and_their_screen() {
         residency: Some(Residency::Citizen),
         resident: None,
         registered: Date::new(2022, 5, 12),
+        turnover_applied: None,
         stops: Vec::new(),
     })
     .await;
@@ -257,6 +258,7 @@ async fn profile_answers_settle_annual_payments() {
         residency: Some(Residency::Citizen),
         resident: None,
         registered: Date::new(2022, 5, 12),
+        turnover_applied: None,
         stops: Vec::new(),
     })
     .await;
@@ -380,6 +382,7 @@ async fn annual_payments_say_what_is_missing() {
         residency: Some(Residency::Citizen),
         resident: None,
         registered: None,
+        turnover_applied: None,
         stops: Vec::new(),
     })
     .await;
@@ -437,4 +440,85 @@ async fn annual_payments_say_what_is_missing() {
     set_hash("");
     forget_device();
     assert!(wrong.is_empty(), "неполные годовые платежи: {wrong:#?}");
+}
+
+/// Заявление нового ИП о налоге с оборота (полный прогон 2026-11-10, п. 7):
+/// учтённый сегодня видит на главном экране карточку с последним днём — с дня
+/// учёта, а не за неделю. «Подано» с сегодняшним днём пишет день в профиль,
+/// карточка уходит, а слова о сделанном остаются с «Вернуть», которое снимает
+/// отметку и возвращает карточку. Пока открыта форма профиля, карточки нет,
+/// а в форме есть поле этого дня.
+#[wasm_bindgen_test]
+async fn a_new_ie_is_reminded_of_the_turnover_application() {
+    let today = clock::today().expect("часы с датой");
+    seed(Person {
+        birth_year: Some(1990),
+        pension_joined: None,
+        pension_applied: None,
+        residency: Some(Residency::Citizen),
+        resident: None,
+        registered: Some(today),
+        turnover_applied: None,
+        stops: Vec::new(),
+    })
+    .await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at("#/");
+    let mut wrong = Vec::new();
+    let due = kvartik_core::tax::deadlines::new_ie_due(today).expect("правило заявления есть");
+    let card = fill(t(lang, Key::ApplyDue), &[&i18n::date(lang, due)]);
+    if !wait_for(&host, &card).await {
+        wrong.push(format!("на главном нет карточки «{card}»"));
+    }
+    match button(&host, &[t(lang, Key::ApplyMark)]) {
+        Some(mark) => mark.click(),
+        None => wrong.push("нет кнопки «Подано»".to_owned()),
+    }
+    let marked = fill(t(lang, Key::ApplyMarked), &[&i18n::date(lang, today)]);
+    if !wait_for(&host, &marked).await {
+        wrong.push(format!("нет слов «{marked}»"));
+    }
+    match stored_profile().await {
+        Ok(Some(profile)) if profile.data().person.turnover_applied == Some(today) => {}
+        other => wrong.push(format!("день подачи не записан: {other:?}")),
+    }
+    if host.text_content().is_some_and(|text| text.contains(&card)) {
+        wrong.push("отмеченная карточка осталась".to_owned());
+    }
+    match button(&host, &[t(lang, Key::DocUnannul)]) {
+        Some(undo) => undo.click(),
+        None => wrong.push("нет «Вернуть» у отметки".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::ApplyUnmarked)).await || !wait_for(&host, &card).await {
+        wrong.push("«Вернуть» не сняло отметку или не вернуло карточку".to_owned());
+    }
+    match stored_profile().await {
+        Ok(Some(profile)) if profile.data().person.turnover_applied.is_none() => {}
+        other => wrong.push(format!("отметка не снята: {other:?}")),
+    }
+
+    set_hash("#/profile");
+    if !wait_for(&host, t(lang, Key::ProfileEdit)).await {
+        wrong.push("экран профиля не открылся".to_owned());
+    }
+    match button(&host, &[t(lang, Key::ProfileEdit)]) {
+        Some(open) => open.click(),
+        None => wrong.push("нет «Изменить профиль»".to_owned()),
+    }
+    sleep(100).await;
+    if field(&host, t(lang, Key::TurnoverApplied), 0).is_none() {
+        wrong.push("в форме нет поля дня подачи".to_owned());
+    }
+    set_hash("#/");
+    sleep(300).await;
+    if host.text_content().is_some_and(|text| text.contains(&card)) {
+        wrong.push("карточка видна при открытой форме профиля".to_owned());
+    }
+
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "заявление нового ИП: {wrong:#?}");
 }

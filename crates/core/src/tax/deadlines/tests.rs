@@ -214,6 +214,7 @@ fn citizen() -> ProfileData {
             resident: None,
             residency: Some(Residency::Citizen),
             registered: Some(day(2022, 5, 12)),
+            turnover_applied: None,
             stops: Vec::new(),
         },
         ..ProfileData::default()
@@ -343,6 +344,111 @@ fn a_new_ie_applies_within_twenty_days() {
         got.contains(&(day(2027, 4, 20), Kind::Turnover(quarter(2027, 1)))),
         "квартал регистрации: {got:?}"
     );
+}
+
+/// Заявление нового ИП (254(1)(2), 59(1)(2); полный прогон 2026-11-10, п. 7):
+/// учтён в пятницу 6 ноября 2026 — срок 26 ноября, четверг, рабочий. Карточка
+/// — с дня учёта, не за 7 дней; после срока — «пропущено» до конца года
+/// учёта, в 2027 — ничего; до дня учёта — ничего. Учтён в воскресенье
+/// 8 ноября — срок 28 ноября, суббота, переносится на понедельник 30-е. Учтён
+/// 20 декабря — срок 9 января 2027, суббота, — 11 января; после него о
+/// пропуске не говорится: год учёта кончился. Давно работающему и тому, кто
+/// отметил день подачи, сказать нечего. Дни недели сверены стандартной
+/// библиотекой Python.
+#[test]
+fn a_new_ie_hears_of_the_application_from_registration() {
+    let registered_on = |on: Date| {
+        let mut profile = citizen();
+        profile.person.registered = Some(on);
+        profile
+    };
+    let new_ie = registered_on(day(2026, 11, 6));
+    let due = Deadline {
+        kind: Kind::Application(2026),
+        by_law: day(2026, 11, 26),
+        day: day(2026, 11, 26),
+        done: false,
+    };
+    let on_sunday = registered_on(day(2026, 11, 8));
+    let shifted = Deadline {
+        by_law: day(2026, 11, 28),
+        day: day(2026, 11, 30),
+        ..due
+    };
+    let in_december = registered_on(day(2026, 12, 20));
+    let next_year = Deadline {
+        by_law: day(2027, 1, 9),
+        day: day(2027, 1, 11),
+        ..due
+    };
+    let mut filed = registered_on(day(2026, 11, 6));
+    filed.person.turnover_applied = Some(day(2026, 11, 20));
+    let old = citizen();
+    let cases: [(&ProfileData, Date, Option<Applying>); 14] = [
+        (&new_ie, day(2026, 11, 5), None),
+        (&new_ie, day(2026, 11, 6), Some(Applying::Due(due))),
+        (&new_ie, day(2026, 11, 10), Some(Applying::Due(due))),
+        (&new_ie, day(2026, 11, 26), Some(Applying::Due(due))),
+        (&new_ie, day(2026, 11, 27), Some(Applying::Missed(due))),
+        (&new_ie, day(2026, 12, 31), Some(Applying::Missed(due))),
+        (&new_ie, day(2027, 1, 1), None),
+        (&on_sunday, day(2026, 11, 29), Some(Applying::Due(shifted))),
+        (&on_sunday, day(2026, 12, 1), Some(Applying::Missed(shifted))),
+        (&in_december, day(2027, 1, 11), Some(Applying::Due(next_year))),
+        (&in_december, day(2027, 1, 12), None),
+        (&filed, day(2026, 11, 10), None),
+        (&filed, day(2026, 11, 27), None),
+        (&old, day(2026, 11, 10), None),
+    ];
+    let wrong: Vec<String> = cases
+        .iter()
+        .filter_map(|(profile, today, expected)| {
+            let got = applying(books(Some(profile), &[]), *today);
+            (got != *expected).then(|| format!("{today:?}: {got:?} вместо {expected:?}"))
+        })
+        .collect();
+    assert!(wrong.is_empty(), "карточка заявления: {wrong:#?}");
+}
+
+/// Заявление нового ИП — своей карточкой, а не строкой напоминаний за неделю;
+/// в списке сроков оно есть, а отмеченное днём подачи — сделанным. Заявление
+/// следующих лет отметка не делает сделанным: она — только о годе учёта.
+#[test]
+fn the_new_ie_application_is_its_own_card() {
+    let mut profile = citizen();
+    profile.person.registered = Some(day(2026, 11, 6));
+    let reminded: Vec<Kind> = reminders(books(Some(&profile), &[]), day(2026, 11, 20))
+        .into_iter()
+        .map(|reminder| reminder.deadline.kind)
+        .collect();
+    assert!(!reminded.contains(&Kind::Application(2026)), "строкой напоминаний: {reminded:?}");
+    let listed = |profile: &ProfileData| -> Vec<(Kind, bool)> {
+        between(books(Some(profile), &[]), day(2026, 11, 10), day(2027, 3, 1))
+            .into_iter()
+            .filter(|deadline| matches!(deadline.kind, Kind::Application(_)))
+            .map(|deadline| (deadline.kind, deadline.done))
+            .collect()
+    };
+    assert_eq!(
+        listed(&profile),
+        [(Kind::Application(2026), false), (Kind::Application(2027), false)]
+    );
+    profile.person.turnover_applied = Some(day(2026, 11, 20));
+    assert_eq!(
+        listed(&profile),
+        [(Kind::Application(2026), true), (Kind::Application(2027), false)]
+    );
+    // Давно работающему отметка не делает сделанным общий срок 20 февраля.
+    let mut old = citizen();
+    old.person.turnover_applied = Some(day(2022, 5, 30));
+    let old_listed: Vec<(Kind, bool)> = between(books(Some(&old), &[]), day(2027, 1, 1), day(2027, 3, 1))
+        .into_iter()
+        .filter(|deadline| matches!(deadline.kind, Kind::Application(_)))
+        .map(|deadline| (deadline.kind, deadline.done))
+        .collect();
+    assert_eq!(old_listed, [(Kind::Application(2027), false)]);
+    // Последний день для формы профиля — тот же, что у карточки.
+    assert_eq!(new_ie_due(day(2026, 11, 8)), Some(day(2026, 11, 30)));
 }
 
 /// Прошлый квартал, срок которого прошёл, а квартал не закрыт, —

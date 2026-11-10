@@ -34,6 +34,7 @@ const SAMPLE: &str = concat!(
     r#""activities":["62.01.0","70.22.0"],"kinds":{"70.22.0":"other"},"regime":"turnover","#,
     r#""person":{"birth_year":1970,"pension_joined":true,"pension_applied":"2019-03-14","#,
     r#""residency":"foreign_with_status","resident":false,"registered":"2022-05-12","#,
+    r#""turnover_applied":"2022-05-30","#,
     r#""stops":[{"from":"2026-03-01","until":"2026-06-01"},{"from":"2026-09-15","until":null}]}"#,
     r#"}}"#
 );
@@ -45,7 +46,7 @@ const EMPTY: &str = concat!(
     r#""address":{"hy":"","ru":"","en":""},"phone":"","email":null,"accounts":[],"#,
     r#""activities":[],"kinds":{},"regime":null,"#,
     r#""person":{"birth_year":null,"pension_joined":null,"pension_applied":null,"residency":null,"#,
-    r#""resident":null,"registered":null,"stops":[]}}}"#
+    r#""resident":null,"registered":null,"turnover_applied":null,"stops":[]}}}"#
 );
 
 /// Образцы читаются в ожидаемые значения, а их запись — слово в слово
@@ -75,6 +76,7 @@ fn data_shape_is_pinned() {
     assert_eq!(data.person.residency, Some(Residency::ForeignWithStatus));
     assert_eq!(data.person.resident, Some(false));
     assert_eq!(data.person.registered, Some(day(2022, 5, 12)));
+    assert_eq!(data.person.turnover_applied, Some(day(2022, 5, 30)));
     assert_eq!(
         data.person.stops,
         [
@@ -87,6 +89,17 @@ fn data_shape_is_pinned() {
     let empty: Profile = serde_json::from_str(EMPTY).expect("пустой читается");
     assert_eq!(empty.data(), &ProfileData::default());
     assert_eq!(serde_json::to_string(&empty).ok().as_deref(), Some(EMPTY));
+}
+
+/// Профиль версии формата 15 — без дня подачи заявления о налоге с оборота —
+/// читается с неотмеченным заявлением (Правило 2).
+#[test]
+fn profiles_without_turnover_applied_still_read() {
+    let old = SAMPLE.replacen(r#""turnover_applied":"2022-05-30","#, "", 1);
+    assert!(!old.contains("turnover_applied"), "{old}");
+    let profile: Profile = serde_json::from_str(&old).expect("профиль версии 15 читается");
+    assert_eq!(profile.data().person.turnover_applied, None);
+    assert_eq!(profile.data().person.registered, Some(day(2022, 5, 12)));
 }
 
 /// Профиль версии формата 7 — без строк налога у кодов — читается с пустым

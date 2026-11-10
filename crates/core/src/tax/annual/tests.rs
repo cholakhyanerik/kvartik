@@ -34,6 +34,7 @@ fn person() -> Person {
         residency: Some(Residency::Citizen),
         resident: None,
         registered: Some(day(2022, 5, 12)),
+        turnover_applied: None,
         stops: Vec::new(),
     }
 }

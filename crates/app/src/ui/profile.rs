@@ -186,6 +186,31 @@ impl Profiles {
         })
     }
 
+    /// Отметить день подачи заявления о налоге с оборота нового ИП (`Some`) или
+    /// снять отметку (`None`) — с карточки на главном экране (полный прогон
+    /// 2026-11-10, п. 7). Команда ядра — `Profile::save` над профилем,
+    /// прочитанным в той же транзакции: правка из другой вкладки не теряется,
+    /// а остальные поля остаются как были. Профиля нет — отмечать нечего:
+    /// карточки без него не бывает.
+    pub(super) async fn mark_applied(&self, store: &Store, day: Option<Date>) -> Result<(), StoreError> {
+        let tx = store.write()?;
+        let existing = Profile::current(tx.all::<Profile>().await?).ok_or(StoreError::Failed)?;
+        let mut data = existing.data().clone();
+        data.person.turnover_applied = day;
+        let mut writes = Writes::default();
+        let profile = match Profile::save(Some(existing.clone()), data, clock::now()) {
+            Ok(Some(profile)) => {
+                writes.update(&profile);
+                profile
+            }
+            Ok(None) => existing,
+            Err(_) => return Err(StoreError::Failed),
+        };
+        tx.commit(writes).await?;
+        self.state.set(State::Ready(Some(Arc::new(profile))));
+        Ok(())
+    }
+
     /// База открылась: прочитать профиль и его логотип.
     pub async fn load(&self, store: &Store) {
         match read(store).await {
@@ -687,6 +712,8 @@ struct Form {
     resident: RwSignal<Option<bool>>,
     /// День регистрации ИП — записью ISO, как его отдаёт `<input type="date">`.
     registered: RwSignal<String>,
+    /// День подачи заявления о налоге с оборота нового ИП — так же.
+    turnover_applied: RwSignal<String>,
     stops: RwSignal<Vec<StopRow>>,
     logo: RwSignal<LogoChoice>,
     logo_problem: RwSignal<Option<LogoProblem>>,
@@ -755,6 +782,7 @@ impl Form {
             residency: RwSignal::new(data.person.residency),
             resident: RwSignal::new(data.person.resident),
             registered: RwSignal::new(data.person.registered.map(Date::iso).unwrap_or_default()),
+            turnover_applied: RwSignal::new(data.person.turnover_applied.map(Date::iso).unwrap_or_default()),
             stops: RwSignal::new(Vec::new()),
             logo: RwSignal::new(LogoChoice::Keep),
             logo_problem: RwSignal::new(None),
@@ -907,6 +935,17 @@ impl Form {
         } else {
             Date::from_iso(self.pension_applied.get_untracked().trim())
         };
+        // Так же день подачи заявления: спрятан — остаётся как был.
+        let applied_shown = asks_applied(
+            &self.registered.get_untracked(),
+            &self.turnover_applied.get_untracked(),
+            today,
+        );
+        let turnover_applied = if applied_shown {
+            optional(&self.turnover_applied.get_untracked(), |text| past_day(text, today).ok_or(()))?
+        } else {
+            Date::from_iso(self.turnover_applied.get_untracked().trim())
+        };
         Some(ProfileData {
             name: Localized {
                 hy: line(self.name.hy)?,
@@ -933,10 +972,23 @@ impl Form {
                 residency: self.residency.get_untracked(),
                 resident: self.resident.get_untracked(),
                 registered,
+                turnover_applied,
                 stops,
             },
         })
     }
+}
+
+/// Спрашивать ли день подачи заявления о налоге с оборота нового ИП: день
+/// уже есть (`applied` — поле дня) — или ИП зарегистрирован (`registered` —
+/// поле дня регистрации) в этом году либо в прошлом так поздно, что срок
+/// заявления пришёлся на этот (`deadlines::new_ie_due`). Давно работающему ИП
+/// поле только мешало бы: о заявлениях следующих лет оно не говорит.
+fn asks_applied(registered_text: &str, applied: &str, today: Option<Date>) -> bool {
+    let new_ie = registered(registered_text, today).zip(today).is_some_and(|(day, today)| {
+        day.year() == today.year() || deadlines::new_ie_due(day).is_some_and(|due| due.year() == today.year())
+    });
+    !applied.trim().is_empty() || new_ie
 }
 
 /// Спрашивать ли о накопительной пенсии — только тех, для кого она по выбору
@@ -1670,6 +1722,21 @@ fn PersonFields(lang: ReadSignal<Lang>, form: Form, today: Option<Date>) -> impl
                         .then_some(Key::RegisteredDayInvalid)
                 })
             />
+            <Show when=move || form.registered.with(|registered| form.turnover_applied.with(|applied| asks_applied(registered, applied, today)))>
+                <label>
+                    {tr(lang, Key::TurnoverApplied)}
+                    <input type="date" bind:value=form.turnover_applied />
+                </label>
+                <p class="hint">{tr(lang, Key::TurnoverAppliedHint)}</p>
+                <FieldError
+                    lang
+                    tried
+                    error=move || form.turnover_applied.with(|text| {
+                        (!text.trim().is_empty() && past_day(text, today).is_none())
+                            .then_some(Key::TurnoverAppliedInvalid)
+                    })
+                />
+            </Show>
             <Show when=pension_asked>
                 <fieldset class="group">
                     <legend>{tr(lang, Key::PensionJoined)}</legend>

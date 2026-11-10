@@ -199,6 +199,7 @@ impl Book {
             residency: input.residency,
             resident: input.resident,
             registered: previous.and_then(|previous| Date::new(previous, 1, 1)),
+            turnover_applied: None,
             stops: Vec::new(),
         };
         let profile = ProfileData {

@@ -18,18 +18,21 @@
 use kvartik_core::i18n::{self, Key, Lang, fill, plural, t};
 use kvartik_core::model::date::Date;
 use kvartik_core::tax::calendar;
-use kvartik_core::tax::deadlines::{self, AHEAD_DAYS, Deadline, Kind, Reminder, When, what};
+use kvartik_core::tax::deadlines::{self, AHEAD_DAYS, Applying, Deadline, Kind, Reminder, When, what};
 use leptos::ev::MouseEvent;
 use leptos::html::A;
 use leptos::prelude::*;
 
 use crate::platform::{self, file::Download};
+use crate::store::StoreError;
 
 use super::backup::BackupChip;
+use super::form::FieldError;
 use super::icon::{Icon, icon};
 use super::ledger::tax_part;
 use super::route::{Router, Screen};
 use super::split::screen;
+use super::storage::error_key;
 use super::tax::{self, Part};
 use super::tr;
 
@@ -119,6 +122,107 @@ pub fn DeadlineReminder(ctx: tax::Ctx) -> impl IntoView {
     }
 }
 
+/// Заявление нового ИП о налоге с оборота (`deadlines::applying`, полный
+/// прогон 2026-11-10, п. 7) — своей карточкой на главном экране, с дня
+/// регистрации до конца года срока: до срока — до какого дня и где подать,
+/// после — чем грозит пропуск и совет идти к бухгалтеру. «Подано» с днём
+/// подачи — день в профиле (`Person::turnover_applied`): карточка уходит,
+/// а слова о сделанном остаются с «Вернуть». Пока открыта форма профиля,
+/// карточки нет: форма сохранила бы поверх отметки свой прежний день.
+#[component]
+pub fn ApplicationCard(ctx: tax::Ctx) -> impl IntoView {
+    let lang = ctx.lang;
+    let profiles = ctx.sources.profiles;
+    ctx.sources.watch(ctx.base);
+    let found = Memo::new(move |_| {
+        let today = ctx.today?;
+        ctx.sources.with_books(|books| deadlines::applying(books, today)).flatten()
+    });
+    let today = ctx.today;
+    let day = RwSignal::new(today.map(Date::iso).unwrap_or_default());
+    let filled = day.get_untracked();
+    ctx.forms.hold_while(move || day.with(|text| *text != filled));
+    let chosen = move || Date::from_iso(day.get().trim()).filter(|day| today.is_none_or(|today| *day <= today));
+    let tried = RwSignal::new(false);
+    let busy = RwSignal::new(false);
+    let failure = RwSignal::new(None::<StoreError>);
+    // Сделанное — над карточкой: день отметки или снятая отметка.
+    let done = RwSignal::new(None::<Option<Date>>);
+    let set = move |value: Option<Date>| {
+        if busy.get_untracked() {
+            return;
+        }
+        let Some(store) = ctx.base.get() else {
+            failure.set(Some(StoreError::Failed));
+            return;
+        };
+        busy.set(true);
+        failure.set(None);
+        leptos::task::spawn_local(async move {
+            let outcome = profiles.mark_applied(&store, value).await;
+            busy.set(false);
+            match outcome {
+                Ok(()) => {
+                    ctx.backups.data_saved();
+                    done.set(Some(value));
+                }
+                Err(error) => failure.set(Some(error)),
+            }
+        });
+    };
+    let mark = move |_| {
+        tried.set(true);
+        if let Some(day) = chosen() {
+            set(Some(day));
+        }
+    };
+    let field_problem = move || {
+        day.with(|text| Date::from_iso(text.trim()))
+            .map_or(Some(Key::DocDateMissing), |_| chosen().is_none().then_some(Key::TurnoverAppliedInvalid))
+    };
+    view! {
+        {move || done.get().map(|value| view! {
+            <div class="notice" role="status">
+                <p>{move || {
+                    let lang = lang.get();
+                    match value {
+                        Some(day) => fill(t(lang, Key::ApplyMarked), &[&i18n::date(lang, day)]),
+                        None => t(lang, Key::ApplyUnmarked).to_owned(),
+                    }
+                }}</p>
+                {value.is_some().then(|| view! {
+                    <button type="button" class="secondary" disabled=move || busy.get() on:click=move |_| set(None)>
+                        <span class="label">{tr(lang, Key::DocUnannul)}</span>
+                    </button>
+                })}
+            </div>
+        })}
+        {move || {
+            let shown = found.get().filter(|_| !profiles.form_open())?;
+            let (key, deadline) = match shown {
+                Applying::Due(deadline) => (Key::ApplyDue, deadline),
+                Applying::Missed(deadline) => (Key::ApplyMissed, deadline),
+            };
+            Some(view! {
+                <div class="notice due application-card" role="status">
+                    {icon(Icon::Calendar)}
+                    <p class="reminder">{move || fill(t(lang.get(), key), &[&i18n::date(lang.get(), deadline.day)])}</p>
+                    {move || deadlines::moved(lang.get(), deadline.kind, deadline.by_law).map(|note| view! { <p>{note}</p> })}
+                    <label>
+                        {tr(lang, Key::ApplyDay)}
+                        <input type="date" max=today.map(Date::iso) bind:value=day />
+                    </label>
+                    <FieldError lang tried error=field_problem />
+                    <button type="button" disabled=move || busy.get() on:click=mark>
+                        <span class="label">{tr(lang, Key::ApplyMark)}</span>
+                    </button>
+                    {move || failure.get().map(|error| view! { <p role="alert">{tr(lang, error_key(error))}</p> })}
+                </div>
+            })
+        }}
+    }
+}
+
 /// Строка на экране налога — к экрану сроков: ближайший срок.
 #[component]
 pub fn DeadlinesEntry(ctx: tax::Ctx) -> impl IntoView {
@@ -165,7 +269,17 @@ fn Row(lang: ReadSignal<Lang>, deadline: Deadline, soon: Option<When>) -> impl I
                     {soon.map(|soon| view! {
                         <span class="deadline-soon">{move || when(lang.get(), soon, deadline.day)}</span>
                     })}
-                    {deadline.done.then(|| view! { <span class="deadline-done">{tr(lang, Key::DeadlineDone)}</span> })}
+                    {deadline.done.then(|| {
+                        let done = match deadline.kind {
+                            Kind::Application(_) => Key::DeadlineApplied,
+                            Kind::Turnover(_)
+                            | Kind::Annual(_)
+                            | Kind::HealthYear(_)
+                            | Kind::HealthMonth { .. }
+                            | Kind::Declaration(_) => Key::DeadlineDone,
+                        };
+                        view! { <span class="deadline-done">{tr(lang, done)}</span> }
+                    })}
                     <span class="entry-meta">
                         <span>{move || what(lang.get(), deadline.kind)}</span>
                         {move || deadlines::moved(lang.get(), deadline.kind, deadline.by_law).map(|note| view! { <span>{note}</span> })}

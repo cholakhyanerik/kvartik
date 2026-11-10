@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.102",
+      "date": "2026-11-10",
+      "hy": [
+        "Նոր ԱՁ-ն այժմ գլխավոր էկրանին տեսնում է շրջանառության հարկի հայտարարությունը գրանցման օրվանից, այլ ոչ թե ժամկետից մեկ շաբաթ առաջ՝ մինչև որ օրը և որտեղ այն ներկայացնել։ Եթե ժամկետն անցել է, իսկ հայտարարությունը նշված չէ, քարտն ասում է, թե դա ինչով է սպառնում, և խորհուրդ է տալիս ճշտել հաշվապահի հետ։",
+        "«Ներկայացված է» կոճակը ներկայացման օրով հեռացնում է քարտը, իսկ օրը կարող եք ուղղել պրոֆիլում։"
+      ],
+      "ru": [
+        "Новый ИП теперь видит на главном экране заявление о налоге с оборота с дня регистрации, а не за неделю до срока: до какого дня и где его подать. Если срок прошёл, а заявление не отмечено, карточка говорит, чем это грозит, и советует сверить с бухгалтером.",
+        "Кнопка «Подано» с днём подачи убирает карточку, а день можно поправить в профиле."
+      ],
+      "en": [
+        "A new IE now sees the turnover tax application on the home screen from the registration day, not just a week before the deadline: by when and where to file it. If the deadline has passed and the application isn't marked, the card says what this means and advises checking with an accountant.",
+        "“Filed” with the day you filed removes the card, and you can change the day in your profile."
+      ]
+    },
+    {
       "version": "0.0.101",
       "date": "2026-11-10",
       "hy": [
@@ -260,19 +276,6 @@
       ],
       "en": [
         "Nothing has changed in the app, and the kvartik.com home page now has a turnover tax calculator: it shows an example of the quarterly tax and annual payments using the same rules as the app."
-      ]
-    },
-    {
-      "version": "0.0.82",
-      "date": "2026-11-05",
-      "hy": [
-        "Ծրագրում ոչինչ չի փոխվել, իսկ kvartik.com կայքն այժմ ունի գլխավոր էջ երեք լեզվով՝ այն մասին, թե ինչ է անում Kvartik-ը, և ժամկետների ընդհանուր օրացույցին բաժանորդագրվելու հնարավորությամբ։ Ծրագիրը, ինչպես նախկինում, բացվում է kvartik.com/app/ հասցեով։"
-      ],
-      "ru": [
-        "В программе ничего не изменилось, а у сайта kvartik.com появилась главная страница на трёх языках — о том, что умеет Kvartik, с подпиской на общий календарь сроков. Сама программа открывается, как и раньше, по адресу kvartik.com/app/."
-      ],
-      "en": [
-        "Nothing has changed in the app, and the kvartik.com website now has a home page in three languages about what Kvartik does, with a subscription to the shared deadline calendar. The app itself still opens at kvartik.com/app/."
       ]
     }
   ]

@@ -304,6 +304,7 @@ fn programmer() -> ProfileData {
             resident: None,
             residency: Some(Residency::Citizen),
             registered: Some(day(2022, 5, 12)),
+            turnover_applied: None,
             stops: Vec::new(),
         },
         activities: vec![crate::model::activity::ActivityCode::parse("62.01.0").expect("код")],

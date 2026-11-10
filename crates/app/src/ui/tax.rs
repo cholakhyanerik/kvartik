@@ -45,7 +45,7 @@ use leptos::prelude::*;
 
 use super::about::AboutPage;
 use super::annual::{AnnualCard, AnnualEntry, AnnualPage};
-use super::deadlines::{DeadlineReminder, DeadlinesEntry, DeadlinesPage};
+use super::deadlines::{ApplicationCard, DeadlineReminder, DeadlinesEntry, DeadlinesPage};
 use super::backup::{AutoCards, BackupChip, Backups};
 use super::documents::{Documents, SettlementReminder};
 use super::form::Forms;
@@ -628,6 +628,7 @@ pub(super) fn content(ctx: Ctx, part: Part) -> AnyView {
         Part::Card => view! {
             <AutoCards lang=ctx.lang backups=ctx.backups />
             <LicenseCard ctx />
+            <ApplicationCard ctx />
             <DeadlineReminder ctx />
             <SettlementReminder lang=ctx.lang documents=ctx.sources.documents today=ctx.today />
             <DriftCard ctx />

@@ -304,6 +304,7 @@ async fn choosing_a_language_translates_the_whole_window() {
         residency: Some(Residency::ForeignWithStatus),
         resident: None,
         registered: None,
+        turnover_applied: None,
         stops: Vec::new(),
     };
     let profile = Profile::save(None, data, crate::platform::clock::now())

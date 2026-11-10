@@ -27,12 +27,16 @@
 //! бухгалтера нет, решает он, решение человека). Доводы за и против
 //! переноса до новости — FEATURE_TASKS.md, «Перенос срока».
 //!
-//! # Что сделано, программа знает только о квартале
+//! # Что сделано, программа знает о квартале и о заявлении нового ИП
 //!
 //! Подан ли расчёт квартала, говорит его закрытие (`tax::closing`): прошёл
 //! срок, а квартал не закрыт — расчёт, по всей видимости, не подан
-//! ([`overdue`]). Об уплате, заявлении и годовых платежах программе никто не
-//! сообщает: у них напоминание до дня срока, а после — следующий срок.
+//! ([`overdue`]). Заявление нового ИП отмечает сам человек — днём подачи
+//! в профиле (`Person::turnover_applied`, полный прогон 2026-11-10, п. 7):
+//! пропущенное стоит режима, и о нём окно напоминает с дня регистрации, а
+//! после срока говорит, чем это грозит ([`applying`]). Об уплате, заявлениях
+//! следующих лет и годовых платежах программе никто не сообщает: у них
+//! напоминание до дня срока, а после — следующий срок.
 //!
 //! # Сроки этого ИП и сроки всех
 //!
@@ -93,7 +97,8 @@ pub struct Deadline {
     /// Последний день с переносом: `by_law`, если он рабочий, иначе —
     /// следующий рабочий.
     pub day: Date,
-    /// Сделано ли: квартал закрыт — расчёт подан (`tax::closing`). О других
+    /// Сделано ли: квартал закрыт — расчёт подан (`tax::closing`); заявление
+    /// нового ИП отмечено днём подачи (`Person::turnover_applied`). О других
     /// сроках программе никто не сообщает, и у них — `false`.
     pub done: bool,
 }
@@ -256,7 +261,10 @@ pub fn between(books: Books<'_>, from: Date, until: Date) -> Vec<Deadline> {
         }
         let on_turnover_this_year = annual.status == Status::Turnover && annual.months.span.is_some();
         if on_turnover_this_year && let Some(deadline) = application(all, person, year) {
-            found.push(deadline);
+            found.push(Deadline {
+                done: applied(person, year),
+                ..deadline
+            });
         }
         if on_turnover_this_year && let Some(due) = Total::of(&annual).due {
             found.push(Deadline::new(Kind::Annual(year), due));
@@ -372,6 +380,75 @@ fn application(all: &Rules, person: Option<&Person>, year: u16) -> Option<Deadli
     Some(Deadline::new(Kind::Application(year), by_law))
 }
 
+/// Последний день заявления нового ИП, учтённого в день `registered`, —
+/// с переносом, как у [`application`]: форме профиля — спрашивать ли день
+/// подачи. `None` — правила нет.
+pub fn new_ie_due(registered: Date) -> Option<Date> {
+    let rule = rules::on(rules::armenia().turnover_application(), Date::new(registered.year(), 1, 1)?)?;
+    Some(last_day(registered.add_days(i32::from(rule.after_days))?))
+}
+
+/// Заявление на год `year` — заявление нового ИП: он зарегистрирован в этом
+/// году, и срок у него свой, от дня учёта (НК, ст. 254, ч. 1, п. 2).
+fn new_ie(person: Option<&Person>, year: u16) -> bool {
+    person
+        .and_then(|person| person.registered)
+        .is_some_and(|day| day.year() == year)
+}
+
+/// Отмечено ли заявление на год `year` поданным: отметка — только у
+/// заявления нового ИП ([`Person::turnover_applied`]).
+fn applied(person: Option<&Person>, year: u16) -> bool {
+    new_ie(person, year) && person.is_some_and(|person| person.turnover_applied.is_some())
+}
+
+/// Заявление нового ИП о налоге с оборота — своей карточкой на главном
+/// экране (полный прогон 2026-11-10, п. 7; слова — решение человека
+/// 2026-11-10).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Applying {
+    /// Срок не прошёл: подать до дня срока.
+    Due(Deadline),
+    /// Срок прошёл, а дня подачи нет.
+    Missed(Deadline),
+}
+
+/// Что сказать о заявлении нового ИП в день `today` — с дня регистрации, а не
+/// за [`REMIND_DAYS`]: всё окно нового ИП — 20 дней (НК, ст. 254, ч. 1, п. 2),
+/// а пропущенное стоит режима — без заявления он с дня учёта до конца года
+/// плательщик НДС (ст. 59, ч. 1, п. 2; по закону, редакция arlis 230455,
+/// сверено 2026-11-10). Поэтому после срока окно не молчит, как у других
+/// сроков, а говорит это — до конца года регистрации, пока человек не
+/// отметит день подачи. Год, а не «пока не отметит»: НДС — до конца этого
+/// года, а на следующий заявление подают к общему дню (п. 1) — о нём обычное
+/// напоминание. Учтённый в последние 20 дней года, чей срок кончился уже
+/// в следующем, о пропуске так и не услышит: слова «с дня регистрации»
+/// говорили бы тогда о прошлом годе. `None` — сказать нечего: дня регистрации
+/// нет, он позже `today`, в год регистрации ИП не на налоге с оборота (как
+/// у [`between`]), день подачи отмечен или год регистрации кончился.
+///
+/// Закон ставит НДС в вину двум неподанным заявлениям сразу — о налоге
+/// с оборота и о микропредприятии (59(1)(2)). Программа — для налога
+/// с оборота, и её человек второго не подаёт: слова говорят о первом.
+pub fn applying(books: Books<'_>, today: Date) -> Option<Applying> {
+    let person = &books.profile?.person;
+    let registered = person.registered.filter(|day| *day <= today)?;
+    if person.turnover_applied.is_some() {
+        return None;
+    }
+    let year = registered.year();
+    let annual = annual::year(books, year);
+    if annual.status != Status::Turnover || annual.months.span.is_none() {
+        return None;
+    }
+    let deadline = application(rules::armenia(), Some(person), year)?;
+    if today <= deadline.day {
+        Some(Applying::Due(deadline))
+    } else {
+        (today.year() == year).then_some(Applying::Missed(deadline))
+    }
+}
+
 /// Всеобщая декларация о доходах за год `year`. Подают её граждане Армении
 /// — резиденты (НК, ст. 156, ч. 4.1), а ИП на налоге с оборота — резидент
 /// (ст. 254, ч. 1): [`between`] берёт её только у гражданина. Гражданство
@@ -480,8 +557,11 @@ pub fn gaps(books: Books<'_>, from: Date, until: Date) -> Gaps {
 
 /// Напоминания в день `today`: незакрытый прошлый квартал, срок которого
 /// прошёл, и несделанные сроки ближайших [`REMIND_DAYS`] дней: о закрытом
-/// квартале напоминать нечего.
+/// квартале напоминать нечего. Заявления нового ИП здесь нет: о нём — своя
+/// карточка с дня регистрации ([`applying`]), и второй строкой о том же она
+/// не нужна.
 pub fn reminders(books: Books<'_>, today: Date) -> Vec<Reminder> {
+    let person = books.profile.map(|profile| &profile.person);
     let mut found: Vec<Reminder> = overdue(books, today)
         .map(|deadline| Reminder {
             deadline,
@@ -492,7 +572,11 @@ pub fn reminders(books: Books<'_>, today: Date) -> Vec<Reminder> {
     let Some(until) = today.add_days(REMIND_DAYS) else {
         return found;
     };
-    for deadline in between(books, today, until).into_iter().filter(|deadline| !deadline.done) {
+    let own_card = |kind: Kind| matches!(kind, Kind::Application(year) if new_ie(person, year));
+    for deadline in between(books, today, until)
+        .into_iter()
+        .filter(|deadline| !deadline.done && !own_card(deadline.kind))
+    {
         let days = deadline.day.days_since(today);
         let when = match days {
             0 => When::Today,
