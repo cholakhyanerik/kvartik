@@ -815,6 +815,14 @@ pub fn BackupSection(
     let seen = Memo::new(move |seen: Option<&bool>| {
         seen.copied().unwrap_or(false) || router.shows(Screen::Backup)
     });
+    // Пока выбран файл копии — и в пустой базе, где копию делать не из чего, —
+    // только восстановление: пароль файла под ним и сразу «Придумайте пароль
+    // копий», «Повторите пароль» — два набора паролей подряд, и пароль копии
+    // легко ввести не туда (полный прогон 2026-11-10, п. 12). «Сделать копию»
+    // прячется атрибутом — начатое в ней не пропадает, — автокопия
+    // снимается: её состояние — у `Backups`.
+    let picked = RwSignal::new(false);
+    let quiet = Signal::derive(move || picked.get() || !backups.has_data());
     // Дизайн «Kvartik Design»: щит в круге, зачем копия, когда была
     // последняя — меткой (пора сделать новую — тёплой), пароль и большая
     // кнопка; восстановление — ссылкой ниже. В пустой базе копию делать не
@@ -838,18 +846,18 @@ pub fn BackupSection(
             </p>
             {if backups.has_data.get_untracked() {
                 view! {
-                    <MakeBackup lang backups forms router />
-                    <RestoreBackup lang backups forms />
+                    <MakeBackup lang backups forms router quiet />
+                    <RestoreBackup lang backups forms picked />
                 }
                 .into_any()
             } else {
                 view! {
-                    <RestoreBackup lang backups forms />
-                    <MakeBackup lang backups forms router />
+                    <RestoreBackup lang backups forms picked />
+                    <MakeBackup lang backups forms router quiet />
                 }
                 .into_any()
             }}
-            {move || seen.get().then(|| Suspend::new(async move {
+            {move || (seen.get() && !quiet.get()).then(|| Suspend::new(async move {
                 super::ledger::auto_part(AutoView { lang, backups, forms }).await.ok()
             }))}
         </Show>
@@ -1313,7 +1321,14 @@ async fn act(
 /// на неё копию ещё не заканчивает — Safari на iPhone сначала спрашивает
 /// о загрузке, и перезагрузка в этот миг оставила бы дату копии без файла.
 #[component]
-fn MakeBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms, router: Router) -> impl IntoView {
+fn MakeBackup(
+    lang: ReadSignal<Lang>,
+    backups: Backups,
+    forms: Forms,
+    router: Router,
+    /// Спрятать: выбран файл копии или база пуста ([`BackupSection`]).
+    quiet: Signal<bool>,
+) -> impl IntoView {
     let password = RwSignal::new(String::new());
     let repeat = RwSignal::new(String::new());
     // «Забыли пароль?» — новый пароль поверх заданного.
@@ -1380,7 +1395,7 @@ fn MakeBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms, router: Ro
     let on_save = move |_: MouseEvent| handed(Key::BackupSaved);
 
     view! {
-        <form class="backup" on:submit=submit>
+        <form class="backup" hidden=move || quiet.get() on:submit=submit>
             {move || if new_password() {
                 view! {
                     <label>
@@ -1424,6 +1439,7 @@ fn MakeBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms, router: Ro
             })}
         </form>
         {move || match making.get() {
+            _ if quiet.get() => None,
             Making::Idle => None,
             Making::Busy => Some(view! {
                 <p role="status">{tr(lang, Key::BackupMaking)}</p>
@@ -1908,8 +1924,20 @@ async fn check_password(typed: &str) -> Result<Made, Problem> {
 /// версия их ждёт, а её перезагрузка оборвала бы восстановление — записано
 /// не было бы ничего, а человек мог бы решить, что было (задача 67).
 #[component]
-fn RestoreBackup(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl IntoView {
+fn RestoreBackup(
+    lang: ReadSignal<Lang>,
+    backups: Backups,
+    forms: Forms,
+    /// Выбран ли файл копии: от выбора до конца восстановления или отказа
+    /// ([`BackupSection`] прячет на это время «Сделать копию»).
+    picked: RwSignal<bool>,
+) -> impl IntoView {
     let restoring = RwSignal::new_local(Restoring::Idle);
+    Effect::new(move |_| {
+        picked.set(restoring.with(|state| {
+            matches!(state, Restoring::Busy | Restoring::Password(..) | Restoring::Other(..))
+        }));
+    });
     let password = RwSignal::new(String::new());
 
     // Файл читается сразу при выборе (`platform::file::read`).

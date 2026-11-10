@@ -1663,3 +1663,82 @@ async fn stored_clients() -> Result<Vec<Client>, StoreError> {
     let store = Store::open(|_| {}).await?;
     Ok(store.read()?.list::<Client>().await?.records)
 }
+
+/// Видна ли кнопка с подписью `label`.
+fn shown_button(host: &HtmlElement, label: &str) -> bool {
+    button(host, &[label]).is_some_and(|found| found.offset_width() > 0)
+}
+
+/// Восстановление не путается с новой копией (полный прогон 2026-11-10,
+/// п. 12): в пустой базе на экране копии — только восстановление, без
+/// «Сделать копию»; с данными она есть, а пока выбран файл копии и спрошен
+/// его пароль — снова нет: два набора паролей подряд путали пароль копии
+/// с паролем копий. «Отмена» её возвращает.
+#[wasm_bindgen_test]
+async fn a_chosen_backup_hides_making_one() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let make = t(lang, Key::BackupMake);
+    let mut wrong = Vec::new();
+
+    let (host, mounted) = mount_at("#/backup");
+    if !wait_for(&host, t(lang, Key::BackupChooseFile)).await {
+        wrong.push("раздела копии нет".to_owned());
+    }
+    sleep(300).await;
+    if shown_button(&host, make) {
+        wrong.push("в пустой базе — «Сделать копию»".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+
+    documents::fresh_base_with_client().await;
+    let (host, mounted) = mount_at("#/backup");
+    for _ in 0..100 {
+        if shown_button(&host, make) {
+            break;
+        }
+        sleep(50).await;
+    }
+    if !shown_button(&host, make) {
+        wrong.push("с данными нет «Сделать копию»".to_owned());
+    }
+    let input: Option<HtmlInputElement> = host
+        .query_selector(r#"input[type="file"][accept=".json,application/json"]"#)
+        .ok()
+        .flatten()
+        .map(JsCast::unchecked_into);
+    match &input {
+        Some(input) => choose_file(
+            input,
+            "kvartik-2026-10-12.json",
+            include_str!("../../../core/tests/backups/v2/kvartik-2026-10-12.json"),
+        ),
+        None => wrong.push("нет поля выбора копии".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::BackupRestore)).await {
+        wrong.push("копия не открылась".to_owned());
+    }
+    sleep(100).await;
+    if shown_button(&host, make) {
+        wrong.push("пока выбран файл копии — «Сделать копию»".to_owned());
+    }
+    // Видимый текст: спрятанная форма остаётся в разметке.
+    if host.inner_text().contains(t(lang, Key::BackupNewPassword)) {
+        wrong.push("пока выбран файл копии — «Придумайте пароль копий»".to_owned());
+    }
+    match button(&host, &[t(lang, Key::Cancel)]) {
+        Some(cancel) => cancel.click(),
+        None => wrong.push("нет «Отмены» у пароля копии".to_owned()),
+    }
+    sleep(200).await;
+    if !shown_button(&host, make) {
+        wrong.push("после «Отмены» «Сделать копию» не вернулась".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "восстановление и новая копия: {wrong:#?}");
+}

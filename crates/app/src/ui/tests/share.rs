@@ -141,7 +141,9 @@ async fn wait_button(host: &HtmlElement, label: &str) -> Option<HtmlElement> {
 /// и отвечает «можно»: Chromium отказывает файлу `.json` уже в `share`.
 #[wasm_bindgen_test]
 async fn backup_goes_to_the_share_menu_on_iphone_only() {
-    crate::store::delete_database(crate::store::DB_NAME).await;
+    // С данными: в пустой базе «Сделать копию» спрятана (полный прогон
+    // 2026-11-10, п. 12) — копировать нечего.
+    super::documents::fresh_base_with_client().await;
     forget_device();
     let lang = Lang::En;
     let device = Device::new();

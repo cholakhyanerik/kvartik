@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.107",
+      "date": "2026-11-11",
+      "hy": [
+        "Պատճենից վերականգնելիս, քանի դեռ ֆայլն ընտրված է, և դատարկ ծրագրում «Պահուստային պատճեն» էկրանին մնում է միայն վերականգնումը. նոր պատճենի գաղտնաբառերն այլևս կողքին չեն, և պատճենի գաղտնաբառը սխալ դաշտում մուտքագրելը դժվար է։"
+      ],
+      "ru": [
+        "Пока вы восстанавливаете копию, и в пустой программе на экране копии остаётся только восстановление: пароли новой копии больше не стоят рядом, и пароль копии не ввести не туда."
+      ],
+      "en": [
+        "While you're restoring a backup, and in an empty app, the backup screen shows only the restore: the new backup's password fields no longer sit right below, so the backup's password won't go into the wrong field."
+      ]
+    },
+    {
       "version": "0.0.106",
       "date": "2026-11-10",
       "hy": [
@@ -263,22 +276,6 @@
       ],
       "en": [
         "Nothing has changed in the app: the build is more reliable. One of its browser checks waited a fixed time and occasionally failed for no reason on a slow machine."
-      ]
-    },
-    {
-      "version": "0.0.87",
-      "date": "2026-11-06",
-      "hy": [
-        "Այժմ մեկ ծրագրում կարելի է վարել մի քանի ԱՁ. պրոֆիլի «ԱՁ-ները ծրագրում» բաժնում կարող եք ավելացնել, բացել և հեռացնել դրանք։ Յուրաքանչյուր ԱՁ ունի իր հաշիվները, մատյանը և հարկը։",
-        "Մի քանի ԱՁ-ի դեպքում պահուստային պատճենը բոլոր ԱՁ-ներինն է՝ մեկ ֆայլով, իսկ մեկ ԱՁ-ի պատճենը կարելի է ստեղծել հաճախորդի համար՝ առանձին գաղտնաբառով, որը ծրագիրը չի հիշում։"
-      ],
-      "ru": [
-        "Теперь в одной программе можно вести несколько ИП: в профиле, в разделе «ИП в программе», их можно добавить, открыть и убрать из списка. У каждого ИП свои счета, книга и налог.",
-        "При нескольких ИП резервная копия — всех ИП одним файлом, а копию одного ИП можно сделать для клиента под отдельным паролем, который программа не запоминает."
-      ],
-      "en": [
-        "You can now keep several entrepreneurs in one app: add, open and remove them under “Entrepreneurs in the app” in your profile. Each has their own invoices, ledger and tax.",
-        "With several entrepreneurs, the backup holds all of them in one file, and you can make a backup of one of them for the client under a separate password the app doesn't remember."
       ]
     }
   ]
