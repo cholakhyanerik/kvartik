@@ -733,6 +733,17 @@ fn ClientForm(ctx: Ctx, existing: Option<Client>) -> impl IntoView {
         if form.first_step() {
             invalid.set(false);
             form.tried.set(false);
+            // Фирма из Армении: шаг 1 обещает «ИНН (ՀՎՀՀ), драмы», и на втором
+            // драмы и армянский уже выбраны — сменить их можно (полный прогон
+            // 2026-11-10, п. 18). Выбранное раньше не трогается.
+            if form.country.get_untracked() == Some(Country::ARMENIA) {
+                if form.currency.get_untracked().is_none() {
+                    form.currency.set(Some(Currency::Amd));
+                }
+                if form.doc_lang.get_untracked().is_none() {
+                    form.doc_lang.set(Some(Lang::Am));
+                }
+            }
             step.set(2);
         } else {
             form.tried.set(true);

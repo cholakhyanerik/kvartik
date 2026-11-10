@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.111",
+      "date": "2026-11-11",
+      "hy": [
+        "Հայաստանի նոր հաճախորդի համար երկրորդ քայլում արժույթն ու փաստաթղթերի լեզուն արդեն ընտրված են՝ դրամ և հայերեն։ Դրանք կարելի է փոխել։"
+      ],
+      "ru": [
+        "У нового клиента из Армении на втором шаге валюта и язык документов уже выбраны: драмы и армянский. Сменить их можно, как и раньше."
+      ],
+      "en": [
+        "For a new client from Armenia, the second step now has the currency and document language already chosen: drams and Armenian. You can still change them."
+      ]
+    },
+    {
       "version": "0.0.110",
       "date": "2026-11-11",
       "hy": [
@@ -257,22 +270,6 @@
       ],
       "en": [
         "On a phone, the heading of a closed document card no longer flies over the tabs at the bottom: if the document's row in the list ends up under the menu, the heading fades out in place."
-      ]
-    },
-    {
-      "version": "0.0.91",
-      "date": "2026-11-08",
-      "hy": [
-        "Հեռախոսում էկրանը փոխելիս ներքևի ցանկի պատկերակներն ու մակագրություններն այլևս չեն ընկնում իրար վրա և չեն ծածկվում նախորդ էկրանով. բաց բաժինը պարզապես փոխում է գույնը։",
-        "Հաշիվների էկրանի «+» կլոր կոճակն այլևս չի կանգնում էկրանի մեջտեղում և չի ցատկում ներքև. այն հայտնվում է իր տեղում՝ էկրանից անմիջապես հետո։"
-      ],
-      "ru": [
-        "На телефоне при смене экрана значки и подписи вкладок внизу больше не наезжают друг на друга и не закрываются прежним экраном: открытая вкладка просто меняет цвет.",
-        "Круглая кнопка «+» на экране счетов больше не стоит посреди экрана и не прыгает вниз: она появляется на своём месте сразу после экрана."
-      ],
-      "en": [
-        "On a phone, the icons and labels of the tabs at the bottom no longer pile up on each other or get covered by the previous screen when you switch screens: the open tab simply changes color.",
-        "The round “+” button on the Invoices screen no longer sits in the middle of the screen and jumps down: it appears in its place right after the screen."
       ]
     }
   ]

@@ -1368,6 +1368,16 @@ async fn clients_are_added_found_deleted_and_restored() {
     if shown_step(&host, "form.client") != Some(2) {
         wrong.push("верный первый шаг не пустил ко второму".to_owned());
     }
+    // Фирма из Армении: на втором шаге драмы и армянский уже выбраны
+    // (полный прогон 2026-11-10, п. 18), а сменить их можно ниже.
+    let chosen = |label: Key| select(&host, t(lang, label), 0).map(|select| select.value());
+    if (chosen(Key::ClientCurrency), chosen(Key::ClientLang)) != (Some("AMD".to_owned()), Some("hy".to_owned())) {
+        wrong.push(format!(
+            "у армянской фирмы не выбраны драмы и армянский: {:?} {:?}",
+            chosen(Key::ClientCurrency),
+            chosen(Key::ClientLang)
+        ));
+    }
     // «Назад» — к первому шагу, и введённое на месте.
     match host.query_selector("form.client .wizard-head button.round").ok().flatten() {
         Some(back) => back.unchecked_into::<HtmlElement>().click(),
