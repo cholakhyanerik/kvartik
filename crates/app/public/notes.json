@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.113",
+      "date": "2026-11-11",
+      "hy": [
+        "Հարկի էկրանը, երբ շրջանառությունը շեմի մեկ տոկոսից պակաս է, այժմ ասում է «շեմի 1%-ից պակաս», այլ ոչ թե «0%»։"
+      ],
+      "ru": [
+        "Экран налога при обороте меньше процента порога теперь говорит «меньше 1 %», а не «0 %»."
+      ],
+      "en": [
+        "When turnover is under one percent of the threshold, the Tax screen now says “less than 1%” instead of “0%”."
+      ]
+    },
+    {
       "version": "0.0.112",
       "date": "2026-11-11",
       "hy": [
@@ -254,22 +267,6 @@
       ],
       "en": [
         "The site now has the license terms and the privacy policy in three languages. Links to them, and the seller's email and Telegram, are at the bottom of every page of the site and on the “About” screen."
-      ]
-    },
-    {
-      "version": "0.0.93",
-      "date": "2026-11-08",
-      "hy": [
-        "Համակարգչում ցանկի բաց բաժնի գունավոր ֆոնն այժմ ինքն է սահում դեպի նոր բաժինը՝ մակագրությունների տակով. մակագրությունները մնում են իրենց տեղում և միայն փոխում են գույնը, ու ճանապարհի կեսին երկու մակագրություն այլևս չեն միախառնվում։",
-        "Հեռախոսում ներքևի ցանկի բաժինը սեղմելիս դրա պատկերակի և մակագրության վրա այլևս կիսաթափանց ուղղանկյուն չի առկայծում։"
-      ],
-      "ru": [
-        "На компьютере подсветка открытой вкладки в меню теперь переезжает к новой сама, под подписями: подписи стоят на месте и только меняют цвет, а не сливаются посреди пути в одну.",
-        "На телефоне при нажатии на вкладку внизу поверх её значка и подписи больше не мелькает полупрозрачный прямоугольник."
-      ],
-      "en": [
-        "On a computer, the highlight of the open tab in the menu now slides to the new tab by itself, beneath the labels: the labels stay in place and only change color instead of blending into one halfway.",
-        "On a phone, tapping a tab at the bottom no longer flashes a translucent rectangle over its icon and label."
       ]
     }
   ]

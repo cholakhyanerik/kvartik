@@ -1196,13 +1196,23 @@ impl Hint {
             Self::CateringDeclared => fill(t(lang, Key::TaxCateringDeclared), &[t(lang, Key::KindCateringOther)]),
             Self::Threshold { year, turnover, threshold } => {
                 // Доля порога — целыми процентами, с отбросом: «99 %»
-                // у 114,9 млн не обещает лишнего.
+                // у 114,9 млн не обещает лишнего. Меньше процента у
+                // ненулевого оборота — «меньше 1 %», а не «0 %»: ноль читался
+                // бы «оборота нет» (полный прогон 2026-11-10, п. 20).
                 let share = i128::from(*turnover) * 100 / i128::from((*threshold).max(1));
+                let tiny = share == 0 && *turnover > 0;
+                let (year, turnover, threshold) = (year.to_string(), drams(lang, *turnover), drams(lang, *threshold));
+                if tiny {
+                    // По-армянски порог стоит перед процентом: «շեմի 1%-ից պակաս».
+                    let one = i18n::percent(lang, 100);
+                    let args: [&str; 4] = match lang {
+                        Lang::Am => [&year, &turnover, &threshold, &one],
+                        Lang::Ru | Lang::En => [&year, &turnover, &one, &threshold],
+                    };
+                    return fill(t(lang, Key::TaxThresholdUnderOne), &args);
+                }
                 let share = i64::try_from(share).unwrap_or(i64::MAX).saturating_mul(100);
-                fill(
-                    t(lang, Key::TaxThreshold),
-                    &[&year.to_string(), &drams(lang, *turnover), &i18n::percent(lang, share), &drams(lang, *threshold)],
-                )
+                fill(t(lang, Key::TaxThreshold), &[&year, &turnover, &i18n::percent(lang, share), &threshold])
             }
         }
     }
@@ -1243,4 +1253,57 @@ fn hints(tax: &QuarterTax) -> Vec<Hint> {
         });
     }
     hints
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Доля порога (полный прогон 2026-11-10, п. 20): у оборота меньше процента
+    /// порога — «меньше 1 %», а не «0 %», по-армянски — порог перед процентом;
+    /// у нулевого оборота — «0 %»; ровно процент и больше — целыми процентами
+    /// с отбросом.
+    #[test]
+    fn a_tiny_share_of_the_threshold_is_not_zero() {
+        let threshold = 115_000_000;
+        let hint = |turnover| Hint::Threshold {
+            year: 2026,
+            turnover,
+            threshold,
+        };
+        let mut wrong = Vec::new();
+        for lang in Lang::ALL {
+            let one = i18n::percent(lang, 100);
+            let (year, small, limit) = ("2026".to_owned(), drams(lang, 638_205), drams(lang, threshold));
+            let args: [&str; 4] = match lang {
+                Lang::Am => [&year, &small, &limit, &one],
+                Lang::Ru | Lang::En => [&year, &small, &one, &limit],
+            };
+            let cases = [
+                (hint(638_205), fill(t(lang, Key::TaxThresholdUnderOne), &args)),
+                (
+                    hint(0),
+                    fill(t(lang, Key::TaxThreshold), &[&year, &drams(lang, 0), &i18n::percent(lang, 0), &limit]),
+                ),
+                (
+                    hint(1_150_000),
+                    fill(t(lang, Key::TaxThreshold), &[&year, &drams(lang, 1_150_000), &one, &limit]),
+                ),
+                (
+                    hint(114_999_999),
+                    fill(
+                        t(lang, Key::TaxThreshold),
+                        &[&year, &drams(lang, 114_999_999), &i18n::percent(lang, 9_900), &limit],
+                    ),
+                ),
+            ];
+            for (hint, expected) in cases {
+                let got = hint.text(lang);
+                if got != expected {
+                    wrong.push(format!("{lang:?}: «{got}», а не «{expected}»"));
+                }
+            }
+        }
+        assert!(wrong.is_empty(), "доля порога: {wrong:#?}");
+    }
 }
