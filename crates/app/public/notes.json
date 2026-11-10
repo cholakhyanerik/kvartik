@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.97",
+      "date": "2026-11-10",
+      "hy": [
+        "«Հարկ» էկրանին ԱՁ-ի գրանցման օրվանից առաջ ավարտված եռամսյակներն այժմ այդպես էլ նշված են. դրանցում դուք դեռ ԱՁ չէիք, դրանց համար հաշվարկ չկա, և դրանք փակել հնարավոր չէ։ Նախկինում դրանք նման էին սովորական դատարկ եռամսյակների։"
+      ],
+      "ru": [
+        "Кварталы, кончившиеся до дня регистрации ИП, на экране «Налог» теперь так и названы: в них вы ещё не были ИП, расчёта за них нет, и закрыть их нельзя. Раньше они выглядели обычными пустыми кварталами."
+      ],
+      "en": [
+        "Quarters that ended before your IE registration date are now named as such on the “Tax” screen: you weren't an IE yet, there's no return for them, and they can't be closed. Before, they looked like ordinary empty quarters."
+      ]
+    },
+    {
       "version": "0.0.96",
       "date": "2026-11-09",
       "hy": [
@@ -260,19 +273,6 @@
       ],
       "en": [
         "The “About” screen now has the license texts of the code and fonts by other authors that Kvartik is built from: their licenses require these texts to come with the app. The section opens on a tap, also without an internet connection."
-      ]
-    },
-    {
-      "version": "0.0.77",
-      "date": "2026-11-04",
-      "hy": [
-        "«Լիցենզիա» էկրանին վերնագրի տակ այժմ երևում է պահուստային պատճենի նշանը, երբ ժամանակն է այն պատրաստելու. պատճենի մասին ծրագիրը հիշեցնում է յուրաքանչյուր էկրանին։"
-      ],
-      "ru": [
-        "На экране «Лицензия» под заголовком теперь видна метка о резервной копии, когда пора её сделать: о копии программа напоминает на каждом экране."
-      ],
-      "en": [
-        "The License screen now shows the backup label under its title when it's time to make a backup: the app reminds you about backups on every screen."
       ]
     }
   ]

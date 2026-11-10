@@ -362,6 +362,9 @@ pub enum Missing {
     Incomplete,
     /// Номеров полей формы на этот квартал у программы нет.
     NoForm,
+    /// Квартал кончился до дня регистрации ИП `registered`: в нём человек ещё
+    /// не был ИП, и расчёта за него нет (`turnover::NotYet`).
+    NotYet { registered: Date },
 }
 
 /// Числа, которые можно вписывать в форму.
@@ -417,12 +420,13 @@ impl Ready {
 }
 
 /// Числа для расчёта квартала `tax` — или почему их нет. `closing` —
-/// снимок квартала, если он закрыт: тогда числа — его.
+/// снимок квартала, если он закрыт: тогда числа — его, даже до регистрации
+/// ИП: поданное человек закрыл сам (Правило 2).
 pub fn report(tax: &QuarterTax, closing: Option<&Closing>) -> Result<Ready, Missing> {
     let quarter = tax.quarter;
     let form = form(quarter);
-    match closing.filter(|closing| closing.quarter() == quarter) {
-        Some(closing) => {
+    match (closing.filter(|closing| closing.quarter() == quarter), tax.not_yet) {
+        (Some(closing), _) => {
             let data = closing.data();
             let numbers = form.and_then(|form| Numbers::of(form, &data.lines)).ok_or(Missing::NoForm)?;
             Ok(Ready {
@@ -434,9 +438,14 @@ pub fn report(tax: &QuarterTax, closing: Option<&Closing>) -> Result<Ready, Miss
                 },
             })
         }
-        None if tax.regime != Regime::Turnover => Err(Missing::Left),
-        None if !tax.complete() => Err(Missing::Incomplete),
-        None => {
+        // Раньше ухода и пропусков: квартала, которого у ИП не было, они не
+        // касаются.
+        (None, Some(not_yet)) => Err(Missing::NotYet {
+            registered: not_yet.registered,
+        }),
+        (None, None) if tax.regime != Regime::Turnover => Err(Missing::Left),
+        (None, None) if !tax.complete() => Err(Missing::Incomplete),
+        (None, None) => {
             let numbers = form.and_then(|form| Numbers::of(form, &tax.lines)).ok_or(Missing::NoForm)?;
             Ok(Ready {
                 quarter,

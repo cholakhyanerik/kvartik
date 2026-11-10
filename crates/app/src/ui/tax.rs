@@ -40,7 +40,7 @@ use kvartik_core::tax::deadlines;
 use kvartik_core::tax::opening::Opening;
 use kvartik_core::tax::report;
 use kvartik_core::tax::rules::{self, Percent};
-use kvartik_core::tax::turnover::{self, Books, Leaving, Line, QuarterTax, Regime, kind_key};
+use kvartik_core::tax::turnover::{self, Books, Leaving, Line, NotYet, QuarterTax, Regime, kind_key};
 use leptos::prelude::*;
 
 use super::about::AboutPage;
@@ -329,9 +329,11 @@ pub(super) fn drams(lang: Lang, drams: i64) -> String {
     i18n::money(lang, Money::new(drams, Currency::Amd))
 }
 
-/// Есть ли о квартале что сказать: налог, пропуск или уход с режима.
+/// Есть ли о квартале что сказать: налог, пропуск или уход с режима. О
+/// квартале до регистрации ИП — нечего: расчёта за него нет, и «к уплате»
+/// на главном было бы неправдой.
 fn has_news(tax: &QuarterTax) -> bool {
-    !tax.lines.is_empty() || !tax.gaps.is_empty() || tax.regime != Regime::Turnover
+    tax.not_yet.is_none() && (!tax.lines.is_empty() || !tax.gaps.is_empty() || tax.regime != Regime::Turnover)
 }
 
 /// Какой квартал показать сразу и к уплате ли он: прошлый — пока он не
@@ -859,7 +861,12 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
                 {move || deadlines::moved(lang.get(), deadline.kind, deadline.by_law).map(|note| view! { <p class="hint">{note}</p> })}
             </div>
         })}
-        {move || tax.get().map(|tax| view! { <Quarterly lang tax closing=closing.get() /> })}
+        // Квартал до регистрации ИП — словами, без налога и без закрытия;
+        // закрытый человеком раньше — как любой закрытый: это его снимок.
+        {move || tax.get().map(|tax| match (tax.not_yet, closing.get()) {
+            (Some(not_yet), None) => view! { <NotYetNotice lang not_yet /> }.into_any(),
+            (_, closing) => view! { <Quarterly lang tax closing /> }.into_any(),
+        })}
         <OpeningEntry ctx quarter tax />
         {move || numbers.get().then(|| view! {
             <a class="button report-open" href=Screen::Report.href()>
@@ -867,7 +874,7 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
                 <span class="label">{tr(lang, Key::ReportOpen)}</span>
             </a>
         })}
-        {move || (ended() && closing.with(Option::is_none) && tax.with(Option::is_some)).then(|| {
+        {move || (ended() && closing.with(Option::is_none) && tax.with(|tax| tax.as_ref().is_some_and(|tax| tax.not_yet.is_none()))).then(|| {
             // Нечитаемая запись переноса: налог без неё мог бы быть другим, и
             // закрывать нельзя, а о ней окно говорит своими словами (`ui/opening.rs`).
             let closable = move || {
@@ -897,6 +904,28 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
         <DeadlinesEntry ctx />
         <p class="tax-check">{tr(lang, Key::TaxCheck)}</p>
         <p class="hint">{move || fill(t(lang.get(), Key::TaxRulesVersion), &[&rules_version])}</p>
+    }
+}
+
+/// Квартал до регистрации ИП (`turnover::NotYet`): слова вместо налога —
+/// расчёта за него нет, — и сколько в нём записей книги, если они есть: их
+/// расчёт обошёл бы молча (Правило 6).
+#[component]
+fn NotYetNotice(lang: ReadSignal<Lang>, not_yet: NotYet) -> impl IntoView {
+    let NotYet { registered, records } = not_yet;
+    view! {
+        <div class="notice">
+            <p>{move || {
+                let lang = lang.get();
+                fill(t(lang, Key::TaxNotYet), &[&i18n::date(lang, registered)])
+            }}</p>
+            {(records > 0).then(|| view! {
+                <p class="hint">{move || {
+                    let lang = lang.get();
+                    fill(t(lang, Key::TaxNotYetRecords), &[&i18n::integer(lang, records as i64)])
+                }}</p>
+            })}
+        </div>
     }
 }
 

@@ -141,6 +141,17 @@ pub fn ReportPage(ctx: tax::Ctx) -> impl IntoView {
                         Missing::Left => Key::ReportLeft,
                         Missing::Incomplete => Key::ReportIncomplete,
                         Missing::NoForm => Key::ReportNoForm,
+                        // Квартал до регистрации ИП — не тревога, а те же слова,
+                        // что на экране налога; о его записях говорит тот экран.
+                        Missing::NotYet { registered } => {
+                            return view! {
+                                <p>{move || {
+                                    let lang = lang.get();
+                                    fill(t(lang, Key::TaxNotYet), &[&i18n::date(lang, registered)])
+                                }}</p>
+                            }
+                            .into_any();
+                        }
                     };
                     view! {
                         <p role="alert">{tr(lang, key)}</p>

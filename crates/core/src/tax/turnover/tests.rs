@@ -1137,6 +1137,82 @@ fn a_quarter_with_leaving_does_not_close() {
     );
 }
 
+/// Квартал, кончившийся до дня регистрации ИП, — не его (`NotYet`, по образцу
+/// года до регистрации): закрыть нельзя, чисел для формы нет, а записи книги
+/// в нём названы числом. Квартал регистрации — обычный, и когда она в его
+/// последний день; без дня регистрации — тоже: неизвестное — не «ещё не был»
+/// (Правило 6). Снимок, закрытый раньше, остаётся поданным расчётом. ИП —
+/// как в полном прогоне 2026-11-10: зарегистрирован 6 ноября 2026 года.
+#[test]
+fn a_quarter_before_registration_is_not_the_entrepreneurs() {
+    use super::super::closing::CloseError;
+    use super::super::report::{self, Missing};
+    let registered = |on: Option<Date>| {
+        let mut data = profile(&["62.01.0"]);
+        data.person.registered = on;
+        data
+    };
+    let (third, fourth) = (quarter(2026, 3), quarter(2026, 4));
+    let november = registered(Some(day(2026, 11, 6)));
+    let today = day(2026, 11, 10);
+    let mut failures = Vec::new();
+
+    let before = tax(Some(&november), &[], &[], third);
+    if before.not_yet != Some(NotYet { registered: day(2026, 11, 6), records: 0 }) {
+        failures.push(format!("III квартал до регистрации: {:?}", before.not_yet));
+    }
+    if before.closable(today) {
+        failures.push("III квартал до регистрации закрывается".to_owned());
+    }
+    match Closing::close(&before, today, at(1)) {
+        Err(CloseError::NotYet) => {}
+        other => failures.push(format!("закрытие III квартала: {:?}", other.map(|_| ()))),
+    }
+    match report::report(&before, None) {
+        Err(Missing::NotYet { registered }) if registered == day(2026, 11, 6) => {}
+        other => failures.push(format!("числа III квартала: {:?}", other.map(|_| ()))),
+    }
+
+    // Квартал регистрации — обычный: закрывается, когда кончился.
+    let own = tax(Some(&november), &[], &[], fourth);
+    if own.not_yet.is_some() || !own.closable(day(2027, 1, 10)) || report::report(&own, None).is_err() {
+        failures.push(format!("IV квартал регистрации: {:?}", own.not_yet));
+    }
+
+    // Граница — последний день квартала: регистрация в нём делает квартал
+    // своим, а 1 октября — уже следующим.
+    for (on, expected) in [(day(2026, 9, 30), false), (day(2026, 10, 1), true)] {
+        let got = tax(Some(&registered(Some(on))), &[], &[], third).not_yet.is_some();
+        if got != expected {
+            failures.push(format!("регистрация {on:?}: «ещё не ИП» — {got}, а ждали {expected}"));
+        }
+    }
+
+    // Без дня регистрации — обычный кончившийся квартал.
+    let unknown = registered(None);
+    let plain = tax(Some(&unknown), &[], &[], third);
+    if plain.not_yet.is_some() || !plain.closable(today) {
+        failures.push(format!("без дня регистрации: {:?}", plain.not_yet));
+    }
+
+    // Доход и расход до регистрации — названы числом.
+    let books = [income(day(2026, 8, 15), 100_000, None), ordinary(day(2026, 9, 1), 20_000)];
+    let with_records = tax(Some(&november), &books, &[], third);
+    if with_records.not_yet.map(|not_yet| not_yet.records) != Some(2) {
+        failures.push(format!("записи до регистрации: {:?}", with_records.not_yet));
+    }
+
+    // Закрытый раньше, когда дня регистрации в профиле не было, — его снимок.
+    let closing = Closing::close(&plain, today, at(1)).expect("без дня регистрации квартал закрывается");
+    let closings = [closing.clone()];
+    let after = tax(Some(&november), &[], &closings, third);
+    if !matches!(report::report(&after, Some(&closing)), Ok(report::Ready { .. })) {
+        failures.push("снимок, закрытый до дня регистрации, не отдаёт числа".to_owned());
+    }
+
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
 /// Доход без курса и в обороте для порога — «нет значения», а не ноль:
 /// оборот прошлого года и начала этого без него неизвестен, и квартал
 /// не посчитан целиком (Правило 6). 50 000 $ по 361,93 — 18 096 500 ֏,

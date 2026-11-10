@@ -409,6 +409,25 @@ pub struct QuarterTax {
     /// Коды профиля, которые закрывают налог с оборота, и с какого дня:
     /// ведёт ли их человек, программа не знает — окно говорит словами.
     pub excluded_codes: Vec<(ActivityCode, Date)>,
+    /// Квартал кончился до дня регистрации ИП: человек в нём ещё не был ИП.
+    /// `None` — был, или день регистрации неизвестен (Правило 6: неизвестное
+    /// — не «ещё не был»).
+    pub not_yet: Option<NotYet>,
+}
+
+/// Квартал до регистрации ИП — по образцу года до неё
+/// (`annual::Status::NotYet`): расчёта за такой квартал нет, и сроки его
+/// не знают (`tax::deadlines`), поэтому закрывать его нечего
+/// ([`QuarterTax::closable`]) и чисел для формы у него нет (`tax::report`).
+/// Квартал регистрации — обычный: в нём ИП уже был.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct NotYet {
+    /// День регистрации из профиля.
+    pub registered: Date,
+    /// Строк книги в квартале — доходов и расходов. Запись до регистрации —
+    /// скорее опечатка в дне регистрации или в дате записи, и окно об этом
+    /// говорит: расчёт молча обошёл бы её стороной.
+    pub records: usize,
 }
 
 impl QuarterTax {
@@ -460,12 +479,14 @@ impl QuarterTax {
     /// бы неверные числа, а снимок квартала с уходом с режима отдал бы
     /// перенос следующему году (ст. 264, ч. 4) — такой квартал считает
     /// бухгалтер. Раньше правил налога закрывать нечего: такой снимок чтение
-    /// считает порчей (`tax::closing`).
+    /// считает порчей (`tax::closing`). И до регистрации ИП ([`NotYet`]):
+    /// снимок закрепил бы расчёт квартала, которого у ИП не было.
     pub fn closable(&self, today: Date) -> bool {
         first_quarter().is_some_and(|first| self.quarter >= first)
             && self.quarter.last_day() < today
             && self.complete()
             && self.regime == Regime::Turnover
+            && self.not_yet.is_none()
     }
 
     /// Расходится ли расчёт со снимком закрытого квартала: данные квартала
@@ -965,6 +986,15 @@ fn compute(
                 .collect()
         })
         .unwrap_or_default();
+    let rows = span.between(quarter.first_day(), quarter.last_day());
+    let not_yet = books
+        .profile
+        .and_then(|profile| profile.person.registered)
+        .filter(|registered| quarter.last_day() < *registered)
+        .map(|registered| NotYet {
+            registered,
+            records: rows.len(),
+        });
     // Переполнение — только от испорченных данных, а их чтение не пропускает:
     // такой квартал — пустой и неполный, а не плашка сбоя.
     let year = match year(span, books.profile, quarter) {
@@ -986,6 +1016,7 @@ fn compute(
                 threshold: None,
                 carry_unknown: None,
                 excluded_codes,
+                not_yet,
             };
         }
     };
@@ -993,7 +1024,6 @@ fn compute(
         Regime::Turnover => None,
         Regime::Left { from, .. } => Some(from),
     };
-    let rows = span.between(quarter.first_day(), quarter.last_day());
     let mut gaps = Gaps {
         year_unrated: year.unrated,
         unreadable: books.unreadable,
@@ -1220,6 +1250,7 @@ fn compute(
         threshold: year.threshold,
         carry_unknown: None,
         excluded_codes,
+        not_yet,
     }
 }
 

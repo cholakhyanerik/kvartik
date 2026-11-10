@@ -115,6 +115,9 @@ pub enum CloseError {
     Incomplete,
     /// В квартале ИП ушёл с налога с оборота: его расчёт — у бухгалтера.
     Left,
+    /// Квартал кончился до регистрации ИП (`turnover::NotYet`): расчёта за
+    /// него нет.
+    NotYet,
 }
 
 /// Закрытый квартал — запись.
@@ -139,6 +142,9 @@ impl Closing {
     pub fn close(tax: &QuarterTax, today: Date, now: Timestamp) -> Result<Self, CloseError> {
         if tax.quarter.last_day() >= today {
             return Err(CloseError::NotOver);
+        }
+        if tax.not_yet.is_some() {
+            return Err(CloseError::NotYet);
         }
         if tax.regime != Regime::Turnover {
             return Err(CloseError::Left);
