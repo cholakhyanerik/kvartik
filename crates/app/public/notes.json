@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.117",
+      "date": "2026-11-11",
+      "hy": [
+        "Մինչ ծրագիրը բեռնվում է, էկրանին արդեն Kvartik նշանն է, ոչ թե դատարկ էջ։ Ծրագիրն ինքը բացվում է նույնքան արագ, որքան առաջ։"
+      ],
+      "ru": [
+        "Пока программа загружается, на экране — знак Kvartik, а не пустая страница. Сама программа открывается так же быстро, как раньше."
+      ],
+      "en": [
+        "While the app is loading, you now see the Kvartik name instead of a blank page. The app itself opens as fast as before."
+      ]
+    },
+    {
       "version": "0.0.116",
       "date": "2026-11-11",
       "hy": [
@@ -251,19 +264,6 @@
       ],
       "en": [
         "When you record a payment, the app now tells you at once if the amount is more than is left to pay or the date received hasn't come yet: that's usually a typo. You can still record it, and an overpayment shows on the invoice card."
-      ]
-    },
-    {
-      "version": "0.0.97",
-      "date": "2026-11-10",
-      "hy": [
-        "«Հարկ» էկրանին ԱՁ-ի գրանցման օրվանից առաջ ավարտված եռամսյակներն այժմ այդպես էլ նշված են. դրանցում դուք դեռ ԱՁ չէիք, դրանց համար հաշվարկ չկա, և դրանք փակել հնարավոր չէ։ Նախկինում դրանք նման էին սովորական դատարկ եռամսյակների։"
-      ],
-      "ru": [
-        "Кварталы, кончившиеся до дня регистрации ИП, на экране «Налог» теперь так и названы: в них вы ещё не были ИП, расчёта за них нет, и закрыть их нельзя. Раньше они выглядели обычными пустыми кварталами."
-      ],
-      "en": [
-        "Quarters that ended before your IE registration date are now named as such on the “Tax” screen: you weren't an IE yet, there's no return for them, and they can't be closed. Before, they looked like ordinary empty quarters."
       ]
     }
   ]

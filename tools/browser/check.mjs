@@ -223,6 +223,12 @@ async function settings(page) {
 /// установки Chrome.
 async function home(page) {
   await go(page, "#/");
+  // Первый кадр до запуска wasm (с 0.0.117): знак — в самой странице, а
+  // запущенное окно его снимает, иначе он остался бы над программой.
+  const boot = await page.eval(`const html = await (await fetch("/app/", { cache: "no-store" })).text();
+    return { served: /class="?boot"?[\\s>]/.test(html), left: document.querySelector(".boot") !== null };`);
+  checks.check("программа: первый кадр — в странице, окно его сняло",
+    boot?.served === true && boot.left === false, JSON.stringify(boot));
   const place = await page.waitFor(`const button = ${BUTTON("#home", s("InstallButton"))};
     const card = [...document.querySelectorAll("#home .hero-card")].find((c) => c.getClientRects().length > 0);
     const section = button && button.closest("section.install");

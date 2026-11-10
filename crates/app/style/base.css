@@ -2119,10 +2119,27 @@ legend.question {
   gap: var(--space-4);
 }
 
-.welcome .brand {
+.welcome .brand,
+.boot .brand {
   font-family: var(--font-display);
   font-size: var(--font-size-2xl);
   line-height: var(--leading-tight);
+}
+
+/* Первый кадр до запуска wasm (`index.html`, полный прогон 2026-11-10,
+   п. 16): знак — там же, где у экрана первого запуска (`.welcome-body`),
+   и системным `serif` — тем, которым тот рисует знак, пока Caprasimo не
+   пришёл. Свой шрифт здесь — запрос 7 КБ рядом со скачиванием wasm:
+   рабочий экран на телефонном профиле 3,00 с вместо 2,97 (замер 0.0.117,
+   docs/measurements.md). */
+.boot {
+  max-width: 30rem;
+  margin: 0 auto;
+  padding: var(--space-7) var(--space-6);
+}
+
+.boot .brand {
+  font-family: serif;
 }
 
 .welcome h1 {
@@ -2214,7 +2231,8 @@ legend.question {
 
 /* На компьютере круги — в углу окна, далеко от колонки текста. */
 @media (min-width: 56.25rem) {
-  .welcome-body {
+  .welcome-body,
+  .boot {
     padding-top: 6rem;
   }
 
