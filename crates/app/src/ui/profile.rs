@@ -1107,7 +1107,7 @@ fn ProfileForm(
         router.form_closed();
     };
     let saved_tin = data.as_ref().and_then(|data| data.tin.clone());
-    licenses.watch(base);
+    licenses.watch(base, profiles);
     // Открыли по строке итога — к её группе полей; после кадра: к нему
     // форма уже в странице.
     if let Some(part) = focus {

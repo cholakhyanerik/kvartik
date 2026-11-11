@@ -95,7 +95,7 @@ pub fn ReportPage(ctx: tax::Ctx) -> impl IntoView {
     let unreadable = Memo::new(move |_| sources.closings.with(|_, _, unreadable| unreadable));
     // Числа квартала — по сроку лицензии (задача 25): пока срок идёт —
     // любого, после — кончившегося в срок.
-    ctx.licenses.watch(ctx.base);
+    ctx.licenses.watch(ctx.base, sources.profiles);
     let access = Memo::new(move |_| ctx.licenses.access(sources.profiles));
     let locked = Memo::new(move |_| report_locked(ctx.licenses, access.get(), quarter.get(), ctx.today));
     let last = RwSignal::new(None::<Copied>);

@@ -57,6 +57,16 @@
 //!
 //! В данных — `{"meta":{…},"key":"AEAAA-…"}`: ключ той же записью, какой
 //! его выдал автор.
+//!
+//! # Срок на виду
+//!
+//! Сколько дней осталось, окно показывает всегда — меткой в меню и на
+//! главном экране, — а когда срок кончился, открывается экраном лицензии;
+//! за [`SOON_DAYS`] дней до конца ключа — окно поверх программы (решение
+//! человека 2026-11-11). Подпись проверяют части окна, а метка нужна с
+//! первого кадра, поэтому срок ключа устройство помнит записью
+//! ([`remember`]) — без подписи: она только показывает, а запирает по-прежнему
+//! [`Access::new`] с проверкой.
 
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::de::{self, Deserializer};
@@ -83,6 +93,12 @@ pub const PUBLIC_KEY_BYTES: usize = ed25519_dalek::PUBLIC_KEY_LENGTH;
 /// Дней пробного периода, считая первый (PDF: «пробный период 14 дней без
 /// регистрации»).
 pub const TRIAL_DAYS: i32 = 14;
+
+/// В последние столько дней срока, считая последний, окно говорит о нём
+/// громче: метка — цветом напоминания и на каждом экране телефона, а у ключа —
+/// ещё и окно поверх программы, один раз (решение человека 2026-11-11:
+/// «через неделю подписка завершается»).
+pub const SOON_DAYS: i32 = 7;
 
 /// Начало подписанных байтов: подпись ключа не годится ни для чего другого,
 /// что автор подпишет той же парой.
@@ -133,6 +149,23 @@ impl Plan {
         match byte {
             1 => Some(Plan::Standard),
             2 => Some(Plan::Pro),
+            _ => None,
+        }
+    }
+
+    /// Имя в записи устройства ([`remember`]).
+    const fn code(self) -> &'static str {
+        match self {
+            Plan::Standard => "standard",
+            Plan::Pro => "pro",
+        }
+    }
+
+    /// Тариф по имени [`Plan::code`]; что они сходятся, держит тест записи.
+    fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "standard" => Some(Plan::Standard),
+            "pro" => Some(Plan::Pro),
             _ => None,
         }
     }
@@ -390,12 +423,19 @@ impl Term {
     }
 }
 
+/// Ключ, который открывает срок: тариф и последний день.
+pub type Paid = (Plan, Date);
+
 /// Что открыто: самый долгий из сроков — пробного периода и ключей на
 /// ՀՎՀՀ профиля с верной подписью. Ключ на другой ՀՎՀՀ не открывает ничего,
 /// как и ключ без ՀՎՀՀ в профиле: ключ выдан на ИП, а не на устройство.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Access {
-    term: Option<Term>,
+    /// Последний день пробного периода.
+    trial: Option<Date>,
+    /// Самый долгий ключ с верной подписью на ՀՎՀՀ профиля — и кончившийся:
+    /// его помнит устройство ([`remember`]).
+    key: Option<Paid>,
 }
 
 impl Access {
@@ -408,48 +448,106 @@ impl Access {
         tin: Option<&Tin>,
         trial: Option<Date>,
     ) -> Self {
-        let trial = trial
-            .and_then(trial_last)
-            .map(|last| Term::Trial { last });
-        let keys = keys
+        let key = keys
             .into_iter()
             .filter(|key| Some(&key.tin) == tin && key.verify(public))
-            .map(|key| Term::Key {
-                plan: key.plan,
-                last: key.until,
-            });
-        // При равном последнем дне — ключ: о нём окно и скажет.
-        let term = trial
-            .into_iter()
-            .chain(keys)
-            .max_by_key(|term| (term.last(), matches!(term, Term::Key { .. })));
-        Self { term }
+            .map(|key| (key.plan, key.until))
+            .max_by_key(|&(_, last)| last);
+        Self::known(trial.and_then(trial_last), key)
     }
 
-    /// Самый долгий срок; `None` — ни пробного периода, ни ключа.
+    /// Доступ по срокам, которые уже известны: последнему дню пробного
+    /// периода и ключу, проверенному раньше, — без проверки подписи. Так
+    /// главный wasm окна показывает срок, не неся в себе Ed25519
+    /// (`ui/license.rs`); запирает выпуск — только [`Access::new`].
+    pub const fn known(trial_last: Option<Date>, key: Option<Paid>) -> Self {
+        Self { trial: trial_last, key }
+    }
+
+    /// Самый долгий срок; `None` — ни пробного периода, ни ключа. Без
+    /// итераторов: его зовёт и главный wasm окна, где каждый байт — время
+    /// первого захода (CLAUDE.md, Правило 1).
     pub const fn term(self) -> Option<Term> {
-        self.term
+        match (self.trial, self.key) {
+            (None, None) => None,
+            (Some(last), None) => Some(Term::Trial { last }),
+            (None, Some((plan, last))) => Some(Term::Key { plan, last }),
+            // При равном последнем дне — ключ: о нём окно и скажет.
+            (Some(trial), Some((plan, last))) => Some(if trial.days_since(last) > 0 {
+                Term::Trial { last: trial }
+            } else {
+                Term::Key { plan, last }
+            }),
+        }
+    }
+
+    /// Самый долгий ключ — и кончившийся; `None` — ключа на ՀՎՀՀ профиля
+    /// нет. Его помнит устройство ([`remember`]).
+    pub const fn key(self) -> Option<Paid> {
+        self.key
     }
 
     /// Идёт ли срок в день `today`: можно ли выпустить документ.
     pub fn issue(self, today: Date) -> bool {
-        self.term.is_some_and(|term| today <= term.last())
+        self.term().is_some_and(|term| today <= term.last())
     }
 
     /// Открыты ли числа для расчёта квартала `quarter` в день `today`:
     /// пока идёт срок — любого, а после — кончившегося в срок.
     pub fn report(self, quarter: Quarter, today: Date) -> bool {
-        self.issue(today) || self.term.is_some_and(|term| quarter.last_day() <= term.last())
+        self.issue(today) || self.term().is_some_and(|term| quarter.last_day() <= term.last())
     }
 
     /// Сколько дней срока осталось, считая `today`: в последний день — 1.
     /// `None` — срока нет или он кончился.
     pub fn days_left(self, today: Date) -> Option<i32> {
-        self.term
+        self.term()
             .filter(|term| today <= term.last())
             .map(|term| term.last().days_since(today) + 1)
     }
+
+    /// Пора ли говорить о сроке громче: осталось не больше [`SOON_DAYS`]
+    /// дней или срок кончился, или его нет вовсе.
+    pub fn soon(self, today: Date) -> bool {
+        self.days_left(today).is_none_or(|left| left <= SOON_DAYS)
+    }
+
+    /// Ключ, о конце которого пора сказать окном поверх программы: идёт
+    /// срок ключа, а осталось не больше [`SOON_DAYS`] дней. Последний день —
+    /// по нему устройство помнит, что о нём уже сказано.
+    pub fn ending_key(self, today: Date) -> Option<Paid> {
+        match (self.term()?, self.days_left(today)?) {
+            (Term::Key { plan, last }, left) if left <= SOON_DAYS => Some((plan, last)),
+            _ => None,
+        }
+    }
 }
+
+/// Запись устройства о ключе базы (`store/device.rs` окна): тариф
+/// и последний день — `standard:2027-11-10`, — а ключа на ՀՎՀՀ профиля нет —
+/// `none`. Пишет её часть окна, проверив подписи, а читает главный wasm при
+/// открытии: метке срока не ждать части. Это договор между версиями на одном
+/// устройстве: незнакомую запись прочитать нельзя ([`remembered`]), и срок
+/// тогда скажет часть, — поэтому смысл записи не меняется, а новое — новой
+/// записью.
+pub fn remember(key: Option<Paid>) -> String {
+    match key {
+        Some((plan, last)) => format!("{}:{}", plan.code(), last.iso()),
+        None => NONE.to_owned(),
+    }
+}
+
+/// Запись [`remember`]; `None` — не она: испорчена или от программы новее.
+pub fn remembered(text: &str) -> Option<Option<Paid>> {
+    if text == NONE {
+        return Some(None);
+    }
+    let (plan, last) = text.split_once(':')?;
+    Some(Some((Plan::from_code(plan)?, Date::from_iso(last)?)))
+}
+
+/// Ключа нет — в записи [`remember`].
+const NONE: &str = "none";
 
 /// Введённый ключ — запись.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]

@@ -4,9 +4,11 @@
 //! человек уже знает и какую окно уже пробовало включить, — скрыты ли
 //! первые шаги на главном экране (задача 28) и что с автокопией (задача 29):
 //! когда была последняя, когда в последний раз менялись данные, метка
-//! устройства и когда вводили пароль, — и настройки окна (задача 88): включён
-//! ли кружок у курсора и свои цвета. Папку и ключ автокопии `localStorage`
-//! не держит — это объекты браузера, они в своей базе (`store/autobackup.rs`).
+//! устройства и когда вводили пароль, — настройки окна (задача 88): включён
+//! ли кружок у курсора и свои цвета, — и срок ключа каждой базы с днём, о конце
+//! которого окно уже сказало (задача 92). Папку и ключ автокопии
+//! `localStorage` не держит — это объекты браузера, они в своей базе
+//! (`store/autobackup.rs`).
 //!
 //! Это не данные человека, а состояние устройства, поэтому оно лежит не
 //! в базе записей и не попадает в копию: перенесённая на новое устройство
@@ -34,6 +36,7 @@
 use kvartik_core::format::autobackup::DeviceTag;
 use kvartik_core::format::backup::DeviceKey;
 use kvartik_core::i18n::Lang;
+use kvartik_core::license::{self, Paid};
 use kvartik_core::model::date::Date;
 use kvartik_core::model::record::Timestamp;
 use kvartik_core::release::Version;
@@ -144,6 +147,33 @@ impl Device {
     /// отказал: при следующем открытии они появятся снова.
     pub fn set_steps_hidden(&self, base: &str) -> bool {
         self.set(&steps_name(base), "1")
+    }
+
+    /// Ключ базы `base`, каким его в прошлый раз нашла часть окна, проверив
+    /// подписи (`license::remember`): `Some(None)` — ключа нет. `None` —
+    /// записи нет или она не читается, и срок скажет часть. У каждого ИП
+    /// свой ключ — на его ՀՎՀՀ.
+    pub fn key_term(&self, base: &str) -> Option<Option<Paid>> {
+        license::remembered(&self.get(&per_base("license", base))?)
+    }
+
+    /// Запомнить ключ базы `base`. `false` — `localStorage` отказал: при
+    /// следующем открытии метка срока подождёт части.
+    pub fn set_key_term(&self, base: &str, key: Option<Paid>) -> bool {
+        self.set(&per_base("license", base), &license::remember(key))
+    }
+
+    /// Последний день ключа базы `base`, о конце которого окно уже сказало
+    /// окном поверх программы; `None` — не говорило или запись не читается.
+    pub fn key_told(&self, base: &str) -> Option<Date> {
+        Date::from_iso(&self.get(&per_base("license_told", base))?)
+    }
+
+    /// Запомнить, что о конце ключа с последним днём `last` сказано.
+    /// `false` — `localStorage` отказал: окно встанет при следующем запуске
+    /// снова.
+    pub fn set_key_told(&self, base: &str, last: Date) -> bool {
+        self.set(&per_base("license_told", base), &last.iso())
     }
 
     /// Когда последняя удавшаяся автокопия (задача 29) начала читать базу;
@@ -310,6 +340,8 @@ impl Device {
                 "base",
                 CURSOR,
                 "colors",
+                "license",
+                "license_told",
             ] {
                 let _ = storage.remove_item(&format!("{}{name}", self.prefix));
             }
@@ -320,10 +352,50 @@ impl Device {
 /// Имя записи скрытых первых шагов: у первого ИП — прежнее, какое было до
 /// конторы, у следующих — с именем базы.
 fn steps_name(base: &str) -> String {
+    per_base("steps_hidden", base)
+}
+
+/// Имя записи `name` ИП базы `base`: у первого ИП — само имя, у следующих —
+/// с именем базы.
+fn per_base(name: &str, base: &str) -> String {
     if base == super::DB_NAME {
-        "steps_hidden".to_owned()
+        name.to_owned()
     } else {
-        format!("steps_hidden.{base}")
+        format!("{name}.{base}")
+    }
+}
+
+/// Открывалась ли программа в этой вкладке раньше — это перезагрузка,
+/// возврат «Назад» из другого сайта или включённая новая версия, а не
+/// запуск, — и запомнить, что открывалась. Запись — во вкладке
+/// (`sessionStorage`): она переживает перезагрузку и восстановление вкладки,
+/// а закрытая вкладка её стирает, и новая вкладка или окно начинают свою (по
+/// браузеру: MDN, `Window.sessionStorage`, правка 2026-10-12, сверено
+/// 2026-11-11). По ней экран лицензии при конце срока встаёт только при
+/// запуске (`ui/license.rs`). `sessionStorage` отказал — «открывалась»:
+/// перезагрузка открывает тот же экран (CLAUDE.md, Правило 2), а без записи
+/// их не отличить.
+pub fn relaunched() -> bool {
+    let Some(session) = super::office::session() else {
+        return true;
+    };
+    let before = session.get_item(LAUNCHED).ok().flatten().is_some();
+    before || session.set_item(LAUNCHED, "1").is_err()
+}
+
+/// Имя записи вкладки о запуске.
+const LAUNCHED: &str = "kvartik.launched";
+
+/// Как будто программа во вкладке открывается впервые (`fresh`) или уже
+/// открывалась — браузерным тестам: у них одна вкладка на весь прогон.
+#[cfg(all(test, target_arch = "wasm32"))]
+pub(crate) fn pretend_launch(fresh: bool) {
+    if let Some(session) = super::office::session() {
+        let _ = if fresh {
+            session.remove_item(LAUNCHED)
+        } else {
+            session.set_item(LAUNCHED, "1")
+        };
     }
 }
 

@@ -52,7 +52,7 @@ use home::Home;
 use icon::{Icon, icon};
 use lang::{LangSwitch, WindowLang};
 use ledger::{LedgerScreen, Operations};
-use license::{LicenseEntry, LicenseScreen, Licenses};
+use license::{LicenseChip, LicenseEntry, LicenseScreen, Licenses, Place};
 use nav::Nav;
 use office::{Office, OfficeBar, OfficeEntry, OfficeScreen};
 use onboarding::Welcome;
@@ -147,8 +147,10 @@ impl Base {
 /// фокусом. Формы окно считает ([`Forms`]): с открытой новая версия ждёт.
 /// Напоминание о копии — карточкой на главном экране и меткой под
 /// заголовком остальных: напоминать обязано каждое открытие (Правило 2).
-/// Установка — на главном экране, выше всего о данных: на iPhone программу
-/// ставят до того, как вводить данные (Правило 6).
+/// Срок лицензии — меткой в меню и на главном экране всегда, а кончился —
+/// экраном лицензии при запуске и окном за неделю до конца ключа (задача 92,
+/// `ui/license.rs`). Установка — на главном экране, выше всего о данных: на
+/// iPhone программу ставят до того, как вводить данные (Правило 6).
 #[component]
 pub fn App() -> impl IntoView {
     // Язык — первым: до первой отрисовки (задача 53).
@@ -191,8 +193,9 @@ pub fn App() -> impl IntoView {
         closings,
     };
     // Пробный период — с первого запуска на устройстве (задача 25); ключи
-    // читают части, которым они нужны (`ui/license.rs`).
-    let licenses = Licenses::start(clock::today());
+    // читают части, которым они нужны (`ui/license.rs`). Кончился срок —
+    // запуск открывает экран лицензии (задача 92).
+    let licenses = Licenses::start(clock::today(), router, forms, welcome, program);
     let tax = tax::Ctx::new(lang, sources, base, backups, licenses, forms);
     leptos::task::spawn_local(async move {
         // Запись в базу — дело автокопии, а не состояния хранилища: сигнал
@@ -202,16 +205,25 @@ pub fn App() -> impl IntoView {
             event => storage.update(|state| state.apply(event)),
         };
         let name = office.start().await;
+        // Срок ключа этой базы — каким его помнит устройство: метка срока
+        // стоит, не дожидаясь базы и части (задача 92).
+        licenses.chosen(&name);
         match Store::open_base(&name, on_event).await {
             Ok(store) => {
                 let store = Rc::new(store);
                 base.opened(Rc::clone(&store));
-                // Не прочиталось — напоминания о копии не будет, а об ошибке
-                // хранилище скажет на первом же действии.
-                let has_data = match store.read() {
-                    Ok(tx) => tx.is_empty().await.is_ok_and(|empty| !empty),
-                    Err(_) => false,
+                // Пуста ли база; `None` — не прочиталось: тогда напоминания
+                // о копии не будет, а об ошибке хранилище скажет на первом же
+                // действии.
+                let empty = match store.read() {
+                    Ok(tx) => tx.is_empty().await.ok(),
+                    Err(_) => None,
                 };
+                let has_data = empty == Some(false);
+                // В пустой базе ключей нет — срок только пробного периода.
+                if empty == Some(true) {
+                    licenses.empty();
+                }
                 // ИП несколько — данные у программы есть, даже если открыт
                 // пустой новый ИП: напоминание о копии и автокопия — за всех
                 // (ревью 2026-11-06).
@@ -262,9 +274,9 @@ pub fn App() -> impl IntoView {
     Effect::watch(move || router.screen(), |screen, _, _| route::shown(*screen), false);
 
     let hidden = move |screen: Screen| move || !router.shows(screen);
-    // Первый запуск и окно под окном «Что нового» неактивны: ни нажать,
-    // ни встать фокусом.
-    let inert = move || blocked.get();
+    // Первый запуск и окно под окнами «Что нового» и о конце ключа неактивны:
+    // ни нажать, ни встать фокусом.
+    let inert = move || blocked.get() || licenses.covering();
     view! {
         {move || welcome.get().then(|| view! {
             <div inert=inert>
@@ -286,11 +298,16 @@ pub fn App() -> impl IntoView {
             >
                 {tr(lang, Key::SkipToContent)}
             </a>
-            <Nav lang router documents clients backups />
+            <Nav lang router documents clients backups licenses />
             <main>
                 <UpdateNotice lang program forms />
                 <StorageAlert lang storage />
                 <OfficeBar ctx=office_ctx />
+                // Срок лицензии над экранами — в последнюю неделю и после
+                // конца срока (задача 92): одна метка на все экраны, а не по
+                // одной под каждым заголовком — каждая встраивалась бы в
+                // главный wasm своей копией (Правило 1).
+                <LicenseChip lang licenses place=Place::Screens(router) />
                 <section id=Screen::Home.id() class="screen" hidden=hidden(Screen::Home)>
                     <Home lang router program backups profiles documents clients tax welcome office />
                 </section>

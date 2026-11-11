@@ -1,7 +1,8 @@
-//! Главный экран (дизайн «Kvartik Design»): какой сегодня день и что ждёт
-//! внимания — копия, установка, первые шаги, сроки, расчётные документы
-//! ՊԵԿ, налог квартала, незаполненный профиль, неоплаченные счета, — и главное
-//! действие, «Новый счёт».
+//! Главный экран (дизайн «Kvartik Design»): какой сегодня день, сколько дней
+//! осталось пробного периода или ключа (задача 92; на компьютере — в меню),
+//! и что ждёт внимания — копия, установка, первые шаги, сроки, расчётные
+//! документы ՊԵԿ, налог квартала, незаполненный профиль, неоплаченные счета, —
+//! и главное действие, «Новый счёт».
 
 use kvartik_core::i18n::{self, Key, Lang, t};
 use leptos::prelude::*;
@@ -10,6 +11,7 @@ use super::backup::{BackupReminder, Backups};
 use super::clients::Clients;
 use super::documents::{Awaiting, Documents};
 use super::icon::{Icon, icon};
+use super::license::{LicenseChip, Place};
 use super::office::Office;
 use super::onboarding::{Card, FirstSteps, HandoffOffer, Steps};
 use super::profile::Profiles;
@@ -74,6 +76,7 @@ pub fn Home(
                 {icon(Icon::Gear)}
             </a>
         </header>
+        <LicenseChip lang licenses=tax.licenses place=Place::Home />
         <BackupReminder lang backups />
         {first.then(|| view! { <InstallSection lang program /> })}
         // Введённое в калькуляторе лендинга — до первых шагов: первый шаг —

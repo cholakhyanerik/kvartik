@@ -187,6 +187,8 @@ pub struct Router {
     /// закрывшись, вернёт на главный экран ([`Router::form_closed`]). Ушёл
     /// человек с него сам — больше не ведём.
     guided: RwSignal<Option<Screen>>,
+    /// Сменился ли экран с открытия окна — ссылкой, «Назад» или из кода.
+    moved: StoredValue<bool>,
 }
 
 impl Router {
@@ -200,6 +202,7 @@ impl Router {
             screen: RwSignal::new(first),
             target: RwSignal::new(first),
             guided: RwSignal::new(None),
+            moved: StoredValue::new(false),
         };
         let listener = window_event_listener(ev::hashchange, move |_| {
             let next = Screen::from_hash(&platform::hash());
@@ -242,6 +245,7 @@ impl Router {
         if from == next {
             return;
         }
+        self.moved.set_value(true);
         self.target.set(next);
         let (screen, target) = (self.screen, self.target);
         super::motion::screen(from, next, move || {
@@ -249,6 +253,13 @@ impl Router {
                 screen.try_set(next);
             }
         });
+    }
+
+    /// Стоит ли окно на экране, с которым открылось: человек никуда ещё не
+    /// переходил, и увести его на другой экран можно, ничего у него не
+    /// отняв (`ui/license.rs`).
+    pub fn untouched(self) -> bool {
+        !self.moved.get_value()
     }
 
     /// Перейти на экран по первым шагам: его форма, закрывшись, вернёт на

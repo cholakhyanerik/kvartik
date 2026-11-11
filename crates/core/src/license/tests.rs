@@ -289,6 +289,95 @@ fn the_longest_term_wins() {
     assert_eq!(access.term().map(Term::last), Some(day(2027, 10, 31)));
 }
 
+/// Срок, собранный из уже проверенного ключа (`Access::known`), — тот же, что
+/// с проверкой подписи: главный wasm окна показывает его без Ed25519, и метка
+/// не должна разойтись с тем, что запирает выпуск. Самый долгий ключ
+/// помнится и кончившимся: он короче пробного периода, но запись о нём —
+/// правда.
+#[test]
+fn a_known_term_matches_the_checked_one() {
+    let on = tin("00054321");
+    let old = key("00054321", Plan::Standard, day(2025, 10, 1), day(2026, 9, 30));
+    let year = standard();
+    let start = day(2026, 10, 27);
+    let mut wrong = Vec::new();
+    for (case, keys) in [("без ключа", vec![]), ("кончившийся", vec![&old]), ("годовой", vec![&old, &year])] {
+        let checked = Access::new(&public(), keys, Some(&on), Some(start));
+        let known = Access::known(trial_last(start), checked.key());
+        for today in [start, day(2026, 11, 9), day(2026, 11, 10), day(2027, 10, 31), day(2027, 11, 1)] {
+            if (known.term(), known.days_left(today), known.issue(today))
+                != (checked.term(), checked.days_left(today), checked.issue(today))
+            {
+                wrong.push(format!("{case}, {today:?}: {known:?} против {checked:?}"));
+            }
+        }
+    }
+    let expired = Access::new(&public(), [&old], Some(&on), Some(start));
+    assert_eq!(expired.key(), Some((Plan::Standard, day(2026, 9, 30))));
+    assert_eq!(expired.term(), Some(Term::Trial { last: day(2026, 11, 9) }));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Громче — в последние семь дней, считая последний, после конца срока
+/// и без срока; окно поверх программы — только о ключе, пока он идёт.
+#[test]
+fn the_last_week_is_said_louder() {
+    let last = day(2027, 10, 31);
+    let licensed = Access::known(None, Some((Plan::Standard, last)));
+    let mut wrong = Vec::new();
+    for (today, soon, ending) in [
+        (day(2027, 10, 24), false, false),
+        (day(2027, 10, 25), true, true),
+        (last, true, true),
+        (day(2027, 11, 1), true, false),
+    ] {
+        if licensed.soon(today) != soon {
+            wrong.push(format!("ключ, {today:?}: громче — {}", licensed.soon(today)));
+        }
+        let told = licensed.ending_key(today);
+        if told.is_some() != ending || told.is_some_and(|key| key != (Plan::Standard, last)) {
+            wrong.push(format!("ключ, {today:?}: окно — {told:?}"));
+        }
+    }
+    let trial = Access::known(trial_last(day(2026, 10, 27)), None);
+    if !trial.soon(day(2026, 11, 3)) || trial.soon(day(2026, 11, 2)) {
+        wrong.push("пробный период: громче не с 3 ноября".to_owned());
+    }
+    if trial.ending_key(day(2026, 11, 9)).is_some() {
+        wrong.push("окно о конце — у пробного периода".to_owned());
+    }
+    if !Access::default().soon(day(2026, 11, 3)) {
+        wrong.push("без срока — тихо".to_owned());
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Запись устройства о ключе читается обратно — и «ключа нет» тоже, — а чужая
+/// или испорченная не читается: срок тогда скажет часть окна, проверив
+/// подписи. Сами записи выписаны руками: их читает и прежняя версия.
+#[test]
+fn the_remembered_key_round_trips() {
+    let mut wrong = Vec::new();
+    for (key, text) in [
+        (Some((Plan::Standard, day(2027, 11, 10))), "standard:2027-11-10"),
+        (Some((Plan::Pro, day(2026, 1, 1))), "pro:2026-01-01"),
+        (None, "none"),
+    ] {
+        if remember(key) != text {
+            wrong.push(format!("{key:?} записан как {}", remember(key)));
+        }
+        if remembered(text) != Some(key) {
+            wrong.push(format!("{text} прочитан как {:?}", remembered(text)));
+        }
+    }
+    for spoiled in ["", "None", "standard", "standard:", "basic:2027-11-10", "standard:2027-02-30", "standard:2027-11-10:1", ":2027-11-10"] {
+        if remembered(spoiled).is_some() {
+            wrong.push(format!("«{spoiled}» прочитан как {:?}", remembered(spoiled)));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// Запись ключа читается обратно, а ключ в ней — только своей записью:
 /// строчными, без дефисов или испорченный — порча.
 #[test]

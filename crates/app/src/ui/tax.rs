@@ -51,7 +51,7 @@ use super::documents::{Documents, SettlementReminder};
 use super::form::Forms;
 use super::icon::{Icon, icon};
 use super::ledger::{Operations, tax_part};
-use super::license::{LicenseCard, LicensePage, Licenses};
+use super::license::{LicenseCard, LicensePage, Licenses, RenewDialog};
 use super::opening::OpeningEntry;
 use super::profile::Profiles;
 use super::report::ReportPage;
@@ -628,6 +628,7 @@ pub(super) fn content(ctx: Ctx, part: Part) -> AnyView {
         Part::Card => view! {
             <AutoCards lang=ctx.lang backups=ctx.backups />
             <LicenseCard ctx />
+            <RenewDialog ctx />
             <ApplicationCard ctx />
             <DeadlineReminder ctx />
             <SettlementReminder lang=ctx.lang documents=ctx.sources.documents today=ctx.today />

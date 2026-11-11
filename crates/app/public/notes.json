@@ -1,6 +1,25 @@
 {
   "notes": [
     {
+      "version": "0.0.118",
+      "date": "2026-11-11",
+      "hy": [
+        "Թե քանի օր է մնացել փորձաշրջանից կամ բանալուց, այժմ միշտ երևում է՝ համակարգչում՝ ընտրացանկում, հեռախոսում՝ գլխավոր էկրանին, իսկ վերջին շաբաթում՝ նաև յուրաքանչյուր էկրանի վերևում։",
+        "Երբ ժամկետն ավարտվել է, ծրագիրը գործարկման ժամանակ բացվում է Լիցենզիայի էկրանով՝ այնտեղ է բանալու գնման մասին ամեն ինչ։ Տվյալները, մատյանը, հարկը և պատճենն աշխատում են նաև առանց բանալու։",
+        "Բանալու ավարտից մեկ շաբաթ առաջ ծրագիրը մեկ անգամ կասի այդ մասին պատուհանով՝ «Երկարաձգել» կոճակով։"
+      ],
+      "ru": [
+        "Сколько дней осталось пробного периода или ключа, теперь всегда видно: в меню на компьютере и на главном экране телефона, а в последнюю неделю — и над каждым экраном.",
+        "Когда срок кончился, программа при запуске открывается экраном лицензии — там всё о покупке ключа. Данные, книга, налог и копия работают и без ключа.",
+        "За неделю до конца ключа программа один раз скажет об этом окном с кнопкой «Продлить»."
+      ],
+      "en": [
+        "How many days are left on your trial or key is now always in view: in the menu on a computer and on the home screen of a phone, and in the last week at the top of every screen too.",
+        "When the term has ended, the app opens on the License screen at launch — everything about buying a key is there. Your data, ledger, tax and backups keep working without a key.",
+        "A week before your key expires, the app tells you once, in a window with a “Renew” button."
+      ]
+    },
+    {
       "version": "0.0.117",
       "date": "2026-11-11",
       "hy": [
@@ -251,19 +270,6 @@
       ],
       "en": [
         "An annulled invoice's card no longer shows “Due date” and “Left to pay”: there's nothing to pay on an annulled invoice. Payments that came in on it are still shown."
-      ]
-    },
-    {
-      "version": "0.0.98",
-      "date": "2026-11-10",
-      "hy": [
-        "Վճարումը նշելիս ծրագիրն այժմ միանգամից զգուշացնում է, եթե գումարը գերազանցում է մնացորդը կամ ստացման օրը դեռ չի եկել. դա սովորաբար տառասխալ է։ Նշել հնարավոր է նաև այդպես, իսկ գերավճարը երևում է հաշվի քարտում։"
-      ],
-      "ru": [
-        "Когда вы отмечаете оплату, программа теперь сразу говорит, если сумма больше остатка или день поступления ещё не наступил: обычно это опечатка. Отметить можно и так, а переплата видна в карточке счёта."
-      ],
-      "en": [
-        "When you record a payment, the app now tells you at once if the amount is more than is left to pay or the date received hasn't come yet: that's usually a typo. You can still record it, and an overpayment shows on the invoice card."
       ]
     }
   ]

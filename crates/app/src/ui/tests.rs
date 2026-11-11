@@ -66,8 +66,25 @@ fn mount() -> (HtmlElement, impl Sized) {
     mount_at("")
 }
 
-/// Окно, открытое по адресу `hash`.
+/// Окно, открытое по адресу `hash`, — как после перезагрузки вкладки: у тестов
+/// вкладка одна на весь прогон, и без этого первое окно в прогоне — какое
+/// придётся — открылось бы как запуск, а с кончившимся сроком ушло бы на
+/// экран лицензии (`ui/license.rs`, `open_on_license`). Запуск — [`launch_at`].
 fn mount_at(hash: &str) -> (HtmlElement, impl Sized) {
+    crate::store::device::pretend_launch(false);
+    mount_in(hash)
+}
+
+/// Окно, открытое по адресу `hash` запуском программы: вкладка открывает её
+/// впервые.
+fn launch_at(hash: &str) -> (HtmlElement, impl Sized) {
+    crate::store::device::pretend_launch(true);
+    mount_in(hash)
+}
+
+/// Окно по адресу `hash`; как вкладка открывалась раньше — решает тот, кто
+/// зовёт.
+fn mount_in(hash: &str) -> (HtmlElement, impl Sized) {
     crate::platform::set_hash(hash);
     let document = document();
     let host: HtmlElement = document
@@ -721,7 +738,8 @@ async fn backup_label_stands_on_every_screen_when_due() {
             continue;
         }
         crate::platform::set_hash(&screen.href());
-        let label = format!("#{} a.chip.nudge", screen.id());
+        // По адресу метки: рядом бывает и метка срока лицензии (задача 92).
+        let label = format!("#{} a.chip.nudge[href=\"{}\"]", screen.id(), Screen::Backup.href());
         let mut seen = false;
         for _ in 0..100 {
             if shown_screens(&host) == [screen.id()] && host.query_selector(&label).ok().flatten().is_some() {

@@ -628,21 +628,26 @@ pub fn BackupChip(
     #[prop(optional)] nudge: bool,
 ) -> impl IntoView {
     move || {
-        if nudge && !backups.due() {
+        let due = backups.due();
+        if nudge && !due {
             return None;
         }
         let text = ago(lang.get(), backups.last.get(), backups.today)?;
-        Some(view! {
-            <a
-                class="chip"
-                class:due=move || backups.due()
-                class:nudge=nudge
-                href=Screen::Backup.href()
-            >
-                {icon(Icon::Shield)}
-                <span>{text}</span>
-            </a>
-        })
+        Some(chip(Screen::Backup.href(), Icon::Shield, text, due, nudge))
+    }
+}
+
+/// Метка — ссылка со значком и словами (дизайн «Kvartik Design»): у копии
+/// и у срока лицензии (задача 92) одна разметка — и одна её копия в главном
+/// wasm (Правило 1). `due` — пора: и заливкой, и словами; `nudge` — она же
+/// на телефоне, на экране, а не в меню. Сменилось что-то — метку рисуют
+/// заново, её слова короткие.
+pub(super) fn chip(href: String, glyph: Icon, words: String, due: bool, nudge: bool) -> impl IntoView {
+    view! {
+        <a class="chip" class:due=due class:nudge=nudge href=href>
+            {icon(glyph)}
+            <span>{words}</span>
+        </a>
     }
 }
 

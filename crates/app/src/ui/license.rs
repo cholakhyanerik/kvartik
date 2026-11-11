@@ -14,28 +14,45 @@
 //!
 //! День начала пробного периода помнит устройство (`store/device.rs`),
 //! а ключ — база: ключ выдан на ИП, а не на устройство, и переезжает с копией.
+//!
+//! Сколько дней осталось — всегда на виду (задача 92, решение человека
+//! 2026-11-11): меткой ([`LicenseChip`]) в меню на компьютере и на главном
+//! экране телефона, а в последние [`license::SOON_DAYS`] дней и после конца срока — и
+//! над остальными экранами телефона. Кончился срок — программа открывается
+//! экраном лицензии (`Licenses::show`), а за неделю до конца ключа встаёт
+//! окно ([`RenewDialog`]). Метке нужен срок с первого кадра, а подпись
+//! проверяет часть, поэтому главный wasm берёт срок без проверки
+//! ([`Licenses::shown`]): у пустой базы ключей нет, а иначе — какой ключ
+//! в прошлый раз нашла часть, помнит устройство. Часть, проверив подписи,
+//! ставит срок сама и обновляет запись. Запирает выпуск и числа по-прежнему
+//! только срок с проверкой ([`Licenses::access`]).
 
 use std::sync::Arc;
 
 use kvartik_core::i18n::{self, Key, Lang, fill, plural, t};
-use kvartik_core::license::{self, Access, KeyError, License, PUBLIC_KEY_BYTES, Plan, Term};
+use kvartik_core::license::{self, Access, KeyError, License, PUBLIC_KEY_BYTES, Paid, Plan, Term};
 use kvartik_core::model::date::{Date, Quarter};
 use kvartik_core::model::tin::Tin;
 use kvartik_core::release;
 use leptos::ev::SubmitEvent;
+use leptos::portal::Portal;
 use leptos::prelude::*;
+use wasm_bindgen::JsCast;
+use web_sys::{HtmlElement, KeyboardEvent};
 
-use super::backup::BackupChip;
+use super::backup::{BackupChip, chip};
+use super::form::Forms;
 use super::icon::{Icon, icon};
 use super::ledger::tax_part;
 use super::profile::Profiles;
+use super::pwa::Program;
 use super::route::{Router, Screen};
 use super::split::screen;
 use super::storage::error_key;
 use super::tax::{self, Part};
 use super::{Base, tr};
-use crate::platform::clock;
-use crate::store::device::Device;
+use crate::platform::{self, clock};
+use crate::store::device::{self, Device};
 use crate::store::{Store, StoreError, Writes};
 
 /// За столько дней до конца ключа окно напоминает его продлить: месяц —
@@ -71,6 +88,37 @@ pub struct Licenses {
     /// Открытый ключ, которым проверяется подпись: в программе —
     /// [`PUBLIC_KEY`], в тестах — ключ проб.
     public: [u8; PUBLIC_KEY_BYTES],
+    /// Сегодня — один раз (Архитектура, «Время — параметр»).
+    today: Option<Date>,
+    /// Срок, который окно показывает, — метка, экран лицензии при запуске
+    /// и окно о конце ключа: без проверки подписи (шапка модуля). `None` —
+    /// ещё неизвестен.
+    shown: RwSignal<Option<Access>>,
+    /// Имя открытой базы: под ним устройство помнит её ключ; пусто — база
+    /// ещё не выбрана. Сигналом и строкой — тем же типом, что у конторы:
+    /// новый тип сигнала — новый код в главном wasm (Правило 1).
+    base_name: RwSignal<String>,
+    /// Стоит ли окно о конце ключа: программа под ним неактивна.
+    covering: RwSignal<bool>,
+    /// Запуск ли это программы во вкладке, а срок ещё не стал известен:
+    /// тогда кончившийся срок открывает экран лицензии ([`Licenses::show`]).
+    launch: StoredValue<bool>,
+    /// Что мешает увести на экран лицензии и поднять окно о конце ключа, —
+    /// одной ручкой: `Licenses` лежит в `Ctx` каждого экрана, и поле в нём —
+    /// байты при каждом переносе `Ctx`, а у профиля — ещё и вариант
+    /// перечисления больше порога клиппи.
+    calm: StoredValue<Calm>,
+}
+
+/// Что мешает увести на экран лицензии и поднять окно о конце ключа
+/// (задача 92): начатая форма, экран первого запуска, окно «Что нового» —
+/// и экран, с которым окно открылось.
+#[derive(Clone, Copy)]
+struct Calm {
+    router: Router,
+    forms: Forms,
+    welcome: RwSignal<bool>,
+    program: Program,
 }
 
 /// Где ключи.
@@ -90,7 +138,13 @@ impl Licenses {
     /// начинается сегодня. Не запомнилось (`localStorage` отказал) — период
     /// начнётся заново при следующем открытии: бороться с этим не нужно
     /// (`kvartik_core::license`).
-    pub fn start(today: Option<Date>) -> Self {
+    pub fn start(
+        today: Option<Date>,
+        router: Router,
+        forms: Forms,
+        welcome: RwSignal<bool>,
+        program: Program,
+    ) -> Self {
         let device = Device::new();
         let trial = device.trial_start().or_else(|| {
             let today = today?;
@@ -103,7 +157,74 @@ impl Licenses {
             root: StoredValue::new(Owner::current()),
             trial,
             public: author(),
+            today,
+            shown: RwSignal::new(None),
+            base_name: RwSignal::new(String::new()),
+            covering: RwSignal::new(false),
+            launch: StoredValue::new(!device::relaunched()),
+            calm: StoredValue::new(Calm {
+                router,
+                forms,
+                welcome,
+                program,
+            }),
         }
+    }
+
+    /// Вкладка выбрала базу `name`: её ключ — каким его в прошлый раз нашла
+    /// часть, если устройство это помнит. Так метка срока стоит с первого
+    /// кадра, а не ждёт части.
+    pub fn chosen(&self, name: &str) {
+        self.base_name.set(name.to_owned());
+        if let Some(key) = Device::new().key_term(name) {
+            self.show(self.known(key));
+        }
+    }
+
+    /// База открылась пустой: ключей в ней нет — ни записи, ни удалённой, —
+    /// и срок — один пробный период, что бы ни помнило устройство.
+    pub fn empty(&self) {
+        self.show(self.known(None));
+    }
+
+    /// Срок по ключу, проверенному раньше, и пробному периоду устройства.
+    fn known(&self, key: Option<Paid>) -> Access {
+        Access::known(self.trial.and_then(license::trial_last), key)
+    }
+
+    /// Показать срок; тот же — подписчиков не будить.
+    ///
+    /// Первый известный срок при запуске программы решает и экран: кончился
+    /// он — пробный период или ключ — программа открывается экраном лицензии,
+    /// где всё о покупке (задача 92, решение человека 2026-11-11). Только
+    /// при запуске, а не при перезагрузке, возврате «Назад» и включённой
+    /// новой версии — перезагрузка открывает тот же экран (CLAUDE.md,
+    /// Правило 2), а какой это из них, помнит вкладка (`device::relaunched`).
+    /// Данные это не запирает: с экрана лицензии человек уходит куда хочет,
+    /// а «Назад» вернёт его на экран, с которым программа открылась. Успел
+    /// он уйти с первого экрана или открыть форму — остаётся где был; стоит
+    /// экран первого запуска — тоже. Решение одно, своего эффекта у него нет:
+    /// эффект в главном wasm — около килобайта (Правило 1).
+    fn show(&self, access: Access) {
+        if self.shown.get_untracked() != Some(access) {
+            self.shown.set(Some(access));
+        }
+        if self.launch.get_value() {
+            self.launch.set_value(false);
+            let ended = self.today.is_some_and(|today| !access.issue(today));
+            let calm = self.calm.get_value();
+            // Адресом, а не `Router::go`: окно идёт за адресом само, и «Назад»
+            // вернёт прежний экран.
+            if ended && !calm.welcome.get_untracked() && calm.router.untouched() && !calm.forms.busy() {
+                platform::set_hash(&Screen::License.href());
+            }
+        }
+    }
+
+    /// Срок, который окно показывает, — отслеживаемое. Без проверки подписи:
+    /// только для показа (шапка модуля); `None` — ещё неизвестен.
+    pub(super) fn shown(&self) -> Option<Access> {
+        self.shown.get()
     }
 
     /// Читать ключи, когда база открылась и когда её заменило
@@ -112,7 +233,13 @@ impl Licenses {
     /// конца: эффект Leptos умирает с владельцем, а первой может позвать
     /// форма профиля или документа — после её закрытия восстановленный
     /// ключ остался бы непрочитанным (ревью задачи 25).
-    pub(super) fn watch(&self, base: Base) {
+    ///
+    /// Там же срок, проверенный подписью, идёт в метку и в запись устройства
+    /// ([`Licenses::shown`]) — когда прочитаны и ключи, и профиль: ключ на
+    /// ՀՎՀՀ профиля, и до профиля любой ключ казался бы чужим, а у купившего
+    /// мелькнуло бы «пробный период кончился». `profiles` — профиль открытой
+    /// базы, у всех, кто зовёт, один.
+    pub(super) fn watch(&self, base: Base, profiles: Profiles) {
         if self.watched.get_value() {
             return;
         }
@@ -131,11 +258,50 @@ impl Licenses {
                 },
                 true,
             );
+            Effect::new(move |_| {
+                if !licenses.ready() || !profiles.ready() {
+                    return;
+                }
+                let access = licenses.access(profiles);
+                licenses.show(access);
+                let name = licenses.base_name.get_untracked();
+                let device = Device::new();
+                if !name.is_empty() && device.key_term(&name) != Some(access.key()) {
+                    device.set_key_term(&name, access.key());
+                }
+            });
         };
         match self.root.get_value() {
             Some(root) => root.with(follow),
             None => follow(),
         }
+    }
+
+    /// Ключ, о конце которого пора сказать окном поверх программы, — если
+    /// о нём ещё не сказано: в этом окне (`told`) или раньше, по записи
+    /// устройства. Отслеживаемое.
+    fn ending(&self, told: RwSignal<Option<Date>>) -> Option<Paid> {
+        let key = self.shown()?.ending_key(self.today?)?;
+        let base = self.base_name.get_untracked();
+        let said = told.get() == Some(key.1) || Device::new().key_told(&base) == Some(key.1);
+        (!base.is_empty() && !said).then_some(key)
+    }
+
+    /// Окно о конце ключа `up` закрыли: о нём сказано — больше не встанет,
+    /// ни в этом окне (`told`, и когда устройство не записало), ни потом.
+    fn renewed(&self, up: RwSignal<Option<Paid>>, told: RwSignal<Option<Date>>) {
+        if let Some((_, last)) = up.get_untracked() {
+            told.set(Some(last));
+            Device::new().set_key_told(&self.base_name.get_untracked(), last);
+        }
+        self.covering.set(false);
+        up.set(None);
+    }
+
+    /// Стоит ли окно о конце ключа — отслеживаемое: программа под ним
+    /// неактивна (`ui/mod.rs`).
+    pub fn covering(&self) -> bool {
+        self.covering.get()
     }
 
     /// Прочитать ключи.
@@ -260,16 +426,18 @@ const fn plan_key(plan: Plan) -> Key {
     }
 }
 
-/// Срок словами: что идёт и до какого дня, а кончился — когда.
+/// Срок словами: что идёт, до какого дня и сколько дней осталось, а кончился —
+/// когда.
 pub(super) fn term_words(lang: Lang, access: Access, today: Date) -> String {
     let date = |day| i18n::date(lang, day);
     match (access.term(), access.days_left(today)) {
         (Some(Term::Trial { last }), Some(left)) => {
             fill(t(lang, Key::LicenseTrialUntil), &[&date(last), &days(lang, left)])
         }
-        (Some(Term::Key { plan, last }), Some(_)) => {
-            fill(t(lang, Key::LicenseKeyUntil), &[t(lang, plan_key(plan)), &date(last)])
-        }
+        (Some(Term::Key { plan, last }), Some(left)) => fill(
+            t(lang, Key::LicenseKeyUntil),
+            &[t(lang, plan_key(plan)), &date(last), &days(lang, left)],
+        ),
         (Some(Term::Trial { last }), None) => fill(t(lang, Key::LicenseTrialEnded), &[&date(last)]),
         (Some(Term::Key { last, .. }), None) => fill(t(lang, Key::LicenseKeyEnded), &[&date(last)]),
         (None, _) => t(lang, Key::LicenseNone).to_owned(),
@@ -315,9 +483,10 @@ pub(super) fn LicenseLink(lang: ReadSignal<Lang>) -> impl IntoView {
     view! { <a class="button" href=Screen::License.href()><span class="label">{tr(lang, Key::LicenseEnter)}</span></a> }
 }
 
-/// Карточка на главном экране: пробный период — сколько осталось, ключ —
-/// когда пора продлить, кончился срок — что заперто. Ключ идёт, и до конца
-/// дальше месяца — карточки нет. Из части книги, как карточка налога.
+/// Карточка на главном экране: ключ — когда пора продлить, кончился срок —
+/// что заперто. Сколько дней идёт пробный период или ключ, говорит метка
+/// срока над карточками ([`LicenseChip`], задача 92), и карточки тогда нет.
+/// Из части книги, как карточка налога.
 #[component]
 pub(super) fn LicenseCard(ctx: tax::Ctx) -> impl IntoView {
     let tax::Ctx {
@@ -328,21 +497,20 @@ pub(super) fn LicenseCard(ctx: tax::Ctx) -> impl IntoView {
         today,
         ..
     } = ctx;
-    licenses.watch(base);
+    licenses.watch(base, sources.profiles);
     let access = Memo::new(move |_| licenses.access(sources.profiles));
     move || {
         let today = today?;
-        // Пока ключи читаются — карточки нет: у купившего ключ мелькнуло бы
-        // «пробный период кончился».
-        if !licenses.ready() {
+        // Пока ключи или профиль читаются — карточки нет: у купившего ключ
+        // мелькнуло бы «пробный период кончился», а ключ — на ՀՎՀՀ профиля.
+        if !licenses.ready() || !sources.profiles.ready() {
             return None;
         }
         let access = access.get();
         let left = access.days_left(today);
         let renew = matches!(access.term(), Some(Term::Key { .. })) && left.is_some_and(|left| left <= RENEW_DAYS);
-        let trial = matches!(access.term(), Some(Term::Trial { .. })) && left.is_some();
         let over = left.is_none();
-        (trial || renew || over).then(|| view! {
+        (renew || over).then(|| view! {
             <div class="notice due" role="status">
                 {icon(Icon::Document)}
                 <p class="reminder">{move || {
@@ -361,6 +529,145 @@ pub(super) fn LicenseCard(ctx: tax::Ctx) -> impl IntoView {
                 <LicenseLink lang />
             </div>
         })
+    }
+}
+
+/// Где стоит метка срока.
+#[derive(Clone, Copy)]
+pub enum Place {
+    /// В меню — на компьютере, всегда.
+    Menu,
+    /// На главном экране под приветствием — на телефоне, всегда.
+    Home,
+    /// Над остальными экранами — на телефоне, в последние
+    /// [`license::SOON_DAYS`] дней и после конца срока; на главном и на
+    /// экране лицензии её нет — там о сроке сказано и так.
+    Screens(Router),
+}
+
+/// Метка срока (задача 92, решение человека 2026-11-11): сколько дней
+/// осталось — пробного периода или ключа, — а кончился — что кончился.
+/// Ведёт на экран лицензии; где стоит и когда видна — [`Place`], а на
+/// компьютере ли она или на телефоне, решают стили (`.nav .chip`,
+/// `.chip.nudge`), как у метки копии. Громче — и заливкой, и словами, не
+/// одним цветом (Правило 4).
+///
+/// В главном wasm — срок без проверки подписи ([`Licenses::shown`]); пока он
+/// неизвестен или часы без даты, метки нет: у купившего ключ мелькнуло бы
+/// «пробный период кончился».
+#[component]
+pub fn LicenseChip(lang: ReadSignal<Lang>, licenses: Licenses, place: Place) -> impl IntoView {
+    move || {
+        let today = licenses.today?;
+        let access = licenses.shown()?;
+        let term = access.term()?;
+        let left = access.days_left(today);
+        let loud = access.soon(today);
+        if let Place::Screens(router) = place
+            && (!loud || matches!(router.screen(), Screen::Home | Screen::License))
+        {
+            return None;
+        }
+        // Язык читается здесь же: сменился — метка рисуется заново, и своё
+        // замыкание у слов было бы лишним кодом в главном wasm.
+        let words = chip_words(lang.get(), term, left);
+        Some(chip(Screen::License.href(), Icon::Key, words, loud, !matches!(place, Place::Menu)))
+    }
+}
+
+/// Слова метки срока.
+fn chip_words(lang: Lang, term: Term, left: Option<i32>) -> String {
+    match (term, left) {
+        (Term::Trial { .. }, Some(left)) => fill(t(lang, Key::LicenseChipTrial), &[&days(lang, left)]),
+        (Term::Key { .. }, Some(left)) => fill(t(lang, Key::LicenseChipKey), &[&days(lang, left)]),
+        (Term::Trial { .. }, None) => t(lang, Key::LicenseChipTrialEnded).to_owned(),
+        (Term::Key { .. }, None) => t(lang, Key::LicenseChipKeyEnded).to_owned(),
+    }
+}
+
+/// Окно «Срок лицензии подходит к концу» (задача 92, решение человека
+/// 2026-11-11): до конца ключа не больше [`license::SOON_DAYS`] дней — окно
+/// поверх программы, один раз на ключ: закрытое, оно больше не встаёт,
+/// а дальше говорят метка цветом напоминания и карточка «продлите ключ». Ждёт,
+/// пока стоят первый запуск или «Что нового» и пока открыта форма.
+///
+/// Всё окно — в части книги, с карточками главного экрана (`Part::Card`): оно
+/// встаёт раз в срок ключа, а у владельца ключа в базе есть данные, и часть
+/// грузится при открытии и так. Карточки — внутри главного экрана, спрятанного,
+/// когда открыт другой, поэтому окно встаёт в конец страницы (`Portal`), а не
+/// на месте карточек. Программа под ним неактивна ([`Licenses::covering`]).
+#[component]
+pub(super) fn RenewDialog(ctx: tax::Ctx) -> impl IntoView {
+    let licenses = ctx.licenses;
+    let up = RwSignal::new(None::<Paid>);
+    // О каком ключе сказано в этом окне: карточки главного экрана живут, пока
+    // живо окно, и вместе с ними — это.
+    let told = RwSignal::new(None::<Date>);
+    Effect::new(move |_| {
+        if up.get_untracked().is_some() {
+            return;
+        }
+        let Some(key) = licenses.ending(told) else {
+            return;
+        };
+        let calm = licenses.calm.get_value();
+        if !calm.welcome.get() && !calm.program.blocks() && !ctx.forms.any() {
+            licenses.covering.set(true);
+            up.set(Some(key));
+        }
+    });
+    let shown = Memo::new(move |_| up.with(Option::is_some));
+    move || shown.get().then(|| view! { <Portal><RenewCard ctx up told /></Portal> })
+}
+
+/// `id` заголовка окна о конце ключа: по нему окно названо для диктора и на
+/// нём встаёт фокус.
+const RENEW_TITLE: &str = "renew-title";
+
+/// Само окно о конце ключа — уже в части книги: сколько дней и до какого дня,
+/// что запрёт конец срока, «Продлить» — на экран лицензии — и «Понятно».
+/// Закрывают его обе кнопки и Escape. Фокус — на заголовке, после кадра,
+/// как у «Что нового».
+#[component]
+fn RenewCard(ctx: tax::Ctx, up: RwSignal<Option<Paid>>, told: RwSignal<Option<Date>>) -> impl IntoView {
+    let tax::Ctx { lang, licenses, .. } = ctx;
+    request_animation_frame(|| {
+        let title = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id(RENEW_TITLE));
+        if let Some(title) = title {
+            let _ = title.unchecked_into::<HtmlElement>().focus();
+        }
+    });
+    let close = move || licenses.renewed(up, told);
+    let keydown = move |event: KeyboardEvent| {
+        if event.key() == "Escape" {
+            close();
+        }
+    };
+    let renew = move |_| {
+        close();
+        platform::set_hash(&Screen::License.href());
+    };
+    let words = move || {
+        let lang = lang.get();
+        let key = up.get()?;
+        let left = Access::known(None, Some(key)).days_left(licenses.today?)?;
+        Some(fill(t(lang, Key::LicenseSoonText), &[&days(lang, left), &i18n::date(lang, key.1)]))
+    };
+    view! {
+        <div class="update" role="dialog" aria-modal="true" aria-labelledby=RENEW_TITLE on:keydown=keydown>
+            <div class="update-card">
+                <h2 id=RENEW_TITLE tabindex="-1">{tr(lang, Key::LicenseSoonTitle)}</h2>
+                <p class="renew-words">{words}</p>
+                <button type="button" class="wide" on:click=renew>
+                    <span class="label">{tr(lang, Key::LicenseSoonRenew)}</span>
+                </button>
+                <button type="button" class="wide secondary" on:click=move |_| close()>
+                    <span class="label">{tr(lang, Key::LicenseSoonOk)}</span>
+                </button>
+            </div>
+        </div>
     }
 }
 
@@ -391,7 +698,7 @@ pub(super) fn LicensePage(ctx: tax::Ctx) -> impl IntoView {
         ..
     } = ctx;
     let profiles = sources.profiles;
-    licenses.watch(base);
+    licenses.watch(base, profiles);
     let access = Memo::new(move |_| licenses.access(profiles));
     let profile_tin = Memo::new(move |_| profiles.with(|data| data.and_then(|data| data.tin.clone())));
     let typed = RwSignal::new(String::new());
@@ -444,14 +751,13 @@ pub(super) fn LicensePage(ctx: tax::Ctx) -> impl IntoView {
         let lang = lang.get();
         let access = access.get();
         let today = today?;
-        if !licenses.ready() {
+        if !licenses.ready() || !profiles.ready() {
             return None;
         }
         let mut lines = vec![(term_words(lang, access, today), false)];
         match access.days_left(today) {
             Some(left) if matches!(access.term(), Some(Term::Key { .. })) && left <= RENEW_DAYS => {
-                let left = fill(t(lang, Key::LicenseLeft), &[&days(lang, left)]);
-                lines.push((format!("{left} {}", t(lang, Key::LicenseRenew)), true));
+                lines.push((t(lang, Key::LicenseRenew).to_owned(), true));
             }
             Some(_) => {}
             None => {

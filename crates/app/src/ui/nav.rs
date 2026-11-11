@@ -9,9 +9,11 @@
 //! (Правило 4).
 //!
 //! Настройки (задача 88) — не вкладкой, а своей строкой с шестерёнкой внизу
-//! колонки, над меткой копии: это не раздел с данными. На телефоне её нет —
-//! седьмая вкладка не помещается в 360 точек, — там шестерёнка на главном
-//! экране (`ui/home.rs`) и строка в профиле.
+//! колонки, над метками срока и копии: это не раздел с данными. На телефоне
+//! её нет — седьмая вкладка не помещается в 360 точек, — там шестерёнка на
+//! главном экране (`ui/home.rs`) и строка в профиле. Метки срока лицензии
+//! (задача 92) и копии на телефоне — на главном экране, а когда пора, —
+//! над экранами и под заголовками.
 
 use kvartik_core::i18n::{Key, Lang, t};
 use leptos::prelude::*;
@@ -20,6 +22,7 @@ use super::backup::{BackupChip, Backups};
 use super::clients::Clients;
 use super::documents::Documents;
 use super::icon::{Icon, icon};
+use super::license::{LicenseChip, Licenses, Place};
 use super::route::{Router, Screen};
 use super::tr;
 
@@ -43,6 +46,7 @@ pub fn Nav(
     documents: Documents,
     clients: Clients,
     backups: Backups,
+    licenses: Licenses,
 ) -> impl IntoView {
     // «Новый счёт» — главное действие программы, и на компьютере оно
     // в меню, на любом экране. Без клиента откроется раздел документов
@@ -82,6 +86,7 @@ pub fn Nav(
                 {icon(Icon::Gear)}
                 <span>{tr(lang, Key::SettingsTitle)}</span>
             </a>
+            <LicenseChip lang licenses place=Place::Menu />
             <BackupChip lang backups />
         </nav>
     }

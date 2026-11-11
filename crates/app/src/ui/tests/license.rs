@@ -24,10 +24,11 @@ use wasm_bindgen_test::wasm_bindgen_test;
 use web_sys::{HtmlElement, HtmlInputElement};
 
 use super::documents::{acme, commit, invoice_data, profile};
-use super::{button, mount_at, sleep, type_into, wait_for};
-use crate::platform::{clock, set_hash};
+use super::{button, launch_at, mount_at, shown_screens, sleep, type_into, wait_for};
+use crate::platform::{clock, hash, set_hash};
 use crate::store::device::Device;
 use crate::store::{Store, Writes};
+use crate::ui::route::Screen;
 
 /// Закрытый ключ проб — тот же, что у тестов ядра (`license/tests.rs`).
 /// Не авторский: им подписаны только ключи тестов.
@@ -58,11 +59,69 @@ fn trial_from(start: Date) {
     Device::new().set_trial_start(start);
 }
 
-/// Забыть пробный период устройства: следующее окно начнёт его сегодня.
+/// Забыть пробный период устройства — следующее окно начнёт его сегодня, —
+/// и что устройство помнит о ключе базы: каким его нашла часть и о конце
+/// какого сказано окном (задача 92).
 fn forget_trial() {
     if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
-        let _ = storage.remove_item("kvartik.trial");
+        for name in ["kvartik.trial", "kvartik.license", "kvartik.license_told"] {
+            let _ = storage.remove_item(name);
+        }
     }
+}
+
+/// Число дней — как его пишет окно: «365 дней», «1 день».
+fn days(lang: Lang, n: i32) -> String {
+    fill(
+        i18n::plural(lang, u64::from(n.unsigned_abs()), Key::DaysOne, Key::DaysFew, Key::DaysMany),
+        &[&i18n::integer(lang, i64::from(n))],
+    )
+}
+
+/// Срок ключа «Стандарт» до `until` словами экрана лицензии — со днями,
+/// которые остались, считая сегодня.
+fn key_until(lang: Lang, until: Date) -> String {
+    let today = clock::today().expect("часы с датой");
+    fill(
+        t(lang, Key::LicenseKeyUntil),
+        &[t(lang, Key::PlanStandard), &i18n::date(lang, until), &days(lang, until.days_since(today) + 1)],
+    )
+}
+
+/// Записать в базу ключ «Стандарт» на ՀՎՀՀ профиля до `until`, подписанный
+/// парой проб.
+async fn store_key(until: Date) {
+    let key = license::Key::read(&key_text(SEED, TIN, until), &signer().verifying_key().to_bytes())
+        .expect("ключ пары проб");
+    let entered = License::enter(key, &[], clock::now()).expect("новый ключ");
+    let mut writes = Writes::default();
+    writes.insert(&entered);
+    commit(writes).await;
+}
+
+/// Метка срока в разделе `scope` — по адресу экрана лицензии; рядом бывает
+/// метка копии.
+fn term_chip(host: &HtmlElement, scope: &str) -> Option<HtmlElement> {
+    host.query_selector(&format!("{scope} a.chip[href=\"{}\"]", Screen::License.href()))
+        .ok()
+        .flatten()
+        .map(JsCast::unchecked_into)
+}
+
+/// Подождать метку срока в `scope` с текстом `text`; `None` — не дождались
+/// за пять секунд, а что было — в `Err`.
+async fn wait_chip(host: &HtmlElement, scope: &str, text: &str) -> Result<HtmlElement, String> {
+    let mut seen = String::new();
+    for _ in 0..100 {
+        if let Some(chip) = term_chip(host, scope) {
+            seen = chip.text_content().unwrap_or_default();
+            if seen.trim() == text {
+                return Ok(chip);
+            }
+        }
+        sleep(50).await;
+    }
+    Err(seen)
 }
 
 /// База: профиль с ՀՎՀՀ и кодом дизайна, клиент, черновик счёта и доход
@@ -263,7 +322,7 @@ async fn a_restored_key_is_read_after_the_form_that_read_keys_first() {
 
     set_hash("#/license");
     let until = Date::new(2027, 10, 31).expect("дата");
-    let term = fill(t(lang, Key::LicenseKeyUntil), &[t(lang, Key::PlanStandard), &i18n::date(lang, until)]);
+    let term = key_until(lang, until);
     if !wait_for(&host, &term).await {
         wrong.push("после восстановления экран лицензии не показал ключ из копии".to_owned());
     }
@@ -315,7 +374,7 @@ async fn a_key_opens_issuing_for_the_profile_tin() {
     if !enter(&good.to_lowercase().replace('-', " ")) || !wait_for(&host, t(lang, Key::LicenseEntered)).await {
         wrong.push("годный ключ не введён".to_owned());
     }
-    let term = fill(t(lang, Key::LicenseKeyUntil), &[t(lang, Key::PlanStandard), &i18n::date(lang, until)]);
+    let term = key_until(lang, until);
     if !wait_for(&host, &term).await {
         wrong.push("срок ключа не показан".to_owned());
     }
@@ -379,6 +438,246 @@ async fn a_key_opens_issuing_for_the_profile_tin() {
 
     drop(mounted);
     host.remove();
+    forget_trial();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Ждать, пока окно покажет один экран `id`, но не дольше двух секунд.
+async fn shows(host: &HtmlElement, id: &str) -> bool {
+    for _ in 0..100 {
+        if shown_screens(host) == [id] {
+            return true;
+        }
+        sleep(20).await;
+    }
+    false
+}
+
+/// Метка над экранами — на телефоне, в последнюю неделю и после конца срока.
+const ABOVE: &str = "main >";
+
+/// Срок на виду (задача 92): метка в меню и на главном экране — сколько дней
+/// осталось пробного периода, а над остальными экранами её нет, пока до
+/// конца больше недели; в последнюю неделю она цвета напоминания и стоит над
+/// каждым экраном, кроме главного, где она и так есть, и экрана лицензии.
+/// С ключом метка — дни ключа, а ключ, найденный частью, устройство помнит
+/// записью: со следующего открытия метка встанет, не дожидаясь части.
+#[wasm_bindgen_test]
+async fn the_term_is_always_on_view() {
+    base_with_draft().await;
+    forget_trial();
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let today = clock::today().expect("часы с датой");
+    let mut wrong = Vec::new();
+
+    // Десять дней пробного периода — метка в меню и на главном, тихая.
+    trial_from(today.add_days(-4).expect("дата"));
+    let ten = fill(t(lang, Key::LicenseChipTrial), &[&days(lang, 10)]);
+    let (host, mounted) = mount_at("#/");
+    for scope in ["nav", "#home"] {
+        match wait_chip(&host, scope, &ten).await {
+            Ok(chip) if chip.class_list().contains("due") => {
+                wrong.push(format!("{scope}: за десять дней метка цвета напоминания"));
+            }
+            Ok(_) => {}
+            Err(seen) => wrong.push(format!("{scope}: метка «{seen}», а не «{ten}»")),
+        }
+    }
+    set_hash(&Screen::Clients.href());
+    if !shows(&host, "clients").await {
+        wrong.push("экран клиентов не открылся".to_owned());
+    }
+    sleep(200).await;
+    if term_chip(&host, ABOVE).is_some() {
+        wrong.push("за десять дней метка над экраном клиентов".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+
+    // Три дня — громче и под заголовком каждого экрана.
+    trial_from(today.add_days(-11).expect("дата"));
+    let three = fill(t(lang, Key::LicenseChipTrial), &[&days(lang, 3)]);
+    let (host, mounted) = mount_at("#/");
+    match wait_chip(&host, "nav", &three).await {
+        Ok(chip) if !chip.class_list().contains("due") => wrong.push("за три дня метка тихая".to_owned()),
+        Ok(_) => {}
+        Err(seen) => wrong.push(format!("меню: метка «{seen}», а не «{three}»")),
+    }
+    for screen in Screen::PLAIN {
+        set_hash(&screen.href());
+        // Над главным и экраном лицензии метки нет: там о сроке и так сказано.
+        let wanted = !matches!(screen, Screen::Home | Screen::License);
+        let mut seen = false;
+        for _ in 0..100 {
+            if shown_screens(&host) == [screen.id()] && term_chip(&host, ABOVE).is_some() == wanted {
+                seen = true;
+                break;
+            }
+            sleep(20).await;
+        }
+        if !seen {
+            let what = if wanted { "нет метки над экраном" } else { "метка над экраном лишняя" };
+            wrong.push(format!("{screen:?}: за три дня {what}"));
+        }
+    }
+    drop(mounted);
+    host.remove();
+
+    // Ключ на год — его дни; устройство помнит, каким его нашла часть.
+    let until = today.add_days(364).expect("дата");
+    store_key(until).await;
+    let year = fill(t(lang, Key::LicenseChipKey), &[&days(lang, 365)]);
+    let (host, mounted) = mount_at("#/");
+    if let Err(seen) = wait_chip(&host, "nav", &year).await {
+        wrong.push(format!("с ключом метка «{seen}», а не «{year}»"));
+    }
+    let remembered = Device::new().key_term(crate::store::DB_NAME);
+    if remembered != Some(Some((Plan::Standard, until))) {
+        wrong.push(format!("устройство помнит ключ как {remembered:?}"));
+    }
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_trial();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Срок кончился — программа открывается экраном лицензии при запуске
+/// (задача 92), а «Назад» возвращает на экран, с которым она открылась.
+/// Перезагрузка открывает тот же экран, что был (Правило 2), а запуск, пока
+/// срок идёт, остаётся на своём экране.
+#[wasm_bindgen_test]
+async fn an_ended_term_opens_the_license_screen_at_launch() {
+    base_with_draft().await;
+    forget_trial();
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let today = clock::today().expect("часы с датой");
+    let mut wrong = Vec::new();
+    trial_from(today.add_days(-30).expect("дата"));
+
+    let (host, mounted) = launch_at("#/");
+    if !shows(&host, "license").await || hash() != Screen::License.href() {
+        wrong.push(format!("запуск: видны {:?}, адрес {}", shown_screens(&host), hash()));
+    }
+    if let Some(window) = web_sys::window() {
+        let _ = window.history().map(|history| history.back());
+    }
+    if !shows(&host, "home").await {
+        wrong.push(format!("«Назад»: видны {:?}", shown_screens(&host)));
+    }
+    drop(mounted);
+    host.remove();
+
+    let (host, mounted) = mount_at("#/clients");
+    let ended = t(lang, Key::LicenseChipTrialEnded);
+    if let Err(seen) = wait_chip(&host, "nav", ended).await {
+        wrong.push(format!("перезагрузка: метка «{seen}», а не «{ended}»"));
+    }
+    sleep(300).await;
+    if shown_screens(&host) != ["clients"] {
+        wrong.push(format!("перезагрузка увела с экрана: видны {:?}", shown_screens(&host)));
+    }
+    drop(mounted);
+    host.remove();
+
+    trial_from(today);
+    let (host, mounted) = launch_at("#/");
+    let fourteen = fill(t(lang, Key::LicenseChipTrial), &[&days(lang, 14)]);
+    if let Err(seen) = wait_chip(&host, "nav", &fourteen).await {
+        wrong.push(format!("срок идёт: метка «{seen}», а не «{fourteen}»"));
+    }
+    sleep(300).await;
+    if shown_screens(&host) != ["home"] {
+        wrong.push(format!("срок идёт, а запуск увёл с главного: видны {:?}", shown_screens(&host)));
+    }
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_trial();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// За неделю до конца ключа — окно поверх программы (задача 92): сколько дней
+/// и до какого дня; программа под ним неактивна. «Понятно» закрывает его,
+/// и больше оно не встаёт, а «Продлить» закрывает и ведёт на экран лицензии.
+/// Окно встаёт в конец страницы (`Portal`), а не внутри окна программы,
+/// поэтому его ищут во всём `<body>`.
+#[wasm_bindgen_test]
+async fn a_key_ending_within_a_week_asks_once() {
+    base_with_draft().await;
+    forget_trial();
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let today = clock::today().expect("часы с датой");
+    trial_from(today.add_days(-30).expect("дата"));
+    let until = today.add_days(4).expect("дата");
+    store_key(until).await;
+    let words = fill(t(lang, Key::LicenseSoonText), &[&days(lang, 5), &i18n::date(lang, until)]);
+    let body = super::document().body().expect("есть <body>");
+    let dialog = || body.query_selector("[role=dialog]").ok().flatten().is_some();
+    let inert = |host: &HtmlElement| {
+        host.query_selector(".app")
+            .ok()
+            .flatten()
+            .is_some_and(|app| app.has_attribute("inert"))
+    };
+    let mut wrong = Vec::new();
+
+    let (host, mounted) = mount_at("#/");
+    if !wait_for(&body, &words).await {
+        wrong.push("за пять дней до конца ключа окна нет".to_owned());
+    }
+    if !inert(&host) {
+        wrong.push("под окном программа активна".to_owned());
+    }
+    match button(&body, &[t(lang, Key::LicenseSoonOk)]) {
+        Some(ok) => ok.click(),
+        None => wrong.push("нет «Понятно»".to_owned()),
+    }
+    sleep(200).await;
+    if dialog() || inert(&host) {
+        wrong.push("«Понятно» не закрыло окно".to_owned());
+    }
+    if Device::new().key_told(crate::store::DB_NAME) != Some(until) {
+        wrong.push("устройство не запомнило, что о ключе сказано".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+
+    let (host, mounted) = mount_at("#/");
+    let five = fill(t(lang, Key::LicenseChipKey), &[&days(lang, 5)]);
+    if let Err(seen) = wait_chip(&host, "nav", &five).await {
+        wrong.push(format!("метка «{seen}», а не «{five}»"));
+    }
+    sleep(500).await;
+    if dialog() {
+        wrong.push("окно встало второй раз".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+
+    if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
+        let _ = storage.remove_item("kvartik.license_told");
+    }
+    let (host, mounted) = mount_at("#/");
+    if !wait_for(&body, &words).await {
+        wrong.push("окна нет и после того, как устройство забыло".to_owned());
+    }
+    match button(&body, &[t(lang, Key::LicenseSoonRenew)]) {
+        Some(renew) => renew.click(),
+        None => wrong.push("нет «Продлить»".to_owned()),
+    }
+    if !shows(&host, "license").await || dialog() || inert(&host) {
+        wrong.push(format!("«Продлить»: видны {:?}, окно — {}", shown_screens(&host), dialog()));
+    }
+    drop(mounted);
+    host.remove();
+    if dialog() {
+        wrong.push("окно осталось на странице после окна программы".to_owned());
+    }
+    set_hash("");
     forget_trial();
     assert!(wrong.is_empty(), "{wrong:#?}");
 }

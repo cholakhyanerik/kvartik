@@ -95,7 +95,7 @@ pub(super) fn AboutPage(ctx: tax::Ctx) -> impl IntoView {
         today,
         ..
     } = ctx;
-    licenses.watch(base);
+    licenses.watch(base, sources.profiles);
     let access = Memo::new(move |_| licenses.access(sources.profiles));
     // Срок — словами экрана лицензии. Пока ключи читаются, его нет: у
     // купившего ключ мелькнуло бы «пробный период кончился»; без даты на

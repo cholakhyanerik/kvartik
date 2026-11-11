@@ -1589,7 +1589,7 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
     let required = Memo::new(move |_| needed.get() && form.income_kind.get().is_none());
     // Выпуск — по сроку лицензии (задача 25): кончился — вместо
     // «Выпустить» слова и ключ, а черновик сохраняется.
-    ctx.licenses.watch(ctx.base);
+    ctx.licenses.watch(ctx.base, ctx.profiles);
     let access = Memo::new(move |_| ctx.licenses.access(ctx.profiles));
     let locked = Memo::new(move |_| license::issue_locked(ctx.licenses, access.get(), ctx.today));
     // Выбранный клиент — из живых.

@@ -56,6 +56,7 @@ pub fn set_tab_base(name: &str) -> bool {
 /// Имя записи вкладки.
 const TAB_BASE: &str = "kvartik.base";
 
-fn session() -> Option<web_sys::Storage> {
+/// `sessionStorage` вкладки; `None` — его нет или браузер не даёт.
+pub(super) fn session() -> Option<web_sys::Storage> {
     web_sys::window()?.session_storage().ok().flatten()
 }
