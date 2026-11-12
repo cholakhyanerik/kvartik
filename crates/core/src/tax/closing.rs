@@ -57,10 +57,11 @@ struct ClosingDataFields {
 impl ClosingData {
     /// Годен ли снимок: квартал из календаря и не раньше правил налога
     /// с оборота, строки — разных видов и по порядку таблицы, суммы не
-    /// меньше нуля, налог — сумма строк. Команда пишет только такой; иное
-    /// в данных — порча. Квартал раньше правил закрыть нельзя, а снимок
-    /// 1-го года из чужой копии растянул бы цепочку переноса на восемь
-    /// тысяч кварталов (`turnover::quarter`).
+    /// меньше нуля, прямые расходы — не больше всех (x.4.1 — часть x.4),
+    /// налог — сумма строк. Команда пишет только такой; иное в данных —
+    /// порча. Квартал раньше правил закрыть нельзя, а снимок 1-го года из
+    /// чужой копии растянул бы цепочку переноса на восемь тысяч кварталов
+    /// (`turnover::quarter`).
     fn check(&self) -> bool {
         let quarter = Quarter::new(self.year, self.quarter)
             .is_some_and(|quarter| turnover::first_quarter().is_some_and(|first| quarter >= first));
@@ -70,6 +71,7 @@ impl ClosingData {
                 [d.attributed, d.shared, d.expenses, d.current, d.carry_in, d.total, d.floor, d.carry_out]
                     .iter()
                     .all(|amount| *amount >= 0)
+                    && d.direct.is_none_or(|direct| (0..=d.expenses).contains(&direct))
             });
             line.income >= 0 && line.gross >= 0 && line.tax >= 0 && deduction
         });

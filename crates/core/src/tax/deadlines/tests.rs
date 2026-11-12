@@ -514,6 +514,7 @@ fn income(date: Date, drams: i64) -> Operation {
             supplier: Line::default(),
             proof: None,
             nature: None,
+            cost: None,
             activity: None,
             income_kind: None,
             attachments: Vec::new(),

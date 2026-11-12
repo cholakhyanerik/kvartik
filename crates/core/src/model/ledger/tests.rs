@@ -43,18 +43,19 @@ const INCOME: &str = concat!(
     r#""amount":{"minor":150000,"currency":"USD"},"#,
     r#""rate":{"currency":"USD","per_unit_e4":3880000,"date":"2026-09-30","source":"manual"},"#,
     r#""text":"Web development, September","client":"5b0e8f9a-3c2d-4e1f-8a7b-9c6d5e4f3a2b","#,
-    r#""supplier":"","proof":null,"nature":null,"activity":null,"income_kind":null,"#,
+    r#""supplier":"","proof":null,"nature":null,"cost":null,"activity":null,"income_kind":null,"#,
     r#""attachments":[{"id":"3f2b8c1d-6a4e-4f7b-9c2d-1e0f5a6b7c8d","name":"act.pdf","kind":"pdf","size":183402}]}}"#
 );
 
 /// Расход 60 000 ֏ — аренда офиса за октябрь: получена 31 октября, документ
-/// — «հաշիվ վավերագիր», вид деятельности 62.01.0, оплаты ещё не было.
+/// — «հաշիվ վավերագիր», сбытовой и административный, вид деятельности
+/// 62.01.0, оплаты ещё не было.
 const EXPENSE: &str = concat!(
     r#"{"meta":{"id":"6e2d3c4b-5a6f-4e7d-9c8b-0a9f8e7d6c5b","modified":1760000000500,"deleted":null},"#,
     r#""data":{"flow":"expense","date":"2026-10-31","paid":null,"#,
     r#""amount":{"minor":60000,"currency":"AMD"},"rate":null,"#,
     r#""text":"Аренда офиса, октябрь","client":null,"#,
-    r#""supplier":"«Արարատ» ՍՊԸ","proof":"settlement_invoice","nature":"ordinary","activity":"62.01.0","income_kind":null,"#,
+    r#""supplier":"«Արարատ» ՍՊԸ","proof":"settlement_invoice","nature":"ordinary","cost":"overhead","activity":"62.01.0","income_kind":null,"#,
     r#""attachments":[]}}"#
 );
 
@@ -79,6 +80,7 @@ fn data_shape_is_pinned() {
     assert_eq!(data.supplier.as_str(), "«Արարատ» ՍՊԸ");
     assert_eq!(data.proof, Some(Proof::SettlementInvoice));
     assert_eq!(data.nature, Some(Nature::Ordinary));
+    assert_eq!(data.cost, Some(Cost::Overhead));
     assert_eq!(data.activity.map(|code| code.to_string()).as_deref(), Some("62.01.0"));
     assert_eq!(serde_json::to_string(&expense).ok().as_deref(), Some(EXPENSE));
 }
@@ -111,6 +113,8 @@ fn data_rejects_what_commands_never_write() {
         expense(r#""proof":"settlement_invoice""#, r#""proof":null"#),
         expense(r#""nature":"ordinary""#, r#""nature":null"#),
         expense(r#""nature":"ordinary""#, r#""nature":"luxury""#),
+        income(r#""cost":null"#, r#""cost":"direct""#),
+        expense(r#""cost":"overhead""#, r#""cost":"indirect""#),
         expense(r#""income_kind":null"#, r#""income_kind":"rent""#),
         expense(r#""rate":null"#, r#""rate":{"currency":"USD","per_unit_e4":3880000,"date":"2026-10-31","source":"manual"}"#),
         expense(r#""deleted":null"#, r#""deleted":1760000000600"#),
@@ -186,6 +190,49 @@ fn an_expense_has_no_income_row() {
     assert_eq!(Operation::create(data, at(1_000)), Err(OperationError::WrongFlow));
 }
 
+/// С версии формата 18 расход говорит, прямой ли он (задача 79): оба ответа
+/// записываются и читаются, запись версии 17 — без поля — читается как «не
+/// сказано», а не «прямой» (Правило 6), и пишется уже с полем; у дохода
+/// команда поля не пропускает.
+#[test]
+fn an_expense_says_whether_it_is_direct() {
+    let mut wrong = Vec::new();
+    for (cost, name) in [(Cost::Direct, "direct"), (Cost::Overhead, "overhead")] {
+        let sample = EXPENSE.replacen(r#""cost":"overhead""#, &format!(r#""cost":"{name}""#), 1);
+        match serde_json::from_str::<Operation>(&sample) {
+            Ok(read) if read.data().cost == Some(cost) => {
+                if serde_json::to_string(&read).ok().as_deref() != Some(sample.as_str()) {
+                    wrong.push(format!("{name}: записан не тем, чем прочитан"));
+                }
+            }
+            other => wrong.push(format!("{name}: {other:?}")),
+        }
+    }
+    for (name, sample) in [("доход", INCOME.to_owned()), ("расход", EXPENSE.replacen(r#""cost":"overhead""#, r#""cost":null"#, 1))] {
+        let old = sample.replacen(r#""cost":null,"#, "", 1);
+        if old == sample {
+            wrong.push(format!("{name}: образец без поля не получился"));
+            continue;
+        }
+        match serde_json::from_str::<Operation>(&old) {
+            Ok(read) if read.data().cost.is_none() => {
+                if serde_json::to_string(&read).ok().as_deref() != Some(sample.as_str()) {
+                    wrong.push(format!("{name}: записан не с полем"));
+                }
+            }
+            other => wrong.push(format!("{name}: {other:?}")),
+        }
+    }
+    let income = OperationData {
+        cost: Some(Cost::Direct),
+        ..income_data(day(2026, 10, 3), amd(12_000))
+    };
+    if Operation::create(income, at(1_000)) != Err(OperationError::WrongFlow) {
+        wrong.push("у дохода команда пропустила «прямой»".to_owned());
+    }
+    assert!(wrong.is_empty(), "прямой ли расход: {wrong:#?}");
+}
+
 fn income_data(date: Date, amount: Money) -> OperationData {
     OperationData {
         flow: Flow::Income,
@@ -198,6 +245,7 @@ fn income_data(date: Date, amount: Money) -> OperationData {
         supplier: Line::default(),
         proof: None,
         nature: None,
+        cost: None,
         activity: None,
         income_kind: None,
         attachments: Vec::new(),

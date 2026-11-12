@@ -42,13 +42,14 @@
 //! Форма делит расходы на прямые (x.4.1: у торговли — стоимость товаров,
 //! у остальных — расходы, прямо связанные с деятельностью) и сбытовые
 //! с административными (x.4.2; приказ 299-Ն, прил. 1, п. 10, 22, 34, 53),
-//! а книга их не различает. Вид деятельности у расхода говорит, к какой
-//! строке налога он относится, а не прямой ли он, — и у ИП с одним кодом
-//! форма расхода его даже не спрашивает. Поэтому, когда расходы есть, у
-//! x.4.1 и x.4.2 числа нет ([`Value::Unknown`]; Правило 6: ноль выглядел бы
-//! фактом), и окно просит разделить их сумму x.4 самому. На налог деление
-//! не влияет: в вычет идёт сумма, x.4 (п. 11–12). Различать их в книге —
-//! задача 79.
+//! а x.4 — их сумма (п. 11). С задачи 79 у расхода книги сказано, прямой ли
+//! он (`ledger::Cost`), и расчёт делит x.4 строки сам
+//! (`turnover::Deduction::direct`): x.4.1 — прямые целыми драмами, x.4.2 —
+//! остаток. Не у всех расходов строки это сказано — записи прежних версий,
+//! снимок, закрытый до задачи 79, — и числа нет ([`Value::Unknown`]; Правило
+//! 6: ноль выглядел бы фактом): окно просит отметить расходы или разделить
+//! x.4 самому. В форме налог от деления не меняется: в вычет идёт сумма
+//! (п. 11–12).
 //!
 //! # Доход по видам деятельности
 //!
@@ -142,6 +143,16 @@ impl What {
         }
     }
 
+    /// Слова поля в разделе строки `kind`: у торговли x.4.1 — не прямые
+    /// расходы, а начальная стоимость товаров для перепродажи (приказ 299-Ն,
+    /// прил. 1, п. 10; ревью задачи 79), у остальных — как [`Self::key`].
+    pub const fn key_in(self, kind: IncomeKind) -> Key {
+        match (self, kind) {
+            (What::Direct, IncomeKind::Trade) => Key::ReportGoods,
+            _ => self.key(),
+        }
+    }
+
     /// Номер поля внутри раздела — по записи формы.
     fn number(self, fields: &SectionFields) -> &str {
         match self {
@@ -161,16 +172,19 @@ impl What {
         }
     }
 
-    /// Число строки расчёта в этом поле. Прямые расходы и сбытовые
-    /// с административными книга не различает: расходов нет — оба ноль,
-    /// есть — числа нет (шапка модуля, «x.4.1 и x.4.2»).
+    /// Число строки расчёта в этом поле. Прямые расходы — из деления
+    /// расчёта, сбытовые с административными — остаток x.4: расходов нет —
+    /// оба ноль, деления нет — числа нет (шапка модуля, «x.4.1 и x.4.2»).
     fn value(self, line: &Line, deduction: Deduction) -> Value {
         match self {
             What::Income => Value::Drams(line.income),
             What::Rate => Value::Percent(line.rate),
             What::Gross => Value::Drams(line.gross),
             What::Direct | What::Overhead if deduction.expenses == 0 => Value::Drams(0),
-            What::Direct | What::Overhead => Value::Unknown,
+            What::Direct => deduction.direct.map_or(Value::Unknown, Value::Drams),
+            What::Overhead => deduction
+                .direct
+                .map_or(Value::Unknown, |direct| Value::Drams(deduction.expenses.saturating_sub(direct))),
             What::Expenses => Value::Drams(deduction.expenses),
             What::Percent => Value::Percent(deduction.percent),
             What::Current => Value::Drams(deduction.current),
@@ -191,7 +205,8 @@ pub enum Value {
     /// Ставка или процент — их форма ставит сама.
     Percent(Percent),
     /// Числа программа не знает: прямые расходы и сбытовые
-    /// с административными (x.4.1 и x.4.2) делит человек (шапка модуля).
+    /// с административными (x.4.1 и x.4.2), когда не у всех расходов сказано,
+    /// прямые ли они, делит человек (шапка модуля).
     Unknown,
 }
 
@@ -574,7 +589,7 @@ pub fn text(lang: Lang, ready: &Ready, activities: Option<&Activities>, today: O
         lines.push(String::new());
         lines.push(heading(&section.number, kind_key(section.kind)));
         for item in &section.fields {
-            lines.push(field(&item.number, item.what.key(), item.value));
+            lines.push(field(&item.number, item.what.key_in(section.kind), item.value));
         }
     }
     for row in &numbers.rows {

@@ -29,10 +29,25 @@
 //!   бухгалтера 2026-10-19, вопрос 1.4). У строки без дохода вес — ноль:
 //!   если доход только у строк без вычета, общий расход пропадает, и окно
 //!   это говорит (`Refused::no_base`), а отнесённый к строке — переносится.
-//!   Прямых расходов и товара ст. 260, ч. 3 не делит, но книга их не отличает
-//!   (задача 79): доход со своей строкой весит и у ИП с одним кодом, поэтому
-//!   окно говорит, что доля ушла на него (`Refused::split`), а форма расхода
-//!   спрашивает вид и при одном коде ([`expense_activity_needed`]);
+//!   Прямых расходов и товара ст. 260, ч. 3 не делит: их ведут отдельно
+//!   (там же), и прямой расход без вида идёт в единственную строку кодов
+//!   профиля целиком, а из нескольких её не узнать — расчёт неполон
+//!   ([`Gaps::undirected`]). Рядом с доходом со своей строкой прямой без вида
+//!   может быть и расходом этого дохода — аренды, роялти, продажи имущества, —
+//!   а тот в строку с вычетом не идёт (ст. 260, ч. 1 и 3; ревью задачи 79):
+//!   строку не угадать, и такой расход — общий, как до задачи 79. Расход,
+//!   о котором не сказано, прямой ли он (`ledger::Cost`: записи до задачи 79),
+//!   считается, как прежде: без вида — общий. Доход со своей строкой весит
+//!   и у ИП с одним кодом, поэтому окно говорит, что доля общих ушла на него
+//!   (`Refused::split`), а форма спрашивает вид и при одном коде
+//!   ([`expense_activity_needed`]);
+//! - прямые расходы строки (x.4.1) — целыми драмами, а сбытовые
+//!   и административные (x.4.2) — остаток x.4: форма складывает их в x.4
+//!   (приказ 299-Ն, прил. 1, п. 11). x.4 считается, как прежде, — расходы
+//!   с видом и без вида, каждые целыми драмами, — и данные до задачи 79 не
+//!   меняют ни драма, а отметка «прямой» у расхода без вида x.4 не меняет вовсе.
+//!   Не у всех расходов строки известно, прямые ли они в этой строке, — деления
+//!   нет ([`Deduction::direct`]);
 //! - каждая строка формы — целые драмы, лумы отбрасываются
 //!   ([`Percent::of`]).
 //!
@@ -106,7 +121,7 @@ use crate::i18n::Key;
 use crate::model::activity::{ActivityCode, IncomeKind};
 use crate::model::date::{Date, Quarter};
 use crate::model::document::Document;
-use crate::model::ledger::{self, Flow, Nature, Operation, Proof, Row};
+use crate::model::ledger::{self, Cost, Flow, Nature, Operation, Proof, Row};
 use crate::model::money::{Lumas, MoneyError};
 use crate::model::profile::ProfileData;
 use crate::model::record::RecordId;
@@ -291,9 +306,17 @@ pub struct Deduction {
     pub floor_percent: Percent,
     /// Расходы, отнесённые к строке видом деятельности расхода.
     pub attributed: i64,
-    /// Доля общих административных и сбытовых расходов — по весу дохода
-    /// строки в обороте всех видов (ст. 260, ч. 3).
+    /// Расходы без вида деятельности, пришедшиеся на строку: доля общих
+    /// административных и сбытовых — по весу дохода строки в обороте всех
+    /// видов (ст. 260, ч. 3), а прямые — целиком, у ИП с одной строкой кодов.
     pub shared: i64,
+    /// Прямые расходы (x.4.1) — целые драмы; сбытовые и административные
+    /// (x.4.2) — остаток [`Self::expenses`]: форма складывает их в x.4
+    /// (приказ 299-Ն, прил. 1, п. 11). `None` — не у всех расходов строки
+    /// сказано, прямые ли они, и делит человек (`tax::report`). В снимке
+    /// закрытого квартала — с версии формата 18; у прежних снимков — `None`.
+    #[serde(default)]
+    pub direct: Option<i64>,
     /// Расходы квартала (x.4).
     pub expenses: i64,
     /// Уменьшение налога за расходы квартала (x.6).
@@ -324,6 +347,10 @@ pub struct Gaps {
     /// Общих расходов, которые не по чему делить: дохода в квартале нет,
     /// а строк с вычетом у ИП несколько.
     pub unallocated: usize,
+    /// Прямых расходов без вида деятельности, когда коды профиля облагаются
+    /// по разным строкам: прямой расход идёт в строку своего вида целиком
+    /// (ст. 260, ч. 3), а в какую — без кода не узнать.
+    pub undirected: usize,
     /// Строки, у которых на этот квартал нет правила.
     pub no_rule: Vec<IncomeKind>,
     /// Доходов без курса ЦБ в прошлом году и в прошлых кварталах этого:
@@ -357,8 +384,10 @@ pub struct Refused {
     /// вес строк с вычетом — ноль, их доля — ноль (ст. 260, ч. 3).
     pub no_base: usize,
     /// Общие расходы рядом с доходом со своей строкой: в вычет вошла только
-    /// доля строк с вычетом. Товар и прямой расход в ней не должны быть, но
-    /// книга их не отличает, и человек относит их к строке сам (шапка модуля).
+    /// доля строк с вычетом (ст. 260, ч. 3). Так делятся сбытовые
+    /// и административные; прямой без вида и расход, о котором не сказано,
+    /// прямой ли он, здесь тоже — строку прямого не угадать, — и окно просит
+    /// указать вид (шапка модуля).
     pub split: usize,
 }
 
@@ -512,12 +541,17 @@ impl QuarterTax {
 }
 
 /// Одинаковы ли строки в форме расчёта. Расходы, отнесённые к строке,
-/// и общие форма не различает: в ней их сумма, x.4.
+/// и общие форма не различает: в ней их сумма, x.4. Прямые (x.4.1)
+/// сравниваются, когда деление знают оба: снимок до задачи 79 его не
+/// хранит, и что человек вписал тогда, программе не известно.
 fn same_in_form(one: &Line, other: &Line) -> bool {
+    let split = |line: &Line| line.deduction.and_then(|deduction| deduction.direct);
+    let both = split(one).is_some() && split(other).is_some();
     let form = |line: &Line| Line {
         deduction: line.deduction.map(|deduction| Deduction {
             attributed: 0,
             shared: 0,
+            direct: deduction.direct.filter(|_| both),
             ..deduction
         }),
         ..line.clone()
@@ -566,9 +600,9 @@ fn code_unknown(profile: Option<&ProfileData>, on: Date) -> bool {
 
 /// Спросить ли у расхода дня `on` вид деятельности, хотя код один: в его
 /// квартале есть доход со своей строкой, а у кодов — вычет. Расход без вида
-/// тогда общий, и его доля уходит на строку без вычета (ст. 260, ч. 3); товар
-/// и прямой расход человек относит к своей строке сам: что он прямой, книга
-/// не знает (задача 79).
+/// тогда общий, и его доля уходит на строку без вычета (ст. 260, ч. 3), —
+/// а ведёт ли человек сбытовой отдельно и для своего ли кода прямой, программа
+/// не знает: прямой может быть и расходом самого этого дохода (шапка модуля).
 pub fn expense_activity_needed(
     documents: &[Document],
     operations: &[Operation],
@@ -582,6 +616,32 @@ pub fn expense_activity_needed(
         && ledger::between(documents, operations, quarter.first_day(), quarter.last_day())
             .iter()
             .any(|row| row.income_kind.is_some())
+}
+
+/// Спросить ли у расхода дня `on` вида `nature` с документом продавца `proof`,
+/// прямой ли он (`ledger::Cost`): такой расход идёт в вычет по правилам этого
+/// дня ([`deductible`]; документ ещё не выбран — смотрится только вид),
+/// а среди строк кодов профиля есть строка с вычетом — или кодов нет, и строку
+/// не узнать (Правило 6). Иначе полей x.4.1 и x.4.2 у расхода нет: в них
+/// только вычитаемые расходы, и только у строк с вычетом.
+pub fn cost_needed(profile: Option<&ProfileData>, proof: Option<Proof>, nature: Nature, on: Date) -> bool {
+    let counted = match proof {
+        Some(proof) => deductible(proof, nature, on).is_ok(),
+        None => rules::on(rules::armenia().turnover_expenses(), on).is_some_and(|rule| !rule.excluded.contains(&nature)),
+    };
+    let kinds = profile_kinds(profile, on);
+    counted
+        && (kinds.is_empty()
+            || kinds
+                .into_iter()
+                .any(|kind| rate(kind, on).is_some_and(|rule| rule.deduction.is_some())))
+}
+
+/// Нужен ли прямому расходу дня `on` вид деятельности: коды профиля
+/// облагаются по разным строкам, и в какую строку прямой расход идёт целиком,
+/// без кода не узнать ([`Gaps::undirected`]).
+pub fn direct_activity_needed(profile: Option<&ProfileData>, on: Date) -> bool {
+    profile_kinds(profile, on).len() > 1
 }
 
 /// Налог квартала `quarter` — с переносом цепочкой от последнего закрытого
@@ -1032,11 +1092,25 @@ fn compute(
     let mut refused = Refused::default();
     let mut months = [Lumas::ZERO; 3];
     let mut income: BTreeMap<IncomeKind, i64> = BTreeMap::new();
+    // Расходы с видом деятельности — лумами по строкам, из них прямые,
+    // и строки, где среди таких расходов есть не сказавший, прямой ли он:
+    // у этих строк деления x.4 нет.
     let mut attributed: BTreeMap<IncomeKind, i64> = BTreeMap::new();
+    let mut attributed_direct: BTreeMap<IncomeKind, i64> = BTreeMap::new();
+    let mut uncosted: BTreeSet<IncomeKind> = BTreeSet::new();
+    // Прямые без вида — целиком в единственную строку кодов.
+    let mut whole: BTreeMap<IncomeKind, i64> = BTreeMap::new();
     let mut unassigned_lumas: i64 = 0;
     let mut shared: i64 = 0;
     let mut shared_rows = 0;
+    // Среди общих есть такой, у которого не узнать, прямой ли он в строке:
+    // о нём не сказано, или это прямой без вида рядом с доходом со своей
+    // строкой.
+    let mut shared_unsplit = false;
     let mut chosen_income = false;
+    // В квартале — доход со своей строкой: прямой без вида рядом с ним может
+    // быть и его расходом (шапка модуля).
+    let beside = rows.iter().any(|row| row.flow == Flow::Income && row.income_kind.is_some());
     let first_month = quarter.first_day().month();
     for row in rows {
         match row.flow {
@@ -1114,14 +1188,46 @@ fn compute(
                         continue;
                     }
                 }
-                match row.activity {
-                    Some(code) => {
-                        let sum = attributed.entry(kind_of(books.profile, &code, row.date)).or_insert(0);
-                        *sum = sum.saturating_add(lumas.get());
+                let add = |sums: &mut BTreeMap<IncomeKind, i64>, kind: IncomeKind| {
+                    let sum = sums.entry(kind).or_insert(0);
+                    *sum = sum.saturating_add(lumas.get());
+                };
+                let cost = row.cost();
+                match (row.activity, cost) {
+                    (Some(code), cost) => {
+                        let kind = kind_of(books.profile, &code, row.date);
+                        add(&mut attributed, kind);
+                        match cost {
+                            Some(Cost::Direct) => add(&mut attributed_direct, kind),
+                            Some(Cost::Overhead) => {}
+                            None => {
+                                uncosted.insert(kind);
+                            }
+                        }
                     }
-                    None => {
+                    // Прямой расход по долям не делят (ст. 260, ч. 3): без вида
+                    // он идёт в единственную строку кодов профиля целиком,
+                    // а из нескольких её не узнать. Рядом с доходом со своей
+                    // строкой он может быть и расходом этого дохода, а тот
+                    // в строку с вычетом не идёт: строку не угадать, и расход
+                    // — общий, как до задачи 79, без деления x.4.
+                    (None, Some(Cost::Direct)) => {
+                        let mut kinds = profile_kinds(books.profile, row.date).into_iter();
+                        match (kinds.next(), kinds.next()) {
+                            (Some(_), Some(_)) => gaps.undirected += 1,
+                            _ if beside => {
+                                shared = shared.saturating_add(lumas.get());
+                                shared_rows += 1;
+                                shared_unsplit = true;
+                            }
+                            (Some(only), None) => add(&mut whole, only),
+                            (None, _) => gaps.no_codes = true,
+                        }
+                    }
+                    (None, Some(Cost::Overhead) | None) => {
                         shared = shared.saturating_add(lumas.get());
                         shared_rows += 1;
+                        shared_unsplit |= cost.is_none();
                     }
                 }
             }
@@ -1178,7 +1284,13 @@ fn compute(
     for kind in IncomeKind::ALL {
         let income_lumas = income.get(&kind).copied().unwrap_or(0);
         let attributed_lumas = attributed.get(&kind).copied().unwrap_or(0);
-        let shared_lumas = shared_by_kind.get(&kind).copied().unwrap_or(0);
+        // Без вида: доля общих по весу и прямые целиком — одной суммой, как
+        // до задачи 79 шли все расходы без вида: целиком прямой идёт, только
+        // когда вес строки и так весь, и отметка «прямой» x.4 не меняет
+        // (шапка модуля).
+        let share_lumas = shared_by_kind.get(&kind).copied().unwrap_or(0);
+        let whole_lumas = whole.get(&kind).copied().unwrap_or(0);
+        let shared_lumas = share_lumas.saturating_add(whole_lumas);
         let carry = carry_in.get(&kind).copied().unwrap_or(0);
         if income_lumas == 0 && attributed_lumas == 0 && shared_lumas == 0 && carry == 0 {
             continue;
@@ -1196,6 +1308,16 @@ fn compute(
                 let attributed = Lumas::new(attributed_lumas).drams();
                 let shared = Lumas::new(shared_lumas).drams();
                 let expenses = attributed.saturating_add(shared);
+                // x.4.1 — целыми драмами, x.4.2 — остаток x.4 (шапка модуля).
+                // Прямые с видом — часть отнесённых, без вида — часть
+                // расходов без вида, и каждая часть доводится до драма, как
+                // её сумма в x.4: x.4.1 не больше x.4. `min` — на случай
+                // испорченных сумм: снимок с x.4.1 больше x.4 не прочитался
+                // бы (`tax::closing`).
+                let direct = (!uncosted.contains(&kind) && !(shared_unsplit && share_lumas > 0)).then(|| {
+                    let with_code = Lumas::new(attributed_direct.get(&kind).copied().unwrap_or(0)).drams();
+                    with_code.saturating_add(Lumas::new(whole_lumas).drams()).min(expenses)
+                });
                 let current = percent.of(expenses);
                 let total = current.saturating_add(carry);
                 let floor = floor_percent.of(income_drams);
@@ -1211,6 +1333,7 @@ fn compute(
                     floor_percent,
                     attributed,
                     shared,
+                    direct,
                     expenses,
                     current,
                     carry_in: carry,

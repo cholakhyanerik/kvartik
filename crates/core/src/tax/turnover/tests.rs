@@ -56,6 +56,7 @@ fn income(date: Date, drams: i64, activity: Option<&str>) -> Operation {
         supplier: Text::default(),
         proof: None,
         nature: None,
+        cost: None,
         activity: activity.map(code),
         income_kind: None,
         attachments: Vec::new(),
@@ -95,6 +96,7 @@ fn expense(date: Date, drams: i64, proof: Proof, nature: Nature, activity: Optio
         supplier: Text::default(),
         proof: Some(proof),
         nature: Some(nature),
+        cost: None,
         activity: activity.map(code),
         income_kind: None,
         attachments: Vec::new(),
@@ -165,6 +167,8 @@ fn other(
             floor_percent: percent("4.5"),
             attributed: 0,
             shared,
+            // Расходы — `ordinary`: не сказано, прямые ли они.
+            direct: (shared == 0).then_some(0),
             expenses: shared,
             current,
             carry_in,
@@ -780,6 +784,7 @@ fn the_kind_chosen_in_the_profile_wins() {
             floor_percent: percent("1"),
             attributed: 0,
             shared: 960_000,
+            direct: None,
             expenses: 960_000,
             current: 91_200,
             carry_in: 0,
@@ -1508,6 +1513,207 @@ fn the_expense_form_asks_the_code_only_beside_an_income_row() {
     assert!(!expense_activity_needed(&[], &sold, Some(&it), day_of));
     assert!(!expense_activity_needed(&[], &plain_income, Some(&design), day_of));
     assert!(!expense_activity_needed(&[], &sold, None, day_of));
+}
+
+/// Расход по «հաշիվ վավերագիր» — прямой или сбытовой и административный.
+fn costed(date: Date, drams: i64, cost: Cost, activity: Option<&str>) -> Operation {
+    operation(OperationData {
+        cost: Some(cost),
+        ..expense(date, drams, Proof::SettlementInvoice, Nature::Ordinary, activity).data().clone()
+    })
+}
+
+/// Расход в долларах по курсу ЦБ — прямой, сбытовой или не сказано.
+fn usd_expense(date: Date, cents: i64, rate_e4: i64, cost: Option<Cost>) -> Operation {
+    let rate = ExchangeRate::new(Currency::Usd, rate_e4, date, RateSource::Manual).expect("в тесте — годный курс");
+    operation(OperationData {
+        amount: Money::new(cents, Currency::Usd),
+        rate: Some(rate),
+        cost,
+        ..ordinary(date, 1).data().clone()
+    })
+}
+
+/// Прямые расходы и сбытовые с административными строки — x.4.1 и x.4.2.
+fn split_of(got: &QuarterTax, kind: IncomeKind) -> Option<(Option<i64>, i64)> {
+    let deduction = got.lines.iter().find(|line| line.kind == kind)?.deduction?;
+    Some((deduction.direct, deduction.expenses))
+}
+
+/// Прямой расход ст. 260, ч. 3 по долям не делит (задача 79). У торговца
+/// с разовой продажей кассового аппарата прямой с кодом идёт в строку
+/// торговли целиком, а без кода — общий, как сбытовой и как расход, о котором
+/// не сказано: рядом с продажей он может быть и её расходом, а тот в строку
+/// с вычетом не идёт (ст. 260, ч. 1; ревью задачи 79), — и деления x.4 у него
+/// нет (числа — у `an_expense_with_its_code_keeps_out_of_the_split`). Без
+/// продажи прямой без кода — в единственную строку целиком: 100 000 − 85 500
+/// = 14 500 (предел 10 000), как у сбытового, чей вес и так весь.
+#[test]
+fn a_direct_expense_goes_to_its_row_whole() {
+    let mut shop = profile(&["47.91.0"]);
+    shop.kinds.insert(code("47.91.0"), IncomeKind::Trade);
+    let sales = [income(day(2026, 7, 10), 1_000_000, None), income_as(day(2026, 8, 10), 1_000_000, IncomeKind::Assets)];
+    let with = |expense: Operation| vec![sales[0].clone(), sales[1].clone(), expense];
+    let alone = |expense: Operation| vec![sales[0].clone(), expense];
+    let mut wrong = Vec::new();
+    for (name, books, tax_due, split, known) in [
+        ("прямой с кодом", with(costed(day(2026, 9, 1), 900_000, Cost::Direct, Some("47.91.0"))), 114_500, 0, Some(Some(900_000))),
+        ("прямой без кода", with(costed(day(2026, 9, 1), 900_000, Cost::Direct, None)), 157_250, 1, Some(None)),
+        ("сбытовой", with(costed(day(2026, 9, 1), 900_000, Cost::Overhead, None)), 157_250, 1, Some(Some(0))),
+        ("не сказано", with(ordinary(day(2026, 9, 1), 900_000)), 157_250, 1, Some(None)),
+        ("прямой без продажи", alone(costed(day(2026, 9, 1), 900_000, Cost::Direct, None)), 14_500, 0, Some(Some(900_000))),
+        ("сбытовой без продажи", alone(costed(day(2026, 9, 1), 900_000, Cost::Overhead, None)), 14_500, 0, Some(Some(0))),
+    ] {
+        let got = tax(Some(&shop), &books, &[], quarter(2026, 3));
+        let direct = split_of(&got, IncomeKind::Trade).map(|(direct, _)| direct);
+        if (got.tax, got.refused.split, direct, got.complete()) != (tax_due, split, known, true) {
+            wrong.push(format!("{name}: налог {}, доля {}, x.4.1 {direct:?}, полон {}", got.tax, got.refused.split, got.complete()));
+        }
+    }
+    assert!(wrong.is_empty(), "прямой расход: {wrong:#?}");
+}
+
+/// Коды облагаются по разным строкам: прямой расход без вида деятельности
+/// ни в какую строку не положить, и расчёт неполон, пока вид не указан, — а не
+/// делится по долям (Правило 6). С видом — в свою строку целиком. У кодов одной
+/// строки вид не нужен.
+#[test]
+fn a_direct_expense_needs_its_code_among_rows() {
+    let two = profile(&["62.01.0", "74.10.0"]);
+    let incomes = [income(day(2026, 7, 10), 300_000, Some("62.01.0")), income(day(2026, 7, 20), 300_000, Some("74.10.0"))];
+    let books = [incomes[0].clone(), incomes[1].clone(), costed(day(2026, 9, 1), 100_000, Cost::Direct, None)];
+    let got = tax(Some(&two), &books, &[], quarter(2026, 3));
+    assert_eq!(got.gaps.undirected, 1);
+    assert!(!got.complete());
+    assert_eq!(split_of(&got, IncomeKind::Other), Some((Some(0), 0)));
+    assert!(direct_activity_needed(Some(&two), day(2026, 9, 1)));
+
+    let coded = [incomes[0].clone(), incomes[1].clone(), costed(day(2026, 9, 1), 100_000, Cost::Direct, Some("74.10.0"))];
+    let got = tax(Some(&two), &coded, &[], quarter(2026, 3));
+    assert!(got.complete());
+    assert_eq!(split_of(&got, IncomeKind::Other), Some((Some(100_000), 100_000)));
+
+    let one_row = profile(&["74.10.0", "73.11.0"]);
+    assert!(!direct_activity_needed(Some(&one_row), day(2026, 9, 1)));
+    let books = [income(day(2026, 7, 20), 300_000, Some("74.10.0")), costed(day(2026, 9, 1), 100_000, Cost::Direct, None)];
+    let got = tax(Some(&one_row), &books, &[], quarter(2026, 3));
+    assert!(got.complete());
+    assert_eq!(split_of(&got, IncomeKind::Other), Some((Some(100_000), 100_000)));
+}
+
+/// x.4.1 и x.4.2 известны, только когда у каждого расхода строки сказано,
+/// прямой ли он: прямые 100 000 без вида и 30 000 с кодом, сбытовые 50 000 —
+/// x.4.1 130 000 из 180 000; один расход без ответа — с видом или без — и деления
+/// нет.
+#[test]
+fn the_split_is_known_only_when_every_expense_says() {
+    let design = profile(&["74.10.0"]);
+    let sale = income(day(2026, 7, 10), 1_000_000, None);
+    let said = vec![
+        sale,
+        costed(day(2026, 8, 1), 100_000, Cost::Direct, None),
+        costed(day(2026, 8, 2), 30_000, Cost::Direct, Some("74.10.0")),
+        costed(day(2026, 8, 3), 50_000, Cost::Overhead, None),
+    ];
+    let got = tax(Some(&design), &said, &[], quarter(2026, 3));
+    assert_eq!(split_of(&got, IncomeKind::Other), Some((Some(130_000), 180_000)));
+    let mut wrong = Vec::new();
+    for (name, extra) in [
+        ("без вида", ordinary(day(2026, 8, 4), 20_000)),
+        ("с кодом", expense(day(2026, 8, 4), 20_000, Proof::SettlementInvoice, Nature::Ordinary, Some("74.10.0"))),
+    ] {
+        let mut books = said.clone();
+        books.push(extra);
+        let got = tax(Some(&design), &books, &[], quarter(2026, 3));
+        if split_of(&got, IncomeKind::Other) != Some((None, 200_000)) {
+            wrong.push(format!("{name}: {:?}", split_of(&got, IncomeKind::Other)));
+        }
+    }
+    assert!(wrong.is_empty(), "деление без ответа: {wrong:#?}");
+}
+
+/// Расходы без вида — одной суммой, как до задачи 79: отметка «прямой» у них
+/// x.4 не сдвигает и на лумах. 10,01 $ по 388 ֏ — 3 883,88 ֏ дважды: вместе
+/// 7 767,76 — x.4 7 767, x.4.1 — 3 883 (лумы отброшены), x.4.2 — остаток 3 884.
+#[test]
+fn marking_expenses_does_not_move_the_total() {
+    let design = profile(&["74.10.0"]);
+    let sale = income(day(2026, 7, 10), 1_000_000, None);
+    let q = quarter(2026, 3);
+    let before = [
+        sale.clone(),
+        usd_expense(day(2026, 8, 1), 1_001, 3_880_000, None),
+        usd_expense(day(2026, 8, 2), 1_001, 3_880_000, None),
+    ];
+    let after = [
+        sale,
+        usd_expense(day(2026, 8, 1), 1_001, 3_880_000, Some(Cost::Direct)),
+        usd_expense(day(2026, 8, 2), 1_001, 3_880_000, Some(Cost::Overhead)),
+    ];
+    let old = tax(Some(&design), &before, &[], q);
+    let new = tax(Some(&design), &after, &[], q);
+    assert_eq!(split_of(&old, IncomeKind::Other), Some((None, 7_767)));
+    assert_eq!(split_of(&new, IncomeKind::Other), Some((Some(3_883), 7_767)));
+    assert_eq!(old.tax, new.tax);
+}
+
+/// В снимке закрытого квартала x.4.1 — тоже поле формы: прямой стал сбытовым
+/// — нужен уточнённый расчёт, хотя налог тот же. Снимок без деления (до задачи
+/// 79) с делением не сравнивается: что человек вписал тогда, неизвестно.
+#[test]
+fn a_changed_split_after_closing_is_a_drift() {
+    let design = profile(&["74.10.0"]);
+    let q = quarter(2026, 1);
+    let sale = income(day(2026, 1, 15), 1_000_000, None);
+    let direct = [sale.clone(), costed(day(2026, 2, 10), 200_000, Cost::Direct, None)];
+    let overhead = [sale.clone(), costed(day(2026, 2, 10), 200_000, Cost::Overhead, None)];
+    let closings = [closed(&design, &direct, &[], q, 1_770_000_000_000)];
+    assert!(!tax(Some(&design), &direct, &closings, q).differs_from(&closings[0]));
+    let live = tax(Some(&design), &overhead, &closings, q);
+    assert_eq!(live.tax, closings[0].data().tax);
+    assert!(live.differs_from(&closings[0]));
+
+    let unsaid = [sale, ordinary(day(2026, 2, 10), 200_000)];
+    let before = [closed(&design, &unsaid, &[], q, 1_770_000_000_000)];
+    assert_eq!(before[0].data().lines[0].deduction.and_then(|deduction| deduction.direct), None);
+    assert!(!tax(Some(&design), &direct, &before, q).differs_from(&before[0]));
+    assert!(!tax(Some(&design), &overhead, &before, q).differs_from(&before[0]));
+}
+
+/// Прямой ли расход, форма спрашивает, когда это идёт в расчёт: расход
+/// вычитается — по виду, а когда документ выбран, и по документу, — а у строк
+/// кодов есть вычет, или кодов нет, и строку не узнать. У IT, у командировки,
+/// без документа продавца, у покупки с одним платежом банка и до правил налога —
+/// не спрашивает.
+#[test]
+fn the_expense_form_asks_whether_direct_only_where_it_counts() {
+    let on = day(2026, 8, 20);
+    let design = profile(&["74.10.0"]);
+    let it = profile(&["62.01.0"]);
+    let both = profile(&["62.01.0", "74.10.0"]);
+    let none = profile(&[]);
+    let bill = Some(Proof::SettlementInvoice);
+    let mut wrong = Vec::new();
+    for (name, profile, proof, nature, day_of, expected) in [
+        ("прочая деятельность", Some(&design), bill, Nature::Ordinary, on, true),
+        ("документ не выбран", Some(&design), None, Nature::Ordinary, on, true),
+        ("зарплата платежом банка", Some(&design), Some(Proof::BankPayment), Nature::Levy, on, true),
+        ("IT и прочая", Some(&both), bill, Nature::Ordinary, on, true),
+        ("кодов нет", Some(&none), bill, Nature::Ordinary, on, true),
+        ("профиля нет", None, bill, Nature::Ordinary, on, true),
+        ("IT", Some(&it), bill, Nature::Ordinary, on, false),
+        ("командировка", Some(&design), bill, Nature::Travel, on, false),
+        ("командировка без документа", Some(&design), None, Nature::Travel, on, false),
+        ("основное средство", Some(&design), bill, Nature::Asset, on, false),
+        ("документа нет", Some(&design), Some(Proof::None), Nature::Ordinary, on, false),
+        ("покупка платежом банка", Some(&design), Some(Proof::BankPayment), Nature::Ordinary, on, false),
+        ("до правил", Some(&design), bill, Nature::Ordinary, day(2024, 8, 20), false),
+    ] {
+        if cost_needed(profile, proof, nature, day_of) != expected {
+            wrong.push(name);
+        }
+    }
+    assert!(wrong.is_empty(), "спросила не там: {wrong:?}");
 }
 
 /// Без кодов в профиле доход со своей строкой посчитан, а общему расходу

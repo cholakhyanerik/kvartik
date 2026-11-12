@@ -266,6 +266,7 @@ fn record(flow: Flow, day: Date, drams: i64, income_kind: Option<IncomeKind>) ->
         supplier: Line::default(),
         proof,
         nature,
+        cost: None,
         activity: None,
         income_kind,
         attachments: Vec::new(),

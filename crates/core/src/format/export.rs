@@ -40,7 +40,7 @@ use crate::model::client::Client;
 use crate::model::date::Date;
 use crate::model::document::{DocKind, Document, Number, Status};
 use crate::model::record::RecordId;
-use crate::model::ledger::{self, Flow, Nature, Operation, Proof, Source};
+use crate::model::ledger::{self, Cost, Flow, Nature, Operation, Proof, Source};
 use crate::model::money::{Currency, Money};
 use crate::tax::closing::Closing;
 use crate::tax::turnover::{self, Line, QuarterTax, Regime};
@@ -242,6 +242,13 @@ const fn nature_key(nature: Nature) -> Key {
     }
 }
 
+const fn cost_key(cost: Cost) -> Key {
+    match cost {
+        Cost::Direct => Key::CostDirect,
+        Cost::Overhead => Key::CostOverhead,
+    }
+}
+
 const fn status_key(status: Status) -> Key {
     match status {
         Status::Draft => Key::StatusDraft,
@@ -295,7 +302,7 @@ pub fn ledger_sheet(
     let rows = rows
         .iter()
         .map(|row| {
-            let (document, counterparty, what, proof, nature, paid) = match row.source {
+            let (document, counterparty, what, proof, nature, cost, paid) = match row.source {
                 Source::Document(document) => {
                     let buyer = document
                         .issued()
@@ -318,7 +325,7 @@ pub fn ledger_sheet(
                     let paid = invoice
                         .filter(|invoice| invoice.left().is_ok_and(|left| left.minor() == 0))
                         .and_then(|invoice| invoice.payments().iter().map(|payment| payment.date).max());
-                    (document_title(lang, document), buyer, items, None, None, paid)
+                    (document_title(lang, document), buyer, items, None, None, None, paid)
                 }
                 Source::Operation(operation) => {
                     let data = operation.data();
@@ -326,7 +333,8 @@ pub fn ledger_sheet(
                         Some(id) => client_name(id),
                         None => data.supplier.as_str().to_owned(),
                     };
-                    (String::new(), counterparty, data.text.as_str().to_owned(), data.proof, data.nature, data.paid)
+                    let what = data.text.as_str().to_owned();
+                    (String::new(), counterparty, what, data.proof, data.nature, data.cost, data.paid)
                 }
             };
             vec![
@@ -337,6 +345,7 @@ pub fn ledger_sheet(
                 Cell::text(&what),
                 proof.map_or(Cell::Empty, |proof| Cell::Text(t(lang, proof_key(proof)).to_owned())),
                 nature.map_or(Cell::Empty, |nature| Cell::Text(t(lang, nature_key(nature)).to_owned())),
+                cost.map_or(Cell::Empty, |cost| Cell::Text(t(lang, cost_key(cost)).to_owned())),
                 row.activity.map_or(Cell::Empty, |code| Cell::Text(code.to_string())),
                 row.income_kind
                     .map_or(Cell::Empty, |kind| Cell::Text(t(lang, turnover::kind_key(kind)).to_owned())),
@@ -362,6 +371,7 @@ pub fn ledger_sheet(
         Key::OpText,
         Key::OpProof,
         Key::OpNature,
+        Key::OpCost,
         Key::ActivityCode,
         Key::IncomeKindLabel,
         Key::OpAmount,

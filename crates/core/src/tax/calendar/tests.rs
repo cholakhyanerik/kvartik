@@ -336,6 +336,7 @@ fn income_of(date: Date, amount: Money) -> Operation {
             supplier: Line::default(),
             proof: None,
             nature: None,
+            cost: None,
             activity: None,
             income_kind: None,
             attachments: Vec::new(),

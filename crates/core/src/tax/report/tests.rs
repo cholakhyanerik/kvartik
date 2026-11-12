@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::model::document::Document;
-use crate::model::ledger::{Nature, Operation, OperationData, Proof};
+use crate::model::ledger::{Cost, Nature, Operation, OperationData, Proof};
 use crate::model::money::{Currency, ExchangeRate, Money, RateSource};
 use crate::model::profile::ProfileData;
 use crate::model::record::Timestamp;
@@ -58,6 +58,7 @@ fn income(date: Date, drams: i64, activity: Option<&str>) -> Operation {
         supplier: Text::default(),
         proof: None,
         nature: None,
+        cost: None,
         activity: activity.map(code),
         income_kind: None,
         attachments: Vec::new(),
@@ -76,6 +77,14 @@ fn usd_income(date: Date, cents: i64, rate_e4: Option<i64>) -> Operation {
     })
 }
 
+/// Расход по «հաշիվ վավերագիր» — прямой или сбытовой и административный.
+fn costed(date: Date, drams: i64, cost: Cost, activity: Option<&str>) -> Operation {
+    operation(OperationData {
+        cost: Some(cost),
+        ..expense(date, drams, activity).data().clone()
+    })
+}
+
 /// Расход по «հաշիվ վավերագիր»: с видом деятельности или общий.
 fn expense(date: Date, drams: i64, activity: Option<&str>) -> Operation {
     operation(OperationData {
@@ -89,6 +98,7 @@ fn expense(date: Date, drams: i64, activity: Option<&str>) -> Operation {
         supplier: Text::default(),
         proof: Some(Proof::SettlementInvoice),
         nature: Some(Nature::Ordinary),
+        cost: None,
         activity: activity.map(code),
         income_kind: None,
         attachments: Vec::new(),
@@ -146,8 +156,8 @@ fn designer() -> (ProfileData, Vec<Operation>) {
 
 /// Строка с вычетом заполняет свой раздел полями 9.1–9.11 — номерами
 /// приказа, — строку сводки 21 со ставкой «X», итог 22 и оборот 27.
-/// Прямые расходы и сбытовые с административными книга не различает: при
-/// расходах у 9.4.1 и 9.4.2 числа нет, а 9.4 — их сумма.
+/// О расходах не сказано, прямые ли они (записи до задачи 79): у 9.4.1
+/// и 9.4.2 числа нет, а 9.4 — их сумма.
 #[test]
 fn a_line_with_deduction_fills_its_section() {
     let (profile, operations) = designer();
@@ -361,11 +371,17 @@ fn the_order_formulas_hold() {
     ];
     let idle = [expense(day(2026, 2, 10), 200_000, None), income(day(2026, 4, 20), 500_000, None)];
     let design = profile(&["74.10.0"]);
+    let said = [
+        income(day(2026, 7, 15), 1_000_000, None),
+        costed(day(2026, 8, 1), 300_000, Cost::Direct, None),
+        costed(day(2026, 8, 2), 150_000, Cost::Overhead, None),
+    ];
     let cases = [
         ("дизайн, предел", tax(&designer, &design_books, &[], quarter(2026, 3))),
         ("перенос в IV квартал", tax(&design, &carry, &[], quarter(2026, 4))),
         ("квартал без дохода", tax(&design, &idle, &[], quarter(2026, 1))),
         ("квартал после него", tax(&design, &idle, &[], quarter(2026, 2))),
+        ("прямые и сбытовые", tax(&design, &said, &[], quarter(2026, 3))),
     ];
     let mut wrong = Vec::new();
     for (case, tax) in cases {
@@ -388,7 +404,7 @@ fn the_order_formulas_hold() {
             let split = match (value("4.1"), value("4.2")) {
                 (Some(Value::Unknown), Some(Value::Unknown)) => amount("4") > 0,
                 (Some(Value::Drams(direct)), Some(Value::Drams(overhead))) => {
-                    amount("4") == 0 && direct == 0 && overhead == 0
+                    direct >= 0 && overhead >= 0 && direct + overhead == amount("4")
                 }
                 _ => false,
             };
@@ -598,14 +614,14 @@ fn plain_numbers_are_what_the_form_takes() {
 }
 
 /// Торговец с одним кодом (47.91.0, строка «торговля» выбрана в профиле):
-/// форма расхода вид деятельности не спрашивает, и покупка товара на
-/// 6 000 000 ֏ — общий расход. Книга не знает, товар это (5.4.1) или
-/// сбытовой расход (5.4.2), — у обоих полей числа нет, а 5.4 — вся сумма.
-/// Налог: 10 % от 10 000 000 — 1 000 000; вычет 9,5 % от 6 000 000 —
-/// 570 000; 430 000 не меньше предела 1 % — 100 000 (приказ, п. 6–17).
-/// В квартале без расходов оба поля — ноль: делить нечего.
+/// покупка товара на 6 000 000 ֏ записана, когда книга не спрашивала, прямой ли
+/// расход (до задачи 79). Товар это (5.4.1) или сбытовой расход (5.4.2), —
+/// неизвестно: у обоих полей числа нет, а 5.4 — вся сумма. Налог: 10 % от
+/// 10 000 000 — 1 000 000; вычет 9,5 % от 6 000 000 — 570 000; 430 000 не
+/// меньше предела 1 % — 100 000 (приказ, п. 6–17). В квартале без расходов
+/// оба поля — ноль: делить нечего.
 #[test]
-fn expenses_are_not_split_into_direct_and_overhead() {
+fn unsaid_expenses_are_not_split_into_direct_and_overhead() {
     let trader = ProfileData {
         kinds: BTreeMap::from([(code("47.91.0"), IncomeKind::Trade)]),
         ..profile(&["47.91.0"])
@@ -646,4 +662,57 @@ fn expenses_are_not_split_into_direct_and_overhead() {
         .map(|field| (field.number.as_str(), field.value))
         .collect();
     assert_eq!(direct, [("5.4.1", drams(0)), ("5.4.2", drams(0))]);
+}
+
+/// Расходы сказали, прямые ли они (задача 79): x.4.1 и x.4.2 заполнены.
+/// Тот же торговец купил товар на 6 000 000 ֏ — прямой расход, — и заплатил
+/// за рекламу 500 000 ֏ — сбытовой; оба без вида деятельности: 5.4.1 —
+/// 6 000 000, 5.4.2 — 500 000, 5.4 — 6 500 000. Вычет 9,5 % — 617 500, налог
+/// 1 000 000 − 617 500 = 382 500 (предел 100 000). Снимок закрытого квартала
+/// отдаёт те же поля, а снимок без деления (до задачи 79) — без чисел.
+#[test]
+fn expenses_said_direct_fill_both_fields() {
+    let trader = ProfileData {
+        kinds: BTreeMap::from([(code("47.91.0"), IncomeKind::Trade)]),
+        ..profile(&["47.91.0"])
+    };
+    let operations = [
+        income(day(2026, 7, 10), 10_000_000, None),
+        costed(day(2026, 7, 20), 6_000_000, Cost::Direct, None),
+        costed(day(2026, 8, 5), 500_000, Cost::Overhead, None),
+    ];
+    let q = quarter(2026, 3);
+    let live = tax(&trader, &operations, &[], q);
+    let expected = [
+        ("5.1", drams(10_000_000)),
+        ("5.2", rate("10")),
+        ("5.3", drams(1_000_000)),
+        ("5.4.1", drams(6_000_000)),
+        ("5.4.2", drams(500_000)),
+        ("5.4", drams(6_500_000)),
+        ("5.5", rate("9.5")),
+        ("5.6", drams(617_500)),
+        ("5.7", drams(0)),
+        ("5.8", drams(617_500)),
+        ("5.9", drams(100_000)),
+        ("5.10", drams(382_500)),
+        ("5.11", drams(0)),
+    ];
+    let numbers = ready(&live, None).numbers;
+    assert_eq!(fields(&numbers.sections[0]), expected);
+    // У торговли 5.4.1 — не прямые расходы, а стоимость товаров (п. 10).
+    assert_eq!((What::Direct.key_in(IncomeKind::Trade), What::Direct.key_in(IncomeKind::Other)), (Key::ReportGoods, Key::ReportDirect));
+    let copied = text(Lang::Ru, &ready(&live, None), None, None);
+    assert!(copied.contains(&format!("5.4.1 {}: 6000000", t(Lang::Ru, Key::ReportGoods))), "{copied}");
+
+    let closing = Closing::close(&live, day(2026, 10, 5), at(1_760_000_000_000)).expect("квартал закрывается");
+    let filed = ready(&tax(&trader, &operations, std::slice::from_ref(&closing), q), Some(&closing)).numbers;
+    assert_eq!(fields(&filed.sections[0]), expected);
+    let before: Closing = serde_json::from_str(
+        &serde_json::to_string(&closing).expect("снимок пишется").replace(r#""direct":6000000,"#, ""),
+    )
+    .expect("снимок без деления читается");
+    let old = ready(&tax(&trader, &operations, std::slice::from_ref(&before), q), Some(&before)).numbers;
+    let split: Vec<(&str, Value)> = fields(&old.sections[0]).into_iter().filter(|(number, _)| number.starts_with("5.4.")).collect();
+    assert_eq!(split, [("5.4.1", Value::Unknown), ("5.4.2", Value::Unknown)]);
 }

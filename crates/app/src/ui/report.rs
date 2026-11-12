@@ -214,6 +214,7 @@ fn Form(
     let close = matches!(ready.origin, Origin::Calculated { .. })
         && today.is_some_and(|today| ready.quarter.last_day() < today);
     let counted = ready.has_activities();
+    let closed = matches!(ready.origin, Origin::Closed { .. });
     let numbers = ready.numbers.clone();
     let all = StoredValue::new(ready);
     let copy_all = move |_| {
@@ -241,7 +242,7 @@ fn Form(
         {numbers
             .sections
             .into_iter()
-            .map(|section| view! { <SectionCard lang section unknown last /> })
+            .map(|section| view! { <SectionCard lang section unknown closed last /> })
             .collect_view()}
         <section class="report-section">
             <h2>{tr(lang, Key::ReportRows)}</h2>
@@ -281,15 +282,20 @@ fn Form(
 }
 
 /// Раздел формы — строка с вычетом: поля по порядку формы, у x.7 — слова,
-/// если перенос до программы неизвестен, а когда расходы есть — что x.4.1
-/// и x.4.2 книга не различает (`tax::report`, «x.4.1 и x.4.2»).
+/// если перенос до программы неизвестен, а когда x.4.1 и x.4.2 не
+/// разделены — почему и что делать (`tax::report`, «x.4.1 и x.4.2»): у
+/// открытого квартала — отметить расходы в книге или разделить самому, у
+/// закрытого — вписать, как в поданном расчёте.
 #[component]
 fn SectionCard(
     lang: ReadSignal<Lang>,
     section: Section,
     unknown: &'static [IncomeKind],
+    /// Числа — из снимка закрытого квартала.
+    closed: bool,
     last: RwSignal<Option<Copied>>,
 ) -> impl IntoView {
+    let split_key = if closed { Key::ReportSplitClosed } else { Key::ReportSplit };
     let number_of = |what: What| {
         section
             .fields
@@ -315,7 +321,7 @@ fn SectionCard(
                             <FieldRow
                                 lang
                                 number=field.number.clone()
-                                label=field.what.key()
+                                label=field.what.key_in(kind)
                                 value=Some(field.value)
                                 spot=field.number
                                 note
@@ -326,7 +332,7 @@ fn SectionCard(
                     .collect_view()}
             </ul>
             {spent.then(|| view! {
-                <p class="hint">{move || fill(t(lang.get(), Key::ReportSplit), &[&split[0], &split[1], &split[2]])}</p>
+                <p class="hint">{move || fill(t(lang.get(), split_key), &[&split[0], &split[1], &split[2]])}</p>
             })}
         </section>
     }

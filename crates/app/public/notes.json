@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.119",
+      "date": "2026-11-12",
+      "hy": [
+        "Ծախսի գրառման մեջ այժմ կա «Անմիջականորեն կապված, թե իրացման և վարչական» ընտրությունը, և «Թվեր հաշվարկի համար» էկրանին անմիջականորեն կապված և իրացման ու վարչական ծախսերն իրենց դաշտերում են, ոչ թե «բաժանեք ինքներդ»։ Նախկինում գրանցված ծախսերի համար բացեք գրառումը և նշեք դա։",
+        "Անմիջականորեն կապված ծախսն ամբողջությամբ գնում է իր տեսակի հարկի տողին. եթե պրոֆիլի կոդերը հարկվում են տարբեր տողերով կամ կողքին կա վարձակալության կամ գույքի վաճառքի եկամուտ, նշեք դրա գործունեության տեսակը։"
+      ],
+      "ru": [
+        "В записи расхода теперь есть выбор «Прямой или сбытовой и административный», и на экране «Числа для расчёта» прямые расходы и сбытовые и административные стоят в своих полях, а не «разделите сами». У расходов, записанных раньше, откройте запись и отметьте это.",
+        "Прямой расход идёт в строку налога своего вида целиком: если коды в профиле облагаются по разным строкам или рядом есть доход от аренды или продажи имущества, укажите у него вид деятельности."
+      ],
+      "en": [
+        "An expense entry now asks “Direct, or selling and administrative”, and the “Numbers for the return” screen puts direct expenses and selling and administrative expenses in their own fields instead of “split it yourself”. For expenses entered earlier, open the entry and mark it.",
+        "A direct expense goes in full to its activity's tax row: if your profile's codes fall under different rows, or there is rental or property-sale income next to it, choose its activity."
+      ]
+    },
+    {
       "version": "0.0.118",
       "date": "2026-11-11",
       "hy": [
@@ -257,19 +273,6 @@
       ],
       "en": [
         "“Remove” on a payment now says that the payment was removed, with “Undo” next to it: if you pressed it by mistake, the payment comes back with the same date and amount."
-      ]
-    },
-    {
-      "version": "0.0.99",
-      "date": "2026-11-10",
-      "hy": [
-        "Չեղարկված հաշվի քարտում այլևս չկան «Վճարել մինչև» և «Մնացել է վճարել» տողերը. չեղարկված հաշիվը վճարելու կարիք չկա։ Դրանով եղած վճարումները երևում են, ինչպես նախկինում։"
-      ],
-      "ru": [
-        "В карточке аннулированного счёта больше нет строк «Оплатить до» и «Осталось оплатить»: оплачивать аннулированный счёт не нужно. Поступления, которые по нему были, видны, как раньше."
-      ],
-      "en": [
-        "An annulled invoice's card no longer shows “Due date” and “Left to pay”: there's nothing to pay on an annulled invoice. Payments that came in on it are still shown."
       ]
     }
   ]

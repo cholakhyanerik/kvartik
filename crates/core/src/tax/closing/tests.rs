@@ -6,8 +6,18 @@ use crate::tax::rules::Percent;
 use crate::tax::turnover::Deduction;
 
 /// Снимок III квартала 2026 года: прочая деятельность, доход 1 000 000 ֏,
-/// расходы 950 000 ֏ — налог упёрся в предел 45 000, перенос 2 000 ֏.
+/// расходы 950 000 ֏ — все сбытовые и административные (прямых — ноль, с
+/// версии формата 18), — налог упёрся в предел 45 000, перенос 2 000 ֏.
 const CLOSING: &str = concat!(
+    r#"{"meta":{"id":"0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d","modified":1760000000000,"deleted":null},"#,
+    r#""data":{"year":2026,"quarter":3,"rules":"2026.2","lines":[{"kind":"other","income":1000000,"#,
+    r#""rate":"10","gross":100000,"deduction":{"percent":"6","floor_percent":"4.5","attributed":0,"#,
+    r#""shared":950000,"direct":0,"expenses":950000,"current":57000,"carry_in":0,"total":57000,"floor":45000,"#,
+    r#""carry_out":2000},"tax":45000}],"tax":45000}}"#
+);
+
+/// Тот же снимок, как его писали версии формата до 18: деления x.4 в нём нет.
+const CLOSING_V17: &str = concat!(
     r#"{"meta":{"id":"0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d","modified":1760000000000,"deleted":null},"#,
     r#""data":{"year":2026,"quarter":3,"rules":"2026.2","lines":[{"kind":"other","income":1000000,"#,
     r#""rate":"10","gross":100000,"deduction":{"percent":"6","floor_percent":"4.5","attributed":0,"#,
@@ -36,6 +46,7 @@ fn data_shape_is_pinned() {
             floor_percent: percent("4.5"),
             attributed: 0,
             shared: 950_000,
+            direct: Some(0),
             expenses: 950_000,
             current: 57_000,
             carry_in: 0,
@@ -48,12 +59,31 @@ fn data_shape_is_pinned() {
     assert_eq!(serde_json::to_string(&closing).ok().as_deref(), Some(CLOSING));
 }
 
+/// Снимок версий до 18 читается без деления x.4 — «не сказано», а не ноль
+/// прямых (Правило 6), — и пишется уже с полем.
+#[test]
+fn a_snapshot_before_the_split_reads_without_it() {
+    let closing: Closing = serde_json::from_str(CLOSING_V17).expect("снимок версии 17 читается");
+    let deduction = closing.data().lines[0].deduction.expect("строка с вычетом");
+    assert_eq!((deduction.direct, deduction.expenses), (None, 950_000));
+    let written = CLOSING.replace(r#""direct":0"#, r#""direct":null"#);
+    assert_ne!(written, CLOSING, "образец поправлен");
+    assert_eq!(serde_json::to_string(&closing).ok().as_deref(), Some(written.as_str()));
+}
+
 /// Снимок, которого команда не пишет, — порча: квартал не из календаря,
 /// налог не равен сумме строк, строки не по порядку или дважды, сумма
-/// меньше нуля, незнакомое поле.
+/// меньше нуля, прямых расходов больше всех, незнакомое поле.
 #[test]
 fn data_rejects_what_close_never_writes() {
+    let fine = [CLOSING.replace(r#""direct":0"#, r#""direct":950000"#), CLOSING.replace(r#""direct":0"#, r#""direct":null"#)];
+    for text in &fine {
+        assert_ne!(text, CLOSING, "образец поправлен");
+        assert!(serde_json::from_str::<Closing>(text).is_ok(), "годный снимок не прочитан: {text}");
+    }
     let cases = [
+        CLOSING.replace(r#""direct":0"#, r#""direct":950001"#),
+        CLOSING.replace(r#""direct":0"#, r#""direct":-1"#),
         CLOSING.replace(r#""quarter":3"#, r#""quarter":5"#),
         // До правил налога с оборота (2025 год) квартал не закрыть, а снимок
         // 1-го года растянул бы цепочку переноса на восемь тысяч кварталов.

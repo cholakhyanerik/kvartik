@@ -84,6 +84,7 @@ async fn seed(person: Person) -> u16 {
             supplier: Line::default(),
             proof: None,
             nature: None,
+            cost: None,
             activity: None,
             income_kind: None,
             attachments: Vec::new(),

@@ -18,7 +18,7 @@ use serde::Deserialize;
 
 use kvartik_core::model::activity::{ActivityCode, IncomeKind};
 use kvartik_core::model::date::{Date, Quarter};
-use kvartik_core::model::ledger::{Flow, Nature, Operation, OperationData, Proof};
+use kvartik_core::model::ledger::{Cost, Flow, Nature, Operation, OperationData, Proof};
 use kvartik_core::model::money::{Currency, ExchangeRate, Money, RateSource};
 use kvartik_core::model::profile::ProfileData;
 use kvartik_core::model::record::Timestamp;
@@ -72,6 +72,9 @@ struct Entry {
     income_kind: Option<IncomeKind>,
     proof: Option<Proof>,
     nature: Option<Nature>,
+    /// Прямой ли расход (задача 79); нет поля — не сказано.
+    #[serde(default)]
+    cost: Option<Cost>,
 }
 
 /// Налог квартала, выписанный человеком.
@@ -93,6 +96,10 @@ struct ExpectedLine {
     /// Перенос на следующий квартал — у строк с вычетом.
     #[serde(default)]
     carry_out: i64,
+    /// x.4.1 и x.4.2 строки с вычетом — у случаев, которые их считают (задача
+    /// 79); нет поля — деление не сверяется.
+    #[serde(default)]
+    split: Option<[i64; 2]>,
 }
 
 fn code(text: &str) -> ActivityCode {
@@ -114,6 +121,7 @@ fn operation(entry: &Entry) -> Operation {
         supplier: Line::default(),
         proof: entry.proof,
         nature: entry.nature,
+        cost: entry.cost,
         activity: entry.activity.as_deref().map(code),
         income_kind: entry.income_kind,
         attachments: Vec::new(),
@@ -160,11 +168,18 @@ fn every_case_holds() {
             let lines: Vec<ExpectedLine> = got
                 .lines
                 .iter()
-                .map(|line| ExpectedLine {
-                    kind: line.kind,
-                    income: line.income,
-                    tax: line.tax,
-                    carry_out: line.deduction.map_or(0, |deduction| deduction.carry_out),
+                .map(|line| {
+                    let asked = expected.lines.iter().any(|want| want.kind == line.kind && want.split.is_some());
+                    let split = line
+                        .deduction
+                        .and_then(|deduction| Some([deduction.direct?, deduction.expenses - deduction.direct?]));
+                    ExpectedLine {
+                        kind: line.kind,
+                        income: line.income,
+                        tax: line.tax,
+                        carry_out: line.deduction.map_or(0, |deduction| deduction.carry_out),
+                        split: split.filter(|_| asked),
+                    }
                 })
                 .collect();
             if got.tax != expected.tax || lines != expected.lines {

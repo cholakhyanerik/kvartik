@@ -8,7 +8,7 @@ use kvartik_core::model::activity::{ActivityCode, IncomeKind};
 use kvartik_core::model::attachment::{Attachment, FileKind};
 use kvartik_core::model::date::Date;
 use kvartik_core::model::document::{DocKind, Document};
-use kvartik_core::model::ledger::{Flow, Nature, Operation, OperationData, Proof};
+use kvartik_core::model::ledger::{Cost, Flow, Nature, Operation, OperationData, Proof};
 use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::model::profile::Profile;
 use kvartik_core::model::record::RecordId;
@@ -119,10 +119,11 @@ async fn ledger_counts_documents_and_entries() {
 
     press(&host, t(lang, Key::LedgerAddExpense), &mut wrong);
     sleep(50).await;
-    // Пустая форма не сохраняется и говорит, чего не хватает.
+    // Пустая форма не сохраняется и говорит, чего не хватает: кодов в профиле
+    // нет, и прямой ли расход, тоже спрошено (задача 79).
     press(&host, t(lang, Key::ProfileSave), &mut wrong);
     sleep(50).await;
-    for missing in [Key::OpTextMissing, Key::OpProofMissing] {
+    for missing in [Key::OpTextMissing, Key::OpProofMissing, Key::OpCostMissing] {
         if !host.text_content().unwrap_or_default().contains(t(lang, missing)) {
             wrong.push(format!("нет жалобы {missing:?}"));
         }
@@ -131,6 +132,14 @@ async fn ledger_counts_documents_and_entries() {
     fill_field(&host, t(lang, Key::OpSupplier), "«Վեբ» ՍՊԸ", &mut wrong);
     fill_field(&host, t(lang, Key::OpAmount), &i18n::amount(lang, amd(60_000)), &mut wrong);
     choose(&host, t(lang, Key::OpProof), "settlement_invoice", &mut wrong);
+    // Без ответа, прямой ли расход, запись не ложится, даже когда остальное
+    // заполнено.
+    press(&host, t(lang, Key::ProfileSave), &mut wrong);
+    sleep(100).await;
+    if !stored().await.0.is_empty() {
+        wrong.push("расход без ответа «прямой или сбытовой» записан".to_owned());
+    }
+    choose(&host, t(lang, Key::OpCost), "overhead", &mut wrong);
     press(&host, t(lang, Key::ProfileSave), &mut wrong);
     if !wait_for(&host, t(lang, Key::LedgerSaved)).await {
         wrong.push("расход не сохранился".to_owned());
@@ -145,8 +154,9 @@ async fn ledger_counts_documents_and_entries() {
                 amd(60_000),
                 Some(Proof::SettlementInvoice),
                 Some(Nature::Ordinary),
+                Some(Cost::Overhead),
             );
-            if (data.flow, data.date, data.amount, data.proof, data.nature) != expected {
+            if (data.flow, data.date, data.amount, data.proof, data.nature, data.cost) != expected {
                 wrong.push(format!("расход записан не так: {data:?}"));
             }
         }
@@ -254,6 +264,7 @@ async fn long_quarter_shows_by_pages() {
             supplier: kvartik_core::model::text::Line::default(),
             proof: None,
             nature: None,
+            cost: None,
             activity: None,
             income_kind: None,
             attachments: Vec::new(),
@@ -617,9 +628,10 @@ async fn income_row_is_chosen_in_the_ledger_form() {
 }
 
 /// Расход рядом с доходом со своей строкой: при одном коде форма спрашивает вид
-/// деятельности только в этом квартале, запись ложится с кодом, а без кода экран
-/// налога говорит, что доля ушла на строку без вычета. Это слова закона, а не
-/// угадывание: что расход прямой, книга не знает.
+/// деятельности только в этом квартале — и у прямого тоже: он может быть
+/// и расходом этого дохода (задача 79), — записи ложатся с кодом, правка
+/// прежней записи без ответа «прямой или сбытовой» просит ответа, а про расход
+/// без вида экран налога говорит, что его доля ушла на строку без вычета.
 #[wasm_bindgen_test]
 async fn expense_form_asks_the_code_beside_an_income_row() {
     crate::store::delete_database(crate::store::DB_NAME).await;
@@ -641,6 +653,7 @@ async fn expense_form_asks_the_code_beside_an_income_row() {
         supplier: Line::default(),
         proof,
         nature,
+        cost: None,
         activity: None,
         income_kind,
         attachments: Vec::new(),
@@ -686,19 +699,59 @@ async fn expense_form_asks_the_code_beside_an_income_row() {
         None => wrong.push("нет поля даты расхода".to_owned()),
     }
     sleep(100).await;
-    fill_field(&host, t(lang, Key::OpText), "Товар", &mut wrong);
+    fill_field(&host, t(lang, Key::OpText), "Бухгалтер", &mut wrong);
     fill_field(&host, t(lang, Key::OpAmount), &i18n::amount(lang, amd(100_000)), &mut wrong);
     choose(&host, t(lang, Key::OpProof), "settlement_invoice", &mut wrong);
+    choose(&host, t(lang, Key::OpCost), "overhead", &mut wrong);
     choose(&host, t(lang, Key::OpActivity), "74.10.0", &mut wrong);
     press(&host, t(lang, Key::ProfileSave), &mut wrong);
     if !wait_for(&host, t(lang, Key::LedgerSaved)).await {
         wrong.push("расход не сохранился".to_owned());
     }
-    let (operations, _) = stored().await;
-    let goods = operations.iter().find(|operation| operation.data().text.as_str() == "Товар");
-    if goods.and_then(|operation| operation.data().activity) != Some(code) {
-        wrong.push("расход лёг без кода".to_owned());
+    press(&host, t(lang, Key::LedgerAddExpense), &mut wrong);
+    sleep(100).await;
+    fill_field(&host, t(lang, Key::OpText), "Товар", &mut wrong);
+    fill_field(&host, t(lang, Key::OpAmount), &i18n::amount(lang, amd(50_000)), &mut wrong);
+    choose(&host, t(lang, Key::OpProof), "settlement_invoice", &mut wrong);
+    choose(&host, t(lang, Key::OpCost), "direct", &mut wrong);
+    sleep(100).await;
+    if select(&host, t(lang, Key::OpActivity), 0).is_none() {
+        wrong.push("у прямого рядом с доходом со своей строкой форма не спросила вид".to_owned());
     }
+    choose(&host, t(lang, Key::OpActivity), "74.10.0", &mut wrong);
+    press(&host, t(lang, Key::ProfileSave), &mut wrong);
+    if !wait_for(&host, t(lang, Key::LedgerSaved)).await {
+        wrong.push("прямой расход не сохранился".to_owned());
+    }
+    // Прежняя запись без ответа «прямой или сбытовой»: правка его просит.
+    open_entry(&host, "Хостинг", &mut wrong);
+    sleep(100).await;
+    press(&host, t(lang, Key::ProfileSave), &mut wrong);
+    if !wait_for(&host, t(lang, Key::OpCostMissing)).await {
+        wrong.push("правка прежнего расхода не спросила, прямой ли он".to_owned());
+    }
+    choose(&host, t(lang, Key::OpCost), "overhead", &mut wrong);
+    press(&host, t(lang, Key::ProfileSave), &mut wrong);
+    if !wait_for(&host, t(lang, Key::LedgerSaved)).await {
+        wrong.push("прежний расход не сохранился".to_owned());
+    }
+    let (operations, _) = stored().await;
+    let data = |text: &str| {
+        operations
+            .iter()
+            .find(|operation| operation.data().text.as_str() == text)
+            .map(|operation| (operation.data().cost, operation.data().activity))
+    };
+    if data("Бухгалтер") != Some((Some(Cost::Overhead), Some(code))) {
+        wrong.push(format!("сбытовой расход лёг не так: {:?}", data("Бухгалтер")));
+    }
+    if data("Товар") != Some((Some(Cost::Direct), Some(code))) {
+        wrong.push(format!("прямой расход лёг не так: {:?}", data("Товар")));
+    }
+    if data("Хостинг") != Some((Some(Cost::Overhead), None)) {
+        wrong.push(format!("прежний расход лёг не так: {:?}", data("Хостинг")));
+    }
+    // Доля ушла только у хостинга: он без вида, а товар и бухгалтер — с кодом.
     set_hash("#/tax");
     if !wait_for(&host, &fill(t(lang, Key::TaxRefusedSplit), &["1"])).await {
         wrong.push("экран налога не сказал о расходе без вида".to_owned());
@@ -708,4 +761,63 @@ async fn expense_form_asks_the_code_beside_an_income_row() {
     set_hash("");
     forget_device();
     assert!(wrong.is_empty(), "вид у расхода: {wrong:#?}");
+}
+
+/// Коды облагаются по разным строкам: прямой расход без вида деятельности
+/// форма не пишет и говорит почему — он идёт в строку своего вида целиком
+/// (задача 79), — у командировки этого не требует, а с кодом пишет.
+#[wasm_bindgen_test]
+async fn a_direct_expense_asks_its_code_among_rows() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let now = clock::now();
+    let design = ActivityCode::parse("74.10.0").expect("код");
+    let mut data = profile();
+    data.activities = vec![ActivityCode::parse("62.01.0").expect("код"), design];
+    let saved = Profile::save(None, data, now).expect("годный профиль").expect("новый");
+    let mut writes = Writes::default();
+    writes.insert(&saved);
+    commit(writes).await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at("#/ledger");
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::LedgerAddExpense)).await {
+        wrong.push("экран книги не открылся".to_owned());
+    }
+    press(&host, t(lang, Key::LedgerAddExpense), &mut wrong);
+    sleep(100).await;
+    fill_field(&host, t(lang, Key::OpText), "Печать каталога", &mut wrong);
+    fill_field(&host, t(lang, Key::OpAmount), &i18n::amount(lang, amd(80_000)), &mut wrong);
+    choose(&host, t(lang, Key::OpProof), "settlement_invoice", &mut wrong);
+    choose(&host, t(lang, Key::OpCost), "direct", &mut wrong);
+    press(&host, t(lang, Key::ProfileSave), &mut wrong);
+    if !wait_for(&host, t(lang, Key::OpActivityDirect)).await {
+        wrong.push("форма не сказала, что прямому расходу нужен вид".to_owned());
+    }
+    if !stored().await.0.is_empty() {
+        wrong.push("прямой расход без вида записан".to_owned());
+    }
+    // Командировка в вычет не идёт: прямой ли она, не спрашивается, и вид ей
+    // не нужен, хотя прежний ответ «прямой» в поле остался (ревью задачи 79).
+    choose(&host, t(lang, Key::OpNature), "travel", &mut wrong);
+    sleep(100).await;
+    if host.text_content().unwrap_or_default().contains(t(lang, Key::OpActivityDirect)) {
+        wrong.push("у командировки форма требует вид деятельности".to_owned());
+    }
+    choose(&host, t(lang, Key::OpNature), "ordinary", &mut wrong);
+    choose(&host, t(lang, Key::OpActivity), "74.10.0", &mut wrong);
+    press(&host, t(lang, Key::ProfileSave), &mut wrong);
+    if !wait_for(&host, t(lang, Key::LedgerSaved)).await {
+        wrong.push("расход с видом не сохранился".to_owned());
+    }
+    let (operations, _) = stored().await;
+    let got: Vec<_> = operations.iter().map(|operation| (operation.data().cost, operation.data().activity)).collect();
+    if got != [(Some(Cost::Direct), Some(design))] {
+        wrong.push(format!("записано {got:?}"));
+    }
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "прямой расход среди строк: {wrong:#?}");
 }

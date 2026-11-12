@@ -279,14 +279,15 @@ const EXPENSE: &str = concat!(
     r#""data":{"flow":"expense","date":"2026-10-31","paid":"2026-11-02","#,
     r#""amount":{"minor":60000,"currency":"AMD"},"rate":null,"#,
     r#""text":"=Аренда офиса","client":null,"#,
-    r#""supplier":"«Արարատ» ՍՊԸ","proof":"settlement_invoice","nature":"ordinary","activity":"62.01.0","income_kind":null,"#,
+    r#""supplier":"«Արարատ» ՍՊԸ","proof":"settlement_invoice","nature":"ordinary","cost":"overhead","activity":"62.01.0","income_kind":null,"#,
     r#""attachments":[]}}"#
 );
 
 /// Книга периода: доход из выпущенного счёта — его номер, клиент, строки,
 /// сумма, курс, драмы и день последней оплаты, когда оплачен целиком; доход
 /// по счёту с актом — акт, а день оплаты — у его счёта; запись
-/// расхода — продавец, документ продавца, вид, код и день оплаты. Строки — по
+/// расхода — продавец, документ продавца, вид, прямой ли он, код и день
+/// оплаты. Строки — по
 /// дню, а то, что вне периода, не попадает.
 #[test]
 fn ledger_sheet_lists_documents_and_records() {
@@ -317,8 +318,9 @@ fn ledger_sheet_lists_documents_and_records() {
     let expense: Operation = serde_json::from_str(EXPENSE).expect("расход читается");
     let lang = Lang::Ru;
     let sheet = ledger_sheet(lang, &documents, &[expense], &[client], day(2026, 10, 1), day(2026, 12, 31));
-    assert_eq!(sheet.columns.len(), 14);
+    assert_eq!(sheet.columns.len(), 15);
     assert_eq!(sheet.columns[0], "Дата оказания или получения");
+    assert_eq!(sheet.columns[7], "Прямой или сбытовой и административный");
     assert_eq!(
         sheet.rows,
         [
@@ -328,6 +330,7 @@ fn ledger_sheet_lists_documents_and_records() {
                 text("Счёт №\u{A0}2026-001"),
                 text("Beispiel GmbH"),
                 text("Development; Hosting"),
+                Cell::Empty,
                 Cell::Empty,
                 Cell::Empty,
                 Cell::Empty,
@@ -349,6 +352,7 @@ fn ledger_sheet_lists_documents_and_records() {
                 Cell::Empty,
                 Cell::Empty,
                 Cell::Empty,
+                Cell::Empty,
                 number(100_000, 2),
                 text("USD"),
                 number(3_880_000, 4),
@@ -363,6 +367,7 @@ fn ledger_sheet_lists_documents_and_records() {
                 text("=Аренда офиса"),
                 text("Счёт-фактура (հաշիվ վավերագիր)"),
                 text("Обычный: товары, материалы, услуги"),
+                text("Сбытовой и административный"),
                 text("62.01.0"),
                 Cell::Empty,
                 number(60_000, 0),
@@ -377,6 +382,7 @@ fn ledger_sheet_lists_documents_and_records() {
                 text("Счёт №\u{A0}2026-003"),
                 text("Beispiel GmbH"),
                 text("Development; Hosting"),
+                Cell::Empty,
                 Cell::Empty,
                 Cell::Empty,
                 Cell::Empty,
@@ -519,6 +525,7 @@ fn income(date: Date, minor: i64, currency: Currency) -> Operation {
         supplier: Line::default(),
         proof: None,
         nature: None,
+        cost: None,
         activity: None,
         income_kind: None,
         attachments: Vec::new(),
@@ -780,7 +787,7 @@ fn act_payment_day_needs_its_only_act() {
     let sheet = ledger_sheet(Lang::Ru, &documents, &[], std::slice::from_ref(&client), day(2026, 10, 1), day(2026, 12, 31));
     // В один день строки идут по идентификатору записи: порядок актов-этапов
     // здесь не важен.
-    let mut paid_days: Vec<(Cell, Cell)> = sheet.rows.iter().map(|row| (row[2].clone(), row[13].clone())).collect();
+    let mut paid_days: Vec<(Cell, Cell)> = sheet.rows.iter().map(|row| (row[2].clone(), row[14].clone())).collect();
     paid_days.sort_by_key(|(title, _)| format!("{title:?}"));
     assert_eq!(
         paid_days,
@@ -803,7 +810,7 @@ fn unknown_values_stay_empty() {
     let documents = [invoice];
     let (from, until) = (day(2026, 10, 1), day(2026, 12, 31));
     let ledger = ledger_sheet(Lang::Ru, &documents, &[], &[client], from, until);
-    assert_eq!((&ledger.rows[0][11], &ledger.rows[0][12]), (&Cell::Empty, &Cell::Empty), "книга");
+    assert_eq!((&ledger.rows[0][12], &ledger.rows[0][13]), (&Cell::Empty, &Cell::Empty), "книга");
     let issued = documents_sheet(Lang::Ru, &documents, from, until, Some(day(2026, 11, 3)));
     assert_eq!((&issued.rows[0][8], &issued.rows[0][9]), (&Cell::Empty, &Cell::Empty), "документы");
     assert_eq!(unrated(&documents, &[], from, until), 1);

@@ -149,6 +149,7 @@ async fn base_with_draft() -> Document {
             supplier: Line::default(),
             proof: None,
             nature: None,
+            cost: None,
             activity: None,
             income_kind: None,
             attachments: Vec::new(),

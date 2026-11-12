@@ -1097,6 +1097,7 @@ pub(super) enum Alert {
     Unassigned(usize),
     NoCodes,
     Unallocated(usize),
+    Undirected(usize),
     NoRule(IncomeKind),
     Excluded(String, Date),
     CateringPlace,
@@ -1123,6 +1124,7 @@ impl Alert {
             Self::Unassigned(rows) => fill(t(lang, Key::TaxUnassigned), &[&count(*rows)]),
             Self::NoCodes => t(lang, Key::TaxNoCodes).to_owned(),
             Self::Unallocated(rows) => fill(t(lang, Key::TaxUnallocated), &[&count(*rows)]),
+            Self::Undirected(rows) => fill(t(lang, Key::TaxUndirected), &[&count(*rows)]),
             Self::NoRule(kind) => fill(t(lang, Key::TaxNoRule), &[t(lang, kind_key(*kind))]),
             Self::Excluded(code, from) => {
                 fill(t(lang, Key::ActivityExcluded), &[code, &i18n::date(lang, *from)])
@@ -1161,6 +1163,9 @@ pub(super) fn alerts(tax: &QuarterTax) -> Vec<Alert> {
     }
     if gaps.unallocated > 0 {
         alerts.push(Alert::Unallocated(gaps.unallocated));
+    }
+    if gaps.undirected > 0 {
+        alerts.push(Alert::Undirected(gaps.undirected));
     }
     alerts.extend(gaps.no_rule.iter().map(|kind| Alert::NoRule(*kind)));
     alerts.extend(tax.excluded_codes.iter().map(|(code, from)| Alert::Excluded(code.to_string(), *from)));
