@@ -676,6 +676,7 @@ fn only_documented_expenses_are_deducted() {
             no_document: 1,
             payment_only: 1,
             excluded: 1,
+            non_culinary: 0,
             no_base: 0,
             split: 0,
             income_row: 0,
@@ -714,7 +715,9 @@ fn deductible_follows_the_rules_file() {
     for proof in Proof::ALL {
         for nature in Nature::ALL {
             let expected = match (proof, nature) {
-                (_, Nature::Asset | Nature::Travel | Nature::Hospitality) => Err(Refusal::Excluded),
+                (_, Nature::Asset | Nature::Travel | Nature::Hospitality | Nature::NonCulinary) => {
+                    Err(Refusal::Excluded)
+                }
                 (Proof::None, _) => Err(Refusal::NoDocument),
                 (Proof::BankPayment, Nature::Levy) => Ok(()),
                 (Proof::BankPayment, _) => Err(Refusal::PaymentOnly),
@@ -1707,6 +1710,7 @@ fn the_expense_form_asks_whether_direct_only_where_it_counts() {
         ("командировка без документа", Some(&design), None, Nature::Travel, on, false),
         ("основное средство", Some(&design), bill, Nature::Asset, on, false),
         ("документа нет", Some(&design), Some(Proof::None), Nature::Ordinary, on, false),
+        ("товар общепита без приготовления", Some(&design), bill, Nature::NonCulinary, on, false),
         ("покупка платежом банка", Some(&design), Some(Proof::BankPayment), Nature::Ordinary, on, false),
         ("до правил", Some(&design), bill, Nature::Ordinary, day(2024, 8, 20), false),
     ] {
@@ -1812,6 +1816,60 @@ fn the_expense_form_offers_the_income_rows_of_the_quarter() {
         }
     }
     assert!(wrong.is_empty(), "строки доходов у формы расхода: {wrong:#?}");
+}
+
+/// Кафе перепродаёт напитки в бутылках (задача 94; ревью задачи 79): их
+/// начальная стоимость в вычет не идёт (НК 258(6)(2)). Общепит 5 000 000 ֏ по
+/// ставке 12 % — 600 000; напитки 1 000 000 ֏ обычным расходом — вычет 9 %
+/// = 90 000 и налог 510 000; видом «товар, не являющийся кулинарной продукцией»
+/// — вычета нет, налог 600 000, и окно называет такой расход своими словами.
+#[test]
+fn goods_a_cafe_sells_uncooked_are_not_deducted() {
+    let mut cafe = profile(&["56.10.0"]);
+    cafe.kinds.insert(code("56.10.0"), IncomeKind::Catering);
+    let sales = income(day(2026, 7, 10), 5_000_000, None);
+    let mut wrong = Vec::new();
+    for (name, nature, tax_due, refused) in [
+        ("обычный", Nature::Ordinary, 510_000, Refused::default()),
+        (
+            "без приготовления",
+            Nature::NonCulinary,
+            600_000,
+            Refused { non_culinary: 1, ..Refused::default() },
+        ),
+        ("командировка", Nature::Travel, 600_000, Refused { excluded: 1, ..Refused::default() }),
+    ] {
+        let drinks = expense(day(2026, 8, 1), 1_000_000, Proof::SettlementInvoice, nature, None);
+        let got = tax(Some(&cafe), &[sales.clone(), drinks], &[], quarter(2026, 3));
+        if (got.tax, got.refused, got.complete()) != (tax_due, refused, true) {
+            wrong.push(format!("{name}: налог {}, {:?}, полон {}", got.tax, got.refused, got.complete()));
+        }
+    }
+    assert!(wrong.is_empty(), "товар общепита без приготовления: {wrong:#?}");
+}
+
+/// Вид «товар без приготовления» форма предлагает только у кода со строкой
+/// общепита (задача 94): код ресторана без выбранной строки — по умолчанию
+/// прочая деятельность, и ему вид не предлагается, как дизайнеру и без профиля.
+#[test]
+fn only_catering_is_offered_goods_sold_uncooked() {
+    let on = day(2026, 8, 20);
+    let mut cafe = profile(&["56.10.0", "74.10.0"]);
+    cafe.kinds.insert(code("56.10.0"), IncomeKind::Catering);
+    let design = profile(&["74.10.0"]);
+    let restaurant = profile(&["56.10.0"]);
+    let mut wrong = Vec::new();
+    for (name, books, expected) in [
+        ("общепит и дизайн", Some(&cafe), true),
+        ("дизайн", Some(&design), false),
+        ("код ресторана без строки", Some(&restaurant), false),
+        ("профиля нет", None, false),
+    ] {
+        if non_culinary_offered(books, on) != expected {
+            wrong.push(name);
+        }
+    }
+    assert!(wrong.is_empty(), "вид предложен не там: {wrong:?}");
 }
 
 /// Без кодов в профиле доход со своей строкой посчитан, а общему расходу

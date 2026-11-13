@@ -797,6 +797,7 @@ const fn nature_key(nature: Nature) -> Key {
         Nature::Asset => Key::NatureAsset,
         Nature::Travel => Key::NatureTravel,
         Nature::Hospitality => Key::NatureHospitality,
+        Nature::NonCulinary => Key::NatureNonCulinary,
     }
 }
 
@@ -1334,6 +1335,12 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
             && form.cost.get() == Some(Cost::Direct)
             && day.is_some_and(|day| ctx.profiles.with(|profile| turnover::direct_activity_needed(profile, day)))
     });
+    // Предлагать ли вид «товар общепита без приготовления»: у кода профиля
+    // строка общепита на день записи (задача 94).
+    let non_culinary = Memo::new(move |_| {
+        let day = form.date.with(|text| Date::from_iso(text)).or(ctx.today);
+        day.is_some_and(|day| ctx.profiles.with(|profile| turnover::non_culinary_offered(profile, day)))
+    });
     let cost_shown = Memo::new(move |_| {
         form.income_kind.with(Option::is_none) && (cost_asked.get() || form.cost.with(Option::is_some))
     });
@@ -1640,8 +1647,16 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
                             form.nature.set(nature);
                         }
                     }>
-                        {Nature::ALL
+                        // Товар общепита без приготовления — только у кода со
+                        // строкой общепита или у записи, где он уже выбран
+                        // (задача 94).
+                        {move || Nature::ALL
                             .into_iter()
+                            .filter(|nature| {
+                                *nature != Nature::NonCulinary
+                                    || non_culinary.get()
+                                    || form.nature.get_untracked() == Nature::NonCulinary
+                            })
                             .map(|nature| view! {
                                 <option value=nature_code(nature) prop:selected=move || form.nature.get() == nature>
                                     {tr(lang, nature_key(nature))}
@@ -1651,6 +1666,9 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
                     </select>
                 </label>
                 <p class="hint">{tr(lang, Key::NatureHint)}</p>
+                {move || non_culinary.get().then(|| view! {
+                    <p class="hint">{tr(lang, Key::NatureNonCulinaryHint)}</p>
+                })}
                 // Прямой ли расход — поля x.4.1 и x.4.2 расчёта (задача 79):
                 // когда расход идёт в вычет, а у строк кодов вычет есть или
                 // кодов нет.
@@ -1994,6 +2012,7 @@ const fn nature_code(nature: Nature) -> &'static str {
         Nature::Asset => "asset",
         Nature::Travel => "travel",
         Nature::Hospitality => "hospitality",
+        Nature::NonCulinary => "non_culinary",
     }
 }
 

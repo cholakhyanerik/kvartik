@@ -144,6 +144,17 @@ fn income_names_its_activity_and_levy_is_a_nature() {
     assert_eq!(serde_json::to_string(&read).ok().as_deref(), Some(levy.as_str()));
 }
 
+/// С версии формата 20 у расхода — вид «товар, который общепит продаёт, не
+/// готовя» (задача 94): в данных — `non_culinary`, записывается и читается.
+#[test]
+fn a_catering_expense_names_goods_sold_uncooked() {
+    let sample = EXPENSE.replacen(r#""nature":"ordinary""#, r#""nature":"non_culinary""#, 1);
+    assert_ne!(sample, EXPENSE, "подмена не сработала");
+    let read: Operation = serde_json::from_str(&sample).expect("расход non_culinary читается");
+    assert_eq!(read.data().nature, Some(Nature::NonCulinary));
+    assert_eq!(serde_json::to_string(&read).ok().as_deref(), Some(sample.as_str()));
+}
+
 /// С версии формата 13 у дохода — своя строка налога, если она не та, что
 /// у кода, а запись версии 12 — без поля — читается со строкой по коду
 /// и пишется уже с полем (Правило 2).

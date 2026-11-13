@@ -1183,6 +1183,7 @@ enum Hint {
     NoDocument(usize),
     PaymentOnly(usize),
     Excluded(usize),
+    NonCulinary(usize),
     NoBase(usize),
     Split(usize),
     IncomeRow(usize),
@@ -1198,6 +1199,7 @@ impl Hint {
             Self::NoDocument(rows) => fill(t(lang, Key::TaxRefusedNoDocument), &[&count(*rows)]),
             Self::PaymentOnly(rows) => fill(t(lang, Key::TaxRefusedPayment), &[&count(*rows)]),
             Self::Excluded(rows) => fill(t(lang, Key::TaxRefusedExcluded), &[&count(*rows)]),
+            Self::NonCulinary(rows) => fill(t(lang, Key::TaxRefusedNonCulinary), &[&count(*rows)]),
             Self::NoBase(rows) => fill(t(lang, Key::TaxRefusedNoBase), &[&count(*rows)]),
             Self::Split(rows) => fill(t(lang, Key::TaxRefusedSplit), &[&count(*rows)]),
             Self::IncomeRow(rows) => fill(t(lang, Key::TaxRefusedIncomeRow), &[&count(*rows)]),
@@ -1240,6 +1242,9 @@ fn hints(tax: &QuarterTax) -> Vec<Hint> {
     }
     if refused.excluded > 0 {
         hints.push(Hint::Excluded(refused.excluded));
+    }
+    if refused.non_culinary > 0 {
+        hints.push(Hint::NonCulinary(refused.non_culinary));
     }
     if refused.no_base > 0 {
         hints.push(Hint::NoBase(refused.no_base));

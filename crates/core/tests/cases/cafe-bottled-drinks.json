@@ -1,0 +1,22 @@
+{
+  "about": "Кафе перепродаёт напитки в бутылках: их стоимость в вычет не идёт, а продукты для блюд вычитаются",
+  "checked": {
+    "by": "агент вручную по НК 258(1) (строка 6: 12 %, вычет 9 %, предел 3,5 %), 258(4), 258(6)(2) и приказу 299-Ն, прил. 1, п. 34: выручка 5 000 000 × 12 % = 600 000; продукты 2 000 000 — прямой расход (7.4.1), вычет 9 % = 180 000; напитки 1 000 000 в вычет не идут; налог 600 000 − 180 000 = 420 000 (предел 175 000). Вычитайся напитки — налог 330 000",
+    "on": "2026-11-13",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["56.10.0"],
+    "kinds": {"56.10.0": "catering"}
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-07-15", "minor": 5000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "expense", "date": "2026-07-20", "minor": 2000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary", "cost": "direct"},
+    {"flow": "expense", "date": "2026-08-10", "minor": 1000000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "non_culinary"}
+  ],
+  "expected": [
+    {"quarter": "2026-3", "tax": 420000, "lines": [
+      {"kind": "catering", "income": 5000000, "tax": 420000, "split": [2000000, 0]}
+    ]}
+  ]
+}

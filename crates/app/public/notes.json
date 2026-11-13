@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.121",
+      "date": "2026-11-13",
+      "hy": [
+        "Սրճարաններն ու ռեստորաններն այժմ կարող են ծախսի համար ընտրել «Հանրային սնունդ՝ խոհարարական արտադրանք չհանդիսացող ապրանք» տեսակը՝ շշալցված ըմպելիքներ, ծխախոտ, փաթեթավորված քաղցրավենիք։ Դրանց արժեքը չի նվազեցվում (Հարկային օրենսգիրք, հոդված 258, մաս 6), իսկ նախկինում ծրագիրը նվազեցնում էր այն. բացեք այդպիսի ծախսերը և փոխեք դրանց տեսակը «Ծախսի տեսակը» դաշտում։"
+      ],
+      "ru": [
+        "Кафе и ресторан теперь могут выбрать у расхода вид «Общепит: товар, не являющийся кулинарной продукцией» — напитки в бутылках, сигареты, сладости в упаковке. Их стоимость не вычитается (НК, ст. 258, ч. 6), а раньше программа её вычитала: откройте такие расходы и смените вид в поле «Что это за расход»."
+      ],
+      "en": [
+        "Cafés and restaurants can now mark an expense as “Catering: goods that aren't culinary products” — bottled drinks, cigarettes, packaged sweets. Their cost isn't deductible (Tax Code, Art. 258(6)), and the app used to deduct it: open such expenses and change their “Kind of expense”."
+      ]
+    },
+    {
       "version": "0.0.120",
       "date": "2026-11-13",
       "hy": [
@@ -260,19 +273,6 @@
       "en": [
         "A new IE now sees the turnover tax application on the home screen from the registration day, not just a week before the deadline: by when and where to file it. If the deadline has passed and the application isn't marked, the card says what this means and advises checking with an accountant.",
         "“Filed” with the day you filed removes the card, and you can change the day in your profile."
-      ]
-    },
-    {
-      "version": "0.0.101",
-      "date": "2026-11-10",
-      "hy": [
-        "Նույն օրվա փաստաթղթերն այժմ դասավորված են ըստ համարների՝ հաշվապահի համար արտահանման մեջ և «Մատյան» էկրանին։ Նախկինում դրանք պատահական հերթականությամբ էին, և 2026-003 ակտը կարող էր լինել 2026-002-ից առաջ։"
-      ],
-      "ru": [
-        "Документы одного дня теперь стоят по номерам — и в выгрузке для бухгалтера, и на экране «Книга». Раньше они шли в случайном порядке, и акт 2026-003 мог оказаться раньше 2026-002."
-      ],
-      "en": [
-        "Documents of the same day are now in number order, both in the export for your accountant and on the “Ledger” screen. Before, they came in random order, and act 2026-003 could come before 2026-002."
       ]
     }
   ]

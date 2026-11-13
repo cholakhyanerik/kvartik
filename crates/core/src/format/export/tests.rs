@@ -418,6 +418,18 @@ fn an_expense_of_an_income_row_shows_its_row() {
     );
 }
 
+/// Вид расхода «товар, не являющийся кулинарной продукцией» (задача 94) —
+/// в столбце вида расхода словами окна.
+#[test]
+fn goods_a_cafe_sells_uncooked_show_their_nature() {
+    let text_of = EXPENSE.replacen(r#""nature":"ordinary""#, r#""nature":"non_culinary""#, 1);
+    assert_ne!(text_of, EXPENSE, "подмена не сработала");
+    let expense: Operation = serde_json::from_str(&text_of).expect("расход non_culinary читается");
+    let sheet = ledger_sheet(Lang::Ru, &[], &[expense], &[], day(2026, 10, 1), day(2026, 12, 31));
+    assert_eq!(sheet.rows.len(), 1);
+    assert_eq!(sheet.rows[0][6], text("Общепит: товар, не являющийся кулинарной продукцией"));
+}
+
 /// Строки одного дня — по виду и номеру документа, а запись книги — за
 /// ними: по одному случайному идентификатору акт 2026-003 вставал раньше
 /// 2026-002 (полный прогон 0.0.96). Восемь документов одного дня — случайный

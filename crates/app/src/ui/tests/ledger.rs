@@ -684,6 +684,13 @@ async fn expense_form_asks_the_code_beside_an_income_row() {
     if select(&host, t(lang, Key::OpActivity), 0).is_none() {
         wrong.push("рядом с доходом со своей строкой форма не спросила вид".to_owned());
     }
+    // Дизайнеру вид «товар общепита без приготовления» не предлагается
+    // (задача 94).
+    let uncooked = select(&host, t(lang, Key::OpNature), 0)
+        .and_then(|list| list.query_selector("option[value='non_culinary']").ok().flatten());
+    if uncooked.is_some() {
+        wrong.push("дизайнеру предложен вид общепита".to_owned());
+    }
     // В прошлом году такого дохода нет: один код, выбирать нечего.
     let last_year = Date::new(today.year() - 1, 6, 15).expect("дата").iso();
     match field(&host, t(lang, Key::OpReceived), 0) {
@@ -918,4 +925,91 @@ async fn an_expense_of_an_income_row_goes_to_its_row() {
     set_hash("");
     forget_device();
     assert!(wrong.is_empty(), "расход строки дохода: {wrong:#?}");
+}
+
+/// Кафе перепродаёт напитки в бутылках (задача 94): у кода со строкой общепита
+/// в виде расхода есть «товар, не являющийся кулинарной продукцией» и подсказка
+/// о нём; расход ложится этим видом, а экран налога говорит, что он не вычтен.
+#[wasm_bindgen_test]
+async fn a_cafe_marks_goods_sold_uncooked() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let now = clock::now();
+    let today = clock::today().expect("часы с датой");
+    let code = ActivityCode::parse("56.10.0").expect("код");
+    let mut data = profile();
+    data.activities = vec![code];
+    data.kinds.insert(code, IncomeKind::Catering);
+    let saved = Profile::save(None, data, now).expect("годный профиль").expect("новый");
+    let sales = Operation::create(
+        OperationData {
+            flow: Flow::Income,
+            date: today,
+            paid: None,
+            amount: amd(5_000_000),
+            rate: None,
+            text: Line::new("Выручка кафе").expect("текст"),
+            client: None,
+            supplier: Line::default(),
+            proof: None,
+            nature: None,
+            cost: None,
+            activity: None,
+            income_kind: None,
+            attachments: Vec::new(),
+        },
+        now,
+    )
+    .expect("годна");
+    let mut writes = Writes::default();
+    writes.insert(&saved);
+    writes.insert(&sales);
+    commit(writes).await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at("#/ledger");
+    let mut wrong = Vec::new();
+    if !wait_for(&host, "Выручка кафе").await {
+        wrong.push("доход не виден".to_owned());
+    }
+    press(&host, t(lang, Key::LedgerAddExpense), &mut wrong);
+    sleep(100).await;
+    let offered = select(&host, t(lang, Key::OpNature), 0)
+        .and_then(|list| list.query_selector("option[value='non_culinary']").ok().flatten());
+    if offered.is_none() {
+        wrong.push("кафе не предложен вид «товар без приготовления»".to_owned());
+    }
+    if !host.text_content().unwrap_or_default().contains(t(lang, Key::NatureNonCulinaryHint)) {
+        wrong.push("нет подсказки о товаре без приготовления".to_owned());
+    }
+    fill_field(&host, t(lang, Key::OpText), "Напитки в бутылках", &mut wrong);
+    fill_field(&host, t(lang, Key::OpAmount), &i18n::amount(lang, amd(1_000_000)), &mut wrong);
+    choose(&host, t(lang, Key::OpProof), "settlement_invoice", &mut wrong);
+    choose(&host, t(lang, Key::OpNature), "non_culinary", &mut wrong);
+    sleep(100).await;
+    // В вычет такой расход не идёт: прямой ли он, форма не спрашивает.
+    if select(&host, t(lang, Key::OpCost), 0).is_some() {
+        wrong.push("у товара без приготовления форма спрашивает, прямой ли он".to_owned());
+    }
+    press(&host, t(lang, Key::ProfileSave), &mut wrong);
+    if !wait_for(&host, t(lang, Key::LedgerSaved)).await {
+        wrong.push("расход не сохранился".to_owned());
+    }
+    let (operations, _) = stored().await;
+    let got: Vec<_> = operations
+        .iter()
+        .filter(|operation| operation.data().flow == Flow::Expense)
+        .map(|operation| operation.data().nature)
+        .collect();
+    if got != [Some(Nature::NonCulinary)] {
+        wrong.push(format!("записано {got:?}"));
+    }
+    set_hash("#/tax");
+    if !wait_for(&host, &fill(t(lang, Key::TaxRefusedNonCulinary), &["1"])).await {
+        wrong.push("экран налога не сказал о товаре без приготовления".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "товар общепита без приготовления: {wrong:#?}");
 }

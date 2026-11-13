@@ -121,7 +121,7 @@ impl Proof {
 ///
 /// Расширяется, а смысл существующих вариантов не меняется (Правило 2);
 /// `match` — без `_`. В данных — `"ordinary"`, `"levy"`, `"asset"`,
-/// `"travel"`, `"hospitality"`.
+/// `"travel"`, `"hospitality"`, `"non_culinary"`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Nature {
@@ -142,16 +142,27 @@ pub enum Nature {
     Travel,
     /// Представительские расходы.
     Hospitality,
+    /// Товар, который общепит продаёт, не готовя: «խոհարարական արտադրանք
+    /// չհանդիսացող այլ ակտիվ» — напитки в бутылках, сигареты. Его начальная
+    /// стоимость в вычет не идёт (НК, ст. 258, ч. 6, п. 2; так с 2025-01-01:
+    /// ՀՕ-285-Ն и ՀՕ-72-Ն; по закону, сверено по тексту arlis 230455, 201067
+    /// и 205201 2026-11-13). С версии формата 20 (задача 94; решение человека
+    /// 2026-11-13 — своим видом расхода, а не правилом по строке общепита:
+    /// продукты для блюд — тоже прямой расход общепита, и вычитаются). Окно
+    /// предлагает его, только когда у кода профиля строка общепита
+    /// (`tax::turnover::non_culinary_offered`).
+    NonCulinary,
 }
 
 impl Nature {
     /// Все виды — в порядке списка выбора.
-    pub const ALL: [Nature; 5] = [
+    pub const ALL: [Nature; 6] = [
         Nature::Ordinary,
         Nature::Levy,
         Nature::Asset,
         Nature::Travel,
         Nature::Hospitality,
+        Nature::NonCulinary,
     ];
 }
 

@@ -239,6 +239,7 @@ const fn nature_key(nature: Nature) -> Key {
         Nature::Asset => Key::NatureAsset,
         Nature::Travel => Key::NatureTravel,
         Nature::Hospitality => Key::NatureHospitality,
+        Nature::NonCulinary => Key::NatureNonCulinary,
     }
 }
 

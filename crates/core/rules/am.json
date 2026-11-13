@@ -1,5 +1,5 @@
 {
-  "version": "2026.8",
+  "version": "2026.9",
   "turnover_exclusions": [
     {
       "codes": ["69", "70", "78.2", "78.3"],
@@ -205,14 +205,14 @@
     {
       "proofs": ["tax_invoice", "settlement_invoice", "cash_receipt", "individual_purchase", "contract", "foreign_supplier"],
       "payment_only": ["levy"],
-      "excluded": ["asset", "travel", "hospitality"],
+      "excluded": ["asset", "travel", "hospitality", "non_culinary"],
       "from": "2025-01-01",
       "until": null,
       "source": {
         "law": "ՀՕ-165-Ն ՀՀ հարկային օրենսգիրք (12.06.24 ՀՕ-285-Ն, 26.03.25 ՀՕ-72-Ն)",
         "article": "հոդված 258, մաս 6; հոդված 55, մաս 2, կետեր 1–5, մասեր 3, 12, 13; ՀՕ-72-Ն, հոդված 9, մաս 4",
         "url": "https://www.arlis.am/hy/acts/230455",
-        "checked": "2026-11-01"
+        "checked": "2026-11-13"
       }
     }
   ],
