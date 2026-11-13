@@ -1724,6 +1724,13 @@ major. План живёт в [README.md](README.md) («План»), и там �
   (`platform::clipboard`), отказ окно говорит словами, а число на экране
   выделяется целиком — скопировать его сами. В Safari и на iPhone вживую
   не проверялось.
+- **`user-select: all` без `-webkit-` Safari на iPhone не знает** (MDN
+  browser-compat-data, `css.properties.user-select`, сверено 2026-11-13: без
+  префикса — только Safari 27.3 на компьютере), и касание выделяет одно
+  слово — ошибки нет. Так «выделяется целиком одним касанием» у реквизитов
+  и слов согласия «Купить» и адреса календаря лендинга молча не работало на
+  iPhone до 0.0.124. Поэтому каждое `user-select` — в паре
+  с `-webkit-user-select`, и это держит тест `crates/app/tests/select.rs`.
 - **Разрешение писать в папку живёт до закрытия последней вкладки сайта**
   (по исходникам Chromium main bd4bc72f и 157.0.8103.42; developer.chrome.com,
   «Persistent permissions for the File System Access API»; 2026-11-03). В новом

@@ -272,10 +272,14 @@ main > section + section {
 }
 
 /* Адрес календаря вставляют в календарь сами: он длиннее строки телефона
-   и выделяется целиком одним касанием. */
+   и выделяется целиком одним касанием. Safari на iPhone знает только
+   `-webkit-user-select` (MDN browser-compat-data, сверено 2026-11-13), и без
+   него до 0.0.124 касание выделяло там одно слово; пару держит тест
+   `crates/app/tests/select.rs`. */
 .address {
   overflow-wrap: anywhere;
   user-select: all;
+  -webkit-user-select: all;
 }
 
 /* Калькулятор (задача 34): поля — как у окна, пилюлями высотой 56 px
@@ -487,7 +491,8 @@ footer .links {
 
 /* Слова согласия, банк, владелец и номер счёта выделяются целиком одним
    касанием: их копируют в письмо и в перевод, и номер, выделенный не
-   весь, ушёл бы в перевод без цифр. Плашка слов согласия — тот же фон, что
+   весь, ушёл бы в перевод без цифр. На iPhone — только с префиксом
+   `-webkit-` (как у `.address`). Плашка слов согласия — тот же фон, что
    у дорожки языков (--surface-sunken), и текст на ней тот же (--text). */
 .phrase {
   padding: var(--space-3) var(--space-4);
@@ -495,10 +500,12 @@ footer .links {
   background: var(--surface-sunken);
   font-weight: var(--weight-strong);
   user-select: all;
+  -webkit-user-select: all;
 }
 
 .copy {
   user-select: all;
+  -webkit-user-select: all;
 }
 
 /* Реквизиты перевода: подпись над значением, на любой ширине — номер

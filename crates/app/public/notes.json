@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.124",
+      "date": "2026-11-13",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել. iPhone-ում կայքի «Գնել» էջի փոխանցման վավերապայմաններն ու համաձայնության բառերն այժմ ընտրվում են ամբողջությամբ՝ մեկ հպումով։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось: на iPhone реквизиты перевода и слова согласия на странице «Купить» сайта теперь выделяются целиком одним касанием."
+      ],
+      "en": [
+        "Nothing changed in the app: on iPhone, the payment details and the acceptance words on the website's “Buy” page are now selected whole with a single tap."
+      ]
+    },
+    {
       "version": "0.0.123",
       "date": "2026-11-13",
       "hy": [
@@ -260,19 +273,6 @@
       ],
       "en": [
         "The card of an invoice fully covered by acts now says “The acts for this invoice cover it in full” instead of putting two equal amounts side by side as if they differed."
-      ]
-    },
-    {
-      "version": "0.0.104",
-      "date": "2026-11-10",
-      "hy": [
-        "Հաշվով հաջորդ ակտի ձևն այժմ ընդհանուրի տակ ցույց է տալիս, թե որքան է մնացել այդ հաշվով ակտերի համար, իսկ եթե ակտը մեծ է մնացածից, դա ասում է մեկ անգամ, ոչ թե երկու։"
-      ],
-      "ru": [
-        "Форма следующего акта по счёту теперь показывает под итогом, сколько осталось актировать по этому счёту, а если акт больше остатка, говорит это один раз, а не дважды."
-      ],
-      "en": [
-        "The form for the next act on an invoice now shows below the total how much is left to cover with acts on that invoice, and if the act is more than that, it says so once instead of twice."
       ]
     }
   ]
