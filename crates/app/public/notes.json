@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.122",
+      "date": "2026-11-13",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել. այս տարբերակն ուղղում է ստուգումներից մեկը, որոնք կատարվում են յուրաքանչյուր թողարկումից առաջ։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось: эта версия чинит одну из проверок, которые идут перед каждой выкладкой."
+      ],
+      "en": [
+        "Nothing changed in the app: this version fixes one of the checks that run before every release."
+      ]
+    },
+    {
       "version": "0.0.121",
       "date": "2026-11-13",
       "hy": [
@@ -257,22 +270,6 @@
       "en": [
         "An invoice in dollars or euros now warns you if your profile has no account in that currency with the bank's SWIFT code: a foreign client can't pay using such details.",
         "Bank accounts in your profile have a new field, “Bank name in Latin letters”: invoices and acts in English and Russian will show the bank this way, e.g. IDBank CJSC."
-      ]
-    },
-    {
-      "version": "0.0.102",
-      "date": "2026-11-10",
-      "hy": [
-        "Նոր ԱՁ-ն այժմ գլխավոր էկրանին տեսնում է շրջանառության հարկի հայտարարությունը գրանցման օրվանից, այլ ոչ թե ժամկետից մեկ շաբաթ առաջ՝ մինչև որ օրը և որտեղ այն ներկայացնել։ Եթե ժամկետն անցել է, իսկ հայտարարությունը նշված չէ, քարտն ասում է, թե դա ինչով է սպառնում, և խորհուրդ է տալիս ճշտել հաշվապահի հետ։",
-        "«Ներկայացված է» կոճակը ներկայացման օրով հեռացնում է քարտը, իսկ օրը կարող եք ուղղել պրոֆիլում։"
-      ],
-      "ru": [
-        "Новый ИП теперь видит на главном экране заявление о налоге с оборота с дня регистрации, а не за неделю до срока: до какого дня и где его подать. Если срок прошёл, а заявление не отмечено, карточка говорит, чем это грозит, и советует сверить с бухгалтером.",
-        "Кнопка «Подано» с днём подачи убирает карточку, а день можно поправить в профиле."
-      ],
-      "en": [
-        "A new IE now sees the turnover tax application on the home screen from the registration day, not just a week before the deadline: by when and where to file it. If the deadline has passed and the application isn't marked, the card says what this means and advises checking with an accountant.",
-        "“Filed” with the day you filed removes the card, and you can change the day in your profile."
       ]
     }
   ]

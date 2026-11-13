@@ -250,6 +250,14 @@ async fn invoice_flow(host: &HtmlElement, client: &Client, lang: Lang, today: Da
         wrong.push(format!("выпуск не подтвердился: нет «{first}»"));
         return wrong;
     }
+    // Карточку выпущенного окно открывает переходом по адресу, а он приходит
+    // событием своей задачей — позже сообщения о выпуске: тест ждёт карточку
+    // (Правило 2; в CI Firefox проверка сразу после сообщения застала
+    // прежний экран, 2026-11-13).
+    if !wait_until(|| field(host, t(lang, Key::PaymentAmount), 0).is_some()).await {
+        wrong.push("карточка выпущенного счёта не открылась".to_owned());
+        return wrong;
+    }
 
     let left = i18n::amount(lang, Money::new(150_075, Currency::Usd));
     if field(host, t(lang, Key::PaymentAmount), 0).map(|input| input.value()) != Some(left.clone()) {
@@ -277,17 +285,22 @@ async fn invoice_flow(host: &HtmlElement, client: &Client, lang: Lang, today: Da
         wrong.push(format!("акт не выпущен: нет «{act}»"));
         return wrong;
     }
+    // Карточка акта приходит позже сообщения (выше, у счёта): её ждать.
     let basis = fill(t(lang, Key::DocBasis), &[&format!("{}-001", today.year())]);
-    if !host.text_content().unwrap_or_default().contains(&basis) {
+    if !wait_for(host, &basis).await {
         wrong.push("у акта не названо основание".to_owned());
     }
     sign_flow(host, lang, today, &mut wrong).await;
     close(&mut wrong);
     sleep(100).await;
 
-    // Аннулировать счёт и вернуть его.
+    // Аннулировать счёт и вернуть его. Строка списка — ссылка: карточка
+    // приходит переходом по адресу, и её ждать, а не фиксированную паузу.
     open_row(&first, &mut wrong);
-    sleep(100).await;
+    if !wait_until(|| button(host, &[t(lang, Key::DocAnnul)]).is_some()).await {
+        wrong.push("карточка выпущенного счёта не открылась из списка".to_owned());
+        return wrong;
+    }
     press(t(lang, Key::DocAnnul), &mut wrong);
     if !wait_for(host, &fill(t(lang, Key::DocAnnulledNotice), &[&first])).await {
         wrong.push("аннулирование не подтвердилось".to_owned());
@@ -330,11 +343,19 @@ async fn invoice_flow(host: &HtmlElement, client: &Client, lang: Lang, today: Da
         return wrong;
     }
     open_row(t(lang, Key::KindInvoice), &mut wrong);
-    sleep(100).await;
+    if !wait_until(|| button(host, &[t(lang, Key::DocIssue)]).is_some()).await {
+        wrong.push("форма черновика не открылась из списка".to_owned());
+        return wrong;
+    }
     press(t(lang, Key::DocIssue), &mut wrong);
     let second = numbered(Key::KindInvoice, 2);
     if !wait_for(host, &fill(t(lang, Key::DocIssuedNotice), &[&second])).await {
         wrong.push(format!("второй счёт не выпущен: нет «{second}»"));
+        return wrong;
+    }
+    // Карточка выпущенного — позже сообщения (выше, у первого счёта).
+    if !wait_selector(host, ".docs-detail a.back").await {
+        wrong.push("карточка второго счёта не открылась".to_owned());
         return wrong;
     }
     close(&mut wrong);
@@ -428,7 +449,7 @@ async fn sign_flow(host: &HtmlElement, lang: Lang, today: Date, wrong: &mut Vec<
             .find(|d| d.data().kind == DocKind::Act && d.number().is_some_and(|n| n.seq() == 1))
             .map(Document::signed)
     };
-    if status() != t(lang, Key::StatusIssued) {
+    if !wait_until(|| status() == t(lang, Key::StatusIssued)).await {
         wrong.push(format!("выпущенный акт — не «выпущен»: «{}»", status()));
     }
     let Some(input) = field(host, t(lang, Key::SignDate), 0) else {
@@ -1096,6 +1117,19 @@ impl Drop for FontServer {
 }
 
 /// Подождать элемент по селектору; `false` — не дождались за пять секунд.
+/// Подождать, пока `ready` не станет правдой; `false` — не дождались за пять
+/// секунд. Для состояния, которое приходит событием своей задачей, — карточки
+/// по адресу после сообщения (Правило 2: тест ждёт состояния, а не времени).
+pub(super) async fn wait_until(ready: impl Fn() -> bool) -> bool {
+    for _ in 0..100 {
+        if ready() {
+            return true;
+        }
+        sleep(50).await;
+    }
+    false
+}
+
 pub(super) async fn wait_selector(host: &HtmlElement, selector: &str) -> bool {
     for _ in 0..100 {
         if host.query_selector(selector).ok().flatten().is_some() {
