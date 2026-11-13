@@ -1,6 +1,25 @@
 {
   "notes": [
     {
+      "version": "0.0.123",
+      "date": "2026-11-13",
+      "hy": [
+        "«Լիցենզիա» էկրանին՝ ինչ է տալիս բանալին և ինչն է աշխատում առանց դրա, ինչպես տեղափոխել բանալին և տվյալներն այլ սարք, և որ տվյալները սարքերի միջև ինքնուրույն չեն փոխանցվում։ Մուտքագրված բանալու մոտ՝ «Պատճենել բանալին» կոճակը։",
+        "Փորձաշրջանի ավարտից մեկ շաբաթ առաջ ծրագիրը մեկ անգամ կասի այդ մասին պատուհանով. բանալին գալիս է վճարումից հետո մեկ աշխատանքային օրվա ընթացքում, և այն ավելի լավ է գնել նախապես։",
+        "Լիցենզիայի պայմանների նոր խմբագրություն. նախորդի ավարտից առաջ վճարված բանալու ժամկետը սկսվում է նրա վերջին օրվան հաջորդող օրը, և նախորդ բանալու օրերը չեն կորչում։"
+      ],
+      "ru": [
+        "На экране «Лицензия» — что даёт ключ и что работает без него, как перенести ключ и данные на другое устройство и что данные между устройствами сами не переходят. У введённого ключа — кнопка «Скопировать ключ».",
+        "За неделю до конца пробного периода программа один раз скажет об этом окном: ключ приходит в течение рабочего дня после оплаты, и купить его лучше заранее.",
+        "Новая редакция условий лицензии: ключ, оплаченный до конца прежнего, начинается на следующий день после него — дни прежнего ключа не пропадают."
+      ],
+      "en": [
+        "The “License” screen now shows what a key gives you and what works without one, how to move the key and your data to another device, and that data doesn't move between devices on its own. An entered key has a “Copy the key” button.",
+        "A week before your trial ends, the app tells you so once, in a window: a key arrives within a business day after payment, so it's best to buy it in advance.",
+        "New edition of the license terms: a key paid for before the current one ends starts the day after it, so no days of the current key are lost."
+      ]
+    },
+    {
       "version": "0.0.122",
       "date": "2026-11-13",
       "hy": [
@@ -254,22 +273,6 @@
       ],
       "en": [
         "The form for the next act on an invoice now shows below the total how much is left to cover with acts on that invoice, and if the act is more than that, it says so once instead of twice."
-      ]
-    },
-    {
-      "version": "0.0.103",
-      "date": "2026-11-10",
-      "hy": [
-        "Դոլարով կամ եվրոյով հաշիվն այժմ զգուշացնում է, եթե պրոֆիլում չկա այդ արժույթով հաշիվ՝ բանկի SWIFT կոդով. նման վավերապայմաններով արտասահմանյան հաճախորդը չի կարող վճարել։",
-        "Պրոֆիլի բանկային հաշիվն ունի նոր դաշտ՝ «Բանկը լատինատառ». ռուսերեն և անգլերեն հաշիվներում և ակտերում բանկը կգրվի այդպես, օրինակ՝ IDBank CJSC։"
-      ],
-      "ru": [
-        "Счёт в долларах или евро теперь предупреждает, если в профиле нет счёта в этой валюте с SWIFT-кодом банка: по таким реквизитам иностранный клиент не заплатит.",
-        "У банковского счёта в профиле появилось поле «Банк латиницей»: в счетах и актах на русском и английском банк будет написан так, например IDBank CJSC."
-      ],
-      "en": [
-        "An invoice in dollars or euros now warns you if your profile has no account in that currency with the bank's SWIFT code: a foreign client can't pay using such details.",
-        "Bank accounts in your profile have a new field, “Bank name in Latin letters”: invoices and acts in English and Russian will show the bank this way, e.g. IDBank CJSC."
       ]
     }
   ]

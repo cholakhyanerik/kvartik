@@ -661,7 +661,11 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
         <button type="button" disabled=move || office.busy.get() on:click=add>
             <span class="label">{tr(lang, Key::OfficeAdd)}</span>
         </button>
-        <p class="hint">{tr(lang, Key::OfficeAddAbout)}</p>
+        // Пробный период — у устройства, а ключ — на ИНН одного ИП (задача 93).
+        <p class="hint">{move || {
+            let lang = lang.get();
+            [Key::OfficeAddAbout, Key::OfficeTrialShared, Key::OfficeKeyEach].map(|key| t(lang, key)).join(" ")
+        }}</p>
         {removed}
     }
 }

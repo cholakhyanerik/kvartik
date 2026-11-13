@@ -352,6 +352,46 @@ fn the_last_week_is_said_louder() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
+/// Окно о конце пробного периода (задача 93) — в его последние семь дней,
+/// считая последний, и только пока срок — он: при ключе дольше него и при
+/// равном последнем дне о сроке скажет окно ключа. Кончился период — окна
+/// нет: экран лицензии открывается при запуске сам.
+#[test]
+fn the_trial_end_is_said_a_week_ahead() {
+    let last = day(2026, 11, 9);
+    let trial = Access::known(trial_last(day(2026, 10, 27)), None);
+    let mut wrong = Vec::new();
+    for (today, ending) in [
+        (day(2026, 11, 2), None),
+        (day(2026, 11, 3), Some(last)),
+        (last, Some(last)),
+        (day(2026, 11, 10), None),
+    ] {
+        if trial.ending_trial(today) != ending {
+            wrong.push(format!("пробный период, {today:?}: окно — {:?}", trial.ending_trial(today)));
+        }
+        if trial.ending_key(today).is_some() {
+            wrong.push(format!("пробный период, {today:?}: окно ключа"));
+        }
+    }
+    let soon = day(2026, 11, 5);
+    let with = |until| Access::known(Some(last), Some((Plan::Standard, until)));
+    if with(day(2027, 10, 31)).ending_trial(soon).is_some() {
+        wrong.push("ключ дольше пробного периода, а окно — о пробном".to_owned());
+    }
+    if with(last).ending_trial(soon).is_some() || with(last).ending_key(soon) != Some((Plan::Standard, last)) {
+        wrong.push("при равном последнем дне окно не о ключе".to_owned());
+    }
+    // Ключ короче пробного периода: срок — пробный период, окно — его.
+    if with(day(2026, 11, 6)).ending_trial(soon) != Some(last) {
+        wrong.push("ключ короче пробного периода, а окна о пробном нет".to_owned());
+    }
+    if Access::default().ending_trial(soon).is_some() {
+        wrong.push("без срока — окно".to_owned());
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// Запись устройства о ключе читается обратно — и «ключа нет» тоже, — а чужая
 /// или испорченная не читается: срок тогда скажет часть окна, проверив
 /// подписи. Сами записи выписаны руками: их читает и прежняя версия.

@@ -62,7 +62,7 @@ const COPIED: &str = "__kvartikCopied";
 /// успехом, а при `refuse` — отказом `NotAllowedError`, как браузер без
 /// нажатия. Своё свойство у `navigator` закрывает настоящее, а
 /// [`unstub_clipboard`] его снимает.
-fn stub_clipboard(refuse: bool) {
+pub(super) fn stub_clipboard(refuse: bool) {
     let answer = if refuse {
         "return Promise.reject(new DOMException('отказ', 'NotAllowedError'));"
     } else {
@@ -79,14 +79,14 @@ fn stub_clipboard(refuse: bool) {
 }
 
 /// Вернуть настоящий `navigator.clipboard` и забыть скопированное.
-fn unstub_clipboard() {
+pub(super) fn unstub_clipboard() {
     let window = web_sys::window().expect("окно есть");
     let _ = Reflect::delete_property(window.navigator().as_ref(), &"clipboard".into());
     let _ = Reflect::delete_property(window.as_ref(), &COPIED.into());
 }
 
 /// Что окно положило в буфер последним; `None` — ничего.
-fn copied() -> Option<String> {
+pub(super) fn copied() -> Option<String> {
     let window = web_sys::window()?;
     Reflect::get(window.as_ref(), &COPIED.into()).ok()?.as_string()
 }

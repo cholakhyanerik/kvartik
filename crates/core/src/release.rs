@@ -93,7 +93,32 @@ impl Legal {
             (Legal::Privacy, Lang::En) => "/en/privacy/",
         }
     }
+
+    /// Прежние редакции текста — дни их редакций, от новой к старой. Каждая
+    /// остаётся на сайте по своему адресу (условия, п. 11): ключ действует на
+    /// условиях дня оплаты, и покупатель вправе прочесть, на каких. Текст
+    /// прежней — файл `docs/legal/<имя>.<день>.<код языка>.md`, ровно тот, что
+    /// был на сайте; новая редакция — новый день в начале списка и прежний
+    /// файл под его днём, а не правка опубликованного.
+    pub const fn earlier(self) -> &'static [Date] {
+        match self {
+            Legal::Terms => &TERMS_EARLIER,
+            Legal::Privacy => &[],
+        }
+    }
+
+    /// Адрес прежней редакции дня `day` на языке `lang` — в папке текста:
+    /// `/terms/2026-11-09/`, `/ru/terms/2026-11-09/`. Адрес — навсегда, как
+    /// у самого текста: его называют сохранённые договоры.
+    pub fn earlier_path(self, lang: Lang, day: Date) -> String {
+        format!("{}{}/", self.path(lang), day.iso())
+    }
 }
+
+/// Прежние редакции условий лицензии (`Legal::earlier`): от 09.11.2026 —
+/// первая, по ней продавались ключи до редакции от 13.11.2026 (задача 93,
+/// продление заранее, п. 4.1).
+const TERMS_EARLIER: [Date; 1] = [Date::new(2026, 11, 9).expect("9 ноября 2026 года в календаре есть")];
 
 /// Почта продавца и автора — та же, что в условиях лицензии и политике
 /// конфиденциальности (задача 32): на неё пишут ՀՎՀՀ и согласие с условиями,
@@ -390,6 +415,38 @@ mod tests {
             }
         }
         assert!(EMAIL.contains('@') && TELEGRAM.starts_with("https://t.me/"));
+    }
+
+    /// Прежняя редакция — в папке своего текста и языка, у каждого дня
+    /// и языка свой адрес, и ни один не ложится на действующую редакцию или
+    /// на чужой текст. Дни — от новой к старой, без повторов.
+    #[test]
+    fn earlier_editions_have_their_own_addresses() {
+        let mut wrong = Vec::new();
+        let mut seen: Vec<String> = Legal::ALL
+            .into_iter()
+            .flat_map(|doc| Lang::ALL.map(|lang| doc.path(lang).to_owned()))
+            .collect();
+        for doc in Legal::ALL {
+            let days = doc.earlier();
+            if days.windows(2).any(|pair| pair[0] <= pair[1]) {
+                wrong.push(format!("{doc:?}: дни не от новой к старой"));
+            }
+            for &day in days {
+                for lang in Lang::ALL {
+                    let path = doc.earlier_path(lang, day);
+                    if path != format!("{}{}/", doc.path(lang), day.iso()) {
+                        wrong.push(format!("{doc:?} {lang:?}: {path}"));
+                    }
+                    if seen.contains(&path) {
+                        wrong.push(format!("{path} — дважды"));
+                    }
+                    seen.push(path);
+                }
+            }
+        }
+        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[0]), "/ru/terms/2026-11-09/");
+        assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
     /// Страница «Купить» — у каждого языка своя, в папке страницы этого

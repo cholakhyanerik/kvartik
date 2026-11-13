@@ -119,13 +119,20 @@ check_page() {
 check_page
 
 # Корень и страницы языков — лендинг (задача 34, с 0.0.82), юридические
-# тексты к каждой (задача 32, с 0.0.94) и страница «Купить» (задача 35,
-# с 0.0.96): 200 и байт в байт та страница, что собрана, — с CSP и без
-# долгого кэша. Зона вписывает свой скрипт в любой ответ `text/html` (выше),
-# и на лендинге тоже. До 0.0.82 корень вёл в программу переадресацией 302.
+# тексты к каждой (задача 32, с 0.0.94), страница «Купить» (задача 35,
+# с 0.0.96) и прежние редакции текстов по своим адресам (задача 93,
+# с 0.0.123; условия, п. 11) — какие собраны, а у условий одна есть
+# точно: 200 и байт в байт та
+# страница, что собрана, — с CSP и без долгого кэша. Зона вписывает свой
+# скрипт в любой ответ `text/html` (выше), и на лендинге тоже. До 0.0.82
+# корень вёл в программу переадресацией 302.
 check_landing() {
-  local path code got
-  for path in "" ru/ en/ buy/ ru/buy/ en/buy/ terms/ ru/terms/ en/terms/ privacy/ ru/privacy/ en/privacy/; do
+  local path code got earlier
+  earlier="$(cd "$dist" && find . \( -path './*terms/????-??-??/index.html' -o -path './*privacy/????-??-??/index.html' \) \
+    | sed 's|^\./||; s|index\.html$||' | sort)"
+  [ -n "$earlier" ] || fail "в сборке нет прежних редакций условий (terms/<день>/)"
+  # shellcheck disable=SC2086 # адреса без пробелов: делить их по строкам и нужно
+  for path in "" ru/ en/ buy/ ru/buy/ en/buy/ terms/ ru/terms/ en/terms/ privacy/ ru/privacy/ en/privacy/ $earlier; do
     while :; do
       code="$(curl -sS --compressed -o "$work/landing" -D "$work/landing-head" -w '%{http_code}' \
         -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' "$site/$path" || true)"

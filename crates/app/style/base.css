@@ -2496,6 +2496,70 @@ dl.months dd,
   color: var(--accent-text);
 }
 
+/* Экран лицензии (задача 93): «Уже купили ключ?» — над покупкой, а что даёт
+   ключ — двумя списками. Подзаголовок списка — жирным текстом, а «сейчас
+   закрыто» после конца срока — словом через тире, цветом предупреждения
+   и жирным: не одним цветом (Правило 4). */
+.have-key {
+  margin-bottom: var(--space-3);
+}
+
+.gives-title {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--font-size-md);
+  font-weight: var(--weight-strong);
+}
+
+.gives-closed {
+  color: var(--warning-text);
+}
+
+.gives-closed::before {
+  content: "\a0— ";
+}
+
+ul.gives {
+  margin: 0;
+  padding-inline-start: var(--space-5);
+}
+
+ul.gives > li + li {
+  margin-top: var(--space-1);
+}
+
+/* На других устройствах — пути переноса абзацами, с воздухом между ними. */
+.devices-way {
+  margin-top: var(--space-3);
+}
+
+/* «Скопировать ключ» и «для своих устройств» — в строку под сроком ключа,
+   а на узком экране — одно под другим. Ключ, который не лёг в буфер, —
+   текстом, который выделяется целиком одним касанием; в нём 149 знаков,
+   и строка рвётся где угодно, а не уезжает за край телефона. Safari на
+   iPhone знает только `-webkit-user-select` (MDN browser-compat-data,
+   сверено 2026-11-13; без префикса — Safari 27.3 на компьютере). */
+.key-copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-3);
+}
+
+.key-status {
+  font-size: var(--font-size-sm);
+  font-weight: var(--weight-strong);
+}
+
+.key-text {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+  user-select: all;
+  -webkit-user-select: all;
+}
+
 .tax-line {
   margin-top: var(--space-3);
   padding: var(--space-4) var(--space-5);

@@ -1,10 +1,15 @@
 # Kvartik License Terms
 
+> **Редакция от 13.11.2026** (задача 93): перевод нового п. 4.1 и даты
+> русского текста той же редакции. Прежняя редакция, от 09.11.2026, —
+> [terms.2026-11-09.en.md](terms.2026-11-09.en.md), на сайте — по адресу
+> /en/terms/2026-11-09/ (п. 11).
+>
 > Перевод [terms.ru.md](terms.ru.md), утверждённого 2026-11-06. Блоки
 > «Для проверки» — только в русском тексте. Квадратные скобки заполнены
 > 2026-11-09 вместе с русским текстом.
 
-**Edition of November 9, 2026. Public offer.**
+**Edition of November 13, 2026. Public offer.**
 
 ## 1. Parties and subject
 
@@ -18,7 +23,7 @@ entrepreneurs and only for their business.
 1. The user picks a plan on the “Buy” page and writes to the seller at
    cholakhyanerik@gmail.com: the TIN (ՀՎՀՀ) of their IE, its name, a contact to send the
    key to, and the words “I accept the Kvartik license terms in the
-   edition of November 9, 2026”.
+   edition of November 13, 2026”.
 2. The user pays for the key. The contract is made upon payment.
 3. The seller sends the key to that contact within one business day after
    payment, together with the settlement document.
@@ -32,9 +37,11 @@ buying.
 ## 4. The license: what you may do and for how long
 
 1. The key is issued to the TIN (ՀՎՀՀ) of an individual entrepreneur for
-   the plan's term stated on the “Buy” page, counted from the day of
-   issue, and works on any number of their devices, with no territorial
-   limit. It does not work with another TIN.
+   the plan's term stated on the “Buy” page and works on any number of
+   their devices, with no territorial limit. It does not work with another
+   TIN. The term is counted from the day the key is issued or, if the key
+   is paid for before the term of the current key for the same TIN ends,
+   from the day after the current key's last day.
 2. The user may open the app in a browser, enter and keep their data in
    it, issue invoices and acts, calculate taxes, make exports and backups,
    for their own business.

@@ -16,6 +16,8 @@
 //! файлы `docs/legal/*.md` (`legal.rs`): опубликовано ровно утверждённое.
 //! Шапка, подвал и оформление у них те же, что у страницы языка, а в подвале
 //! каждой страницы — ссылки на оба текста и почта и Telegram продавца.
+//! Прежние редакции (`Legal::earlier`, задача 93) — в папке текста под своим
+//! днём, `terms/2026-11-09/`: условия обещают держать их на сайте (п. 11).
 //!
 //! И страница «Купить» (задача 35), `buy/` в той же папке
 //! (`release::buy_path`): тариф и цена, шаги покупки по условиям (п. 2)
@@ -124,20 +126,36 @@ pub fn write(staging: &Path, site: &Path, style: &Path, legal: &Path, app: &str,
     for lang in Lang::ALL {
         files.push((page_file(url(lang)), page(lang, &css_name, &js_name, app, calc, checked)));
     }
+    let mut editions = 0;
     for doc in Legal::ALL {
-        let mut texts = Vec::new();
-        for lang in Lang::ALL {
-            let name = format!("{}.{}.md", doc.name(), lang.code());
-            texts.push((lang, legal::parse(&name, &read(&legal.join(&name))?)?));
-        }
-        let pairs: Vec<(Lang, &legal::Doc)> = texts.iter().map(|(lang, text)| (*lang, text)).collect();
-        legal::same_shape(doc.name(), &pairs)?;
-        if doc == Legal::Terms {
-            agreed(&texts)?;
-        }
-        for (lang, text) in &texts {
-            let html = legal_page(*lang, doc, text, &css_name, &js_name, app, checked);
-            files.push((page_file(doc.path(*lang)), html));
+        // Действующая редакция и прежние (задача 93; условия, п. 11) —
+        // каждая на трёх языках, и переводы одной редакции держатся друг
+        // друга.
+        let earlier = doc.earlier();
+        for edition in std::iter::once(Edition::Current(earlier)).chain(earlier.iter().map(|&day| Edition::Earlier(day))) {
+            let day = match edition {
+                Edition::Current(_) => None,
+                Edition::Earlier(day) => Some(day),
+            };
+            let mut texts = Vec::new();
+            for lang in Lang::ALL {
+                let name = legal::file_name(doc, lang, day);
+                texts.push((lang, legal::parse(&name, &read(&legal.join(&name))?)?));
+            }
+            let pairs: Vec<(Lang, &legal::Doc)> = texts.iter().map(|(lang, text)| (*lang, text)).collect();
+            legal::same_shape(&legal::file_name(doc, Lang::Ru, day), &pairs)?;
+            if doc == Legal::Terms && day.is_none() {
+                agreed(&texts)?;
+            }
+            for (lang, text) in &texts {
+                let html = legal_page(*lang, doc, text, edition, &css_name, &js_name, app, checked);
+                let path = match day {
+                    None => doc.path(*lang).to_owned(),
+                    Some(day) => doc.earlier_path(*lang, day),
+                };
+                files.push((page_file(&path), html));
+            }
+            editions += 1;
         }
     }
     for lang in Lang::ALL {
@@ -161,8 +179,21 @@ pub fn write(staging: &Path, site: &Path, style: &Path, legal: &Path, app: &str,
         "лендинг: страниц {}, «Купить» {}, юридических текстов {}",
         Lang::ALL.len(),
         Lang::ALL.len(),
-        Legal::ALL.len() * Lang::ALL.len()
+        editions * Lang::ALL.len()
     ))
+}
+
+/// Какая редакция юридического текста на странице (задача 93; условия,
+/// п. 11): действующая называет прежние днями ссылками, а прежняя говорит,
+/// что она прежняя, и ведёт на действующую. Прежнюю поисковики не
+/// показывают (`noindex`, и в карте сайта её нет): искавший условия должен
+/// найти действующие, а прочесть свои — по ссылке.
+#[derive(Clone, Copy)]
+enum Edition {
+    /// Действующая; дни прежних редакций — от новой к старой.
+    Current(&'static [Date]),
+    /// Прежняя редакция этого дня.
+    Earlier(Date),
 }
 
 /// Слова согласия, которые просит написать страница «Купить»
@@ -401,20 +432,51 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
 
 /// Страница юридического текста `doc` на языке `lang` — рядом со страницей
 /// языка: та же шапка, оформление и подвал, а языки ведут к тому же тексту
-/// на другом языке. Описания для поисковиков нет — его заменит сам текст.
+/// той же редакции на другом языке. Описания для поисковиков нет — его
+/// заменит сам текст. Какая это редакция и куда от неё вести — `edition`.
+#[allow(clippy::too_many_arguments)]
 fn legal_page(
     lang: Lang,
     doc: Legal,
     text: &legal::Doc,
+    edition: Edition,
     css: &str,
     js: &str,
     app: &str,
     checked: Option<Date>,
 ) -> String {
-    let path = |other: Lang| doc.path(other);
+    let path = move |other: Lang| match edition {
+        Edition::Current(_) => doc.path(other).to_owned(),
+        Edition::Earlier(day) => doc.earlier_path(other, day),
+    };
+    let (meta, before, after) = match edition {
+        Edition::Current([]) => (String::new(), String::new(), String::new()),
+        Edition::Current(earlier) => {
+            let links: Vec<String> = earlier
+                .iter()
+                .map(|&day| format!("<a href=\"{}\">{}</a>", doc.earlier_path(lang, day), escape(&i18n::date(lang, day))))
+                .collect();
+            let after = format!(
+                "        <p class=\"editions\">{} {}</p>\n",
+                escape(t(lang, Key::LegalEditions)),
+                links.join(", ")
+            );
+            (String::new(), String::new(), after)
+        }
+        Edition::Earlier(_) => (
+            "    <meta name=\"robots\" content=\"noindex\" />\n".to_owned(),
+            format!(
+                "        <p class=\"edition-note\">{} <a href=\"{}\">{}</a></p>\n",
+                escape(t(lang, Key::LegalOldEdition)),
+                doc.path(lang),
+                escape(t(lang, Key::LegalCurrentEdition))
+            ),
+            String::new(),
+        ),
+    };
     format!(
-        "{head}  <body>\n{top}    <main>\n      <article class=\"legal\">\n{body}      </article>\n    </main>\n{footer}  </body>\n</html>\n",
-        head = head(lang, &escape(&text.title), path, "", css, js, app),
+        "{head}  <body>\n{top}    <main>\n      <article class=\"legal\">\n{before}{body}{after}      </article>\n    </main>\n{footer}  </body>\n</html>\n",
+        head = head(lang, &escape(&text.title), path, &meta, css, js, app),
         top = top(lang, url(lang), path),
         body = legal::html(text, escape),
         footer = footer(lang, app, checked),
@@ -503,7 +565,7 @@ fn buy_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -
             <p>{key}</p>
           </li>
         </ol>
-        <p class="hint">{only}</p>
+{faq}        <p class="hint">{only}</p>
       </article>
     </main>
 {footer}  </body>
@@ -513,7 +575,12 @@ fn buy_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -
         top = top(lang, url(lang), buy_path),
         footer = footer(lang, app, checked),
         title = text(Key::BuyTitle),
-        plan_card = plan_card(lang, "plan", &format!("        <p class=\"hint\">{}</p>\n", trial(lang))),
+        plan_card = plan_card(
+            lang,
+            "plan",
+            &format!("        <p class=\"hint\">{} {}</p>\n", trial(lang), text(Key::LandingAfterTrial))
+        ),
+        faq = faq(lang),
         how = text(Key::BuyHow),
         accept = text(Key::BuyAccept),
         mail = escape(&mail),
@@ -532,6 +599,56 @@ fn buy_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -
         purpose = text(Key::BuyPurposeValue),
         only = text(Key::BuyOnly),
     )
+}
+
+/// «Вопросы» страницы «Купить» (задача 93): сколько устройств, как перенести
+/// ключ, что без него, несколько ИП и когда продлевать — каждый раскрывается
+/// сам, без скрипта (`<details>`: CSP встроенных скриптов не пускает). Ответы
+/// — те же строки, что на экране лицензии и экране ИП программы, и списки
+/// «что даёт ключ» — те же (`i18n::LICENSE_WITH_TERM`, `LICENSE_ALWAYS`):
+/// тексты не разойдутся. Числа — у карточки тарифа выше, из ядра.
+fn faq(lang: Lang) -> String {
+    let text = |key: Key| escape(t(lang, key));
+    let list = |keys: &[Key]| {
+        let items: String = keys.iter().map(|&key| format!("              <li>{}</li>\n", text(key))).collect();
+        format!("            <ul>\n{items}            </ul>\n")
+    };
+    let paragraphs = |lines: &[String]| -> String {
+        lines.iter().map(|line| format!("            <p>{line}</p>\n")).collect()
+    };
+    let move_backup = escape(&fill(
+        t(lang, Key::LicenseMoveBackup),
+        &[t(lang, Key::BackupMake), t(lang, Key::WelcomeHaveBackup), t(lang, Key::BackupRestore)],
+    ));
+    let move_key = escape(&fill(
+        t(lang, Key::LicenseMoveKey),
+        &[t(lang, Key::NavProfile), t(lang, Key::LicenseTitle), t(lang, Key::LicenseCopy)],
+    ));
+    let answers = [
+        (Key::BuyFaqDevices, paragraphs(&[text(Key::LicenseDevicesKey), text(Key::LicenseDevicesData)])),
+        (Key::BuyFaqMove, paragraphs(&[move_backup, move_key, text(Key::LicenseDevicesApple)])),
+        (
+            Key::BuyFaqWithout,
+            format!(
+                "            <p class=\"list-title\">{}</p>\n{}            <p class=\"list-title\">{}</p>\n{}",
+                text(Key::LicenseWithTerm),
+                list(&i18n::LICENSE_WITH_TERM),
+                text(Key::LicenseAlways),
+                list(&i18n::LICENSE_ALWAYS)
+            ),
+        ),
+        (Key::BuyFaqOffice, paragraphs(&[format!("{} {}", text(Key::OfficeKeyEach), text(Key::OfficeTrialShared))])),
+        (Key::BuyFaqRenew, paragraphs(&[format!("{} {}", text(Key::BuyFaqRenewWhen), text(Key::LicenseRenewKeeps))])),
+    ];
+    let mut out = format!("        <h2 id=\"faq\">{}</h2>\n        <div class=\"faq\">\n", text(Key::BuyFaq));
+    for (question, answer) in answers {
+        out.push_str(&format!(
+            "          <details>\n            <summary>{}</summary>\n{answer}          </details>\n",
+            text(question)
+        ));
+    }
+    out.push_str("        </div>\n");
+    out
 }
 
 /// Шаблон с одним `{}`, на месте которого — готовая разметка `link`:
@@ -570,7 +687,15 @@ fn mailto_part(text: &str) -> String {
 /// языке (`path`) — своя каноническая, армянская «по умолчанию», — `meta` —
 /// описание страницы, если оно есть, значки, оформление и скрипт. `title`
 /// уже экранирован.
-fn head(lang: Lang, title: &str, path: impl Fn(Lang) -> &'static str, meta: &str, css: &str, js: &str, app: &str) -> String {
+fn head<P: std::fmt::Display>(
+    lang: Lang,
+    title: &str,
+    path: impl Fn(Lang) -> P,
+    meta: &str,
+    css: &str,
+    js: &str,
+    app: &str,
+) -> String {
     let own = path(lang);
     let mut alternates = String::new();
     for other in Lang::ALL {
@@ -606,7 +731,7 @@ fn head(lang: Lang, title: &str, path: impl Fn(Lang) -> &'static str, meta: &str
 
 /// Шапка страницы: круги украшения, «Kvartik» — ссылкой на страницу языка
 /// `home` — и языки ссылками на ту же страницу на каждом (`path`).
-fn top(lang: Lang, home: &str, path: impl Fn(Lang) -> &'static str) -> String {
+fn top<P: std::fmt::Display>(lang: Lang, home: &str, path: impl Fn(Lang) -> P) -> String {
     // Язык — ссылкой на свою страницу, именем на нём самом (как
     // переключатель окна, `Lang::native_name`). Текущий — `aria-current`:
     // им же его выделяет оформление, не одним цветом (Правило 4).
@@ -733,36 +858,157 @@ mod tests {
     const FONTS_CSS: &str = include_str!("../../app/style/fonts.css");
     const LANDING_CSS: &str = include_str!("../../app/site/landing.css");
     const LANDING_JS: &str = include_str!("../../app/site/landing.js");
-    /// Утверждённые юридические тексты (задача 32) — те, что берёт сборка.
-    const LEGAL: [(&str, &str); 6] = [
+    /// Утверждённые юридические тексты (задача 32) и прежняя редакция условий
+    /// (задача 93) — те, что берёт сборка.
+    const LEGAL: [(&str, &str); 9] = [
         ("terms.hy.md", include_str!("../../../docs/legal/terms.hy.md")),
         ("terms.ru.md", include_str!("../../../docs/legal/terms.ru.md")),
         ("terms.en.md", include_str!("../../../docs/legal/terms.en.md")),
+        ("terms.2026-11-09.hy.md", include_str!("../../../docs/legal/terms.2026-11-09.hy.md")),
+        ("terms.2026-11-09.ru.md", include_str!("../../../docs/legal/terms.2026-11-09.ru.md")),
+        ("terms.2026-11-09.en.md", include_str!("../../../docs/legal/terms.2026-11-09.en.md")),
         ("privacy.hy.md", include_str!("../../../docs/legal/privacy.hy.md")),
         ("privacy.ru.md", include_str!("../../../docs/legal/privacy.ru.md")),
         ("privacy.en.md", include_str!("../../../docs/legal/privacy.en.md")),
     ];
 
-    /// Страница юридического текста из утверждённого файла.
-    fn legal_sample(doc: Legal, lang: Lang) -> String {
-        let name = format!("{}.{}.md", doc.name(), lang.code());
+    /// Страница юридического текста из утверждённого файла: действующей
+    /// редакции или прежней дня `day`.
+    fn legal_sample(doc: Legal, lang: Lang, day: Option<Date>) -> String {
+        let name = legal::file_name(doc, lang, day);
         let (_, source) = LEGAL.iter().find(|(file, _)| *file == name).expect("текст есть");
         let text = legal::parse(&name, source).expect("текст разбирается");
-        legal_page(lang, doc, &text, "kvartik-site-a.css", "kvartik-site-b.js", "/app/", checked())
+        let edition = day.map_or(Edition::Current(doc.earlier()), Edition::Earlier);
+        legal_page(lang, doc, &text, edition, "kvartik-site-a.css", "kvartik-site-b.js", "/app/", checked())
     }
 
-    /// Все страницы сайта: три страницы языков, три «Купить» и шесть
-    /// юридических.
+    /// Все страницы сайта: три страницы языков, три «Купить», шесть
+    /// юридических и прежние редакции.
     fn every_page() -> Vec<(String, String)> {
         let mut out = Vec::new();
         for lang in Lang::ALL {
             out.push((format!("{lang:?} {}", url(lang)), sample(lang)));
             out.push((format!("{lang:?} {}", buy_path(lang)), buy_sample(lang)));
             for doc in Legal::ALL {
-                out.push((format!("{lang:?} {}", doc.path(lang)), legal_sample(doc, lang)));
+                out.push((format!("{lang:?} {}", doc.path(lang)), legal_sample(doc, lang, None)));
+                for &day in doc.earlier() {
+                    out.push((format!("{lang:?} {}", doc.earlier_path(lang, day)), legal_sample(doc, lang, Some(day))));
+                }
             }
         }
         out
+    }
+
+    /// Прежняя редакция (задача 93; условия, п. 11) — по своему адресу на
+    /// каждом языке: канонический адрес и переводы — её же, а не
+    /// действующей; страница говорит, что она прежняя, ведёт на действующую
+    /// и просит поисковики её не показывать. Действующая называет прежние
+    /// днями ссылками, а в карте сайта прежних нет.
+    #[test]
+    fn earlier_editions_stay_at_their_own_addresses() {
+        let mut wrong = Vec::new();
+        let days = Legal::Terms.earlier();
+        assert!(!days.is_empty(), "у условий есть прежняя редакция");
+        for lang in Lang::ALL {
+            let current = legal_sample(Legal::Terms, lang, None);
+            for &day in days {
+                let at = Legal::Terms.earlier_path(lang, day);
+                let link = format!("<a href=\"{at}\">{}</a>", escape(&i18n::date(lang, day)));
+                if !current.contains(&format!("<p class=\"editions\">{} ", escape(t(lang, Key::LegalEditions))))
+                    || !current.contains(&link)
+                {
+                    wrong.push(format!("{lang:?}: действующая не ведёт на прежнюю {link}"));
+                }
+                let old = legal_sample(Legal::Terms, lang, Some(day));
+                let mut need = vec![
+                    format!("<link rel=\"canonical\" href=\"https://kvartik.com{at}\" />"),
+                    "<meta name=\"robots\" content=\"noindex\" />".to_owned(),
+                    format!(
+                        "<p class=\"edition-note\">{} <a href=\"{}\">{}</a></p>",
+                        escape(t(lang, Key::LegalOldEdition)),
+                        Legal::Terms.path(lang),
+                        escape(t(lang, Key::LegalCurrentEdition))
+                    ),
+                ];
+                for other in Lang::ALL {
+                    let there = Legal::Terms.earlier_path(other, day);
+                    need.push(format!("<link rel=\"alternate\" hreflang=\"{}\" href=\"https://kvartik.com{there}\" />", other.code()));
+                    need.push(format!("<a href=\"{there}\" hreflang=\"{}\"", other.code()));
+                }
+                for piece in need {
+                    if !old.contains(&piece) {
+                        wrong.push(format!("{lang:?} {at}: нет {piece}"));
+                    }
+                }
+                if old.contains("class=\"editions\"") || current.contains("noindex") || current.contains("edition-note") {
+                    wrong.push(format!("{lang:?}: прежняя и действующая перепутали свои слова"));
+                }
+                if sitemap().contains(&at) {
+                    wrong.push(format!("{at}: прежняя редакция в карте сайта"));
+                }
+            }
+            // У политики прежних редакций нет — и ссылок на них.
+            if legal_sample(Legal::Privacy, lang, None).contains("class=\"editions\"") {
+                wrong.push(format!("{lang:?}: у политики — ссылки на прежние редакции"));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// «Вопросы» страницы «Купить» (задача 93) — пять, каждый раскрывается
+    /// без скрипта, а ответы — те же строки, что в программе: экрана лицензии
+    /// (ключ на ИНН, данные не переходят сами, перенос копией и ключом,
+    /// Safari и программа с «Домой» — два места, оба списка «что даёт ключ»)
+    /// и экрана ИП. «Когда продлевать?» — с днями прежнего ключа (условия,
+    /// п. 4.1, редакция от 13.11.2026). Под карточкой тарифа — что работает
+    /// после пробного периода.
+    #[test]
+    fn the_buy_page_answers_the_questions_in_the_app_s_words() {
+        let mut wrong = Vec::new();
+        for lang in Lang::ALL {
+            let html = buy_sample(lang);
+            let Some(at) = html.find("<h2 id=\"faq\">") else {
+                wrong.push(format!("{lang:?}: нет вопросов"));
+                continue;
+            };
+            let faq = &html[at..];
+            if faq.matches("<details>").count() != 5 || faq.matches("<summary>").count() != 5 {
+                wrong.push(format!("{lang:?}: вопросов не пять"));
+            }
+            let text = |key: Key| escape(t(lang, key));
+            let mut need = vec![
+                format!("<h2 id=\"faq\">{}</h2>", text(Key::BuyFaq)),
+                escape(&fill(
+                    t(lang, Key::LicenseMoveBackup),
+                    &[t(lang, Key::BackupMake), t(lang, Key::WelcomeHaveBackup), t(lang, Key::BackupRestore)],
+                )),
+                escape(&fill(
+                    t(lang, Key::LicenseMoveKey),
+                    &[t(lang, Key::NavProfile), t(lang, Key::LicenseTitle), t(lang, Key::LicenseCopy)],
+                )),
+                format!("{} {}", text(Key::OfficeKeyEach), text(Key::OfficeTrialShared)),
+                format!("{} {}", text(Key::BuyFaqRenewWhen), text(Key::LicenseRenewKeeps)),
+            ];
+            for question in [Key::BuyFaqDevices, Key::BuyFaqMove, Key::BuyFaqWithout, Key::BuyFaqOffice, Key::BuyFaqRenew] {
+                need.push(format!("<summary>{}</summary>", text(question)));
+            }
+            for key in [Key::LicenseDevicesKey, Key::LicenseDevicesData, Key::LicenseDevicesApple, Key::LicenseWithTerm, Key::LicenseAlways] {
+                need.push(text(key));
+            }
+            for key in i18n::LICENSE_WITH_TERM.into_iter().chain(i18n::LICENSE_ALWAYS) {
+                need.push(format!("<li>{}</li>", text(key)));
+            }
+            for piece in need {
+                if !faq.contains(&piece) {
+                    wrong.push(format!("{lang:?}: в вопросах нет {piece}"));
+                }
+            }
+            let plan = &html[html.find("<section class=\"card plan\"").expect("карточка тарифа")..at];
+            if !plan.contains(&format!("{} {}", trial(lang), text(Key::LandingAfterTrial))) {
+                wrong.push(format!("{lang:?}: под тарифом не сказано, что после пробного периода"));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
     /// Страница «Купить».
@@ -892,7 +1138,7 @@ mod tests {
         let mut wrong = Vec::new();
         for doc in Legal::ALL {
             for lang in Lang::ALL {
-                let html = legal_sample(doc, lang);
+                let html = legal_sample(doc, lang, None);
                 let name = format!("{}.{}.md", doc.name(), lang.code());
                 let (_, source) = LEGAL.iter().find(|(file, _)| *file == name).expect("текст есть");
                 let title = source.lines().next().and_then(|line| line.strip_prefix("# ")).expect("название");
@@ -1204,6 +1450,9 @@ mod tests {
         pages.extend(Lang::ALL.into_iter().map(|lang| page_file(buy_path(lang))));
         for doc in Legal::ALL {
             pages.extend(Lang::ALL.into_iter().map(|lang| page_file(doc.path(lang))));
+            for &day in doc.earlier() {
+                pages.extend(Lang::ALL.into_iter().map(|lang| page_file(&doc.earlier_path(lang, day))));
+            }
         }
         for name in pages.iter().map(String::as_str).chain(["robots.txt", "sitemap.xml"]) {
             assert!(written.iter().any(|n| n == name), "нет {name}: {written:?}");
@@ -1266,6 +1515,16 @@ mod tests {
         let error = build(&missing).expect_err("нет перевода");
         assert!(error.contains("privacy.ru.md"), "{error}");
 
+        // Прежняя редакция (задача 93) — тоже: без её файла адрес, который
+        // обещают условия (п. 11), остался бы пустым.
+        let earlier = Temp::new("earlier");
+        sources(&earlier);
+        fs::create_dir_all(earlier.0.join("stage")).expect("папка сборки");
+        fs::remove_file(earlier.0.join("legal/terms.2026-11-09.hy.md")).expect("файл удаляется");
+        let error = build(&earlier).expect_err("нет прежней редакции");
+        assert!(error.contains("terms.2026-11-09.hy.md"), "{error}");
+        assert!(names(&earlier.0.join("stage")).is_empty(), "в сайт что-то легло");
+
         // Новая редакция условий со своими словами согласия, а страница
         // «Купить» просит прежние (задача 35): сборка останавливается,
         // и в сайт ничего не ложится.
@@ -1273,8 +1532,8 @@ mod tests {
         sources(&edition);
         fs::create_dir_all(edition.0.join("stage")).expect("папка сборки");
         let (_, terms) = LEGAL.iter().find(|(name, _)| *name == "terms.en.md").expect("текст есть");
-        assert!(terms.contains("November 9, 2026"), "в условиях — та редакция, что ждёт тест");
-        edition.put("legal/terms.en.md", &terms.replace("November 9, 2026", "December 1, 2026"));
+        assert!(terms.contains("November 13, 2026"), "в условиях — та редакция, что ждёт тест");
+        edition.put("legal/terms.en.md", &terms.replace("November 13, 2026", "December 1, 2026"));
         let error = build(&edition).expect_err("слов согласия нет в условиях");
         assert!(error.contains("terms.en.md") && error.contains("Key::BuyAccept"), "{error}");
         assert!(names(&edition.0.join("stage")).is_empty(), "в сайт что-то легло");

@@ -20,6 +20,19 @@
 //! (`landing::escape`, Правило 13).
 
 use kvartik_core::i18n::Lang;
+use kvartik_core::model::date::Date;
+use kvartik_core::release::Legal;
+
+/// Файл текста `doc` на языке `lang` в `docs/legal/`: действующей редакции —
+/// `terms.ru.md`, прежней редакции дня `day` — `terms.2026-11-09.ru.md`
+/// (`Legal::earlier`, задача 93). Прежний файл — ровно опубликованный текст:
+/// новая редакция — новый файл, а не правка его.
+pub fn file_name(doc: Legal, lang: Lang, day: Option<Date>) -> String {
+    match day {
+        None => format!("{}.{}.md", doc.name(), lang.code()),
+        Some(day) => format!("{}.{}.{}.md", doc.name(), day.iso(), lang.code()),
+    }
+}
 
 /// Знаки разметки Markdown, которой разбор не знает. В утверждённых текстах
 /// их нет, а появись — страница показала бы их как есть.
@@ -233,63 +246,103 @@ mod tests {
     use kvartik_core::release::{EMAIL, Legal, SELLER_TIN};
 
     /// Утверждённые тексты — настоящие файлы: проверка ловит правку, после
-    /// которой сборка их не разобрала бы.
-    fn real(doc: Legal, lang: Lang) -> (String, String) {
-        let name = format!("{}.{}.md", doc.name(), lang.code());
+    /// которой сборка их не разобрала бы. `day` — прежняя редакция этого дня.
+    fn real(doc: Legal, lang: Lang, day: Option<Date>) -> (String, String) {
+        let name = file_name(doc, lang, day);
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/legal").join(&name);
         let text = std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
         (name, text)
     }
 
-    /// Все шесть текстов разбираются, переводы держатся друг друга,
-    /// квадратных скобок и заметок «Для проверки» на странице нет, а почта
-    /// продавца — та, на которую ведут подвал и «О программе».
+    /// День редакции, как его пишет строка редакции текста: «09.11.2026»
+    /// по-русски и по-армянски, «November 9, 2026» по-английски — от месяца
+    /// здесь только день и год.
+    fn edition_day(lang: Lang, day: Date) -> String {
+        match lang {
+            Lang::Am | Lang::Ru => format!("{:02}.{:02}.{}", day.day(), day.month(), day.year()),
+            Lang::En => format!(" {}, {}", day.day(), day.year()),
+        }
+    }
+
+    /// Все тексты — действующие и прежние редакции (задача 93) — разбираются,
+    /// переводы одной редакции держатся друг друга, квадратных скобок
+    /// и заметок «Для проверки» на странице нет, а почта продавца — та, на
+    /// которую ведут подвал и «О программе». Строка редакции прежней называет
+    /// её день, а действующей — ни одного дня прежних: под днём прежней лежит
+    /// не она, и новая редакция — действительно новая.
     #[test]
     fn approved_texts_parse_and_match_their_translations() {
         let mut wrong = Vec::new();
         for doc in Legal::ALL {
-            let mut parsed = Vec::new();
-            for lang in Lang::ALL {
-                let (name, text) = real(doc, lang);
-                match parse(&name, &text) {
-                    Ok(parsed_doc) => parsed.push((lang, parsed_doc)),
-                    Err(error) => wrong.push(error),
-                }
-            }
-            let pairs: Vec<(Lang, &Doc)> = parsed.iter().map(|(lang, doc)| (*lang, doc)).collect();
-            if let Err(error) = same_shape(doc.name(), &pairs) {
-                wrong.push(error);
-            }
-            for (lang, parsed_doc) in &parsed {
-                let page = html(parsed_doc, str::to_owned);
-                for bad in ["[", "]", "Для проверки", "**", "> "] {
-                    if page.contains(bad) {
-                        wrong.push(format!("{} {}: на странице «{bad}»", doc.name(), lang.code()));
+            for day in std::iter::once(None).chain(doc.earlier().iter().copied().map(Some)) {
+                let mut parsed = Vec::new();
+                for lang in Lang::ALL {
+                    let (name, text) = real(doc, lang, day);
+                    match parse(&name, &text) {
+                        Ok(parsed_doc) => parsed.push((lang, parsed_doc)),
+                        Err(error) => wrong.push(error),
                     }
                 }
-                if !page.contains(EMAIL) {
-                    wrong.push(format!("{} {}: нет почты {EMAIL}", doc.name(), lang.code()));
+                let pairs: Vec<(Lang, &Doc)> = parsed.iter().map(|(lang, doc)| (*lang, doc)).collect();
+                if let Err(error) = same_shape(&file_name(doc, Lang::Ru, day), &pairs) {
+                    wrong.push(error);
                 }
-                // Условия называют продавца тем ՀՎՀՀ, что на странице «Купить»
-                // рядом со счётом, и те слова согласия, которые она просит
-                // написать (задача 35).
-                if doc == Legal::Terms {
-                    if !contains(parsed_doc, SELLER_TIN) {
-                        wrong.push(format!("terms {}: нет ՀՎՀՀ продавца {SELLER_TIN}", lang.code()));
+                for (lang, parsed_doc) in &parsed {
+                    let name = file_name(doc, *lang, day);
+                    let page = html(parsed_doc, str::to_owned);
+                    for bad in ["[", "]", "Для проверки", "**", "> "] {
+                        if page.contains(bad) {
+                            wrong.push(format!("{name}: на странице «{bad}»"));
+                        }
                     }
-                    if !contains(parsed_doc, t(*lang, Key::BuyAccept)) {
-                        wrong.push(format!("terms {}: нет слов согласия страницы «Купить»", lang.code()));
+                    if !page.contains(EMAIL) {
+                        wrong.push(format!("{name}: нет почты {EMAIL}"));
                     }
-                }
-                if !matches!(parsed_doc.blocks.first(), Some(Block::Edition(text)) if text.contains("2026")) {
-                    wrong.push(format!("{} {}: первым идёт не строка редакции", doc.name(), lang.code()));
-                }
-                if page.contains(" —") {
-                    wrong.push(format!("{} {}: тире после обычного пробела", doc.name(), lang.code()));
+                    // Условия называют продавца тем ՀՎՀՀ, что на странице
+                    // «Купить» рядом со счётом, а действующие — и те слова
+                    // согласия, которые она просит написать (задача 35).
+                    if doc == Legal::Terms && !contains(parsed_doc, SELLER_TIN) {
+                        wrong.push(format!("{name}: нет ՀՎՀՀ продавца {SELLER_TIN}"));
+                    }
+                    if doc == Legal::Terms && day.is_none() && !contains(parsed_doc, t(*lang, Key::BuyAccept)) {
+                        wrong.push(format!("{name}: нет слов согласия страницы «Купить»"));
+                    }
+                    let edition = match parsed_doc.blocks.first() {
+                        Some(Block::Edition(text)) if text.contains("2026") => text.as_str(),
+                        _ => {
+                            wrong.push(format!("{name}: первым идёт не строка редакции"));
+                            ""
+                        }
+                    };
+                    match day {
+                        Some(day) if !edition.contains(&edition_day(*lang, day)) => {
+                            wrong.push(format!("{name}: строка редакции «{edition}» не о {}", day.iso()));
+                        }
+                        Some(_) => {}
+                        None => {
+                            for &earlier in doc.earlier() {
+                                if edition.contains(&edition_day(*lang, earlier)) {
+                                    wrong.push(format!("{name}: действующая — от дня прежней {}", earlier.iso()));
+                                }
+                            }
+                        }
+                    }
+                    if page.contains(" —") {
+                        wrong.push(format!("{name}: тире после обычного пробела"));
+                    }
                 }
             }
         }
         assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// Имя файла — действующей редакции и прежней.
+    #[test]
+    fn earlier_editions_have_their_own_files() {
+        let day = Date::new(2026, 11, 9).expect("день");
+        assert_eq!(file_name(Legal::Terms, Lang::Am, None), "terms.hy.md");
+        assert_eq!(file_name(Legal::Terms, Lang::Ru, Some(day)), "terms.2026-11-09.ru.md");
+        assert_eq!(file_name(Legal::Privacy, Lang::En, Some(day)), "privacy.2026-11-09.en.md");
     }
 
     /// Блоки, список и редакция; цитатный блок в страницу не идёт, а строки

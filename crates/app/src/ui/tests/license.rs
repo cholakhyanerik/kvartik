@@ -23,7 +23,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_test::wasm_bindgen_test;
 use web_sys::{HtmlElement, HtmlInputElement};
 
-use super::documents::{acme, commit, invoice_data, profile};
+use super::documents::{acme, commit, invoice_data, profile, wait_until};
 use super::{button, launch_at, mount_at, shown_screens, sleep, type_into, wait_for};
 use crate::platform::{clock, hash, set_hash};
 use crate::store::device::Device;
@@ -61,13 +61,33 @@ fn trial_from(start: Date) {
 
 /// Забыть пробный период устройства — следующее окно начнёт его сегодня, —
 /// и что устройство помнит о ключе базы: каким его нашла часть и о конце
-/// какого сказано окном (задача 92).
+/// какого сказано окном (задача 92), — и что сказано о конце пробного
+/// периода (задача 93).
 fn forget_trial() {
     if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
-        for name in ["kvartik.trial", "kvartik.license", "kvartik.license_told"] {
+        for name in ["kvartik.trial", "kvartik.license", "kvartik.license_told", "kvartik.trial_told"] {
             let _ = storage.remove_item(name);
         }
     }
+}
+
+/// Забыть, каким срок базы в прошлый раз нашла часть окна: метка срока тогда
+/// встанет, только когда часть проверит подписи снова, — и решит, вставать
+/// ли окну о конце срока. Проверка «окно не встало» без этого могла успеть
+/// раньше части и пропустить окно (ревью задачи 93).
+fn forget_found_term() {
+    if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
+        let _ = storage.remove_item("kvartik.license");
+    }
+}
+
+/// Текст экрана лицензии.
+fn license_text(host: &HtmlElement) -> String {
+    host.query_selector("#license")
+        .ok()
+        .flatten()
+        .and_then(|node| node.text_content())
+        .unwrap_or_default()
 }
 
 /// Число дней — как его пишет окно: «365 дней», «1 день».
@@ -180,11 +200,13 @@ async fn open_draft(host: &HtmlElement) -> bool {
     false
 }
 
-/// Пробный период кончился: на главном — карточка со сроком; в форме
-/// черновика вместо «Выпустить» — слова о ключе, а «Сохранить черновик»
-/// осталось; числа прошлого квартала, кончившегося после срока, заперты,
-/// и экран называет, по какой день кварталы открыты; экран лицензии
-/// говорит, что заперто, а что работает.
+/// Пробный период кончился: на главном — карточка со сроком и «Купить или
+/// ввести ключ»; в форме черновика вместо «Выпустить» — слова о ключе,
+/// а «Сохранить черновик» осталось; числа прошлого квартала, кончившегося
+/// после срока, заперты, и экран называет, по какой день кварталы открыты;
+/// экран лицензии говорит, что заперто — «сейчас закрыто» у списка того, что
+/// открывает срок, — а что работает, и с каким днём открыты числа кварталов
+/// (задача 93), и спрашивает купившего, где его ключ.
 #[wasm_bindgen_test]
 async fn an_ended_trial_locks_issuing_and_numbers() {
     base_with_draft().await;
@@ -202,6 +224,15 @@ async fn an_ended_trial_locks_issuing_and_numbers() {
     let mut wrong = Vec::new();
     if !wait_for(&host, &ended).await {
         wrong.push("на главном нет карточки о конце пробного периода".to_owned());
+    }
+    let link = host
+        .query_selector(&format!("#home .notice a.button[href=\"{}\"]", Screen::License.href()))
+        .ok()
+        .flatten()
+        .and_then(|link| link.text_content())
+        .unwrap_or_default();
+    if link.trim() != t(lang, Key::LicenseBuyOrEnter) {
+        wrong.push(format!("у карточки на главном кнопка «{}»", link.trim()));
     }
     if !open_draft(&host).await {
         wrong.push("в списке нет черновика".to_owned());
@@ -235,8 +266,21 @@ async fn an_ended_trial_locks_issuing_and_numbers() {
     }
 
     set_hash("#/license");
-    if !wait_for(&host, t(lang, Key::LicenseLocked)).await {
+    if !wait_for(&host, t(lang, Key::LicenseClosedNow)).await {
         wrong.push("экран лицензии не сказал, что заперто".to_owned());
+    }
+    let screen = license_text(&host);
+    let until = fill(t(lang, Key::LicenseAlwaysReportUntil), &[&i18n::date(lang, last)]);
+    for (said, what) in [
+        (until.as_str(), "с каким днём открыты числа кварталов"),
+        (t(lang, Key::LicenseLockedShort), "что заперто, одной строкой"),
+        (t(lang, Key::LicenseHaveKey), "«Уже купили ключ?»"),
+        (t(lang, Key::LicenseDevicesData), "что данные сами не переходят"),
+        (t(lang, Key::LicenseAlwaysUpdates), "что обновления — и без ключа"),
+    ] {
+        if !screen.contains(said) {
+            wrong.push(format!("экран лицензии не сказал {what}"));
+        }
     }
 
     drop(mounted);
@@ -287,7 +331,7 @@ async fn a_restored_key_is_read_after_the_form_that_read_keys_first() {
     sleep(300).await;
 
     set_hash("#/license");
-    if !wait_for(&host, t(lang, Key::LicenseLocked)).await {
+    if !wait_for(&host, t(lang, Key::LicenseClosedNow)).await {
         wrong.push("до восстановления экран лицензии не сказал, что выпуск заперт".to_owned());
     }
 
@@ -350,8 +394,11 @@ async fn a_key_opens_issuing_for_the_profile_tin() {
 
     let (host, mounted) = mount_at("#/license");
     let mut wrong = Vec::new();
-    if !wait_for(&host, t(lang, Key::LicenseLocked)).await {
+    if !wait_for(&host, t(lang, Key::LicenseClosedNow)).await {
         wrong.push("экран лицензии не открылся запертым".to_owned());
+    }
+    if !license_text(&host).contains(t(lang, Key::LicenseHaveKey)) {
+        wrong.push("без ключа нет «Уже купили ключ?»".to_owned());
     }
     let enter = |text: &str| {
         let area = host.query_selector("#license textarea").ok().flatten();
@@ -379,6 +426,70 @@ async fn a_key_opens_issuing_for_the_profile_tin() {
     if !wait_for(&host, &term).await {
         wrong.push("срок ключа не показан".to_owned());
     }
+    // Ключ идёт: ни «Уже купили ключ?», ни «сейчас закрыто».
+    let open = wait_until(|| {
+        let screen = license_text(&host);
+        !screen.contains(t(lang, Key::LicenseHaveKey)) && !screen.contains(t(lang, Key::LicenseClosedNow))
+    })
+    .await;
+    if !open {
+        wrong.push("с ключом экран всё ещё говорит о запертом".to_owned());
+    }
+    // Строка введённого ключа на ՀՎՀՀ профиля: «до … включительно» есть и в
+    // сроке над ключами, и искать надо в ней самой.
+    let entry = || {
+        let entries = host.query_selector_all("#license li.entry").ok()?;
+        (0..entries.length())
+            .filter_map(|at| entries.item(at))
+            .map(JsCast::unchecked_into::<HtmlElement>)
+            .find(|entry| entry.text_content().is_some_and(|text| text.contains(TIN)))
+    };
+    // День выдачи и последний день — порознь, а не промежутком: ключ,
+    // оплаченный заранее, считается со дня после прежнего (условия, п. 4.1).
+    let facts = entry().and_then(|entry| entry.text_content()).unwrap_or_default();
+    for fact in [
+        fill(t(lang, Key::LicenseIssuedOn), &[&i18n::date(lang, today)]),
+        fill(t(lang, Key::LicenseLastDay), &[&i18n::date(lang, until)]),
+    ] {
+        if !facts.contains(&fact) {
+            wrong.push(format!("у введённого ключа нет «{fact}»: «{facts}»"));
+        }
+    }
+
+    // «Скопировать ключ» (задача 93) — записью, как его выдал автор, а не
+    // как его вставили; не легло в буфер — словами, и ключ встаёт текстом.
+    let copy = || {
+        entry()?
+            .query_selector("button")
+            .ok()
+            .flatten()
+            .map(JsCast::unchecked_into::<HtmlElement>)
+    };
+    super::report::stub_clipboard(false);
+    match copy() {
+        Some(button) if button.text_content().is_some_and(|text| text.trim() == t(lang, Key::LicenseCopy)) => {
+            button.click();
+            if !wait_for(&host, t(lang, Key::ReportCopied)).await || super::report::copied().as_deref() != Some(good.as_str()) {
+                wrong.push(format!("скопировано {:?}, а не ключ", super::report::copied()));
+            }
+        }
+        other => wrong.push(format!("у введённого ключа нет «Скопировать ключ»: {other:?}")),
+    }
+    super::report::stub_clipboard(true);
+    if let Some(button) = copy() {
+        button.click();
+        let shown = || {
+            host.query_selector("#license .key-text")
+                .ok()
+                .flatten()
+                .and_then(|node| node.text_content())
+        };
+        if !wait_for(&host, t(lang, Key::LicenseCopyFailed)).await || shown().as_deref() != Some(good.as_str()) {
+            wrong.push(format!("не скопировалось, а ключ на экране — {:?}", shown()));
+        }
+    }
+    super::report::unstub_clipboard();
+
     if !enter(&good) || !wait_for(&host, t(lang, Key::LicenseKnown)).await {
         wrong.push("повтор ключа не сказан".to_owned());
     }
@@ -496,8 +607,11 @@ async fn the_term_is_always_on_view() {
     drop(mounted);
     host.remove();
 
-    // Три дня — громче и под заголовком каждого экрана.
-    trial_from(today.add_days(-11).expect("дата"));
+    // Три дня — громче и под заголовком каждого экрана. О конце пробного
+    // периода уже сказано: окно поверх программы — свой тест ниже.
+    let start = today.add_days(-11).expect("дата");
+    trial_from(start);
+    Device::new().set_trial_told(license::trial_last(start).expect("дата"));
     let three = fill(t(lang, Key::LicenseChipTrial), &[&days(lang, 3)]);
     let (host, mounted) = mount_at("#/");
     match wait_chip(&host, "nav", &three).await {
@@ -647,6 +761,8 @@ async fn a_key_ending_within_a_week_asks_once() {
     drop(mounted);
     host.remove();
 
+    // Метка — только от части, проверившей подпись (ниже, `forget_found_term`).
+    forget_found_term();
     let (host, mounted) = mount_at("#/");
     let five = fill(t(lang, Key::LicenseChipKey), &[&days(lang, 5)]);
     if let Err(seen) = wait_chip(&host, "nav", &five).await {
@@ -678,6 +794,114 @@ async fn a_key_ending_within_a_week_asks_once() {
     if dialog() {
         wrong.push("окно осталось на странице после окна программы".to_owned());
     }
+    set_hash("");
+    forget_trial();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// За неделю до конца пробного периода — то же окно поверх программы
+/// (задача 93): сколько дней и до какого дня, что запрёт конец срока и что
+/// ключ приходит в течение рабочего дня после оплаты; программа под ним
+/// неактивна. «Понятно» закрывает его, и больше оно не встаёт — запись одна
+/// на устройство, — а «Купить ключ» закрывает и ведёт на экран лицензии.
+/// С ключом дольше пробного периода окна о пробном нет.
+#[wasm_bindgen_test]
+async fn a_trial_ending_within_a_week_asks_once() {
+    base_with_draft().await;
+    forget_trial();
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let today = clock::today().expect("часы с датой");
+    // Последний день — через четыре дня: осталось пять, считая сегодня.
+    let start = today.add_days(-9).expect("дата");
+    trial_from(start);
+    let last = license::trial_last(start).expect("дата");
+    let words = fill(t(lang, Key::TrialSoonText), &[&days(lang, 5), &i18n::date(lang, last)]);
+    let body = super::document().body().expect("есть <body>");
+    let dialog = || body.query_selector("[role=dialog]").ok().flatten().is_some();
+    let inert = |host: &HtmlElement| {
+        host.query_selector(".app")
+            .ok()
+            .flatten()
+            .is_some_and(|app| app.has_attribute("inert"))
+    };
+    let mut wrong = Vec::new();
+
+    let (host, mounted) = mount_at("#/");
+    if !wait_for(&body, &words).await {
+        wrong.push("за пять дней до конца пробного периода окна нет".to_owned());
+    }
+    let card = body.text_content().unwrap_or_default();
+    if !card.contains(t(lang, Key::TrialSoonTitle)) || card.contains(t(lang, Key::LicenseSoonTitle)) {
+        wrong.push("у окна не заголовок пробного периода".to_owned());
+    }
+    if !inert(&host) {
+        wrong.push("под окном программа активна".to_owned());
+    }
+    match button(&body, &[t(lang, Key::LicenseSoonOk)]) {
+        Some(ok) => ok.click(),
+        None => wrong.push("нет «Понятно»".to_owned()),
+    }
+    if !wait_until(|| !dialog() && !inert(&host)).await {
+        wrong.push("«Понятно» не закрыло окно".to_owned());
+    }
+    if Device::new().trial_told() != Some(last) {
+        wrong.push("устройство не запомнило, что о пробном периоде сказано".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+
+    // Устройство забыло, каким нашла срок часть, и метка встанет, только когда
+    // часть проверит его снова, — а с ней и решение об окне (ревью задачи 93:
+    // по записи метка встала бы раньше части, и окно, вставшее позже, тест
+    // не застал бы).
+    forget_found_term();
+    let (host, mounted) = mount_at("#/");
+    let five = fill(t(lang, Key::LicenseChipTrial), &[&days(lang, 5)]);
+    if let Err(seen) = wait_chip(&host, "nav", &five).await {
+        wrong.push(format!("метка «{seen}», а не «{five}»"));
+    }
+    sleep(500).await;
+    if dialog() {
+        wrong.push("окно встало второй раз".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+
+    if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
+        let _ = storage.remove_item("kvartik.trial_told");
+    }
+    let (host, mounted) = mount_at("#/");
+    if !wait_for(&body, &words).await {
+        wrong.push("окна нет и после того, как устройство забыло".to_owned());
+    }
+    match button(&body, &[t(lang, Key::LicenseBuy)]) {
+        Some(buy) => buy.click(),
+        None => wrong.push("нет «Купить ключ»".to_owned()),
+    }
+    if !shows(&host, "license").await || !wait_until(|| !dialog() && !inert(&host)).await {
+        wrong.push(format!("«Купить ключ»: видны {:?}, окно — {}", shown_screens(&host), dialog()));
+    }
+    drop(mounted);
+    host.remove();
+
+    // Ключ на год дольше пробного периода: окна о пробном нет, хоть
+    // устройство о нём и не помнит.
+    if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
+        let _ = storage.remove_item("kvartik.trial_told");
+    }
+    store_key(today.add_days(364).expect("дата")).await;
+    let (host, mounted) = mount_at("#/");
+    let year = fill(t(lang, Key::LicenseChipKey), &[&days(lang, 365)]);
+    if let Err(seen) = wait_chip(&host, "nav", &year).await {
+        wrong.push(format!("с ключом метка «{seen}», а не «{year}»"));
+    }
+    sleep(500).await;
+    if dialog() {
+        wrong.push("с ключом на год — окно о конце пробного периода".to_owned());
+    }
+    drop(mounted);
+    host.remove();
     set_hash("");
     forget_trial();
     assert!(wrong.is_empty(), "{wrong:#?}");

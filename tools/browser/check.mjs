@@ -146,7 +146,7 @@ const SCREENS = [
   { name: "Сроки", hash: "#/deadlines", shown: TEXT_IN("#deadlines", s("DeadlinesShiftRule")) },
   { name: "Числа для расчёта", hash: "#/report", shown: TEXT_IN("#report", s("ReportAbout")) },
   { name: "Лицензия", hash: "#/license", shown: `return document.querySelector('#license a[href="${buyPath(opt.lang)}"]')
-      && document.querySelector("#license")?.innerText.includes(${JSON.stringify(s("LicenseAbout"))}) ? true : null;` },
+      && document.querySelector("#license")?.innerText.includes(${JSON.stringify(s("LicenseGives"))}) ? true : null;` },
   { name: "О программе", hash: "#/about", shown: TEXT_IN("#about", s("AboutRules")) },
   { name: "Настройки", hash: "#/settings", shown: TEXT_IN("#settings", s("SettingsCursorHint")) },
 ];
@@ -454,6 +454,17 @@ async function landing(browser) {
         && getComputedStyle(document.querySelector("h1")).fontFamily.includes("Kvartik Serif") ? true : null;`));
       checks.check(`«Купить» ${at}: без прокрутки вбок на 360`, await page.eval(`const d = document.documentElement;
         return d.clientWidth === 360 && d.scrollWidth <= d.clientWidth ? true : null;`));
+      // «Вопросы» (задача 93) — пять, раскрываются без скрипта (`<details>`),
+      // и раскрытые все разом не растягивают страницу вбок.
+      checks.check(`«Купить» ${at}: пять вопросов раскрываются, и без прокрутки вбок`, await page.eval(`
+        const all = [...document.querySelectorAll("article.buy .faq details")];
+        if (all.length !== 5 || all.some((d) => d.open)) return null;
+        all[0].querySelector("summary").click();
+        if (!all[0].open) return null;
+        for (const d of all) d.open = true;
+        const e = document.documentElement;
+        return e.scrollWidth <= e.clientWidth
+          && document.querySelector("article.buy .faq")?.innerText.includes(${JSON.stringify(t("LicenseDevicesData", lang))}) ? true : null;`));
     }
     // Юридические тексты (задача 32): у каждого языка — свои условия
     // и политика, страницами из утверждённых файлов docs/legal/*.md, с тем же
@@ -473,6 +484,29 @@ async function landing(browser) {
         checks.check(`текст ${at}: без прокрутки вбок на 360`, await page.eval(`const d = document.documentElement;
           return d.clientWidth === 360 && d.scrollWidth <= d.clientWidth ? true : null;`));
       }
+    }
+    // Прежние редакции (задача 93; условия, п. 11) — по своему адресу на
+    // каждом языке, текстом из своего файла, со словами, что она прежняя,
+    // и ссылкой на действующую, а поисковикам — `noindex`; действующая ведёт
+    // на каждую. Какие есть — по файлам docs/legal: у условий одна точно есть.
+    const editions = fs.readdirSync(path.join(REPO, "docs/legal"))
+      .map((name) => name.match(/^(terms|privacy)\.(\d{4}-\d{2}-\d{2})\.(hy|ru|en)\.md$/)).filter(Boolean);
+    checks.check("прежние редакции: файлы трёх языков, у условий — есть",
+      editions.some((m) => m[1] === "terms") && editions.length % 3 === 0);
+    for (const [name, doc, day, lang] of editions) {
+      const home = lang === "hy" ? "/" : `/${lang}/`;
+      const at = `${home}${doc}/${day}/`;
+      const title = fs.readFileSync(path.join(REPO, "docs/legal", name), "utf8").split(/\r?\n/)[0].replace(/^# /, "");
+      await page.go(`${ORIGIN}${at}`);
+      checks.check(`прежняя редакция ${at}: свой язык, название, «прежняя» и ссылка на действующую`, await page.waitFor(`return document
+        .documentElement.lang === ${JSON.stringify(lang)} && document.querySelector("article.legal h1")?.textContent === ${JSON.stringify(title)}
+        && document.querySelector('article.legal .edition-note a[href="${home}${doc}/"]')
+        && document.querySelector('meta[name="robots"][content="noindex"]') ? true : null;`));
+      checks.check(`прежняя редакция ${at}: без прокрутки вбок на 360`, await page.eval(`const d = document.documentElement;
+        return d.clientWidth === 360 && d.scrollWidth <= d.clientWidth ? true : null;`));
+      await page.go(`${ORIGIN}${home}${doc}/`);
+      checks.check(`текст ${home}${doc}/: ведёт на прежнюю редакцию ${day}`, await page.waitFor(`return document
+        .querySelector('article.legal .editions a[href="${at}"]') && !document.querySelector('meta[name="robots"]') ? true : null;`));
     }
     await page.go(`${ORIGIN}/ru/`);
     await page.waitFor(`return document.querySelector('footer a[href="/ru/terms/"]') ? true : null;`);
