@@ -179,15 +179,61 @@ fn income_names_its_tax_row() {
     assert!(wrong.is_empty(), "строка налога у дохода: {wrong:#?}");
 }
 
-/// Строка налога — у дохода: у расхода команда её не пропускает, а не только
-/// чтение.
+/// С версии формата 19 расход называет строку своего дохода (задача 95):
+/// аренду или продажу имущества — записывается и читается, — а другую строку,
+/// строку вместе с кодом или с «прямой ли» команда не пропускает, и чтение
+/// тоже: такой записи форма не пишет.
 #[test]
-fn an_expense_has_no_income_row() {
-    let data = OperationData {
+fn an_expense_names_the_row_of_its_income() {
+    let mut wrong = Vec::new();
+    let own = EXPENSE.replacen(r#""cost":"overhead","activity":"62.01.0","#, r#""cost":null,"activity":null,"#, 1);
+    if own == EXPENSE {
+        wrong.push("образец без кода и ответа не получился".to_owned());
+    }
+    for (kind, name) in [(IncomeKind::Rent, "rent"), (IncomeKind::Assets, "assets")] {
+        let sample = own.replacen(r#""income_kind":null"#, &format!(r#""income_kind":"{name}""#), 1);
+        match serde_json::from_str::<Operation>(&sample) {
+            Ok(read) if read.data().income_kind == Some(kind) => {
+                if serde_json::to_string(&read).ok().as_deref() != Some(sample.as_str()) {
+                    wrong.push(format!("{name}: записан не тем, чем прочитан"));
+                }
+            }
+            other => wrong.push(format!("{name}: {other:?}")),
+        }
+        let data = OperationData {
+            income_kind: Some(kind),
+            ..expense_data(day(2026, 10, 3), amd(12_000))
+        };
+        if Operation::create(data, at(1_000)).is_err() {
+            wrong.push(format!("{name}: команда не пропустила строку дохода"));
+        }
+    }
+    let rent = own.replacen(r#""income_kind":null"#, r#""income_kind":"rent""#, 1);
+    for (name, text) in [
+        ("строка торговли", own.replacen(r#""income_kind":null"#, r#""income_kind":"trade""#, 1)),
+        ("строка с кодом", rent.replacen(r#""activity":null"#, r#""activity":"62.01.0""#, 1)),
+        ("строка с ответом", rent.replacen(r#""cost":null"#, r#""cost":"direct""#, 1)),
+    ] {
+        if text == own || text == rent {
+            wrong.push(format!("{name}: подмена не сработала"));
+        } else if serde_json::from_str::<Operation>(&text).is_ok() {
+            wrong.push(format!("{name}: прочитано"));
+        }
+    }
+    let base = || OperationData {
         income_kind: Some(IncomeKind::Rent),
         ..expense_data(day(2026, 10, 3), amd(12_000))
     };
-    assert_eq!(Operation::create(data, at(1_000)), Err(OperationError::WrongFlow));
+    for (name, data) in [
+        ("строка торговли", OperationData { income_kind: Some(IncomeKind::Trade), ..base() }),
+        ("строка с кодом", OperationData { activity: ActivityCode::parse("62.01.0").ok(), ..base() }),
+        ("строка с ответом", OperationData { cost: Some(Cost::Overhead), ..base() }),
+    ] {
+        if Operation::create(data, at(1_000)) != Err(OperationError::WrongFlow) {
+            wrong.push(format!("{name}: команда пропустила"));
+        }
+    }
+    assert!(wrong.is_empty(), "строка дохода у расхода: {wrong:#?}");
 }
 
 /// С версии формата 18 расход говорит, прямой ли он (задача 79): оба ответа

@@ -27,8 +27,14 @@ wasm, а под MIT это копия, к которой прилагается 
   (компонент `rust-docs`, `share/doc/rust/`): короткая и длинная версии
   и список «In-tree files», кроме файлов других целей ([`OTHER_TARGETS`]).
   Тексты лицензий из этого списка — из `share/doc/rust/licenses/`, а из
-  «A OR MIT» — MIT, как у крейтов. Другая лицензия в списке — остановка:
-  её смотрят глазами.
+  «A OR MIT» — MIT, как у крейтов; у «A WITH B» — тексты обеих. Другая
+  лицензия в списке — остановка: её смотрят глазами. Запись без пути — тоже
+  в файле, с пометкой, что путь не указан: у Rust 1.100.0 так стоит
+  «Apache-2.0 WITH LLVM-exception AND (Apache-2.0 OR MIT)» с правами
+  Иллинойсского университета, а в `REUSE.toml` проекта Rust на теге 1.100.0
+  эта лицензия с этими правами — только у двух файлов `compiler/`, не
+  `library/` (сверено 2026-11-13). Похоже на след генератора, но лишнее
+  уведомление условий не нарушает.
 - **Тексты крейтов** — из их пакетов на crates.io: сумма пакета сверяется
   с `checksum` того же `library/Cargo.lock`, иначе скрипт останавливается.
   Из пакета берутся файлы лицензии MIT — у всех этих крейтов она среди
@@ -57,8 +63,12 @@ LICENSE_NAME = re.compile(r"^(licen[cs]e|copying|copyright|notice|unlicense)", r
 # мьютекс Fuchsia — только `target_os = "fuchsia"` (library/std/src/sys/sync/
 # mutex/mod.rs, Rust 1.99.1).
 OTHER_TARGETS = {"library/std/src/sys/sync/mutex/fuchsia.rs"}
-# Лицензии, тексты которых могут понадобиться файлам списка после выбора MIT.
-KNOWN = {"MIT", "Unicode-3.0"}
+# Лицензии и исключения из них, тексты которых могут понадобиться файлам списка
+# после выбора MIT: Apache-2.0 и LLVM-exception — у записи без пути с Rust 1.100.0
+# (шапка).
+KNOWN = {"MIT", "Unicode-3.0", "Apache-2.0", "LLVM-exception"}
+# Как в файле назван путь записи, у которой его в `COPYRIGHT-library.html` нет.
+NO_PATH = "(no path given in COPYRIGHT-library.html)"
 
 
 def run(*args: str) -> str:
@@ -151,44 +161,55 @@ def chosen(expression: str) -> list[str]:
     return result
 
 
+def texts_of(license: str) -> list[str]:
+    """Тексты, которые нужны лицензии после выбора: у «A WITH B» — и A, и B."""
+    return [part.strip() for part in re.split(r"\s+WITH\s+", license)]
+
+
 def in_tree(page: str) -> tuple[list[str], set[str]]:
     """Список «In-tree files»: путь, лицензия, авторские права — и лицензии,
     чьи тексты нужны. Исключение внутри папки — путём от неё: оно вложено
-    в её блок."""
+    в её блок. Запись без `<code>` пути — своя запись с [`NO_PATH`], а не
+    продолжение прежней: иначе её лицензия легла бы поверх чужой (Rust
+    1.100.0, шапка)."""
     start = page.index('<h2 id="in-tree-files">')
     end = page.index('<h2 id="out-of-tree-dependencies">')
     section = page[start:end]
     entries = []
     depth = 0
     parents: list[str] = []
-    for token in re.finditer(r"<div\b|</div>|<b>File/Directory:</b>\s*<code>([^<]*)</code>|"
+    for token in re.finditer(r"<div\b|</div>|(?P<file><b>File/Directory:</b>\s*(?:<code>([^<]*)</code>)?)|"
                              r"<b>License:</b>\s*([^<]*)</p>|<b>Copyright:</b>\s*([^<]*)</p>", section):
         if token.group(0).startswith("<div"):
             depth += 1
         elif token.group(0) == "</div>":
             depth -= 1
             del parents[depth:]
-        elif token.group(1) is not None:
-            path = html.unescape(token.group(1))
-            parent = parents[depth - 2] if depth > 1 and len(parents) >= depth - 1 else "."
-            if parent != ".":
-                path = f"{parent}/{path}"
+        elif token.group("file") is not None:
+            if token.group(2) is None:
+                path = NO_PATH
+            else:
+                path = html.unescape(token.group(2))
+                parent = parents[depth - 2] if depth > 1 and len(parents) >= depth - 1 else "."
+                if parent not in (".", NO_PATH):
+                    path = f"{parent}/{path}"
             parents[depth - 1:] = [path]
             entries.append([path, None, []])
-        elif token.group(2) is not None:
-            entries[-1][1] = html.unescape(token.group(2)).strip()
+        elif token.group(3) is not None:
+            entries[-1][1] = html.unescape(token.group(3)).strip()
         else:
-            entries[-1][2].append(html.unescape(token.group(3)).strip())
+            entries[-1][2].append(html.unescape(token.group(4)).strip())
     lines = []
     ids = set()
     for path, license, copyrights in entries:
         if path in OTHER_TARGETS:
             continue
         used = chosen(license)
-        unknown = set(used) - KNOWN
+        needed = {text for one in used for text in texts_of(one)}
+        unknown = needed - KNOWN
         if unknown:
             sys.exit(f"в «In-tree files» у {path} — {license}: тексты {unknown} скрипт не берёт, посмотреть глазами")
-        ids.update(used)
+        ids.update(needed)
         lines.append(f"{path}: {license}" + ("" if used == [license] else f", used under {' AND '.join(used)}"))
         lines.extend(f"    Copyright: {c}" for c in copyrights)
     return lines, ids

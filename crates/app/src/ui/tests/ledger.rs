@@ -821,3 +821,101 @@ async fn a_direct_expense_asks_its_code_among_rows() {
     forget_device();
     assert!(wrong.is_empty(), "прямой расход среди строк: {wrong:#?}");
 }
+
+/// Расход самого дохода со своей строкой (задача 95): рядом с доходом от аренды
+/// в выборе вида есть строка аренды, а продажи имущества, которой в квартале
+/// нет, — нет; выбранная строка снимает вопрос «прямой или сбытовой» — и ответ,
+/// данный до неё, в запись не идёт, — расход ложится без кода, правка открывает
+/// его на той же строке, а экран налога говорит, что он не вычтен.
+#[wasm_bindgen_test]
+async fn an_expense_of_an_income_row_goes_to_its_row() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let now = clock::now();
+    let today = clock::today().expect("часы с датой");
+    let mut data = profile();
+    data.activities = vec![ActivityCode::parse("74.10.0").expect("код")];
+    let saved = Profile::save(None, data, now).expect("годный профиль").expect("новый");
+    let rent = Operation::create(
+        OperationData {
+            flow: Flow::Income,
+            date: today,
+            paid: None,
+            amount: amd(300_000),
+            rate: None,
+            text: Line::new("Сдача квартиры").expect("текст"),
+            client: None,
+            supplier: Line::default(),
+            proof: None,
+            nature: None,
+            cost: None,
+            activity: None,
+            income_kind: Some(IncomeKind::Rent),
+            attachments: Vec::new(),
+        },
+        now,
+    )
+    .expect("годна");
+    let mut writes = Writes::default();
+    writes.insert(&saved);
+    writes.insert(&rent);
+    commit(writes).await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at("#/ledger");
+    let mut wrong = Vec::new();
+    if !wait_for(&host, "Сдача квартиры").await {
+        wrong.push("доход не виден".to_owned());
+    }
+    press(&host, t(lang, Key::LedgerAddExpense), &mut wrong);
+    sleep(100).await;
+    match select(&host, t(lang, Key::OpActivity), 0) {
+        Some(list) => {
+            let has = |value: &str| list.query_selector(&format!("option[value='{value}']")).ok().flatten().is_some();
+            if !has("row-5") || has("row-9") {
+                wrong.push(format!("строки в выборе: аренда {}, продажа {}", has("row-5"), has("row-9")));
+            }
+        }
+        None => wrong.push("рядом с арендой форма не спросила вид".to_owned()),
+    }
+    if !host.text_content().unwrap_or_default().contains(t(lang, Key::OpActivityIncomeRowHint)) {
+        wrong.push("нет подсказки о строке дохода".to_owned());
+    }
+    fill_field(&host, t(lang, Key::OpText), "Агенту за сдачу квартиры", &mut wrong);
+    fill_field(&host, t(lang, Key::OpAmount), &i18n::amount(lang, amd(30_000)), &mut wrong);
+    choose(&host, t(lang, Key::OpProof), "contract", &mut wrong);
+    choose(&host, t(lang, Key::OpCost), "direct", &mut wrong);
+    choose(&host, t(lang, Key::OpActivity), "row-5", &mut wrong);
+    sleep(100).await;
+    if select(&host, t(lang, Key::OpCost), 0).is_some() {
+        wrong.push("у расхода строки дохода форма спрашивает, прямой ли он".to_owned());
+    }
+    press(&host, t(lang, Key::ProfileSave), &mut wrong);
+    if !wait_for(&host, t(lang, Key::LedgerSaved)).await {
+        wrong.push("расход не сохранился".to_owned());
+    }
+    let (operations, _) = stored().await;
+    let got: Vec<_> = operations
+        .iter()
+        .filter(|operation| operation.data().flow == Flow::Expense)
+        .map(|operation| (operation.data().income_kind, operation.data().activity, operation.data().cost))
+        .collect();
+    if got != [(Some(IncomeKind::Rent), None, None)] {
+        wrong.push(format!("записано {got:?}"));
+    }
+    open_entry(&host, "Агенту за сдачу квартиры", &mut wrong);
+    sleep(100).await;
+    match select(&host, t(lang, Key::OpActivity), 0).map(|list| list.value()) {
+        Some(value) if value == "row-5" => {}
+        other => wrong.push(format!("в правке выбрано {other:?}, а не строка аренды")),
+    }
+    press(&host, t(lang, Key::Cancel), &mut wrong);
+    set_hash("#/tax");
+    if !wait_for(&host, &fill(t(lang, Key::TaxRefusedIncomeRow), &["1"])).await {
+        wrong.push("экран налога не сказал о расходе строки дохода".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "расход строки дохода: {wrong:#?}");
+}

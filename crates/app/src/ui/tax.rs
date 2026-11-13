@@ -1185,6 +1185,7 @@ enum Hint {
     Excluded(usize),
     NoBase(usize),
     Split(usize),
+    IncomeRow(usize),
     CateringDeclared,
     Threshold { year: u16, turnover: i64, threshold: i64 },
 }
@@ -1199,6 +1200,7 @@ impl Hint {
             Self::Excluded(rows) => fill(t(lang, Key::TaxRefusedExcluded), &[&count(*rows)]),
             Self::NoBase(rows) => fill(t(lang, Key::TaxRefusedNoBase), &[&count(*rows)]),
             Self::Split(rows) => fill(t(lang, Key::TaxRefusedSplit), &[&count(*rows)]),
+            Self::IncomeRow(rows) => fill(t(lang, Key::TaxRefusedIncomeRow), &[&count(*rows)]),
             Self::CateringDeclared => fill(t(lang, Key::TaxCateringDeclared), &[t(lang, Key::KindCateringOther)]),
             Self::Threshold { year, turnover, threshold } => {
                 // Доля порога — целыми процентами, с отбросом: «99 %»
@@ -1244,6 +1246,9 @@ fn hints(tax: &QuarterTax) -> Vec<Hint> {
     }
     if refused.split > 0 {
         hints.push(Hint::Split(refused.split));
+    }
+    if refused.income_row > 0 {
+        hints.push(Hint::IncomeRow(refused.income_row));
     }
     if tax.declaration_unknown() {
         hints.push(Hint::CateringDeclared);

@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.120",
+      "date": "2026-11-13",
+      "hy": [
+        "Վարձակալության կամ գույքի վաճառքի եկամտի ծախսը, օրինակ՝ բնակարանը վարձակալության տալու համար գործակալին վճարը, այժմ վերագրվում է այդ եկամտի տողին. ծախսի գրառման մեջ ընտրեք այն «Գործունեության տեսակը» դաշտում։ Այն չի նվազեցվում, իսկ հարկի էկրանը նշում է այդպիսի ծախսերը։"
+      ],
+      "ru": [
+        "Расход дохода от аренды или продажи имущества — например, агенту за сдачу квартиры — теперь относится к строке этого дохода: в записи расхода выберите её в поле «Вид деятельности». Он не вычитается, а экран налога называет такие расходы."
+      ],
+      "en": [
+        "An expense of rental or property-sale income — say, an agent's fee for renting out a flat — can now go to that income's row: choose it under “Activity” in the expense entry. It isn't deducted, and the tax screen names such expenses."
+      ]
+    },
+    {
       "version": "0.0.119",
       "date": "2026-11-12",
       "hy": [
@@ -260,19 +273,6 @@
       ],
       "en": [
         "Documents of the same day are now in number order, both in the export for your accountant and on the “Ledger” screen. Before, they came in random order, and act 2026-003 could come before 2026-002."
-      ]
-    },
-    {
-      "version": "0.0.100",
-      "date": "2026-11-10",
-      "hy": [
-        "Վճարման «Հեռացնել» կոճակն այժմ ասում է, որ վճարումը հեռացվեց, և կողքին կա «Հետ բերել»՝ եթե սխալմամբ եք սեղմել, վճարումը կվերադառնա նույն օրով և գումարով։"
-      ],
-      "ru": [
-        "«Убрать» у оплаты теперь говорит, что оплата убрана, а рядом — «Вернуть»: если нажали по ошибке, оплата вернётся с тем же днём и суммой."
-      ],
-      "en": [
-        "“Remove” on a payment now says that the payment was removed, with “Undo” next to it: if you pressed it by mistake, the payment comes back with the same date and amount."
       ]
     }
   ]

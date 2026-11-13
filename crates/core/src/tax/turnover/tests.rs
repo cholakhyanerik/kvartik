@@ -678,6 +678,7 @@ fn only_documented_expenses_are_deducted() {
             excluded: 1,
             no_base: 0,
             split: 0,
+            income_row: 0,
         }
     );
 }
@@ -1714,6 +1715,103 @@ fn the_expense_form_asks_whether_direct_only_where_it_counts() {
         }
     }
     assert!(wrong.is_empty(), "спросила не там: {wrong:?}");
+}
+
+/// Расход самого дохода со своей строкой (задача 95): без кода и без «прямой
+/// ли».
+fn of_income(date: Date, drams: i64, proof: Proof, nature: Nature, kind: IncomeKind) -> Operation {
+    operation(OperationData {
+        income_kind: Some(kind),
+        ..expense(date, drams, proof, nature, None).data().clone()
+    })
+}
+
+/// Расход самого дохода со своей строкой — агенту за сдачу квартиры — не
+/// вычитается и не делится (задача 95): у строки 5 вычета нет (ст. 260, ч. 1),
+/// а в строку с вычетом он не идёт (ст. 260, ч. 3). Дизайн 1 000 000 ֏, аренда
+/// 250 000 ֏, агенту 100 000 ֏. К строке аренды: дизайн 100 000 без вычета,
+/// аренда 25 000 — 125 000, и x.4 дизайна пуст. Общим: доля дизайна 100 000 ×
+/// 1 000 000 / 1 250 000 = 80 000, вычет 4 800, дизайн 95 200 — 120 200. С кодом
+/// дизайна: вычет 6 000, дизайн 94 000 — 119 000.
+#[test]
+fn an_expense_of_an_income_row_is_not_deducted() {
+    let design = profile(&["74.10.0"]);
+    let incomes = [income(day(2026, 7, 10), 1_000_000, None), income_as(day(2026, 8, 1), 250_000, IncomeKind::Rent)];
+    let with = |expense: Operation| vec![incomes[0].clone(), incomes[1].clone(), expense];
+    let fee = |activity| expense(day(2026, 8, 5), 100_000, Proof::Contract, Nature::Ordinary, activity);
+    let own = of_income(day(2026, 8, 5), 100_000, Proof::Contract, Nature::Ordinary, IncomeKind::Rent);
+    let mut wrong = Vec::new();
+    for (name, books, tax_due, refused, split) in [
+        ("к строке аренды", with(own), 125_000, Refused { income_row: 1, ..Refused::default() }, (Some(0), 0)),
+        ("общий", with(fee(None)), 120_200, Refused { split: 1, ..Refused::default() }, (None, 80_000)),
+        ("с кодом дизайна", with(fee(Some("74.10.0"))), 119_000, Refused::default(), (None, 100_000)),
+    ] {
+        let got = tax(Some(&design), &books, &[], quarter(2026, 3));
+        let got_split = split_of(&got, IncomeKind::Other);
+        if (got.tax, got.refused, got_split, got.complete()) != (tax_due, refused, Some(split), true) {
+            wrong.push(format!(
+                "{name}: налог {}, {:?}, x.4.1 и x.4 {got_split:?}, полон {}",
+                got.tax,
+                got.refused,
+                got.complete()
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "расход дохода со своей строкой: {wrong:#?}");
+}
+
+/// Расход дохода со своей строкой назван один раз и своей причиной (задача 95):
+/// без документа продавца и командировка — тоже «строка без вычета», а не «без
+/// документа» и «не вычитается по виду». В квартале без самого дохода он тоже
+/// не вычитается: дизайн 1 000 000 ֏ — налог 100 000. До правил налога окно о нём
+/// молчит, как о прочих расходах.
+#[test]
+fn an_expense_of_an_income_row_is_named_once() {
+    let design = profile(&["74.10.0"]);
+    let books = [
+        income(day(2026, 7, 10), 1_000_000, None),
+        of_income(day(2026, 8, 5), 30_000, Proof::None, Nature::Ordinary, IncomeKind::Rent),
+        of_income(day(2026, 8, 6), 20_000, Proof::SettlementInvoice, Nature::Travel, IncomeKind::Assets),
+    ];
+    let got = tax(Some(&design), &books, &[], quarter(2026, 3));
+    assert_eq!(got.refused, Refused { income_row: 2, ..Refused::default() });
+    assert_eq!(got.tax, 100_000);
+    assert!(got.complete());
+    let before = [
+        income(day(2024, 11, 10), 1_000_000, None),
+        of_income(day(2024, 11, 15), 30_000, Proof::SettlementInvoice, Nature::Ordinary, IncomeKind::Rent),
+    ];
+    assert_eq!(tax(Some(&design), &before, &[], quarter(2024, 4)).refused, Refused::default());
+}
+
+/// Форма расхода предлагает рядом с кодами строки доходов квартала (задача 95):
+/// аренду, продажу имущества или обе, по порядку таблицы закона, — только у ИП
+/// с вычетом у строк кодов, только в квартале такого дохода, и строку дохода,
+/// а не расхода: расход, уже отнесённый к аренде, дохода в квартале не делает.
+#[test]
+fn the_expense_form_offers_the_income_rows_of_the_quarter() {
+    let on = day(2026, 8, 20);
+    let design = profile(&["74.10.0"]);
+    let it = profile(&["62.01.0"]);
+    let rent = income_as(day(2026, 7, 10), 300_000, IncomeKind::Rent);
+    let sale = income_as(day(2026, 9, 10), 400_000, IncomeKind::Assets);
+    let fee = of_income(day(2026, 8, 5), 30_000, Proof::Contract, Nature::Ordinary, IncomeKind::Rent);
+    let mut wrong = Vec::new();
+    for (name, operations, profile, day_of, expected) in [
+        ("аренда", vec![rent.clone()], Some(&design), on, vec![IncomeKind::Rent]),
+        ("продажа и аренда", vec![sale, rent.clone()], Some(&design), on, vec![IncomeKind::Rent, IncomeKind::Assets]),
+        ("другой квартал", vec![rent.clone()], Some(&design), day(2026, 10, 1), Vec::new()),
+        ("IT без вычета", vec![rent.clone()], Some(&it), on, Vec::new()),
+        ("профиля нет", vec![rent], None, on, Vec::new()),
+        ("только расход аренды", vec![fee], Some(&design), on, Vec::new()),
+    ] {
+        let got = expense_rows(&[], &operations, profile, day_of);
+        let asked = expense_activity_needed(&[], &operations, profile, day_of);
+        if got != expected || asked == expected.is_empty() {
+            wrong.push(format!("{name}: {got:?}, вид спрошен: {asked}"));
+        }
+    }
+    assert!(wrong.is_empty(), "строки доходов у формы расхода: {wrong:#?}");
 }
 
 /// Без кодов в профиле доход со своей строкой посчитан, а общему расходу

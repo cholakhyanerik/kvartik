@@ -1,0 +1,23 @@
+{
+  "about": "Дизайнер с одним кодом сдаёт квартиру и платит агенту за сдачу: расход аренды отнесён к её строке и не вычитается, а бухгалтерия без вида делится по весу дохода вместе с арендой",
+  "checked": {
+    "by": "агент вручную по НК 258(1), 258(5), 260(1), 260(3) и приказу 299-Ն, прил. 1, п. 11, 53: аренда 300 000 × 10 % = 30 000, вычета у строки 5 нет, и агент 60 000 не вычитается и не делится; вес дизайна 1 200 000 / 1 500 000 = 0,8; бухгалтерия 150 000 × 0,8 = 120 000 (9.4.2, 9.4.1 — 0), вычет 6 % = 7 200; налог 120 000 − 7 200 = 112 800 (предел 54 000). Делись агент вместе с бухгалтерией — 9.4 было бы 168 000, налог дизайна 109 920",
+    "on": "2026-11-13",
+    "accountant": null
+  },
+  "profile": {
+    "activities": ["74.10.0"]
+  },
+  "entries": [
+    {"flow": "income", "date": "2026-07-10", "minor": 1200000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": null, "nature": null},
+    {"flow": "income", "date": "2026-08-01", "minor": 300000, "currency": "AMD", "rate_e4": null, "activity": null, "income_kind": "rent", "proof": null, "nature": null},
+    {"flow": "expense", "date": "2026-08-05", "minor": 60000, "currency": "AMD", "rate_e4": null, "activity": null, "income_kind": "rent", "proof": "contract", "nature": "ordinary"},
+    {"flow": "expense", "date": "2026-09-01", "minor": 150000, "currency": "AMD", "rate_e4": null, "activity": null, "proof": "settlement_invoice", "nature": "ordinary", "cost": "overhead"}
+  ],
+  "expected": [
+    {"quarter": "2026-3", "tax": 142800, "lines": [
+      {"kind": "rent", "income": 300000, "tax": 30000},
+      {"kind": "other", "income": 1200000, "tax": 112800, "split": [0, 120000]}
+    ]}
+  ]
+}

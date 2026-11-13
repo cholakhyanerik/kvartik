@@ -1195,13 +1195,18 @@ impl Form {
                 data.supplier = Line::new(&self.supplier.get_untracked()).ok()?;
                 data.proof = Some(self.proof.get_untracked()?);
                 data.nature = Some(self.nature.get_untracked());
-                data.cost = self.cost.get_untracked();
-                data.activity = self.activity.get_untracked();
-                if asked.cost && data.cost.is_none() {
-                    return None;
-                }
-                if asked.direct_code && data.activity.is_none() {
-                    return None;
+                data.income_kind = self.income_kind.get_untracked();
+                // Расход дохода со своей строкой — без кода и без «прямой ли»
+                // (задача 95): ответ, оставшийся в поле, в запись не идёт.
+                if data.income_kind.is_none() {
+                    data.cost = self.cost.get_untracked();
+                    data.activity = self.activity.get_untracked();
+                    if asked.cost && data.cost.is_none() {
+                        return None;
+                    }
+                    if asked.direct_code && data.activity.is_none() {
+                        return None;
+                    }
                 }
             }
         }
@@ -1300,12 +1305,13 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
         day.is_some_and(|day| ctx.profiles.with(|profile| turnover::activity_needed(profile, day)))
     });
     let required = Memo::new(move |_| needed.get() && form.income_kind.get().is_none());
-    // Спросить ли у расхода вид и при одном коде (задача 70).
-    let beside = Memo::new(move |_| {
-        form.date.with(|text| Date::from_iso(text)).is_some_and(|day| {
+    // Строки доходов квартала, к которым можно отнести расход (задача 95):
+    // когда они есть, у расхода спрашивается вид и при одном коде (задача 70).
+    let income_rows = Memo::new(move |_| {
+        form.date.with(|text| Date::from_iso(text)).map_or_else(Vec::new, |day| {
             ctx.documents.with(|documents, _, _| {
                 ctx.operations.with(|operations, _| {
-                    ctx.profiles.with(|profile| turnover::expense_activity_needed(documents, operations, profile, day))
+                    ctx.profiles.with(|profile| turnover::expense_rows(documents, operations, profile, day))
                 })
             })
         })
@@ -1313,11 +1319,14 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
     // Спросить ли, прямой ли расход, и нужен ли прямому вид (задача 79).
     // Вид прямому нужен, только пока ответ «прямой» спрошен: у командировки
     // его не спрашивают, а прежний ответ форма не стирает — при нечитаемом
-    // профиле спросить было бы нельзя, и ответ пропал бы.
+    // профиле спросить было бы нельзя, и ответ пропал бы. У расхода дохода со
+    // своей строкой не спрашивается ни то, ни другое: вычета у неё нет
+    // (задача 95).
     let cost_asked = Memo::new(move |_| {
         let day = form.date.with(|text| Date::from_iso(text)).or(ctx.today);
         let (proof, nature) = (form.proof.get(), form.nature.get());
-        day.is_some_and(|day| ctx.profiles.with(|profile| turnover::cost_needed(profile, proof, nature, day)))
+        form.income_kind.with(Option::is_none)
+            && day.is_some_and(|day| ctx.profiles.with(|profile| turnover::cost_needed(profile, proof, nature, day)))
     });
     let direct_code = Memo::new(move |_| {
         let day = form.date.with(|text| Date::from_iso(text)).or(ctx.today);
@@ -1325,13 +1334,19 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
             && form.cost.get() == Some(Cost::Direct)
             && day.is_some_and(|day| ctx.profiles.with(|profile| turnover::direct_activity_needed(profile, day)))
     });
-    let cost_shown = Memo::new(move |_| cost_asked.get() || form.cost.with(Option::is_some));
+    let cost_shown = Memo::new(move |_| {
+        form.income_kind.with(Option::is_none) && (cost_asked.get() || form.cost.with(Option::is_some))
+    });
     // Вид деятельности спрашивается, когда их в профиле больше одного: у одного
     // вида выбирать нечего, пока рядом нет дохода со своей строкой — тогда он
     // отделяет расход своего кода (прямой, сбытовой, который ведут отдельно)
-    // от общего.
-    let activity_shown =
-        Memo::new(move |_| activities.with(Vec::len) > 1 || beside.get() || form.activity.with(Option::is_some));
+    // и расход самого этого дохода (задача 95) от общего.
+    let activity_shown = Memo::new(move |_| {
+        activities.with(Vec::len) > 1
+            || income_rows.with(|rows| !rows.is_empty())
+            || form.activity.with(Option::is_some)
+            || form.income_kind.with(Option::is_some)
+    });
     let asked = move || Asked {
         activity: needed.get_untracked(),
         cost: flow == Flow::Expense && cost_asked.get_untracked(),
@@ -1669,11 +1684,18 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
                         {tr(lang, Key::OpActivity)}
                         <select on:change=move |event| {
                             let chosen = event_target_value(&event);
-                            form.activity.set(ActivityCode::parse(&chosen).ok());
+                            // Строка дохода — вместо кода, не вместе с ним
+                            // (задача 95).
+                            let row = IncomeKind::OF_INCOME.into_iter().find(|kind| row_code(*kind) == chosen);
+                            form.income_kind.set(row);
+                            form.activity.set(if row.is_some() { None } else { ActivityCode::parse(&chosen).ok() });
                         }>
                             // Прямому при кодах разных строк «общего» нет: ему
                             // нужен код (задача 79).
-                            <option value="" prop:selected=move || form.activity.get().is_none()>
+                            <option
+                                value=""
+                                prop:selected=move || form.activity.get().is_none() && form.income_kind.get().is_none()
+                            >
                                 {move || {
                                     let key = if direct_code.get() { Key::NotChosen } else { Key::OpActivityShared };
                                     t(lang.get(), key)
@@ -1692,9 +1714,27 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
                                     </option>
                                 }).collect_view()
                             }}
+                            // Строки доходов квартала — и та, что у записи уже
+                            // выбрана, даже если такого дохода в квартале больше нет.
+                            {move || {
+                                let mut kinds = income_rows.get();
+                                if let Some(own) = form.income_kind.get_untracked()
+                                    && !kinds.contains(&own)
+                                {
+                                    kinds.push(own);
+                                }
+                                kinds.into_iter().map(|kind| view! {
+                                    <option value=row_code(kind) prop:selected=move || form.income_kind.get() == Some(kind)>
+                                        {tr(lang, row_key(kind))}
+                                    </option>
+                                }).collect_view()
+                            }}
                         </select>
                     </label>
                     <p class="hint">{tr(lang, Key::OpActivityHint)}</p>
+                    {move || (income_rows.with(|rows| !rows.is_empty()) || form.income_kind.with(Option::is_some)).then(|| view! {
+                        <p class="hint">{tr(lang, Key::OpActivityIncomeRowHint)}</p>
+                    })}
                     {shown_problem(tried, move || {
                         (direct_code.get() && form.activity.get().is_none())
                             .then(|| t(lang.get(), Key::OpActivityDirect).to_owned())
@@ -1962,6 +2002,32 @@ const fn cost_code(cost: Cost) -> &'static str {
     match cost {
         Cost::Direct => "direct",
         Cost::Overhead => "overhead",
+    }
+}
+
+/// `value` строки дохода в выборе вида у расхода (задача 95) — номером строки
+/// закона, со своей приставкой: код деятельности так не начинается, и выбор
+/// их не спутает.
+fn row_code(kind: IncomeKind) -> String {
+    format!("row-{}", kind.row())
+}
+
+/// Подпись строки дохода в выборе вида у расхода (задача 95): «К доходу: …»,
+/// а не имя строки — «Аренда, проценты, роялти» в закрытом списке читалась
+/// видом самого расхода, хотя аренда своего офиса — обычный расход. Других
+/// строк у расхода нет (`IncomeKind::OF_INCOME`), и у них — имя строки.
+const fn row_key(kind: IncomeKind) -> Key {
+    match kind {
+        IncomeKind::Rent => Key::OpActivityRentRow,
+        IncomeKind::Assets => Key::OpActivityAssetsRow,
+        IncomeKind::Trade
+        | IncomeKind::Recyclables
+        | IncomeKind::Newspapers
+        | IncomeKind::Production
+        | IncomeKind::Catering
+        | IncomeKind::CateringOther
+        | IncomeKind::HighTech
+        | IncomeKind::Other => turnover::kind_key(kind),
     }
 }
 

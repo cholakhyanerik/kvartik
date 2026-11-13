@@ -397,6 +397,27 @@ fn ledger_sheet_lists_documents_and_records() {
     );
 }
 
+/// Расход, отнесённый к строке дохода (задача 95), — в столбце строки налога,
+/// как доход со своей строкой, а кода и «прямой ли» у него нет: бухгалтер
+/// видит, почему расход не в вычете.
+#[test]
+fn an_expense_of_an_income_row_shows_its_row() {
+    let text_of = EXPENSE.replacen(
+        r#""cost":"overhead","activity":"62.01.0","income_kind":null"#,
+        r#""cost":null,"activity":null,"income_kind":"rent""#,
+        1,
+    );
+    assert_ne!(text_of, EXPENSE, "подмена не сработала");
+    let expense: Operation = serde_json::from_str(&text_of).expect("расход строки дохода читается");
+    let sheet = ledger_sheet(Lang::Ru, &[], &[expense], &[], day(2026, 10, 1), day(2026, 12, 31));
+    assert_eq!((sheet.columns[8].as_str(), sheet.columns[9].as_str()), ("Код вида деятельности", "Строка налога"));
+    assert_eq!(sheet.rows.len(), 1);
+    assert_eq!(
+        sheet.rows[0][7..10],
+        [Cell::Empty, Cell::Empty, text("Аренда, проценты, роялти")]
+    );
+}
+
 /// Строки одного дня — по виду и номеру документа, а запись книги — за
 /// ними: по одному случайному идентификатору акт 2026-003 вставал раньше
 /// 2026-002 (полный прогон 0.0.96). Восемь документов одного дня — случайный
