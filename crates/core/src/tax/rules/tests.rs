@@ -59,6 +59,10 @@ fn file(exclusions: &[Value], pensions: &[Value]) -> String {
         "turnover_rates": [],
         "high_tech": [],
         "turnover_threshold": [],
+        "micro_threshold": [],
+        "micro_exclusions": [],
+        "micro_application": [],
+        "micro_report": [],
         "turnover_expenses": [],
         "turnover_carry": [],
         "turnover_place": [],
@@ -161,6 +165,10 @@ fn the_built_in_file_is_sound() {
     assert_eq!(rules.turnover_rates().len(), IncomeKind::ALL.len());
     assert!(!rules.high_tech().is_empty());
     assert!(!rules.turnover_threshold().is_empty());
+    assert!(!rules.micro_threshold().is_empty());
+    assert!(!rules.micro_exclusions().is_empty());
+    assert!(!rules.micro_application().is_empty());
+    assert!(!rules.micro_report().is_empty());
     assert!(!rules.turnover_expenses().is_empty());
     assert!(!rules.turnover_form().is_empty());
     assert!(!rules.profit_tax().is_empty());
@@ -559,7 +567,7 @@ fn version_parse_is_strict() {
 
 /// Отпечаток значений текущей версии правил: её запись и FNV-1a значений
 /// файла ([`values`]).
-const PINNED: (&str, u64) = ("2026.9", 0xb972_4547_5756_e839);
+const PINNED: (&str, u64) = ("2026.10", 0x0a12_fef8_e50b_46a0);
 
 /// Значения файла правил одной строкой: всё, кроме версии и источников, —
 /// JSON с ключами по алфавиту. Источник — когда сверили и где лежит
@@ -653,7 +661,7 @@ fn values_see_rules_not_sources() {
     assert_eq!(print(&base), print(&spaced), "пробелы — не новое правило");
     let reordered = format!(
         r#"{{"days_off": [], "deadline_shift": [], "funded_pension": [{}], "health_insurance": [], "high_tech": [],
-            "holidays": [], "income_declaration": [], "profit_tax": [], "settlement_due": [], "social_payment": [], "stamp_duty": [], "turnover_application": [],
+            "holidays": [], "income_declaration": [], "micro_application": [], "micro_exclusions": [], "micro_report": [], "micro_threshold": [], "profit_tax": [], "settlement_due": [], "social_payment": [], "stamp_duty": [], "turnover_application": [],
             "turnover_carry": [], "turnover_due": [], "turnover_exclusions": [{}], "turnover_expenses": [], "turnover_form": [], "turnover_place": [], "turnover_rates": [],
             "turnover_threshold": [], "version": "2026.1"}}"#,
         pension("2014-01-01", None),

@@ -120,6 +120,20 @@ fn card(host: &HtmlElement) -> Option<String> {
     host.query_selector("#home .hero-card").ok().flatten().and_then(|card| card.text_content())
 }
 
+/// Отметка года `year` в «Годах микропредпринимательства» формы профиля.
+fn micro_checkbox(host: &HtmlElement, year: u16) -> Option<HtmlInputElement> {
+    let year = year.to_string();
+    let labels = host.query_selector_all(".micro-years label").ok()?;
+    (0..labels.length())
+        .filter_map(|at| labels.item(at))
+        .map(|node| node.unchecked_into::<HtmlElement>())
+        .find(|label| label.text_content().is_some_and(|text| text.trim() == year))?
+        .query_selector("input")
+        .ok()
+        .flatten()
+        .map(|input| input.unchecked_into::<HtmlInputElement>())
+}
+
 /// Налог прошлого квартала: дизайнер (74.10.0) с доходом 1 000 000 ֏ — 10 %,
 /// 100 000 ֏ (предел 4,5 % — 45 000). Главный экран показывает его «к
 /// уплате», экран налога — с доходом и ставкой; квартал закрывается —
@@ -623,4 +637,131 @@ async fn an_uncounted_quarter_is_no_alarm_and_no_zero() {
     set_hash("");
     forget_device();
     assert!(wrong.is_empty(), "не посчитанный квартал: {wrong:#?}");
+}
+
+/// Год микропредпринимательства (задача 100) — отметкой в форме профиля:
+/// отмеченные годы ложатся в профиль, карточка главного экрана — оборот года
+/// и «налогов нет» вместо налога квартала, экран налога — без строк налога,
+/// с порогом своего режима (24 млн ֏), а у кончившегося квартала — без
+/// «Закрыть квартал». Год, отмеченный раньше и вне окна формы (прошлый, этот
+/// и следующий), снятый ошибкой, остаётся в списке, и отметку можно вернуть
+/// (ревью задачи 100). Прошлый год отмечен тоже: прошлый квартал в январе —
+/// его.
+#[wasm_bindgen_test]
+async fn a_micro_year_is_marked_in_the_profile_and_shows_no_tax() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let today = clock::today().expect("часы с датой");
+    let year = today.year();
+    let old = year - 3;
+    let mut data = profile();
+    data.activities = vec![ActivityCode::parse("90.01.0").expect("код")];
+    data.micro.insert(old);
+    let saved = Profile::save(None, data, clock::now()).expect("годный профиль").expect("новый");
+    let mut writes = Writes::default();
+    writes.insert(&saved);
+    writes.insert(&operation(Flow::Income, today.quarter().first_day(), 3_600_000));
+    commit(writes).await;
+
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at("#/profile");
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::ProfileEdit)).await {
+        wrong.push("профиль не прочитан".to_owned());
+    }
+    match button(&host, &[t(lang, Key::ProfileEdit)]) {
+        Some(edit) => edit.click(),
+        None => wrong.push("нет «Изменить»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::ProfileMicroYears)).await {
+        wrong.push("в форме нет годов микропредпринимательства".to_owned());
+    }
+    // Снять отметку года вне окна и вернуть её: строка года не пропадает.
+    for (step, wanted) in [("снять", false), ("вернуть", true)] {
+        match micro_checkbox(&host, old) {
+            Some(input) => {
+                input.click();
+                if input.checked() != wanted {
+                    wrong.push(format!("{step} {old}: отметка {}", input.checked()));
+                }
+            }
+            None => wrong.push(format!("{step} {old}: строки года нет")),
+        }
+        // Перерисовка Leptos — микрозадачей после нажатия.
+        leptos::task::tick().await;
+    }
+    for marked in [year - 1, year] {
+        match micro_checkbox(&host, marked) {
+            Some(input) => input.click(),
+            None => wrong.push(format!("нет отметки {marked} года")),
+        }
+    }
+    match button(&host, &[t(lang, Key::ProfileSave)]) {
+        Some(save) => save.click(),
+        None => wrong.push("нет «Сохранить»".to_owned()),
+    }
+    let mut marked = false;
+    for _ in 0..100 {
+        if let Ok(Some(profile)) = super::stored_profile().await
+            && profile.data().micro_in(year)
+        {
+            marked = true;
+            if !profile.data().micro_in(old) || !profile.data().micro_in(year - 1) {
+                wrong.push(format!("в профиле годы {:?}", profile.data().micro));
+            }
+            break;
+        }
+        sleep(50).await;
+    }
+    if !marked {
+        wrong.push(format!("отметка {year} года не легла в профиль"));
+    }
+
+    set_hash("#/");
+    if !wait_for(&host, t(lang, Key::TaxMicroTurnover)).await {
+        wrong.push("на главном нет карточки микропредприятия".to_owned());
+    }
+    // Квартал — текущий: прошлый квартал микропредприятия к уплате не бывает,
+    // и «подали расчёт — закройте» о нём было бы неправдой.
+    let shown = card(&host).unwrap_or_default();
+    if !shown.contains(&i18n::quarter(lang, today.quarter()))
+        || !shown.contains(&drams(lang, 3_600_000))
+        || !shown.contains(t(lang, Key::TaxMicroNone))
+        || shown.contains(t(lang, Key::TaxCloseReminder))
+    {
+        wrong.push(format!("карточка: «{shown}»"));
+    }
+
+    set_hash("#/tax");
+    if !wait_for(&host, t(lang, Key::TaxMicroAbout)).await {
+        wrong.push("экран налога не сказал о микропредпринимательстве".to_owned());
+    }
+    let screen = text(&host, "#tax");
+    if screen.contains(t(lang, Key::TaxTurnover)) || !screen.contains(&drams(lang, 24_000_000)) {
+        wrong.push(format!("экран налога — как у налога с оборота: «{screen}»"));
+    }
+    // Прошлый квартал кончился, а закрывать его не нужно.
+    let previous = today.quarter().previous().expect("прошлый квартал");
+    let back = format!("#tax button[aria-label=\"{}\"]", t(lang, Key::LedgerPrevQuarter));
+    match host.query_selector(&back).ok().flatten() {
+        Some(arrow) => arrow.unchecked_into::<HtmlElement>().click(),
+        None => wrong.push("нет стрелки к прошлому кварталу".to_owned()),
+    }
+    let name = i18n::quarter(lang, previous);
+    for _ in 0..100 {
+        if text(&host, "#tax .quarter-name").contains(&name) && text(&host, "#tax").contains(t(lang, Key::TaxCannotCloseMicro)) {
+            break;
+        }
+        sleep(20).await;
+    }
+    let screen = text(&host, "#tax");
+    if !screen.contains(t(lang, Key::TaxCannotCloseMicro)) || screen.contains(t(lang, Key::TaxClose)) {
+        wrong.push(format!("{name}: «{screen}»"));
+    }
+
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "год микропредпринимательства: {wrong:#?}");
 }

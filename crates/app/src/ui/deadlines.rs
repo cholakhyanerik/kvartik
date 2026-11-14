@@ -75,8 +75,10 @@ fn when(lang: Lang, when: When, day: Date) -> String {
 const fn place(kind: Kind) -> Screen {
     match kind {
         Kind::Turnover(_) => Screen::Tax,
-        Kind::Annual(_) | Kind::HealthYear(_) | Kind::HealthMonth { .. } => Screen::Annual,
-        Kind::Application(_) | Kind::Declaration(_) => Screen::Deadlines,
+        Kind::Annual(_) | Kind::MicroAnnual(_) | Kind::HealthYear(_) | Kind::HealthMonth { .. } => Screen::Annual,
+        Kind::Application(_) | Kind::MicroApplication(_) | Kind::MicroReport(_) | Kind::Declaration(_) => {
+            Screen::Deadlines
+        }
     }
 }
 
@@ -271,8 +273,10 @@ fn Row(lang: ReadSignal<Lang>, deadline: Deadline, soon: Option<When>) -> impl I
                     })}
                     {deadline.done.then(|| {
                         let done = match deadline.kind {
-                            Kind::Application(_) => Key::DeadlineApplied,
+                            Kind::Application(_) | Kind::MicroApplication(_) => Key::DeadlineApplied,
                             Kind::Turnover(_)
+                            | Kind::MicroReport(_)
+                            | Kind::MicroAnnual(_)
                             | Kind::Annual(_)
                             | Kind::HealthYear(_)
                             | Kind::HealthMonth { .. }
@@ -348,6 +352,9 @@ pub fn DeadlinesPage(ctx: tax::Ctx) -> impl IntoView {
         {move || list.get().map(|(gaps, overdue, ahead)| {
             let empty = overdue.is_none() && ahead.is_empty();
             let declaration = ahead.iter().any(|(deadline, _)| matches!(deadline.kind, Kind::Declaration(_)));
+            let micro = ahead.iter().any(|(deadline, _)| {
+                matches!(deadline.kind, Kind::MicroApplication(_) | Kind::MicroReport(_) | Kind::MicroAnnual(_))
+            });
             view! {
                 <ul class="list deadlines">
                     {overdue.map(|deadline| view! { <Row lang deadline soon=Some(When::Overdue) /> })}
@@ -358,6 +365,7 @@ pub fn DeadlinesPage(ctx: tax::Ctx) -> impl IntoView {
                 </ul>
                 {empty.then(|| view! { <p class="hint">{tr(lang, Key::DeadlinesNone)}</p> })}
                 {declaration.then(|| view! { <p class="hint">{tr(lang, Key::DeadlinesDeclarationAbout)}</p> })}
+                {micro.then(|| view! { <p class="hint">{tr(lang, Key::DeadlinesMicroMonthly)}</p> })}
                 <Gaps lang gaps />
             }
         })}

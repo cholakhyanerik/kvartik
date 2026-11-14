@@ -79,14 +79,16 @@ pub fn AnnualCard(ctx: tax::Ctx) -> impl IntoView {
     let shown = Memo::new(move |_| {
         let year = due_year(ctx)?;
         let annual = ctx.sources.annual(year)?;
-        if annual.status != Status::Turnover {
+        // Год микропредпринимательства — тоже: к сроку — гербовый сбор
+        // (задача 100).
+        if !matches!(annual.status, Status::Turnover | Status::Micro) {
             return None;
         }
         let saving = ctx.today.and_then(|today| annual::saving(&annual, today));
-        Some((year, Total::of(&annual), saving))
+        Some((year, Total::of(&annual), saving, due_kind(&annual)))
     });
     move || {
-        shown.get().map(|(year, total, saving)| {
+        shown.get().map(|(year, total, saving, kind)| {
             view! {
                 <a class="annual-card" data-tilt="" href=Screen::Annual.href()>
                     <span class="annual-meta">{move || fill(t(lang.get(), Key::AnnualFor), &[&year.to_string()])}</span>
@@ -94,7 +96,7 @@ pub fn AnnualCard(ctx: tax::Ctx) -> impl IntoView {
                         <span class="annual-label">
                             {move || fill(t(lang.get(), Key::AnnualDue), &[&i18n::date(lang.get(), deadlines::last_day(due))])}
                         </span>
-                        {move || deadlines::moved(lang.get(), Kind::Annual(year), due).map(|note| view! { <span class="annual-note">{note}</span> })}
+                        {move || deadlines::moved(lang.get(), kind, due).map(|note| view! { <span class="annual-note">{note}</span> })}
                     })}
                     {total.sum.map(|sum| view! { <span class="annual-sum">{move || drams(lang.get(), sum)}</span> })}
                     {saving.map(|saving| view! {
@@ -115,11 +117,11 @@ pub fn AnnualEntry(ctx: tax::Ctx) -> impl IntoView {
     let shown = Memo::new(move |_| {
         let year = due_year(ctx)?;
         let annual = ctx.sources.annual(year)?;
-        let total = (annual.status == Status::Turnover).then(|| Total::of(&annual));
-        Some((year, total))
+        let total = matches!(annual.status, Status::Turnover | Status::Micro).then(|| Total::of(&annual));
+        Some((year, total, due_kind(&annual)))
     });
     move || {
-        shown.get().map(|(year, total)| {
+        shown.get().map(|(year, total, kind)| {
             view! {
                 <ul class="list annual-entry">
                     <li>
@@ -132,7 +134,7 @@ pub fn AnnualEntry(ctx: tax::Ctx) -> impl IntoView {
                                     <span class="entry-meta">
                                         {total.due.map(|due| view! {
                                             <span>{move || fill(t(lang.get(), Key::AnnualDue), &[&i18n::date(lang.get(), deadlines::last_day(due))])}</span>
-                                            {move || deadlines::moved(lang.get(), Kind::Annual(year), due).map(|note| view! { <span>{note}</span> })}
+                                            {move || deadlines::moved(lang.get(), kind, due).map(|note| view! { <span>{note}</span> })}
                                         })}
                                         {(!total.complete).then(|| view! { <span>{tr(lang, Key::AnnualPartialShort)}</span> })}
                                     </span>
@@ -149,6 +151,16 @@ pub fn AnnualEntry(ctx: tax::Ctx) -> impl IntoView {
                 </ul>
             }
         })
+    }
+}
+
+/// Срок годовых платежей года `annual` — видом: у года микропредпринимательства
+/// к нему — один гербовый сбор (задача 100).
+fn due_kind(annual: &Annual) -> Kind {
+    if annual.status == Status::Micro {
+        Kind::MicroAnnual(annual.year)
+    } else {
+        Kind::Annual(annual.year)
     }
 }
 
@@ -247,14 +259,27 @@ fn Payments(lang: ReadSignal<Lang>, annual: Annual, residency: Option<Residency>
         Status::General => {
             let code = match annual.months.left {
                 Some((from, Leaving::Code(code))) => Some((from, code)),
-                Some((_, Leaving::Threshold | Leaving::PreviousYear)) | None => None,
+                Some((
+                    _,
+                    Leaving::Threshold
+                    | Leaving::PreviousYear
+                    | Leaving::MicroThreshold
+                    | Leaving::MicroPreviousYear
+                    | Leaving::MicroCode(_),
+                ))
+                | None => None,
             };
+            // Ушёл с микропредпринимательства посреди года или не мог быть им
+            // с 1 января (задача 100).
+            let micro = annual.months.left.map(|(_, why)| why);
             view! {
                 <div class="notice">
                     <p>{move || {
                         let lang = lang.get();
                         match code {
                             Some((from, code)) => fill(t(lang, Key::AnnualGeneralCode), &[&i18n::date(lang, from), &code.to_string()]),
+                            None if micro == Some(Leaving::MicroPreviousYear) => t(lang, Key::AnnualMicroPrevious).to_owned(),
+                            None if micro.is_some_and(Leaving::micro) => t(lang, Key::AnnualLeftMicro).to_owned(),
                             None => t(lang, Key::AnnualGeneral).to_owned(),
                         }
                     }}</p>
@@ -263,11 +288,22 @@ fn Payments(lang: ReadSignal<Lang>, annual: Annual, residency: Option<Residency>
             .into_any()
         }
         Status::Turnover => view! { <Summary lang annual=annual.clone() today /> }.into_any(),
+        // Год микропредпринимательства (задача 100): налога на прибыль нет —
+        // словами над итогом, а его карточки нет.
+        Status::Micro => view! {
+            <div class="notice">
+                <p>{move || fill(t(lang.get(), Key::AnnualMicro), &[&year.to_string()])}</p>
+            </div>
+            <Summary lang annual=annual.clone() today />
+        }
+        .into_any(),
     };
     let asks = asks(&annual);
     let alerts = alerts(&annual);
     let cards = if annual.status == Status::General {
         vec![health_card(&annual, residency)]
+    } else if annual.status == Status::Micro {
+        vec![social_card(&annual), stamp_card(&annual, today), health_card(&annual, residency)]
     } else {
         vec![
             profit_card(&annual),
@@ -300,7 +336,8 @@ fn Summary(lang: ReadSignal<Lang>, annual: Annual, today: Option<Date>) -> impl 
     // (`tax::deadlines`, задача 21).
     let by_law = total.due;
     let due = by_law.map(deadlines::last_day);
-    let kind = Kind::Annual(annual.year);
+    let kind = due_kind(&annual);
+    let label = if annual.status == Status::Micro { Key::AnnualSumOfMicro } else { Key::AnnualSumOf };
     let passed = due.zip(today).is_some_and(|(due, today)| due < today);
     view! {
         <div class="hero-card" data-tilt="">
@@ -316,7 +353,7 @@ fn Summary(lang: ReadSignal<Lang>, annual: Annual, today: Option<Date>) -> impl 
             {by_law.map(|by_law| move || deadlines::moved(lang.get(), kind, by_law).map(|note| view! {
                 <span class="hero-note">{note}</span>
             }))}
-            <span class="hero-label">{tr(lang, Key::AnnualSumOf)}</span>
+            <span class="hero-label">{tr(lang, label)}</span>
             {match total.sum {
                 Some(sum) => view! { <span class="hero-sum">{move || drams(lang.get(), sum)}</span> }.into_any(),
                 None => view! { <span class="hero-note">{tr(lang, Key::AnnualSumUnknown)}</span> }.into_any(),
@@ -478,8 +515,12 @@ enum Note {
     SocialNoStatus,
     SocialEaeu,
     SocialStops,
+    /// Соцплатёж микропредприятия — как у самозанятого (задача 100).
+    SocialSelfEmployed,
     NoRule,
     StampScale(u16),
+    /// Шкала года микропредпринимательства: база — оборот отчёта (задача 100).
+    StampScaleMicro(u16),
     StampMayGrow { up_to: i64, next: i64 },
     StampUnrated { rows: usize, up_to: i64, next: i64 },
     StampNoTurnover(u16),
@@ -547,8 +588,10 @@ impl Note {
             Self::SocialNoStatus => t(lang, Key::AnnualSocialNoStatus).to_owned(),
             Self::SocialEaeu => t(lang, Key::AnnualSocialEaeu).to_owned(),
             Self::SocialStops => t(lang, Key::AnnualSocialStops).to_owned(),
+            Self::SocialSelfEmployed => t(lang, Key::AnnualSocialSelfEmployed).to_owned(),
             Self::NoRule => t(lang, Key::AnnualNoRule).to_owned(),
             Self::StampScale(year) => fill(t(lang, Key::AnnualStampScale), &[&scale(lang, year)]),
+            Self::StampScaleMicro(year) => fill(t(lang, Key::AnnualStampScaleMicro), &[&scale(lang, year)]),
             Self::StampMayGrow { up_to, next } => fill(t(lang, Key::AnnualStampMayGrow), &[&money(up_to), &money(next)]),
             Self::StampUnrated { rows, up_to, next } => {
                 fill(t(lang, Key::AnnualStampUnrated), &[&count(rows), &money(up_to), &money(next)])
@@ -776,6 +819,7 @@ fn social_card(annual: &Annual) -> Card {
         Social::Out(SocialOut::NoStatus) => (Amount::Nothing, None, vec![Note::SocialNoStatus, Note::SocialEaeu]),
         Social::Out(SocialOut::Later(day)) => (Amount::Nothing, None, vec![Note::SocialLater(day)]),
         Social::Unknown(_) => (Amount::Unknown, None, Vec::new()),
+        Social::SelfEmployed => (Amount::Unknown, None, vec![Note::SocialSelfEmployed]),
         Social::Due {
             payment: Fixed::NoRule,
             ..
@@ -793,6 +837,7 @@ fn social_card(annual: &Annual) -> Card {
 /// Гербовый сбор.
 fn stamp_card(annual: &Annual, today: Option<Date>) -> Card {
     let year = annual.year;
+    let scale_note = if annual.status == Status::Micro { Note::StampScaleMicro(year) } else { Note::StampScale(year) };
     let left = matches!(annual.months.left, Some((_, Leaving::Threshold | Leaving::Code(_))));
     let (amount, due, mut notes) = match annual.stamp {
         Stamp::Due {
@@ -803,7 +848,7 @@ fn stamp_card(annual: &Annual, today: Option<Date>) -> Card {
             due,
             unrated,
         } => {
-            let mut notes = vec![Note::StampScale(year)];
+            let mut notes = vec![scale_note];
             if let (Some(up_to), Some((_, next))) = (up_to, next) {
                 if unrated > 0 {
                     notes.push(Note::StampUnrated {
@@ -820,7 +865,7 @@ fn stamp_card(annual: &Annual, today: Option<Date>) -> Card {
         Stamp::NoTurnover { cautious, due } => (
             Amount::Sum(Basis::Cautious, cautious),
             Some(Due::Day(due)),
-            vec![Note::StampNoTurnover(year), Note::StampScale(year)],
+            vec![Note::StampNoTurnover(year), scale_note],
         ),
         Stamp::Stopped => (Amount::Nothing, None, vec![Note::StampStopped]),
         Stamp::Exempt => (Amount::Nothing, None, vec![Note::StampExempt]),

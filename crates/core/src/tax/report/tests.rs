@@ -481,6 +481,15 @@ fn no_numbers_without_a_whole_calculation() {
     ];
     assert_eq!(report(&tax(&design, &threshold, &[], quarter(2026, 3)), None), Err(Missing::Left));
     assert_eq!(report(&tax(&design, &[], &[], quarter(2024, 4)), None), Err(Missing::NoForm));
+    // Год микропредпринимательства (задача 100) — своим ответом: расчёта налога
+    // с оборота у микропредприятия нет вовсе, а ушедшему с него он, может быть,
+    // и нужен — налог с оборота по заявлению или НДС, — но готовит его
+    // бухгалтер.
+    let mut micro = design.clone();
+    micro.micro.insert(2026);
+    assert_eq!(report(&tax(&micro, &[], &[], quarter(2026, 3)), None), Err(Missing::Micro));
+    let over = [income(day(2026, 2, 10), 30_000_000, None)];
+    assert_eq!(report(&tax(&micro, &over, &[], quarter(2026, 1)), None), Err(Missing::LeftMicro));
     // Квартал без дохода и расходов — нули в итоге, а не «чисел нет».
     let empty = ready(&tax(&design, &[], &[], quarter(2026, 3)), None);
     assert!(empty.numbers.sections.is_empty() && empty.numbers.rows.is_empty());

@@ -2182,3 +2182,147 @@ fn five_years() -> (Vec<Document>, Vec<Operation>) {
     }
     (documents, operations)
 }
+
+/// Профиль с этими кодами, микропредприятие в годы `years` (задача 100).
+fn micro(codes: &[&str], years: &[u16]) -> ProfileData {
+    ProfileData {
+        micro: years.iter().copied().collect(),
+        ..profile(codes)
+    }
+}
+
+/// Год микропредпринимательства: налогов с деятельности нет — ни строк, ни
+/// суммы (НК, ст. 269, ч. 1), — а порог и оборот года — свои: 24 млн по
+/// записи `micro_threshold` (ст. 267, ч. 3; ст. 268, ч. 1, п. 2). Ровно порог
+/// — ещё не превышение («չի գերազանցել»). Соседний год без отметки — налог
+/// с оборота, как раньше. Числа — из закона, не из этого кода.
+#[test]
+fn a_micro_year_has_no_tax_and_its_own_threshold() {
+    let profile = micro(&["90.01.0"], &[2026]);
+    let books = [
+        income(day(2025, 6, 1), 1_000_000, None),
+        income(day(2026, 2, 10), 3_600_000, None),
+        income(day(2026, 3, 20), 20_400_000, None),
+    ];
+    let got = tax(Some(&profile), &books, &[], quarter(2026, 1));
+    let mut wrong = Vec::new();
+    if got.regime != Regime::Micro || !got.micro() {
+        wrong.push(format!("режим {:?}", got.regime));
+    }
+    if !got.lines.is_empty() || got.tax != 0 || got.known().is_some() {
+        wrong.push(format!("строки {:?}, налог {}", got.lines, got.tax));
+    }
+    if (got.year_turnover, got.threshold) != (24_000_000, Some(24_000_000)) {
+        wrong.push(format!("оборот и порог {:?}", (got.year_turnover, got.threshold)));
+    }
+    if !got.complete() || got.closable(day(2026, 11, 14)) {
+        wrong.push(format!("полнота {}, закрывается {}", got.complete(), got.closable(day(2026, 11, 14))));
+    }
+    // Прошлый год не отмечен — налог с оборота, прочая деятельность: 10 %.
+    let before = tax(Some(&profile), &books, &[], quarter(2025, 2));
+    if before.regime != Regime::Turnover || before.tax != 100_000 {
+        wrong.push(format!("2025: {:?}, налог {}", before.regime, before.tax));
+    }
+    assert!(wrong.is_empty(), "год микропредпринимательства: {wrong:#?}");
+}
+
+/// Оборот этого года перешёл порог — с этого дня до конца года ИП не
+/// микропредприятие (ст. 268, ч. 1, п. 2), а налог с оборота или НДС —
+/// к бухгалтеру: в налог не идёт ни часть до порога, ни сверх. Оборот
+/// прошлого года больше порога — этот год микропредприятием быть нельзя
+/// (ст. 267, ч. 3), со дня 1 января.
+#[test]
+fn the_micro_regime_ends_over_its_threshold() {
+    let profile = micro(&["90.01.0"], &[2026, 2027]);
+    let books = [
+        income(day(2026, 2, 10), 20_000_000, None),
+        income(day(2026, 8, 10), 5_000_000, None),
+        income(day(2026, 9, 5), 1_000_000, None),
+    ];
+    let third = tax(Some(&profile), &books, &[], quarter(2026, 3));
+    assert_eq!(
+        third.regime,
+        Regime::Left {
+            from: day(2026, 8, 10),
+            why: Leaving::MicroThreshold
+        }
+    );
+    assert!(third.micro() && third.lines.is_empty() && third.tax == 0);
+    assert_eq!((third.year_turnover, third.threshold), (26_000_000, Some(24_000_000)));
+    let next = tax(Some(&profile), &books, &[], quarter(2027, 1));
+    assert_eq!(
+        next.regime,
+        Regime::Left {
+            from: day(2027, 1, 1),
+            why: Leaving::MicroPreviousYear
+        }
+    );
+}
+
+/// Доход по коду, закрывающему микропредпринимательство (70 — ст. 267, ч. 5,
+/// п. 2.1, с 2025-07-01), — со дня этой услуги режима нет (ст. 268, ч. 1,
+/// п. 3), и код назван своей причиной, а не закрывающим налог с оборота.
+#[test]
+fn income_under_a_code_closed_to_micro_ends_it() {
+    let profile = micro(&["90.01.0", "70.22.0"], &[2026]);
+    let books = [
+        income(day(2026, 7, 5), 1_000_000, Some("90.01.0")),
+        income(day(2026, 8, 1), 200_000, Some("70.22.0")),
+    ];
+    let got = tax(Some(&profile), &books, &[], quarter(2026, 3));
+    assert_eq!(
+        got.regime,
+        Regime::Left {
+            from: day(2026, 8, 1),
+            why: Leaving::MicroCode(code("70.22.0"))
+        }
+    );
+    assert_eq!(got.excluded_codes, [(code("70.22.0"), day(2025, 7, 1))]);
+}
+
+/// Пропуски года микропредпринимательства — то, без чего не узнать, длится
+/// ли режим (Правило 6), а не то, что решало бы налог: его нет.
+///
+/// - Доход без курса — порог (ст. 268, ч. 1, п. 2); расходам делить нечего.
+/// - Кодов в профиле нет — не узнать, не закрыт ли режим кодом (ст. 267,
+///   ч. 5, п. 2.1); неизвестный вид — не «разрешённый».
+/// - Кодов несколько, и один из них закрывает режим, — доход без кода тоже
+///   пропуск: по закрывающему коду режим кончился бы со дня услуги (ст. 268,
+///   ч. 1, п. 3). Единственный незакрывающий код — не пропуск.
+/// - Доход «аренда, проценты, роялти» — с начала года и в следующих
+///   кварталах: по действующему договору аренды, процентов (кроме процентов
+///   на остаток текущего счёта) или роялти микропредприятием быть нельзя
+///   (ст. 267, ч. 5, п. 11), а проценты ли это на остаток, программа не знает.
+#[test]
+fn a_micro_quarter_misses_what_decides_the_regime() {
+    let mut wrong = Vec::new();
+    let codeless = micro(&[], &[2026]);
+    let books = [usd_income(day(2026, 4, 2), 100_000, None), ordinary(day(2026, 4, 3), 50_000)];
+    let got = tax(Some(&codeless), &books, &[], quarter(2026, 2));
+    if got.gaps.unrated != 1 || !got.gaps.no_codes || got.gaps.unallocated != 0 || got.complete() {
+        wrong.push(format!("без кодов: {:?}", got.gaps));
+    }
+    let closing_code = micro(&["90.01.0", "70.22.0"], &[2026]);
+    let got = tax(Some(&closing_code), &[income(day(2026, 5, 4), 200_000, None)], &[], quarter(2026, 2));
+    if got.gaps.unassigned != 1 || got.regime != Regime::Micro || got.complete() {
+        wrong.push(format!("закрывающий код рядом: {:?}, {:?}", got.regime, got.gaps));
+    }
+    let singer = micro(&["90.01.0"], &[2026]);
+    let got = tax(Some(&singer), &[income(day(2026, 5, 4), 200_000, None)], &[], quarter(2026, 2));
+    if !got.gaps.is_empty() || !got.complete() {
+        wrong.push(format!("один код: {:?}", got.gaps));
+    }
+    let rent = [income_as(day(2026, 2, 1), 300_000, IncomeKind::Rent), income(day(2026, 5, 4), 200_000, None)];
+    for (number, count) in [(1, 1), (2, 1)] {
+        let got = tax(Some(&singer), &rent, &[], quarter(2026, number));
+        if got.gaps.micro_rent != count || got.complete() || got.regime != Regime::Micro {
+            wrong.push(format!("аренда, {number} квартал: {:?}", got.gaps));
+        }
+    }
+    // Год налога с оборота — как раньше: строка 5, пропуска нет.
+    let before = tax(Some(&singer), &[income_as(day(2025, 2, 1), 300_000, IncomeKind::Rent)], &[], quarter(2025, 1));
+    if before.gaps.micro_rent != 0 || before.tax != 30_000 {
+        wrong.push(format!("2025: {:?}, налог {}", before.gaps, before.tax));
+    }
+    assert!(wrong.is_empty(), "пропуски года микропредпринимательства: {wrong:#?}");
+}

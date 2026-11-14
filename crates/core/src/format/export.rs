@@ -547,6 +547,11 @@ pub fn closings_sheet<'a>(lang: Lang, closed: impl IntoIterator<Item = (&'a Quar
             let known = now.known();
             let check = match now.regime {
                 _ if !now.complete() => t(lang, Key::ExportClosingUnknown).to_owned(),
+                // Год закрытого квартала теперь отмечен в профиле
+                // микропредпринимательством (задача 100): расчёт налога
+                // с оборота за него подан, а программа налога не считает.
+                Regime::Micro => t(lang, Key::ExportClosingMicro).to_owned(),
+                Regime::Left { why, .. } if why.micro() => t(lang, Key::ExportClosingMicro).to_owned(),
                 Regime::Left { from, .. } => fill(t(lang, Key::ExportClosingLeft), &[&i18n::date(lang, from)]),
                 Regime::Turnover if !now.differs_from(closing) => t(lang, Key::ExportClosingSame).to_owned(),
                 Regime::Turnover if now.tax == filed.tax => t(lang, Key::ExportClosingSameTax).to_owned(),

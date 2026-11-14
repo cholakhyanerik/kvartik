@@ -151,7 +151,10 @@ fn uid(kind: Kind) -> String {
     match kind {
         Kind::Turnover(quarter) => format!("turnover-{}-q{}", quarter.year(), quarter.number()),
         Kind::Application(year) => format!("application-{year}"),
+        Kind::MicroApplication(year) => format!("micro-application-{year}"),
+        Kind::MicroReport(year) => format!("micro-report-{year}"),
         Kind::Annual(year) => format!("annual-{year}"),
+        Kind::MicroAnnual(year) => format!("micro-annual-{year}"),
         Kind::HealthYear(year) => format!("health-{year}"),
         Kind::HealthMonth { year, month } => format!("health-{year}-{month:02}"),
         Kind::Declaration(year) => format!("declaration-{year}"),
@@ -164,7 +167,15 @@ fn uid(kind: Kind) -> String {
 const fn tax_payment(kind: Kind) -> bool {
     match kind {
         Kind::Turnover(_) | Kind::Annual(_) => true,
-        Kind::Application(_) | Kind::HealthYear(_) | Kind::HealthMonth { .. } | Kind::Declaration(_) => false,
+        // Гербовый сбор — не налог кодекса (закон ՀՕ-245-Ն), и о норме
+        // ст. 18, ч. 4 к нему не сверено — как у взноса медстраховки.
+        Kind::Application(_)
+        | Kind::MicroApplication(_)
+        | Kind::MicroReport(_)
+        | Kind::MicroAnnual(_)
+        | Kind::HealthYear(_)
+        | Kind::HealthMonth { .. }
+        | Kind::Declaration(_) => false,
     }
 }
 
@@ -205,7 +216,15 @@ fn public_lines(lang: Lang, deadline: Deadline) -> Vec<String> {
                 lines.push(fill(t(lang, Key::CalendarHealthOver), &[&over]));
             }
         }
-        Kind::Turnover(_) | Kind::Annual(_) | Kind::HealthMonth { .. } | Kind::Declaration(_) => {}
+        // Общий календарь — налог с оборота: сроков микропредпринимательства
+        // в нём нет (`deadlines::general`).
+        Kind::Turnover(_)
+        | Kind::Annual(_)
+        | Kind::MicroApplication(_)
+        | Kind::MicroReport(_)
+        | Kind::MicroAnnual(_)
+        | Kind::HealthMonth { .. }
+        | Kind::Declaration(_) => {}
     }
     common_lines(lang, deadline, &mut lines);
     lines.push(fill(t(lang, Key::CalendarYours), &[APP_URL]));
@@ -267,7 +286,26 @@ fn amount(books: Books<'_>, today: Date, kind: Kind, years: &mut Vec<Annual>) ->
             }),
             _ => None,
         },
-        Kind::Turnover(_) | Kind::Application(_) | Kind::Declaration(_) => None,
+        // Год микропредпринимательства — один гербовый сбор: налога на
+        // прибыль нет, а соцплатёж самозанятого — не к этому сроку
+        // (`annual::Social::SelfEmployed`). Строки без курса — сбор может
+        // быть ступенью выше.
+        // Нечитаемые записи и строки без курса прошлого и этого года — база
+        // может быть больше, а сбор ступенью выше, как у `Total::of`.
+        Kind::MicroAnnual(year) => {
+            let annual = annual(year);
+            let unrated = matches!(annual.stamp, annual::Stamp::Due { unrated, next: Some(_), .. } if unrated > 0);
+            let partial = unrated || annual.unreadable > 0 || annual.broken || annual.regime_unrated > 0;
+            annual.stamp.amount().map(|drams| Amount {
+                drams: Some(drams),
+                partial: partial.then_some(Key::AnnualPartialCard),
+            })
+        }
+        Kind::Turnover(_)
+        | Kind::Application(_)
+        | Kind::MicroApplication(_)
+        | Kind::MicroReport(_)
+        | Kind::Declaration(_) => None,
     }
 }
 

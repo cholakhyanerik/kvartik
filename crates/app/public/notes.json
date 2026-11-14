@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.126",
+      "date": "2026-11-14",
+      "hy": [
+        "Միկրոձեռնարկատիրությունը՝ հարկման երկրորդ համակարգ. պրոֆիլում նշեք այն տարին, որի համար ներկայացրել եք հայտարարությունը, և ծրագիրը շրջանառության հարկի փոխարեն ցույց կտա տարվա շրջանառությունը, կհետևի 24 մլն ֏ շեմին և այն կոդերին, որոնց համար համակարգը փակ է, և կասի, եթե այն դադարել է։",
+        "Այդպիսի տարվա համար՝ իր տարեկան վճարները (շահութահարկ չկա, դրոշմանիշային վճարը՝ տարվա շրջանառությամբ) և ժամկետները՝ համակարգի հայտարարություն, տարեկան շրջանառության հաշվետվություն և դրոշմանիշային վճար։"
+      ],
+      "ru": [
+        "Микропредпринимательство — второй налоговый режим: отметьте в профиле год, на который подали заявление о нём, и программа покажет оборот года вместо налога с оборота, проследит за порогом 24 млн ֏ и кодами, которым режим закрыт, и скажет, если он кончился.",
+        "У такого года свои годовые платежи (налога на прибыль нет, гербовый сбор — по обороту года) и свои сроки: заявление о режиме, отчёт об обороте за год и гербовый сбор."
+      ],
+      "en": [
+        "Micro-entrepreneurship is now a second tax regime: tick the year you filed the application for in your profile, and the app shows the year's turnover instead of turnover tax, watches the 24 million ֏ threshold and the codes the regime is closed to, and tells you if it has ended.",
+        "Such a year gets its own annual payments (no profit tax, stamp duty by the year's turnover) and its own deadlines: the regime application, the annual turnover report and stamp duty."
+      ]
+    },
+    {
       "version": "0.0.125",
       "date": "2026-11-14",
       "hy": [
@@ -260,19 +276,6 @@
       ],
       "en": [
         "While you're restoring a backup, and in an empty app, the backup screen shows only the restore: the new backup's password fields no longer sit right below, so the backup's password won't go into the wrong field."
-      ]
-    },
-    {
-      "version": "0.0.106",
-      "date": "2026-11-10",
-      "hy": [
-        "Կայքի էջի «Բացել Kvartik-ը» կոճակն այժմ ծրագիրը բացում է այդ էջի լեզվով, այլ ոչ թե դիտարկիչի լեզվով։ Այն կհիշվի, երբ սեղմեք «Շարունակել»։"
-      ],
-      "ru": [
-        "«Открыть Kvartik» на странице сайта теперь открывает программу на языке этой страницы, а не на языке браузера. Запомнится он, когда вы нажмёте «Продолжить»."
-      ],
-      "en": [
-        "“Open Kvartik” on a website page now opens the app in that page's language rather than your browser's. It's remembered once you press “Continue”."
       ]
     }
   ]

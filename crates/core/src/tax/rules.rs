@@ -362,11 +362,14 @@ pub trait Rule {
 }
 
 /// Кто ведёт деятельность с такими кодами, не может быть плательщиком
-/// налога с оборота — ни по какой своей деятельности (`tax::turnover`).
+/// налога с оборота — ни по какой своей деятельности (`tax::turnover`), —
+/// а в записях `micro_exclusions` — микропредприятием (НК, ст. 267, ч. 5,
+/// п. 2.1; задача 100).
 ///
 /// Основание окно называет словами (`Key::ActivityExcluded`: ст. 254,
-/// ч. 3, п. 3.1), а из записи берёт только день начала: запись с другим
-/// основанием — повод поправить и строку окна.
+/// ч. 3, п. 3.1; `Key::TaxLeftMicroCode`: ст. 267, ч. 5, п. 2.1), а из записи
+/// берёт только день начала: запись с другим основанием — повод поправить
+/// и строку окна.
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Exclusion {
@@ -554,8 +557,9 @@ impl Rule for HighTech {
     }
 }
 
-/// Порог оборота всех видов за год (НК, ст. 254, ч. 2; ст. 255, ч. 1, п. 2;
-/// ст. 59, ч. 1, п. 5).
+/// Порог оборота всех видов за год: налога с оборота (НК, ст. 254, ч. 2;
+/// ст. 255, ч. 1, п. 2; ст. 59, ч. 1, п. 5) и, в записях `micro_threshold`,
+/// микропредпринимательства (ст. 267, ч. 3; ст. 268, ч. 1, п. 2; задача 100).
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Threshold {
@@ -1186,6 +1190,44 @@ impl Rule for IncomeDeclaration {
     }
 }
 
+/// Отчёт микропредприятия об обороте за год (`tax::deadlines`, задача 100):
+/// последний день — день `due` следующего года (НК, ст. 270, ч. 1). Не
+/// подаёт его ИП, который микропредприятие только по видам приложения 3
+/// к кодексу (там же), — а знать это программе не из чего, и окно говорит
+/// словами. Запись — об отчётном годе, как у декларации.
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MicroReport {
+    pub due: NextYearDay,
+    pub from: Date,
+    /// Ключ обязателен, как у [`Exclusion::until`].
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub until: Option<Date>,
+    pub source: Source,
+}
+
+impl Rule for MicroReport {
+    fn period(&self) -> Period {
+        Period {
+            from: self.from,
+            until: self.until,
+        }
+    }
+
+    fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// Срок один на всех: две записи — всегда об одном.
+    fn same_subject(&self, _: &Self) -> bool {
+        true
+    }
+
+    fn usable(&self) -> bool {
+        self.due.usable()
+    }
+}
+
 /// Когда выписать расчётный документ по услуге (`tax::settlement`, задача
 /// 23): через `after_days` дней после дня оказания услуги, `0` — в тот же
 /// день. Слова окна называют правило сами (`Key::SettleAbout`: день
@@ -1371,6 +1413,10 @@ pub struct Rules {
     turnover_rates: Vec<Rate>,
     high_tech: Vec<HighTech>,
     turnover_threshold: Vec<Threshold>,
+    micro_threshold: Vec<Threshold>,
+    micro_exclusions: Vec<Exclusion>,
+    micro_application: Vec<TurnoverApplication>,
+    micro_report: Vec<MicroReport>,
     turnover_expenses: Vec<Expenses>,
     turnover_carry: Vec<QuarterKinds>,
     turnover_place: Vec<QuarterKinds>,
@@ -1427,6 +1473,10 @@ impl Rules {
         check("turnover_rates", &rules.turnover_rates)?;
         check("high_tech", &rules.high_tech)?;
         check("turnover_threshold", &rules.turnover_threshold)?;
+        check("micro_threshold", &rules.micro_threshold)?;
+        check("micro_exclusions", &rules.micro_exclusions)?;
+        check("micro_application", &rules.micro_application)?;
+        check("micro_report", &rules.micro_report)?;
         check("turnover_expenses", &rules.turnover_expenses)?;
         check("turnover_carry", &rules.turnover_carry)?;
         check("turnover_place", &rules.turnover_place)?;
@@ -1490,6 +1540,10 @@ impl Rules {
             turnover_rates,
             high_tech,
             turnover_threshold,
+            micro_threshold,
+            micro_exclusions,
+            micro_application,
+            micro_report,
             turnover_expenses,
             turnover_carry,
             turnover_place,
@@ -1512,6 +1566,10 @@ impl Rules {
         all.extend(of(turnover_rates));
         all.extend(of(high_tech));
         all.extend(of(turnover_threshold));
+        all.extend(of(micro_threshold));
+        all.extend(of(micro_exclusions));
+        all.extend(of(micro_application));
+        all.extend(of(micro_report));
         all.extend(of(turnover_expenses));
         all.extend(of(turnover_carry));
         all.extend(of(turnover_place));
@@ -1554,6 +1612,27 @@ impl Rules {
     /// Порог оборота за год.
     pub fn turnover_threshold(&self) -> &[Threshold] {
         &self.turnover_threshold
+    }
+
+    /// Порог оборота микропредпринимательства (задача 100).
+    pub fn micro_threshold(&self) -> &[Threshold] {
+        &self.micro_threshold
+    }
+
+    /// Кто не может быть микропредприятием по коду деятельности (задача 100).
+    pub fn micro_exclusions(&self) -> &[Exclusion] {
+        &self.micro_exclusions
+    }
+
+    /// Срок заявления о микропредпринимательстве (задача 100): те же дни, что
+    /// у заявления о налоге с оборота, по своей статье (НК, ст. 267, ч. 1).
+    pub fn micro_application(&self) -> &[TurnoverApplication] {
+        &self.micro_application
+    }
+
+    /// Срок отчёта микропредприятия об обороте (задача 100).
+    pub fn micro_report(&self) -> &[MicroReport] {
+        &self.micro_report
     }
 
     /// Какие расходы идут в вычет.

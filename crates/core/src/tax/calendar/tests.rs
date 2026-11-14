@@ -493,6 +493,48 @@ fn the_personal_calendar_says_what_it_cannot_count() {
     assert!(wrong.is_empty(), "чего не знает календарь: {wrong:#?}");
 }
 
+/// Год микропредпринимательства (задача 100): к 20 апреля следующего года —
+/// гербовый сбор, 12 000 ֏ при обороте 3 600 000 ֏ (закон ՀՕ-245-Ն, ст. 12,
+/// ч. 1, п. 2), без налога на прибыль и соцплатежа; с нечитаемой записью
+/// база может быть больше, и сумма — с «посчитано не всё», как у годовых
+/// платежей.
+#[test]
+fn the_personal_calendar_has_the_micro_stamp_duty() {
+    let mut profile = programmer();
+    profile.activities = vec![crate::model::activity::ActivityCode::parse("90.01.0").expect("код")];
+    profile.micro.insert(2026);
+    let operations = [income(day(2026, 3, 10), 3_600_000)];
+    let books = Books {
+        documents: &[],
+        operations: &operations,
+        profile: Some(&profile),
+        closings: &[],
+        openings: &[],
+        unreadable: 0,
+    };
+    let today = day(2026, 10, 5);
+    let mut wrong = Vec::new();
+    for (unreadable, partial) in [(0, false), (1, true)] {
+        let events = personal_events(Books { unreadable, ..books }, today);
+        match events.iter().find(|(uid, _, _)| uid == "mine-micro-annual-2026@kvartik.com") {
+            Some((_, start, description)) => {
+                let first = description.lines().next().unwrap_or_default();
+                if start != "20270420" || !first.contains("12\u{A0}000\u{A0}֏") {
+                    wrong.push(format!("нечитаемых {unreadable}: {start}, {first}"));
+                }
+                if description.contains(t(Lang::Ru, Key::AnnualPartialCard)) != partial {
+                    wrong.push(format!("нечитаемых {unreadable}: {description}"));
+                }
+            }
+            None => wrong.push(format!("нечитаемых {unreadable}: нет события сбора: {events:?}")),
+        }
+        if events.iter().any(|(uid, _, _)| uid == "mine-annual-2026@kvartik.com") {
+            wrong.push(format!("нечитаемых {unreadable}: годовые платежи налога с оборота"));
+        }
+    }
+    assert!(wrong.is_empty(), "сбор микропредприятия в календаре: {wrong:#?}");
+}
+
 /// Файлы для глаз и для импорта в календарь телефона: общий календарь на
 /// трёх языках и личный — программиста из теста выше, на 5 октября 2026
 /// года. `cargo test -p kvartik-core look_ics -- --ignored`, файлы —

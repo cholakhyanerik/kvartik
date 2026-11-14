@@ -48,7 +48,7 @@
 use super::annual::{self, Health, Status, Total};
 use super::closing::Closing;
 use super::rules::{self, HealthBy, Rule, Rules};
-use super::turnover::Books;
+use super::turnover::{Books, Leaving};
 use crate::i18n::{self, Key, Lang, fill, t};
 use crate::model::date::{Date, Quarter};
 use crate::model::profile::{Person, Residency};
@@ -76,8 +76,16 @@ pub enum Kind {
     Turnover(Quarter),
     /// Подать заявление о налоге с оборота на год.
     Application(u16),
+    /// Подать заявление о микропредпринимательстве на год (задача 100).
+    MicroApplication(u16),
+    /// Подать отчёт микропредприятия об обороте за год (задача 100).
+    MicroReport(u16),
     /// Заплатить налог на прибыль, соцплатёж и гербовый сбор за год.
     Annual(u16),
+    /// Заплатить гербовый сбор за год микропредпринимательства: налога на
+    /// прибыль у микропредприятия нет, а соцплатёж самозанятого — в срок
+    /// подоходного налога (`tax::annual::Social::SelfEmployed`), задача 100.
+    MicroAnnual(u16),
     /// Заплатить взнос медстраховки за год одной суммой.
     HealthYear(u16),
     /// Заплатить взнос медстраховки за месяц `month` года `year`.
@@ -120,7 +128,10 @@ pub fn what(lang: Lang, kind: Kind) -> String {
     match kind {
         Kind::Turnover(quarter) => fill(t(lang, Key::DeadlineTurnover), &[&i18n::quarter(lang, quarter)]),
         Kind::Application(year) => fill(t(lang, Key::DeadlineApplication), &[&year.to_string()]),
+        Kind::MicroApplication(year) => fill(t(lang, Key::DeadlineMicroApplication), &[&year.to_string()]),
+        Kind::MicroReport(year) => fill(t(lang, Key::DeadlineMicroReport), &[&year.to_string()]),
         Kind::Annual(year) => fill(t(lang, Key::DeadlineAnnual), &[&year.to_string()]),
+        Kind::MicroAnnual(year) => fill(t(lang, Key::DeadlineMicroAnnual), &[&year.to_string()]),
         Kind::HealthYear(year) => fill(t(lang, Key::DeadlineHealthYear), &[&year.to_string()]),
         // Месяц — всегда с годом: «за декабрь» в январском напоминании
         // читалось бы как декабрь этого года. Пробел перед «г.» CLDR ставит
@@ -138,8 +149,10 @@ pub fn what(lang: Lang, kind: Kind) -> String {
 /// в шапке). К сроку квартала и подают расчёт, и платят.
 const fn pays(kind: Kind) -> bool {
     match kind {
-        Kind::Turnover(_) | Kind::Annual(_) | Kind::HealthYear(_) | Kind::HealthMonth { .. } => true,
-        Kind::Application(_) | Kind::Declaration(_) => false,
+        Kind::Turnover(_) | Kind::Annual(_) | Kind::MicroAnnual(_) | Kind::HealthYear(_) | Kind::HealthMonth { .. } => {
+            true
+        }
+        Kind::Application(_) | Kind::MicroApplication(_) | Kind::MicroReport(_) | Kind::Declaration(_) => false,
     }
 }
 
@@ -269,6 +282,28 @@ pub fn between(books: Books<'_>, from: Date, until: Date) -> Vec<Deadline> {
         if on_turnover_this_year && let Some(due) = Total::of(&annual).due {
             found.push(Deadline::new(Kind::Annual(year), due));
         }
+        // Год микропредпринимательства (задача 100): заявление на него, отчёт
+        // об обороте за него и гербовый сбор. Ушедшему с режима посреди года
+        // сроки этого года считает бухгалтер (`Status::General`).
+        if annual.status == Status::Micro {
+            found.extend(micro_application(all, person, year));
+            found.extend(micro_report(all, year));
+            if let Some(due) = annual::micro_due(&annual) {
+                found.push(Deadline::new(Kind::MicroAnnual(year), due));
+            }
+        }
+        // Перешедший порог микропредпринимательства — плательщик налога
+        // с оборота со дня превышения, если в 20 дней подаст о нём заявление,
+        // иначе НДС (НК, ст. 254, ч. 1, п. 3; ст. 59, ч. 1, п. 3). Срок — по
+        // записи `turnover_application`; налоги после ухода считает бухгалтер.
+        // Ушедшему по коду (ст. 267, ч. 5, п. 2.1) налог с оборота закрыт тем
+        // же кодом (ст. 254, ч. 3, п. 3.1), и заявления нет.
+        if let Some((left, Leaving::MicroThreshold)) = annual.months.left
+            && let Some(rule) = rules::on(all.turnover_application(), left)
+            && let Some(day) = left.add_days(i32::from(rule.after_days))
+        {
+            found.push(Deadline::new(Kind::Application(year), day));
+        }
         // За год до регистрации ИП взноса нет: `tax::annual` смотрит
         // регистрацию только в самом году.
         let health = if annual.status == Status::NotYet { Health::NoRule } else { annual.health };
@@ -359,13 +394,41 @@ fn health_month(year: u16, month: u8, due_day: u8) -> Option<Deadline> {
 /// прочтениях (FEATURE_TASKS.md, «Заявление о налоге с оборота»; ответ
 /// 2026-10-19, вопрос 6.1; разведка задачи 21, 2026-10-20).
 fn application(all: &Rules, person: Option<&Person>, year: u16) -> Option<Deadline> {
+    applying_by(all.turnover_application(), Kind::Application(year), person, year)
+}
+
+/// Заявление о микропредпринимательстве на год `year` (задача 100): те же
+/// дни, что у [`application`], по своей статье — НК, ст. 267, ч. 1, п. 1–3
+/// (по закону, сверено по тексту arlis 230455 2026-11-14).
+fn micro_application(all: &Rules, person: Option<&Person>, year: u16) -> Option<Deadline> {
+    applying_by(all.micro_application(), Kind::MicroApplication(year), person, year)
+}
+
+/// Отчёт микропредприятия об обороте за год `year` — до дня следующего года
+/// по записи `micro_report` (НК, ст. 270, ч. 1). Кто микропредприятие только
+/// по видам приложения 3 к кодексу, его не подаёт (там же), а программе это
+/// знать не из чего: срок показывается всем, а слова экрана налога говорят
+/// об исключении.
+fn micro_report(all: &Rules, year: u16) -> Option<Deadline> {
+    let rule = rules::for_year(all.micro_report(), year)?;
+    Some(Deadline::new(Kind::MicroReport(year), rule.due.after(year)?))
+}
+
+/// Заявление вида `kind` на год `year` по записям `records` — общий ход
+/// у [`application`] и [`micro_application`].
+fn applying_by(
+    records: &[super::rules::TurnoverApplication],
+    kind: Kind,
+    person: Option<&Person>,
+    year: u16,
+) -> Option<Deadline> {
     let start = Date::new(year, 1, 1)?;
-    let rule = rules::on(all.turnover_application(), start)?;
+    let rule = rules::on(records, start)?;
     let due = rule.due.of(year)?;
     let after = i32::from(rule.after_days);
     let registered = person.and_then(|person| person.registered);
     if let Some(day) = registered.filter(|day| day.year() == year) {
-        return Some(Deadline::new(Kind::Application(year), day.add_days(after)?));
+        return Some(Deadline::new(kind, day.add_days(after)?));
     }
     let stopped = person.and_then(|person| {
         person
@@ -377,7 +440,7 @@ fn application(all: &Rules, person: Option<&Person>, year: u16) -> Option<Deadli
         Some(stop) => stop.until().filter(|resumed| resumed.year() == year)?.add_days(after)?,
         None => due,
     };
-    Some(Deadline::new(Kind::Application(year), by_law))
+    Some(Deadline::new(kind, by_law))
 }
 
 /// Последний день заявления нового ИП, учтённого в день `registered`, —
@@ -572,7 +635,16 @@ pub fn reminders(books: Books<'_>, today: Date) -> Vec<Reminder> {
     let Some(until) = today.add_days(REMIND_DAYS) else {
         return found;
     };
-    let own_card = |kind: Kind| matches!(kind, Kind::Application(year) if new_ie(person, year));
+    // Заявление нового ИП — своей карточкой ([`applying`]), когда год его
+    // регистрации на налоге с оборота; заявление после ухода
+    // с микропредпринимательства (задача 100) карточки нет — оно здесь.
+    let own_card = |kind: Kind| match kind {
+        Kind::Application(year) if new_ie(person, year) => {
+            let annual = annual::year(books, year);
+            annual.status == Status::Turnover && annual.months.span.is_some()
+        }
+        _ => false,
+    };
     for deadline in between(books, today, until)
         .into_iter()
         .filter(|deadline| !deadline.done && !own_card(deadline.kind))

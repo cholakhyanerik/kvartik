@@ -15,7 +15,7 @@
 //! нужную дату (`tax`), а правило, поменявшееся завтра, не должно сделать
 //! вчерашний профиль «испорченным».
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
@@ -308,6 +308,13 @@ pub struct ProfileData {
     pub kinds: BTreeMap<ActivityCode, IncomeKind>,
     /// Режим налогообложения; `None` — не выбран.
     pub regime: Option<Regime>,
+    /// Годы, в которые ИП — микропредприятие: заявление о
+    /// микропредпринимательстве на год подано (НК, ст. 267, ч. 1; задача 100).
+    /// Режим выбирают на год — заявлением до 20 февраля или в 20 дней после
+    /// учёта, — поэтому и здесь он по годам, а не одним значением: год, которого
+    /// здесь нет, — налог с оборота, как раньше. Не больше
+    /// [`ProfileData::MAX_MICRO_YEARS`]. С версии формата 21.
+    pub micro: BTreeSet<u16>,
     pub person: Person,
 }
 
@@ -328,6 +335,10 @@ struct ProfileDataFields {
     #[serde(default)]
     kinds: BTreeMap<ActivityCode, IncomeKind>,
     regime: Option<Regime>,
+    /// С версии формата 21 (задача 100): у профиля прежних версий все годы —
+    /// налог с оборота.
+    #[serde(default)]
+    micro: BTreeSet<u16>,
     person: Person,
 }
 
@@ -340,6 +351,9 @@ pub enum ProfileError {
     /// Строка налога выбрана коду, которого в профиле нет. Форма такого не
     /// пишет — это порча.
     StrayKind,
+    /// Год микропредпринимательства вне календаря дат: форма такого не пишет —
+    /// это порча.
+    StrayYear,
 }
 
 impl ProfileData {
@@ -349,6 +363,8 @@ impl ProfileData {
     pub const MAX_ACTIVITIES: usize = 30;
     /// Периодов остановки — с запасом на годы работы.
     pub const MAX_STOPS: usize = 100;
+    /// Лет микропредпринимательства — с запасом на годы работы.
+    pub const MAX_MICRO_YEARS: usize = 100;
 
     /// Не длиннее ли списки пределов. Списки ограничены, чтобы испорченная
     /// копия не положила в окно миллион строк (Правило 13). И строки налога
@@ -356,14 +372,25 @@ impl ProfileData {
     pub fn check(&self) -> Result<(), ProfileError> {
         let fits = self.accounts.len() <= Self::MAX_ACCOUNTS
             && self.activities.len() <= Self::MAX_ACTIVITIES
-            && self.person.stops.len() <= Self::MAX_STOPS;
+            && self.person.stops.len() <= Self::MAX_STOPS
+            && self.micro.len() <= Self::MAX_MICRO_YEARS;
         if !fits {
             return Err(ProfileError::TooMany);
         }
         if self.kinds.keys().any(|code| !self.activities.contains(code)) {
             return Err(ProfileError::StrayKind);
         }
+        if self.micro.iter().any(|year| !(Date::MIN_YEAR..=Date::MAX_YEAR).contains(year)) {
+            return Err(ProfileError::StrayYear);
+        }
         Ok(())
+    }
+
+    /// Микропредприятие ли ИП в году `year` — подано ли заявление на этот
+    /// год ([`Self::micro`]). Что из этого следует — порог, уход с режима,
+    /// платежи, — решают правила года (`tax`).
+    pub fn micro_in(&self, year: u16) -> bool {
+        self.micro.contains(&year)
     }
 }
 
@@ -380,6 +407,7 @@ impl<'de> Deserialize<'de> for ProfileData {
             activities,
             kinds,
             regime,
+            micro,
             person,
         } = ProfileDataFields::deserialize(deserializer)?;
         let data = Self {
@@ -393,11 +421,13 @@ impl<'de> Deserialize<'de> for ProfileData {
             activities,
             kinds,
             regime,
+            micro,
             person,
         };
         data.check().map_err(|error| match error {
             ProfileError::TooMany => de::Error::custom("список в профиле длиннее предела"),
             ProfileError::StrayKind => de::Error::custom("строка налога у кода, которого в профиле нет"),
+            ProfileError::StrayYear => de::Error::custom("год микропредпринимательства вне календаря"),
         })?;
         Ok(data)
     }

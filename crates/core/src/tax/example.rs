@@ -647,7 +647,8 @@ fn annual_lines(lang: Lang, annual: &Annual, today: Date, blocks: &mut Vec<Block
     let social = match annual.social {
         Social::Due { payment, .. } => payment.amount().map_or_else(|| unknown.to_owned(), |sum| amd(lang, sum)),
         Social::Out(_) => none.to_owned(),
-        Social::Unknown(_) | Social::NoRule => unknown.to_owned(),
+        // Пример — всегда налог с оборота: микропредприятия в нём нет.
+        Social::Unknown(_) | Social::SelfEmployed | Social::NoRule => unknown.to_owned(),
     };
     let stamp = match annual.stamp {
         Stamp::Due { amount, .. } | Stamp::NoTurnover { cautious: amount, .. } => amd(lang, amount),

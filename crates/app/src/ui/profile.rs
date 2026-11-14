@@ -11,7 +11,7 @@
 //! узнать об этом в конце квартала поздно. Так же — о номере счёта с
 //! несходящейся контрольной цифрой: опечатку видно, пока номер перед глазами.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
@@ -19,7 +19,7 @@ use kvartik_core::model::activity::{ActivityCode, CodeError, IncomeKind};
 use kvartik_core::model::bank::{BankAccount, Swift};
 use kvartik_core::model::date::Date;
 use kvartik_core::model::logo::{self, Image, ImageError, Logo};
-use kvartik_core::model::money::Currency;
+use kvartik_core::model::money::{Currency, Money};
 // Год рождения разбирает ядро: его же поле — у калькулятора лендинга
 // (задача 34).
 use kvartik_core::model::profile::{
@@ -28,7 +28,7 @@ use kvartik_core::model::profile::{
 use kvartik_core::model::text::{Line, Lines};
 use kvartik_core::model::tin::Tin;
 use kvartik_core::tax::example::Handoff;
-use kvartik_core::tax::{annual, deadlines, turnover};
+use kvartik_core::tax::{annual, deadlines, rules, turnover};
 use leptos::ev::{Event, SubmitEvent};
 use leptos::prelude::*;
 use leptos::wasm_split::SplitLoaderError;
@@ -583,6 +583,9 @@ where
     let initials = data.name.clone();
     let tin = data.tin.as_ref().map(|tin| tin.as_str().to_owned());
     let turnover = data.regime == Some(Regime::Turnover);
+    // Год микропредпринимательства (задача 100): в нём режим — он, а не
+    // налог с оборота.
+    let micro_now = today.is_some_and(|today| data.micro_in(today.year()));
     // Языки, на которых имя заполнено, — их имена на них самих.
     let named: Vec<&str> = Lang::ALL
         .into_iter()
@@ -621,7 +624,11 @@ where
                     {tin.map(|tin| view! {
                         <span>{move || fill(t(lang.get(), Key::TinShort), &[&tin])}</span>
                     })}
-                    {turnover.then(|| view! { <span>{tr(lang, Key::RegimeTurnover)}</span> })}
+                    {if micro_now {
+                        Some(view! { <span>{tr(lang, Key::RegimeMicro)}</span> })
+                    } else {
+                        turnover.then(|| view! { <span>{tr(lang, Key::RegimeTurnover)}</span> })
+                    }}
                 </p>
             </div>
         </div>
@@ -708,6 +715,9 @@ struct Form {
     accounts: RwSignal<Vec<AccountRow>>,
     activities: RwSignal<Vec<CodeRow>>,
     regime: RwSignal<Option<Regime>>,
+    /// Годы микропредпринимательства (задача 100) — все, и те, которых форма
+    /// не показывает: их она не трогает.
+    micro: RwSignal<BTreeSet<u16>>,
     birth_year: RwSignal<String>,
     pension_joined: RwSignal<Option<bool>>,
     /// День заявления о фонде — записью ISO, как и день регистрации.
@@ -778,6 +788,7 @@ impl Form {
             accounts: RwSignal::new(Vec::new()),
             activities: RwSignal::new(Vec::new()),
             regime: RwSignal::new(data.regime),
+            micro: RwSignal::new(data.micro.clone()),
             birth_year: RwSignal::new(
                 data.person.birth_year.map(|year| year.to_string()).unwrap_or_default(),
             ),
@@ -971,6 +982,7 @@ impl Form {
             activities,
             kinds,
             regime: self.regime.get_untracked(),
+            micro: self.micro.get_untracked(),
             person: Person {
                 birth_year,
                 pension_joined: self.pension_joined.get_untracked(),
@@ -1628,11 +1640,13 @@ fn Activities(
                         let code = ActivityCode::parse(&row.text.get()).ok()?;
                         excluded_warning(lang, code, today)
                     }}
-                    // Что значит этот код: ставка и ближайший срок (задача 28).
+                    // Что значит этот код: ставка и ближайший срок (задача 28) —
+                    // у года налога с оборота: в отмеченном году
+                    // микропредпринимательства их нет (задача 100).
                     {move || {
                         let day = today?;
                         let code = ActivityCode::parse(&row.text.get()).ok()?;
-                        if turnover::excluded(&code, day).is_some() {
+                        if turnover::excluded(&code, day).is_some() || form.micro.with(|years| years.contains(&day.year())) {
                             return None;
                         }
                         let kind = row.kind.get().unwrap_or_else(|| turnover::default_kind(&code, day));
@@ -1677,6 +1691,70 @@ fn Activities(
                 <Choice lang name="regime" label=Key::RegimeTurnover value=Regime::Turnover chosen=form.regime />
                 <p class="hint">{tr(lang, Key::RegimeOthers)}</p>
             </fieldset>
+            <MicroYears lang form today />
+        </fieldset>
+    }
+}
+
+/// Годы микропредпринимательства (задача 100): отметка на год, на который
+/// подано заявление о нём (НК, ст. 267, ч. 1), — заявление подают на год,
+/// и отметка тоже по годам. Видны прошлый, этот и следующий годы — не раньше
+/// года регистрации из поля формы — и годы, отмеченные раньше; остальные годы
+/// данных форма не трогает. Без даты часов — только отмеченные. Порог
+/// в подсказке — запись файла правил на этот год.
+#[component]
+fn MicroYears(lang: ReadSignal<Lang>, form: Form, today: Option<Date>) -> impl IntoView {
+    // Отмеченные до открытия формы — по набору на открытие, а не по живому
+    // сигналу: иначе прошлый год вне окна, снятый ошибкой, пропал бы из
+    // списка, и вернуть отметку до «Сохранить» было бы нечем (ревью задачи 100).
+    let marked = form.micro.get_untracked();
+    let years = move || {
+        let mut shown = marked.clone();
+        // Отмеченные сейчас — без подписки: список, перерисованный на каждую
+        // галочку, снимал бы фокус клавиатуры с нажатой; перерисовка — по дню
+        // регистрации, и отмеченный год, ушедший тогда из окна, остаётся.
+        shown.extend(form.micro.get_untracked());
+        if let Some(today) = today {
+            let this = today.year();
+            let registered = registered(&form.registered.get(), Some(today)).map(Date::year);
+            let first = this.saturating_sub(1).max(registered.unwrap_or(0));
+            shown.extend(first..=this.saturating_add(1));
+        }
+        shown
+    };
+    let threshold = today
+        .and_then(|today| Date::new(today.year(), 1, 1))
+        .and_then(|start| rules::on(rules::armenia().micro_threshold(), start))
+        .map(|rule| rule.amount);
+    view! {
+        <fieldset class="group micro-years">
+            <legend>{tr(lang, Key::ProfileMicroYears)}</legend>
+            {move || years().into_iter().map(|year| view! {
+                <label class="choice">
+                    <input
+                        type="checkbox"
+                        name="micro"
+                        prop:checked=move || form.micro.with(|years| years.contains(&year))
+                        on:change=move |event| {
+                            let on = event_target_checked(&event);
+                            form.micro.update(|years| {
+                                if on {
+                                    years.insert(year);
+                                } else {
+                                    years.remove(&year);
+                                }
+                            });
+                        }
+                    />
+                    <span>{year}</span>
+                </label>
+            }).collect_view()}
+            {threshold.map(|amount| view! {
+                <p class="hint">{move || {
+                    let lang = lang.get();
+                    fill(t(lang, Key::ProfileMicroHint), &[&i18n::money(lang, Money::new(amount, Currency::Amd))])
+                }}</p>
+            })}
         </fieldset>
     }
 }

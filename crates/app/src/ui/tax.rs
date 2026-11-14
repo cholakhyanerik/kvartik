@@ -338,14 +338,17 @@ fn has_news(tax: &QuarterTax) -> bool {
 
 /// Какой квартал показать сразу и к уплате ли он: прошлый — пока он не
 /// закрыт и о нём есть что сказать (его расчёт подают в этом месяце),
-/// иначе — текущий. `None` — данные читаются или сказать нечего.
+/// иначе — текущий. `None` — данные читаются или сказать нечего. Квартал
+/// микропредприятия к уплате не бывает: расчёта за него не подают, налога
+/// нет, и закрывать его не нужно (задача 100); а ушедшему с режима — как
+/// ушедшему с налога с оборота: «с бухгалтером».
 fn shown_quarter(sources: Sources, today: Date) -> Option<(QuarterTax, bool)> {
     let current = today.quarter();
     if let Some(previous) = current.previous()
         && sources.closing(previous).is_none()
     {
         let tax = sources.quarter(previous)?;
-        if has_news(&tax) {
+        if has_news(&tax) && tax.regime != Regime::Micro {
             return Some((tax, true));
         }
     }
@@ -358,6 +361,8 @@ fn shown_quarter(sources: Sources, today: Date) -> Option<(QuarterTax, bool)> {
 enum Note {
     /// С этого дня — общий режим.
     Left(Date),
+    /// С этого дня — не микропредприятие (задача 100).
+    LeftMicro(Date),
     /// Посчитано не всё.
     Partial,
     /// Квартал к уплате: подали расчёт — закройте.
@@ -366,8 +371,8 @@ enum Note {
 
 impl Note {
     fn of(tax: &QuarterTax, due: bool) -> Option<Self> {
-        if let Regime::Left { from, .. } = tax.regime {
-            return Some(Self::Left(from));
+        if let Regime::Left { from, why } = tax.regime {
+            return Some(if why.micro() { Self::LeftMicro(from) } else { Self::Left(from) });
         }
         if !tax.complete() {
             return Some(Self::Partial);
@@ -378,6 +383,7 @@ impl Note {
     fn text(self, lang: Lang) -> String {
         match self {
             Self::Left(from) => fill(t(lang, Key::TaxLeftShort), &[&i18n::date(lang, from)]),
+            Self::LeftMicro(from) => fill(t(lang, Key::TaxLeftMicroShort), &[&i18n::date(lang, from)]),
             Self::Partial => t(lang, Key::TaxPartial).to_owned(),
             Self::Close => t(lang, Key::TaxCloseReminder).to_owned(),
         }
@@ -419,10 +425,21 @@ fn Card(ctx: Ctx) -> impl IntoView {
     move || {
         shown.get().map(|(tax, due)| {
             let quarter = tax.quarter;
-            let sum = tax.tax;
+            // Год микропредпринимательства (задача 100): налога нет, и на
+            // карточке — оборот года, по которому кончается режим.
+            let micro = tax.micro();
+            let sum = if micro { tax.year_turnover } else { tax.tax };
             let note = Note::of(&tax, due);
             let chosen = ctx.quarter;
-            let label = if due { Key::TaxToPay } else { Key::TaxSoFar };
+            let label = if tax.regime == Regime::Micro {
+                Key::TaxMicroTurnover
+            } else if micro {
+                Key::TaxYearTurnover
+            } else if due {
+                Key::TaxToPay
+            } else {
+                Key::TaxSoFar
+            };
             // Квартал к уплате — с последним днём, перенесённым с нерабочего
             // (задача 21), если расчёт за него подают.
             let deadline = due
@@ -443,6 +460,7 @@ fn Card(ctx: Ctx) -> impl IntoView {
                     {deadline.map(|deadline| move || deadlines::moved(lang.get(), deadline.kind, deadline.by_law).map(|note| view! {
                         <span class="hero-note">{note}</span>
                     }))}
+                    {(tax.regime == Regime::Micro && note.is_none()).then(|| view! { <span class="hero-note">{tr(lang, Key::TaxMicroNone)}</span> })}
                     {note.map(|note| view! { <span class="hero-note">{move || note.text(lang.get())}</span> })}
                 </a>
             }
@@ -867,6 +885,7 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
         // закрытый человеком раньше — как любой закрытый: это его снимок.
         {move || tax.get().map(|tax| match (tax.not_yet, closing.get()) {
             (Some(not_yet), None) => view! { <NotYetNotice lang not_yet /> }.into_any(),
+            (None, None) if tax.micro() => view! { <MicroQuarter lang tax /> }.into_any(),
             (_, closing) => view! { <Quarterly lang tax closing /> }.into_any(),
         })}
         <OpeningEntry ctx quarter tax />
@@ -895,8 +914,12 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
                         }
                         .into_any()
                     } else {
-                        let left = tax.with(|tax| tax.as_ref().is_some_and(|tax| tax.regime != Regime::Turnover));
-                        let key = if left { Key::TaxCannotCloseLeft } else { Key::TaxCannotClose };
+                        let key = tax.with(|tax| match tax.as_ref().map(|tax| tax.regime) {
+                            Some(Regime::Micro) => Key::TaxCannotCloseMicro,
+                            Some(Regime::Left { why, .. }) if why.micro() => Key::TaxCannotCloseLeftMicro,
+                            Some(Regime::Left { .. }) => Key::TaxCannotCloseLeft,
+                            Some(Regime::Turnover) | None => Key::TaxCannotClose,
+                        });
                         view! { <p class="hint">{tr(lang, key)}</p> }.into_any()
                     }}
                 </div>
@@ -928,6 +951,42 @@ fn NotYetNotice(lang: ReadSignal<Lang>, not_yet: NotYet) -> impl IntoView {
                 }}</p>
             })}
         </div>
+    }
+}
+
+/// Квартал года микропредпринимательства (задача 100): налогов с деятельности
+/// нет — на карточке оборот года, по которому режим кончается, — что не так
+/// с порогом и уходом с режима, и что программа по записям не узнаёт.
+#[component]
+fn MicroQuarter(lang: ReadSignal<Lang>, tax: QuarterTax) -> impl IntoView {
+    let alerts = alerts(&tax);
+    let hints = hints(&tax);
+    let turnover = tax.year_turnover;
+    let left = match tax.regime {
+        Regime::Left { from, .. } => Some(from),
+        Regime::Micro | Regime::Turnover => None,
+    };
+    let partial = !tax.complete();
+    view! {
+        <div class="hero-card" data-tilt="">
+            <span class="hero-label">{tr(lang, if left.is_some() { Key::TaxYearTurnover } else { Key::TaxMicroTurnover })}</span>
+            <span class="hero-sum">{move || drams(lang.get(), turnover)}</span>
+            <span class="hero-note">{move || {
+                let lang = lang.get();
+                match left {
+                    Some(from) => fill(t(lang, Key::TaxLeftMicroShort), &[&i18n::date(lang, from)]),
+                    None if partial => t(lang, Key::TaxPartial).to_owned(),
+                    None => t(lang, Key::TaxMicroNone).to_owned(),
+                }
+            }}</span>
+        </div>
+        {alerts.into_iter().map(|alert| view! {
+            <p role="alert">{move || alert.text(lang.get())}</p>
+        }).collect_view()}
+        {hints.into_iter().map(|hint| view! {
+            <p class="hint">{move || hint.text(lang.get())}</p>
+        }).collect_view()}
+        <p class="hint">{tr(lang, Key::TaxMicroAbout)}</p>
     }
 }
 
@@ -974,6 +1033,12 @@ fn Quarterly(lang: ReadSignal<Lang>, tax: QuarterTax, closing: Option<Closing>) 
             <span class="hero-note">{move || subtitle.text(lang.get())}</span>
         </div>
         {about_now.then(|| view! { <p class="hint">{tr(lang, Key::TaxClosedNow)}</p> })}
+        // Закрытый квартал года, который потом отметили
+        // микропредпринимательством (задача 100): расходится он со снимком
+        // из-за отметки, и окно говорит это, а не только «сейчас иначе».
+        {(closing.is_some() && tax.regime == Regime::Micro).then(|| view! {
+            <p role="alert">{tr(lang, Key::ReportMicro)}</p>
+        })}
         {alerts.into_iter().map(|alert| view! {
             <p role="alert">{move || alert.text(lang.get())}</p>
         }).collect_view()}
@@ -1100,6 +1165,15 @@ pub(super) enum Alert {
     Undirected(usize),
     NoRule(IncomeKind),
     Excluded(String, Date),
+    /// Код профиля закрывает микропредпринимательство (задача 100).
+    MicroExcluded(String, Date),
+    /// Год микропредпринимательства: строк без курса, нечитаемых записей —
+    /// оборот для порога без них неизвестен; кодов нет — не узнать,
+    /// не закрыт ли режим; доходов «аренда, проценты, роялти» (задача 100).
+    MicroUnrated(usize),
+    MicroUnreadable(usize),
+    MicroNoCodes,
+    MicroRent(usize),
     CateringPlace,
 }
 
@@ -1115,6 +1189,13 @@ impl Alert {
                         fill(t(lang, Key::TaxLeftCode), &[&i18n::date(lang, *from), &code.to_string()])
                     }
                     Leaving::PreviousYear => fill(t(lang, Key::TaxLeftPrevious), &[&limit]),
+                    Leaving::MicroThreshold => {
+                        fill(t(lang, Key::TaxLeftMicroThreshold), &[&i18n::date(lang, *from), &limit])
+                    }
+                    Leaving::MicroPreviousYear => fill(t(lang, Key::TaxLeftMicroPrevious), &[&limit]),
+                    Leaving::MicroCode(code) => {
+                        fill(t(lang, Key::TaxLeftMicroCode), &[&i18n::date(lang, *from), &code.to_string()])
+                    }
                 }
             }
             Self::Unrated(rows) => fill(t(lang, Key::TaxUnrated), &[&count(*rows)]),
@@ -1129,6 +1210,11 @@ impl Alert {
             Self::Excluded(code, from) => {
                 fill(t(lang, Key::ActivityExcluded), &[code, &i18n::date(lang, *from)])
             }
+            Self::MicroExcluded(code, from) => fill(t(lang, Key::MicroExcluded), &[code, &i18n::date(lang, *from)]),
+            Self::MicroUnrated(rows) => fill(t(lang, Key::TaxMicroUnrated), &[&count(*rows)]),
+            Self::MicroUnreadable(records) => fill(t(lang, Key::TaxMicroUnreadable), &[&count(*records)]),
+            Self::MicroNoCodes => t(lang, Key::TaxMicroNoCodes).to_owned(),
+            Self::MicroRent(rows) => fill(t(lang, Key::TaxMicroRent), &[&count(*rows)]),
             Self::CateringPlace => t(lang, Key::TaxCateringPlace).to_owned(),
         }
     }
@@ -1144,20 +1230,26 @@ pub(super) fn alerts(tax: &QuarterTax) -> Vec<Alert> {
         });
     }
     let gaps = &tax.gaps;
+    // У года микропредпринимательства налога нет: пропуски говорят о пороге
+    // и режиме (задача 100).
+    let micro = tax.micro();
     if gaps.unrated > 0 {
-        alerts.push(Alert::Unrated(gaps.unrated));
+        alerts.push(if micro { Alert::MicroUnrated(gaps.unrated) } else { Alert::Unrated(gaps.unrated) });
     }
     if gaps.year_unrated > 0 {
         alerts.push(Alert::YearUnrated(gaps.year_unrated));
     }
     if gaps.unreadable > 0 {
-        alerts.push(Alert::Unreadable(gaps.unreadable));
+        alerts.push(if micro { Alert::MicroUnreadable(gaps.unreadable) } else { Alert::Unreadable(gaps.unreadable) });
     }
     if let Some(quarter) = gaps.previous {
         alerts.push(Alert::Previous(quarter));
     }
+    if gaps.micro_rent > 0 {
+        alerts.push(Alert::MicroRent(gaps.micro_rent));
+    }
     if gaps.no_codes {
-        alerts.push(Alert::NoCodes);
+        alerts.push(if micro { Alert::MicroNoCodes } else { Alert::NoCodes });
     } else if gaps.unassigned > 0 {
         alerts.push(Alert::Unassigned(gaps.unassigned));
     }
@@ -1168,7 +1260,14 @@ pub(super) fn alerts(tax: &QuarterTax) -> Vec<Alert> {
         alerts.push(Alert::Undirected(gaps.undirected));
     }
     alerts.extend(gaps.no_rule.iter().map(|kind| Alert::NoRule(*kind)));
-    alerts.extend(tax.excluded_codes.iter().map(|(code, from)| Alert::Excluded(code.to_string(), *from)));
+    // У года микропредпринимательства коды — закрывающие его (задача 100).
+    alerts.extend(tax.excluded_codes.iter().map(|(code, from)| {
+        if micro {
+            Alert::MicroExcluded(code.to_string(), *from)
+        } else {
+            Alert::Excluded(code.to_string(), *from)
+        }
+    }));
     if tax.place_unknown() {
         alerts.push(Alert::CateringPlace);
     }
@@ -1259,7 +1358,7 @@ fn hints(tax: &QuarterTax) -> Vec<Hint> {
         hints.push(Hint::CateringDeclared);
     }
     if let Some(threshold) = tax.threshold
-        && tax.regime == Regime::Turnover
+        && matches!(tax.regime, Regime::Turnover | Regime::Micro)
         && tax.year_turnover > 0
     {
         hints.push(Hint::Threshold {

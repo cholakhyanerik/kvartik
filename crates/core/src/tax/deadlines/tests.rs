@@ -43,6 +43,10 @@ fn shift_rules() -> Rules {
         "turnover_rates": [],
         "high_tech": [],
         "turnover_threshold": [],
+        "micro_threshold": [],
+        "micro_exclusions": [],
+        "micro_application": [],
+        "micro_report": [],
         "turnover_expenses": [],
         "turnover_carry": [],
         "turnover_place": [],
@@ -620,4 +624,111 @@ fn review_cases() {
         wrong.push("у полного профиля пробелы".to_owned());
     }
     assert!(wrong.is_empty(), "ревью сроков: {wrong:#?}");
+}
+
+
+/// Год микропредпринимательства (задача 100): вместо кварталов и заявления
+/// о налоге с оборота — заявление о микропредпринимательстве (НК, ст. 267,
+/// ч. 1: 20 февраля 2027 года — суббота, 22-е), отчёт об обороте за год до
+/// 1 февраля следующего (ст. 270, ч. 1: 1 февраля 2028 года — вторник)
+/// и гербовый сбор 20 апреля следующего (четверг 2028 года). Прошлый год —
+/// налог с оборота, как был; медстраховка и декларация — как у любого ИП.
+#[test]
+fn a_micro_year_has_its_own_deadlines() {
+    let mut profile = citizen();
+    profile.micro.insert(2027);
+    let got = listed(&between(books(Some(&profile), &[]), day(2026, 10, 20), day(2027, 10, 20)));
+    let month = |month| Kind::HealthMonth { year: 2027, month };
+    let expected = vec![
+        (day(2026, 10, 20), Kind::Turnover(quarter(2026, 3))),
+        (day(2026, 11, 2), Kind::Declaration(2025)),
+        (day(2027, 1, 20), Kind::Turnover(quarter(2026, 4))),
+        (day(2027, 2, 22), Kind::MicroApplication(2027)),
+        (day(2027, 2, 22), month(1)),
+        (day(2027, 3, 22), month(2)),
+        (day(2027, 4, 20), Kind::Annual(2026)),
+        (day(2027, 4, 20), month(3)),
+        (day(2027, 5, 20), month(4)),
+        (day(2027, 6, 21), month(5)),
+        (day(2027, 7, 1), Kind::Declaration(2026)),
+        (day(2027, 7, 20), month(6)),
+        (day(2027, 8, 20), month(7)),
+        (day(2027, 9, 20), month(8)),
+        (day(2027, 10, 20), month(9)),
+    ];
+    assert_eq!(got, expected);
+    let later = listed(&between(books(Some(&profile), &[]), day(2028, 1, 1), day(2028, 4, 30)));
+    let mut wrong = Vec::new();
+    for item in [
+        (day(2028, 2, 1), Kind::MicroReport(2027)),
+        (day(2028, 4, 20), Kind::MicroAnnual(2027)),
+    ] {
+        if !later.contains(&item) {
+            wrong.push(format!("нет {item:?}"));
+        }
+    }
+    if later.iter().any(|(_, kind)| *kind == Kind::Annual(2027) || *kind == Kind::Turnover(quarter(2027, 4))) {
+        wrong.push(format!("налог с оборота за 2027 год: {later:?}"));
+    }
+    assert!(wrong.is_empty(), "сроки после года микропредпринимательства: {wrong:#?}");
+}
+
+/// Перешедший порог микропредпринимательства 10 августа 2027 года (среда) —
+/// плательщик налога с оборота с этого дня, если до 30 августа включительно
+/// (20-й день после него, понедельник) подаст о нём заявление (НК, ст. 254,
+/// ч. 1, п. 3), иначе НДС. Срок заявления — на экране сроков; сроков
+/// микропредпринимательства за этот год нет: налоги после ухода — у
+/// бухгалтера. Ушедшему по закрывающему коду заявления нет: тот же код
+/// закрывает и налог с оборота (ст. 254, ч. 3, п. 3.1).
+#[test]
+fn leaving_micro_over_the_threshold_has_a_turnover_application() {
+    let with = |profile: &ProfileData, operations: &[Operation]| -> Vec<(Date, Kind)> {
+        let books = Books {
+            documents: &[],
+            operations,
+            profile: Some(profile),
+            closings: &[],
+            openings: &[],
+            unreadable: 0,
+        };
+        listed(&between(books, day(2027, 1, 1), day(2027, 12, 31)))
+    };
+    let mut profile = citizen();
+    profile.micro.insert(2027);
+    let got = with(&profile, &[income(day(2027, 3, 1), 20_000_000), income(day(2027, 8, 10), 5_000_000)]);
+    let mut wrong = Vec::new();
+    if !got.contains(&(day(2027, 8, 30), Kind::Application(2027))) {
+        wrong.push(format!("нет заявления 30 августа: {got:?}"));
+    }
+    if got.iter().any(|(_, kind)| matches!(kind, Kind::MicroApplication(_) | Kind::MicroAnnual(_))) {
+        wrong.push(format!("сроки микропредприятия у ушедшего: {got:?}"));
+    }
+    // Единственный код 70.22.0 — доход по нему 10 августа кончает режим.
+    let coded = ProfileData {
+        activities: vec![crate::model::activity::ActivityCode::parse("70.22.0").expect("код")],
+        ..profile.clone()
+    };
+    let got = with(&coded, &[income(day(2027, 8, 10), 100_000)]);
+    if got.iter().any(|(_, kind)| *kind == Kind::Application(2027)) {
+        wrong.push(format!("заявление у ушедшего по коду: {got:?}"));
+    }
+    // ИП, учтённый в том же году, — напоминание на главном: карточки
+    // заявления нового ИП у года не на налоге с оборота нет (опровергатель
+    // ревью задачи 100).
+    let mut new_ie = profile.clone();
+    new_ie.person.registered = Some(day(2027, 2, 1));
+    let over = [income(day(2027, 3, 1), 20_000_000), income(day(2027, 8, 10), 5_000_000)];
+    let books = Books {
+        documents: &[],
+        operations: &over,
+        profile: Some(&new_ie),
+        closings: &[],
+        openings: &[],
+        unreadable: 0,
+    };
+    let reminded: Vec<Kind> = reminders(books, day(2027, 8, 25)).iter().map(|reminder| reminder.deadline.kind).collect();
+    if !reminded.contains(&Kind::Application(2027)) || applying(books, day(2027, 8, 25)).is_some() {
+        wrong.push(format!("новый ИП после ухода: {reminded:?}"));
+    }
+    assert!(wrong.is_empty(), "уход с микропредпринимательства: {wrong:#?}");
 }

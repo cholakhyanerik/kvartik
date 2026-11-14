@@ -139,6 +139,8 @@ pub fn ReportPage(ctx: tax::Ctx) -> impl IntoView {
                 Err(missing) => {
                     let key = match missing {
                         Missing::Left => Key::ReportLeft,
+                        Missing::Micro => Key::ReportMicro,
+                        Missing::LeftMicro => Key::ReportLeftMicro,
                         Missing::Incomplete => Key::ReportIncomplete,
                         Missing::NoForm => Key::ReportNoForm,
                         // Квартал до регистрации ИП — не тревога, а те же слова,

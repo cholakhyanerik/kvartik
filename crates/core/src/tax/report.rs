@@ -373,6 +373,14 @@ pub enum Origin {
 pub enum Missing {
     /// В квартале ИП ушёл с налога с оборота: расчёт — у бухгалтера.
     Left,
+    /// Год квартала — микропредпринимательство (задача 100): расчёта налога
+    /// с оборота у микропредприятия нет (НК, ст. 269, ч. 1; ст. 270, ч. 3).
+    Micro,
+    /// В году микропредпринимательства ИП в этом квартале уже не
+    /// микропредприятие (`turnover::Leaving::Micro*`): дальше налог с оборота
+    /// по заявлению или НДС (ст. 254, ч. 1, п. 3; ст. 59, ч. 1, п. 3), и их
+    /// расчёт — у бухгалтера.
+    LeftMicro,
     /// Посчитано не всё: чего не хватает, говорит расчёт (`turnover::Gaps`).
     Incomplete,
     /// Номеров полей формы на этот квартал у программы нет.
@@ -458,6 +466,8 @@ pub fn report(tax: &QuarterTax, closing: Option<&Closing>) -> Result<Ready, Miss
         (None, Some(not_yet)) => Err(Missing::NotYet {
             registered: not_yet.registered,
         }),
+        (None, None) if tax.regime == Regime::Micro => Err(Missing::Micro),
+        (None, None) if tax.micro() => Err(Missing::LeftMicro),
         (None, None) if tax.regime != Regime::Turnover => Err(Missing::Left),
         (None, None) if !tax.complete() => Err(Missing::Incomplete),
         (None, None) => {

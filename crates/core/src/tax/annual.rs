@@ -181,6 +181,11 @@ fn months(person: Option<&Person>, year: u16, regime: Regime) -> Months {
     };
     let (last, left) = match regime {
         Regime::Turnover => (Some(12), None),
+        // Год микропредпринимательства (задача 100): месяцев налога
+        // с оборота в нём нет, а ушедший с него — налог с оборота по
+        // заявлению или НДС, этого программа не знает: к бухгалтеру.
+        Regime::Micro => (None, None),
+        Regime::Left { from, why } if why.micro() => (None, Some((from, why))),
         // Весь год — общий режим: оборот прошлого года больше порога.
         Regime::Left {
             from,
@@ -323,6 +328,16 @@ pub enum Social {
     Out(SocialOut),
     /// Участвует ли, не известно: в профиле нет ответа.
     Unknown(Missing),
+    /// Микропредприятие (задача 100): закон о накопительных пенсиях такого ИП
+    /// «ИП» не считает (ст. 2, п. 2) и называет самозанятым (ст. 2, п. 9),
+    /// а самозанятый платит 5 % полученного дохода при любом его размере
+    /// (ст. 6, ч. 2, п. 4) в срок подоходного налога (ст. 7, ч. 4). Обязателен
+    /// ли платёж, текст двоится: «на началах добровольности» (ст. 5, ч. 8), но
+    /// среди плательщиков — самозанятые, которые когда-либо платили его как
+    /// ИП или работники (ст. 5, ч. 1, п. 3). Поэтому — «нет значения», и окно
+    /// советует сверить (по закону, сверено по тексту arlis 224823 2026-11-14;
+    /// `docs/research/ip-performers-taxes.md`).
+    SelfEmployed,
     /// Правила на весь год нет.
     NoRule,
 }
@@ -332,7 +347,7 @@ impl Social {
     pub fn amount(self) -> Option<i64> {
         match self {
             Self::Due { payment, .. } => payment.amount(),
-            Self::Out(_) | Self::Unknown(_) | Self::NoRule => None,
+            Self::Out(_) | Self::Unknown(_) | Self::SelfEmployed | Self::NoRule => None,
         }
     }
 }
@@ -869,6 +884,12 @@ fn monthly(rule: &HealthInsurance, due_day: u8, year: u16, registered: Option<Da
 pub enum Status {
     /// На налоге с оборота весь год или его часть.
     Turnover,
+    /// Весь год — микропредприятие (задача 100): налога на прибыль нет (НК,
+    /// ст. 269, ч. 1), соцплатёж — как у самозанятого ([`Social::SelfEmployed`]),
+    /// гербовый сбор — по обороту года (закон ՀՕ-245-Ն, ст. 9, ч. 1, п. 5, «գ»),
+    /// медстраховка — как у любого ИП. Ушедший с микропредпринимательства
+    /// посреди года — [`Status::General`].
+    Micro,
     /// Весь год — общий режим: оборот прошлого года больше порога (НК,
     /// ст. 254, ч. 2) или доход по закрывающему коду 1 января; налог на
     /// прибыль, соцплатёж и гербовый сбор считаются иначе (НК, ст. 125,
@@ -921,15 +942,31 @@ pub struct Total {
     pub complete: bool,
 }
 
+/// Срок года микропредпринимательства — гербового сбора, единственного
+/// платежа к нему (задача 100): по записи `stamp_duty` — в срок налога на
+/// прибыль по кодексу (закон ՀՕ-245-Ն, ст. 15, ч. 2; по закону, сверено по
+/// тексту arlis 230046 2026-11-14). Освобождён ли, не известно, — срок всё
+/// равно есть; освобождённому, за год остановки и без правила — нет.
+pub fn micro_due(annual: &Annual) -> Option<Date> {
+    match annual.stamp {
+        Stamp::Due { due, .. } | Stamp::NoTurnover { due, .. } => Some(due),
+        Stamp::Unknown(_) => {
+            rules::for_year(rules::armenia().stamp_duty(), annual.year).and_then(|rule| rule.due.after(annual.year))
+        }
+        Stamp::Stopped | Stamp::Exempt | Stamp::NoRule => None,
+    }
+}
+
 impl Total {
     /// Итог года `annual`.
     pub fn of(annual: &Annual) -> Self {
         let due = match annual.profit {
+            _ if annual.status == Status::Micro => micro_due(annual),
             Fixed::Due { due, .. } => Some(due),
             Fixed::NoRule => None,
         };
         match annual.status {
-            Status::Turnover => {}
+            Status::Turnover | Status::Micro => {}
             Status::NotYet => {
                 return Self {
                     due,
@@ -948,9 +985,13 @@ impl Total {
         let social = match annual.social {
             Social::Due { payment, .. } => payment.amount(),
             Social::Out(_) => Some(0),
-            Social::Unknown(_) | Social::NoRule => None,
+            Social::Unknown(_) | Social::SelfEmployed | Social::NoRule => None,
         };
-        let parts = [annual.profit.amount(), social, annual.stamp.amount()];
+        // У микропредприятия налога на прибыль нет вовсе (НК, ст. 269, ч. 1):
+        // в итоге его нет, а не ноль, — иначе неизвестный сбор выглядел бы
+        // итогом «0» (задача 100).
+        let profit = (annual.status != Status::Micro).then(|| annual.profit.amount());
+        let parts: Vec<Option<i64>> = profit.into_iter().chain([social, annual.stamp.amount()]).collect();
         let sum = parts
             .iter()
             .flatten()
@@ -1043,6 +1084,8 @@ pub fn year(books: Books<'_>, year: u16) -> Annual {
     let months = months(person, year, regime.unwrap_or(Regime::Turnover));
     let status = if person.and_then(|person| person.registered).is_some_and(|day| day.year() > year) {
         Status::NotYet
+    } else if regime == Ok(Regime::Micro) {
+        Status::Micro
     } else if months.span.is_none() && months.left.is_some() {
         Status::General
     } else {
@@ -1067,7 +1110,11 @@ pub fn year(books: Books<'_>, year: u16) -> Annual {
         rules: all.version(),
         status,
         profit: fixed(rules::for_year(all.profit_tax(), year), year, months.count()),
-        social: social(person, year, &months),
+        social: if status == Status::Micro {
+            Social::SelfEmployed
+        } else {
+            social(person, year, &months)
+        },
         stamp: stamp(person, year, &months, base.unwrap_or_default()),
         health: health(books, person, year, previous),
         months,

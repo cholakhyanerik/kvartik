@@ -1098,3 +1098,67 @@ fn annual_timing() {
     let elapsed = started.elapsed();
     println!("год 2029, {} записей: {elapsed:?}, к сроку {:?}", operations.len(), Total::of(&got).sum);
 }
+
+
+/// Год микропредпринимательства (задача 100): налога на прибыль нет — месяцев
+/// налога с оборота ноль (НК, ст. 269, ч. 1), — соцплатёж самозанятого —
+/// «нет значения» (закон о накопительных пенсиях, ст. 5, ч. 1, п. 3 и ч. 8),
+/// гербовый сбор — по обороту года: 3,6 млн — ступень 12 000 ֏ (закон
+/// ՀՕ-245-Ն, ст. 9, ч. 1, п. 5, «գ»; ст. 12, ч. 1, п. 2), и итог не полон.
+/// Ушедший с режима посреди года — к бухгалтеру (`Status::General`).
+#[test]
+fn a_micro_year_pays_stamp_duty_and_asks_about_the_social_payment() {
+    let mut profile = profile(person());
+    profile.micro.insert(2026);
+    let operations = [income(day(2026, 3, 1), 3_600_000)];
+    let got = annual(Some(&profile), &operations, 2026);
+    let mut wrong = Vec::new();
+    if got.status != Status::Micro {
+        wrong.push(format!("статус {:?}", got.status));
+    }
+    if got.profit.amount() != Some(0) || got.months.count() != 0 {
+        wrong.push(format!("налог на прибыль {:?}", got.profit));
+    }
+    if got.social != Social::SelfEmployed {
+        wrong.push(format!("соцплатёж {:?}", got.social));
+    }
+    if got.stamp.amount() != Some(12_000) {
+        wrong.push(format!("гербовый сбор {:?}", got.stamp));
+    }
+    let total = Total::of(&got);
+    if total.sum != Some(12_000) || total.complete {
+        wrong.push(format!("итог {total:?}"));
+    }
+    let left = annual(Some(&profile), &[income(day(2026, 3, 1), 30_000_000)], 2026);
+    if left.status != Status::General {
+        wrong.push(format!("ушедший с режима: {:?}", left.status));
+    }
+    // База больше 12 000 000 ֏ — верхняя ступень 2026 года, 120 000 ֏ (ст. 12,
+    // ч. 1, п. 2); порог режима 24 000 000 не перейдён.
+    let upper = annual(Some(&profile), &[income(day(2026, 3, 1), 13_000_000)], 2026);
+    if upper.status != Status::Micro || upper.stamp.amount() != Some(120_000) {
+        wrong.push(format!("верхняя ступень: {:?}, {:?}", upper.status, upper.stamp));
+    }
+    // Срок — гербового сбора, в срок налога на прибыль по кодексу (закон
+    // ՀՕ-245-Ն, ст. 15, ч. 2): 20 апреля следующего года.
+    if Total::of(&upper).due != Some(day(2027, 4, 20)) || micro_due(&upper) != Some(day(2027, 4, 20)) {
+        wrong.push(format!("срок: {:?}", Total::of(&upper).due));
+    }
+    // Сбор не известен (нет статуса проживания) — итога нет, а не «0» налога
+    // на прибыль, которого у микропредприятия нет.
+    let mut unknown = profile.clone();
+    unknown.person.residency = None;
+    let unknown = annual(Some(&unknown), &operations, 2026);
+    if Total::of(&unknown).sum.is_some() {
+        wrong.push(format!("итог без сбора: {:?}", Total::of(&unknown)));
+    }
+    // Иностранец без статуса проживания сбор не платит (ст. 11, ч. 2, п. 3),
+    // а налога на прибыль у микропредприятия нет: срока года нет вовсе.
+    let mut foreign = profile.clone();
+    foreign.person.residency = Some(Residency::ForeignWithoutStatus);
+    let exempt = annual(Some(&foreign), &operations, 2026);
+    if exempt.stamp != Stamp::Exempt || Total::of(&exempt).due.is_some() || micro_due(&exempt).is_some() {
+        wrong.push(format!("освобождённый: {:?}, срок {:?}", exempt.stamp, Total::of(&exempt).due));
+    }
+    assert!(wrong.is_empty(), "год микропредпринимательства: {wrong:#?}");
+}

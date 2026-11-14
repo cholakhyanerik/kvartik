@@ -32,6 +32,7 @@ const SAMPLE: &str = concat!(
     r#""accounts":[{"currency":"USD","number":"127027482877","bank":"Ameriabank CJSC","bank_latin":"","#,
     r#""swift":"ARMIAM22","correspondent":"Citibank N.A., New York\nSWIFT: CITIUS33"}],"#,
     r#""activities":["62.01.0","70.22.0"],"kinds":{"70.22.0":"other"},"regime":"turnover","#,
+    r#""micro":[2027,2028],"#,
     r#""person":{"birth_year":1970,"pension_joined":true,"pension_applied":"2019-03-14","#,
     r#""residency":"foreign_with_status","resident":false,"registered":"2022-05-12","#,
     r#""turnover_applied":"2022-05-30","#,
@@ -44,7 +45,7 @@ const EMPTY: &str = concat!(
     r#"{"meta":{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":1760000000000,"deleted":null},"#,
     r#""data":{"name":{"hy":"","ru":"","en":""},"tin":null,"registration":"","#,
     r#""address":{"hy":"","ru":"","en":""},"phone":"","email":null,"accounts":[],"#,
-    r#""activities":[],"kinds":{},"regime":null,"#,
+    r#""activities":[],"kinds":{},"regime":null,"micro":[],"#,
     r#""person":{"birth_year":null,"pension_joined":null,"pension_applied":null,"residency":null,"#,
     r#""resident":null,"registered":null,"turnover_applied":null,"stops":[]}}}"#
 );
@@ -70,6 +71,8 @@ fn data_shape_is_pinned() {
         BTreeMap::from([(data.activities[1], IncomeKind::Other)])
     );
     assert_eq!(data.regime, Some(Regime::Turnover));
+    assert_eq!(data.micro, BTreeSet::from([2027, 2028]));
+    assert!(!data.micro_in(2026) && data.micro_in(2027));
     assert_eq!(data.person.birth_year, Some(1970));
     assert_eq!(data.person.pension_joined, Some(true));
     assert_eq!(data.person.pension_applied, Some(day(2019, 3, 14)));
@@ -89,6 +92,31 @@ fn data_shape_is_pinned() {
     let empty: Profile = serde_json::from_str(EMPTY).expect("пустой читается");
     assert_eq!(empty.data(), &ProfileData::default());
     assert_eq!(serde_json::to_string(&empty).ok().as_deref(), Some(EMPTY));
+}
+
+/// Профиль версии формата 20 — без лет микропредпринимательства — читается:
+/// все его годы — налог с оборота, как было (Правило 2, задача 100).
+#[test]
+fn profiles_without_micro_years_still_read() {
+    let old = SAMPLE.replacen(r#""micro":[2027,2028],"#, "", 1);
+    assert!(!old.contains("micro"), "{old}");
+    let profile: Profile = serde_json::from_str(&old).expect("профиль версии 20 читается");
+    assert!(profile.data().micro.is_empty());
+}
+
+/// Год микропредпринимательства вне календаря и лишние годы — порча:
+/// форма их не пишет, и чтение их не пропускает (Правило 13).
+#[test]
+fn stray_or_too_many_micro_years_are_corruption() {
+    let stray = SAMPLE.replacen(r#""micro":[2027,2028]"#, r#""micro":[0]"#, 1);
+    assert!(serde_json::from_str::<Profile>(&stray).is_err(), "год 0 прочитан");
+    let mut data = ProfileData {
+        micro: BTreeSet::from([0]),
+        ..ProfileData::default()
+    };
+    assert_eq!(Profile::save(None, data.clone(), at(1_000)), Err(ProfileError::StrayYear));
+    data.micro = (2000..2000 + ProfileData::MAX_MICRO_YEARS as u16 + 1).collect();
+    assert_eq!(Profile::save(None, data, at(1_000)), Err(ProfileError::TooMany));
 }
 
 /// Профиль версии формата 15 — без дня подачи заявления о налоге с оборота —

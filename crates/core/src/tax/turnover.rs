@@ -87,6 +87,30 @@
 //!
 //! Общий режим программа не считает: окно говорит «к бухгалтеру».
 //!
+//! # Микропредпринимательство
+//!
+//! Год, на который ИП подал заявление о микропредпринимательстве
+//! (`ProfileData::micro`, задача 100), — не налог с оборота: налогов с этой
+//! деятельности нет вовсе (НК, ст. 269, ч. 1), и строк у такого квартала нет
+//! ([`Regime::Micro`]). Считается только то, что режим кончает
+//! (ст. 267, ч. 3; ст. 268, ч. 1), — записями файла правил:
+//!
+//! - оборот прошлого года больше порога — микропредприятием этот год быть
+//!   нельзя (ст. 267, ч. 3; [`Leaving::MicroPreviousYear`]);
+//! - оборот этого года больше порога — с момента превышения до конца года
+//!   (ст. 268, ч. 1, п. 2; [`Leaving::MicroThreshold`]);
+//! - доход по коду, который закрывает микропредпринимательство (ст. 267, ч. 5,
+//!   п. 2.1), — со дня этой услуги (ст. 268, ч. 1, п. 3;
+//!   [`Leaving::MicroCode`]).
+//!
+//! Ушедший с режима — плательщик налога с оборота, если в 20 дней подал о нём
+//! заявление (ст. 254, ч. 1, п. 3), иначе НДС (ст. 59, ч. 1, п. 3): какой из
+//! двух, программа не знает, и окно говорит «к бухгалтеру». Закрытые виды
+//! услуг, названные словами (ст. 267, ч. 5, п. 2), и договоры роялти, аренды
+//! и процентов (п. 11) программа по кодам не узнаёт — окно о них говорит
+//! словами. Всё — по закону, сверено по тексту arlis 230455, 171781, 201067,
+//! 205201 и 185690 2026-11-14 (разбор `docs/research/ip-performers-taxes.md`).
+//!
 //! # Общепит
 //!
 //! Строки общепита программа считает по общему правилу, а двух вещей не
@@ -162,6 +186,16 @@ use crate::model::record::RecordId;
 /// говорит «кто ведёт» и советует сверить с бухгалтером.
 pub fn excluded(code: &ActivityCode, on: Date) -> Option<&'static Exclusion> {
     rules::armenia().turnover_exclusions().iter().find(|rule| {
+        rule.period().contains(on) && rule.codes.iter().any(|prefix| code.starts_with(prefix))
+    })
+}
+
+/// Закрывает ли код `code` микропредпринимательство в день `on` (НК, ст. 267,
+/// ч. 5, п. 2.1; задача 100): запись `micro_exclusions` файла правил. Как
+/// у [`excluded`] — про человека целиком: со дня такой услуги он не
+/// микропредприятие до конца года (ст. 268, ч. 1, п. 3).
+pub fn micro_excluded(code: &ActivityCode, on: Date) -> Option<&'static Exclusion> {
+    rules::armenia().micro_exclusions().iter().find(|rule| {
         rule.period().contains(on) && rule.codes.iter().any(|prefix| code.starts_with(prefix))
     })
 }
@@ -373,6 +407,13 @@ pub struct Gaps {
     /// Первый неполный квартал цепочки до этого: перенос из него тоже
     /// неполный.
     pub previous: Option<Quarter>,
+    /// Доходов строки «аренда, проценты, роялти» с начала года
+    /// микропредпринимательства до ухода с режима (задача 100): тот, кто по
+    /// действующему договору получает аренду, проценты (кроме процентов на
+    /// остаток текущего счёта в банке) или роялти, микропредприятием быть не
+    /// может со дня такого договора (НК, ст. 267, ч. 5, п. 11; ст. 268, ч. 1,
+    /// п. 3), а проценты ли это на остаток, программа не знает.
+    pub micro_rent: usize,
 }
 
 impl Gaps {
@@ -410,7 +451,8 @@ pub struct Refused {
     pub income_row: usize,
 }
 
-/// Почему ИП перестал быть плательщиком налога с оборота.
+/// Почему ИП перестал быть плательщиком налога с оборота — или, в году
+/// микропредпринимательства, микропредприятием (задача 100).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Leaving {
     /// Оборот этого года превысил порог (ст. 255, ч. 1, п. 2).
@@ -420,6 +462,25 @@ pub enum Leaving {
     Code(ActivityCode),
     /// Оборот прошлого года превысил порог (ст. 254, ч. 2).
     PreviousYear,
+    /// Оборот этого года превысил порог микропредпринимательства (ст. 268,
+    /// ч. 1, п. 2).
+    MicroThreshold,
+    /// Оборот прошлого года превысил порог микропредпринимательства: этот год
+    /// микропредприятием быть нельзя (ст. 267, ч. 3).
+    MicroPreviousYear,
+    /// Доход по коду, который закрывает микропредпринимательство (ст. 267,
+    /// ч. 5, п. 2.1; ст. 268, ч. 1, п. 3).
+    MicroCode(ActivityCode),
+}
+
+impl Leaving {
+    /// Ушёл ли ИП с микропредпринимательства, а не с налога с оборота.
+    pub const fn micro(self) -> bool {
+        match self {
+            Self::MicroThreshold | Self::MicroPreviousYear | Self::MicroCode(_) => true,
+            Self::Threshold | Self::Code(_) | Self::PreviousYear => false,
+        }
+    }
 }
 
 /// Режим в квартале.
@@ -427,7 +488,12 @@ pub enum Leaving {
 pub enum Regime {
     /// Весь квартал — плательщик налога с оборота.
     Turnover,
-    /// С дня `from` до конца года — нет: общий режим, к бухгалтеру.
+    /// Весь квартал — микропредприятие: налогов с деятельности нет (НК,
+    /// ст. 269, ч. 1; задача 100).
+    Micro,
+    /// С дня `from` до конца года — нет: общий режим, к бухгалтеру. У ушедшего
+    /// с микропредпринимательства (`why.micro()`) — налог с оборота, если
+    /// в 20 дней подано заявление, иначе НДС: тоже к бухгалтеру.
     Left { from: Date, why: Leaving },
 }
 
@@ -479,6 +545,17 @@ pub struct NotYet {
 }
 
 impl QuarterTax {
+    /// Год микропредпринимательства (задача 100): квартал — микропредприятие
+    /// или ИП ушёл с него в этом году. Налога с оборота у такого квартала
+    /// нет, а порог в [`Self::threshold`] — микропредпринимательства.
+    pub const fn micro(&self) -> bool {
+        match self.regime {
+            Regime::Micro => true,
+            Regime::Left { why, .. } => why.micro(),
+            Regime::Turnover => false,
+        }
+    }
+
     /// Посчитан ли налог целиком: у всего дохода и расхода есть курс,
     /// строка и правило, и общие расходы поделены.
     pub fn complete(&self) -> bool {
@@ -981,10 +1058,16 @@ struct Year {
     /// ухода с режима: без них оборот для порога неизвестен. Строки самого
     /// квартала считает `compute`.
     unrated: usize,
+    /// Доходов строки «аренда, проценты, роялти» с начала года
+    /// микропредпринимательства по конец квартала, до ухода с режима
+    /// ([`Gaps::micro_rent`]); в году налога с оборота — ноль.
+    micro_rent: usize,
 }
 
 /// Режим года по конец квартала `quarter`: порог прошлого и этого года
-/// и доход по коду, который закрывает налог с оборота (шапка модуля).
+/// и доход по коду, который закрывает налог с оборота (шапка модуля). В году
+/// микропредпринимательства — то же по его порогу и его кодам, а в налог не
+/// идёт ничего («Микропредпринимательство» в шапке модуля).
 fn year(span: &Span<'_>, profile: Option<&ProfileData>, quarter: Quarter) -> Result<Year, MoneyError> {
     let Some(start) = Date::new(quarter.year(), 1, 1) else {
         return Ok(Year {
@@ -993,10 +1076,24 @@ fn year(span: &Span<'_>, profile: Option<&ProfileData>, quarter: Quarter) -> Res
             turnover: Lumas::ZERO,
             threshold: None,
             unrated: 0,
+            micro_rent: 0,
         });
     };
-    let threshold = rules::on(rules::armenia().turnover_threshold(), start).map(|rule| rule.amount);
+    let micro = profile.is_some_and(|profile| profile.micro_in(quarter.year()));
+    let all = rules::armenia();
+    let limits = if micro { all.micro_threshold() } else { all.turnover_threshold() };
+    let threshold = rules::on(limits, start).map(|rule| rule.amount);
     let threshold_lumas = threshold.and_then(Lumas::from_drams).map(Lumas::get);
+    // Режим, в котором ИП остаётся, и почему уходит: у микропредприятия —
+    // свои порог и коды, а в налог с оборота не идёт ничего.
+    let (stay, previous_why, threshold_why) = if micro {
+        (Regime::Micro, Leaving::MicroPreviousYear, Leaving::MicroThreshold)
+    } else {
+        (Regime::Turnover, Leaving::PreviousYear, Leaving::Threshold)
+    };
+    let closes = |code: &ActivityCode, on: Date| {
+        if micro { micro_excluded(code, on).is_some() } else { excluded(code, on).is_some() }
+    };
     let income = |rows: &[Row<'_>]| -> Vec<(Date, RecordId, Option<ActivityCode>, Option<Lumas>)> {
         rows.iter()
             .filter(|row| row.flow == Flow::Income)
@@ -1015,20 +1112,20 @@ fn year(span: &Span<'_>, profile: Option<&ProfileData>, quarter: Quarter) -> Res
     let mut regime = match threshold_lumas {
         Some(limit) if previous.get() > limit => Regime::Left {
             from: start,
-            why: Leaving::PreviousYear,
+            why: previous_why,
         },
-        _ => Regime::Turnover,
+        _ => stay,
     };
     let mut unrated = 0;
     let mut taxed = BTreeMap::new();
-    if regime == Regime::Turnover {
+    if regime == stay {
         unrated = previous_unrated;
         // День дохода по закрывающему коду — весь вне режима («со дня»,
-        // ст. 255, ч. 1, п. 3): порядок строк одного дня программе не
-        // известен.
-        let code_day = rows.iter().find_map(|(date, _, code, _)| {
-            code.filter(|code| excluded(code, *date).is_some()).map(|code| (*date, code))
-        });
+        // ст. 255, ч. 1, п. 3; ст. 268, ч. 1, п. 3): порядок строк одного дня
+        // программе не известен.
+        let code_day = rows
+            .iter()
+            .find_map(|(date, _, code, _)| code.filter(|code| closes(code, *date)).map(|code| (*date, code)));
         let first_day = quarter.first_day();
         let mut so_far: i64 = 0;
         for (date, id, _, lumas) in rows {
@@ -1037,7 +1134,7 @@ fn year(span: &Span<'_>, profile: Option<&ProfileData>, quarter: Quarter) -> Res
             {
                 regime = Regime::Left {
                     from: day,
-                    why: Leaving::Code(code),
+                    why: if micro { Leaving::MicroCode(code) } else { Leaving::Code(code) },
                 };
                 break;
             }
@@ -1049,16 +1146,23 @@ fn year(span: &Span<'_>, profile: Option<&ProfileData>, quarter: Quarter) -> Res
             };
             match threshold_lumas {
                 Some(limit) if so_far.saturating_add(lumas.get()) > limit => {
-                    taxed.insert(id, Lumas::new(limit - so_far));
+                    // Сделка, на которой превышен порог налога с оборота,
+                    // делится (шапка модуля); у микропредприятия в налог не
+                    // идёт ничего — ни до порога, ни сверх.
+                    if !micro {
+                        taxed.insert(id, Lumas::new(limit - so_far));
+                    }
                     regime = Regime::Left {
                         from: date,
-                        why: Leaving::Threshold,
+                        why: threshold_why,
                     };
                     break;
                 }
                 _ => {
                     so_far = so_far.saturating_add(lumas.get());
-                    taxed.insert(id, lumas);
+                    if !micro {
+                        taxed.insert(id, lumas);
+                    }
                 }
             }
         }
@@ -1067,12 +1171,29 @@ fn year(span: &Span<'_>, profile: Option<&ProfileData>, quarter: Quarter) -> Res
     if threshold_lumas.is_none() {
         unrated = 0;
     }
+    let micro_rent = if micro {
+        let left = match regime {
+            Regime::Left { from, .. } => Some(from),
+            Regime::Turnover | Regime::Micro => None,
+        };
+        span.between(start, quarter.last_day())
+            .iter()
+            .filter(|row| {
+                row.flow == Flow::Income
+                    && row.income_kind == Some(IncomeKind::Rent)
+                    && left.is_none_or(|from| row.date < from)
+            })
+            .count()
+    } else {
+        0
+    };
     Ok(Year {
         regime,
         taxed,
         turnover,
         threshold,
         unrated,
+        micro_rent,
     })
 }
 
@@ -1129,9 +1250,17 @@ fn compute(
         }
     };
     let left_from = match year.regime {
-        Regime::Turnover => None,
+        Regime::Turnover | Regime::Micro => None,
         Regime::Left { from, .. } => Some(from),
     };
+    let micro = match year.regime {
+        Regime::Micro => true,
+        Regime::Left { why, .. } => why.micro(),
+        Regime::Turnover => false,
+    };
+    if micro {
+        return micro_quarter(books, rows, quarter, year, left_from, not_yet);
+    }
     let mut gaps = Gaps {
         year_unrated: year.unrated,
         unreadable: books.unreadable,
@@ -1431,6 +1560,74 @@ fn compute(
         months,
         gaps,
         refused,
+        regime: year.regime,
+        year_turnover: year.turnover.drams(),
+        threshold: year.threshold,
+        carry_unknown: None,
+        excluded_codes,
+        not_yet,
+    }
+}
+
+/// Квартал года микропредпринимательства («Микропредпринимательство» в шапке
+/// модуля): строк и налога нет, а пропуски — только те, что мешают знать,
+/// длится ли режим: доход квартала без курса до ухода с режима, такой же доход
+/// прежних кварталов и прошлого года и нечитаемые записи — для порога; доход
+/// без кода, когда кодов в профиле нет или среди нескольких есть закрывающий
+/// режим, — для кода (Правило 6: неизвестный вид — не «разрешённый»); доход
+/// «аренда, проценты, роялти» с начала года — для договора (ст. 267, ч. 5,
+/// п. 11). Коды профиля, закрывающие режим, — по правилам
+/// микропредпринимательства.
+fn micro_quarter(
+    books: Books<'_>,
+    rows: &[Row<'_>],
+    quarter: Quarter,
+    year: Year,
+    left_from: Option<Date>,
+    not_yet: Option<NotYet>,
+) -> QuarterTax {
+    let mut gaps = Gaps {
+        year_unrated: year.unrated,
+        unreadable: books.unreadable,
+        micro_rent: year.micro_rent,
+        ..Gaps::default()
+    };
+    let codes = books.profile.map_or(&[][..], |data| data.activities.as_slice());
+    for row in rows {
+        if row.flow != Flow::Income || left_from.is_some_and(|from| row.date >= from) {
+            continue;
+        }
+        if row.unrated() {
+            gaps.unrated += 1;
+        }
+        // Код дохода решает режим (ст. 268, ч. 1, п. 3): без кода у дохода
+        // и в профиле его не узнать, а у дохода со своей строкой код —
+        // только указанный у него самого (`regime_code`).
+        if row.activity.is_none() && row.income_kind.is_none() {
+            if codes.is_empty() {
+                gaps.no_codes = true;
+            } else if codes.len() > 1 && codes.iter().any(|code| micro_excluded(code, row.date).is_some()) {
+                gaps.unassigned += 1;
+            }
+        }
+    }
+    let excluded_codes = books
+        .profile
+        .map(|data| {
+            data.activities
+                .iter()
+                .filter_map(|code| Some((*code, micro_excluded(code, quarter.last_day())?.from)))
+                .collect()
+        })
+        .unwrap_or_default();
+    QuarterTax {
+        quarter,
+        rules: rules::armenia().version(),
+        lines: Vec::new(),
+        tax: 0,
+        months: [Lumas::ZERO; 3],
+        gaps,
+        refused: Refused::default(),
         regime: year.regime,
         year_turnover: year.turnover.drams(),
         threshold: year.threshold,
