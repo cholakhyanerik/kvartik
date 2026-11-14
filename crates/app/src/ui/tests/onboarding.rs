@@ -13,7 +13,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_test::wasm_bindgen_test;
 use web_sys::HtmlElement;
 
-use super::documents::{acme, commit, forget_device, fresh_base_with_client, invoice_data, profile};
+use super::documents::{acme, commit, forget_device, fresh_base_with_client, invoice_data, profile, wait_until};
 use super::{
     button, choice_card, document, field, mount_at, section_text, select, sleep, stored_profile, type_into, wait_for,
 };
@@ -687,4 +687,103 @@ async fn the_landing_language_is_offered_and_kept_on_continue() {
     address(&original);
     forget_device();
     assert!(wrong.is_empty(), "язык сайта: {wrong:#?}");
+}
+
+/// Язык, выбранный переключателем на страницах сайта (запись лендинга
+/// `kvartik.site_lang`, 0.0.125), сильнее выбранного в окне раньше: окно
+/// открывается на нём, запоминает его и снимает запись — выбрал на лендинге
+/// English, а программа открывалась по-русски. Язык страницы в адресе без
+/// выбора на сайте выбранного в окне не меняет: корень сайта армянский
+/// у всех. При первом запуске выбранный на сайте только предлагается —
+/// сильнее языка адреса, — а снимает его выбор в окне.
+#[wasm_bindgen_test]
+async fn a_language_chosen_on_the_site_wins_over_the_remembered_one() {
+    let window = web_sys::window().expect("окно есть");
+    let history = window.history().expect("history есть");
+    let location = window.location();
+    let original = format!(
+        "{}{}{}",
+        location.pathname().unwrap_or_default(),
+        location.search().unwrap_or_default(),
+        location.hash().unwrap_or_default()
+    );
+    let address = |query: &str| {
+        let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(query));
+    };
+    let html = document().document_element().expect("есть <html>");
+    let page_lang = html.get_attribute("lang");
+    let storage = local_storage().expect("localStorage есть");
+    let site_record = || storage.get_item("kvartik.site_lang").ok().flatten();
+    let mut wrong = Vec::new();
+
+    // Выбрал в окне русский, потом на сайте — English, а пришёл со страницы
+    // армянской: окно — на English и помнит его.
+    forget_device();
+    Device::new().set_ui_lang(Lang::Ru);
+    let _ = storage.set_item("kvartik.site_lang", Lang::En.code());
+    address(&format!("?lang={}", Lang::Am.code()));
+    let (host, mounted) = mount_welcome(Browser::Chrome);
+    if html.get_attribute("lang").as_deref() != Some(Lang::En.code()) {
+        wrong.push(format!("выбранный на сайте не взят: окно на {:?}", html.get_attribute("lang")));
+    }
+    if Device::new().ui_lang() != Some(Lang::En) || site_record().is_some() {
+        wrong.push(format!(
+            "выбранный на сайте не запомнен окном: {:?}, запись сайта — {:?}",
+            Device::new().ui_lang(),
+            site_record()
+        ));
+    }
+    drop(mounted);
+    host.remove();
+
+    // Выбора на сайте нет — язык страницы в адресе выбранного в окне не меняет.
+    address(&format!("?lang={}", Lang::Am.code()));
+    let (host, mounted) = mount_welcome(Browser::Chrome);
+    if html.get_attribute("lang").as_deref() != Some(Lang::En.code()) || Device::new().ui_lang() != Some(Lang::En) {
+        wrong.push(format!(
+            "язык страницы без выбора на сайте сменил выбранный: окно на {:?}, помнит {:?}",
+            html.get_attribute("lang"),
+            Device::new().ui_lang()
+        ));
+    }
+    drop(mounted);
+    host.remove();
+
+    // Первый запуск: выбранный на сайте предлагается — сильнее языка адреса, —
+    // не запоминается сам, а выбор в окне его снимает.
+    forget_device();
+    let _ = storage.set_item("kvartik.site_lang", Lang::En.code());
+    address(&format!("?lang={}", Lang::Ru.code()));
+    let (host, mounted) = mount_welcome(Browser::Chrome);
+    if !host.text_content().unwrap_or_default().contains(t(Lang::En, Key::WelcomeContinue)) {
+        wrong.push("первый запуск предложил не язык, выбранный на сайте".to_owned());
+    }
+    if Device::new().ui_lang().is_some() || site_record().is_none() {
+        wrong.push(format!(
+            "первый запуск без выбора: окно помнит {:?}, запись сайта — {:?}",
+            Device::new().ui_lang(),
+            site_record()
+        ));
+    }
+    match host.query_selector(".welcome label[lang=\"hy\"]").ok().flatten() {
+        Some(armenian) => armenian.unchecked_into::<HtmlElement>().click(),
+        None => wrong.push("нет армянского среди языков".to_owned()),
+    }
+    if !wait_until(|| Device::new().ui_lang() == Some(Lang::Am)).await || site_record().is_some() {
+        wrong.push(format!(
+            "выбор в окне: помнит {:?}, запись сайта — {:?}",
+            Device::new().ui_lang(),
+            site_record()
+        ));
+    }
+    drop(mounted);
+    host.remove();
+
+    address(&original);
+    forget_device();
+    match page_lang {
+        Some(code) => html.set_attribute("lang", &code).expect("ставится"),
+        None => html.remove_attribute("lang").expect("снимается"),
+    }
+    assert!(wrong.is_empty(), "язык, выбранный на сайте: {wrong:#?}");
 }

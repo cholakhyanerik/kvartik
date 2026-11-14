@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.125",
+      "date": "2026-11-14",
+      "hy": [
+        "kvartik.com կայքում ընտրած լեզուն այժմ վերցնում է նաև ծրագիրը. կայքում ընտրեք English, և ծրագիրը կբացվի անգլերենով ու կհիշի այն, նույնիսկ եթե նախկինում դրանում այլ լեզու էր ընտրված։"
+      ],
+      "ru": [
+        "Язык, выбранный на сайте kvartik.com, теперь берёт и программа: выбрали на сайте English — программа откроется по-английски и запомнит его, даже если раньше в ней был выбран другой язык."
+      ],
+      "en": [
+        "The language you choose on kvartik.com now carries over to the app: pick English on the site, and the app opens in English and remembers it, even if another language was chosen in it before."
+      ]
+    },
+    {
       "version": "0.0.124",
       "date": "2026-11-13",
       "hy": [
@@ -260,19 +273,6 @@
       ],
       "en": [
         "“Open Kvartik” on a website page now opens the app in that page's language rather than your browser's. It's remembered once you press “Continue”."
-      ]
-    },
-    {
-      "version": "0.0.105",
-      "date": "2026-11-10",
-      "hy": [
-        "Ակտերով ամբողջությամբ ծածկված հաշվի քարտն այժմ ասում է «Այս հաշվով ակտերը ծածկում են այն ամբողջությամբ»՝ երկու նույն գումարը «իսկ»-ով կողք կողքի դնելու փոխարեն։"
-      ],
-      "ru": [
-        "Карточка счёта, который акты закрыли целиком, теперь говорит «Акты по этому счёту закрывают его целиком», а не ставит рядом две одинаковые суммы через «а»."
-      ],
-      "en": [
-        "The card of an invoice fully covered by acts now says “The acts for this invoice cover it in full” instead of putting two equal amounts side by side as if they differed."
       ]
     }
   ]

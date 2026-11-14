@@ -28,11 +28,13 @@
 //! кончилось: тогда чтение даёт «нет», а запись — `false`, и окно живёт
 //! дальше без них.
 //!
-//! Одну запись пишет не окно, а калькулятор лендинга (задача 34): что из
-//! введённого в нём «Открыть Kvartik» взял с собой ([`Device::handoff`]).
-//! У лендинга и программы одно происхождение, и запись видна окну без
-//! переноса. А одну запись окна читает лендинг: включён ли кружок у курсора
-//! ([`Device::cursor`]) — у его страниц кружок тот же.
+//! Две записи пишет не окно, а лендинг: калькулятор — что из введённого
+//! в нём «Открыть Kvartik» взял с собой ([`Device::handoff`], задача 34),
+//! а переключатель страниц — какой язык человек выбрал на сайте
+//! ([`Device::site_lang`], 0.0.125). У лендинга и программы одно
+//! происхождение, и записи видны окну без переноса. А одну запись окна
+//! читает лендинг: включён ли кружок у курсора ([`Device::cursor`]) — у его
+//! страниц кружок тот же.
 
 use kvartik_core::format::autobackup::DeviceTag;
 use kvartik_core::format::backup::DeviceKey;
@@ -56,6 +58,11 @@ const HANDOFF: &str = "calc";
 /// Имя записи кружка у курсора: его читает и лендинг (`site/landing.js`)
 /// под полным именем, и тест ниже держит их вместе.
 const CURSOR: &str = "cursor";
+
+/// Имя записи языка, выбранного переключателем страниц сайта: её пишет
+/// лендинг (`site/landing.js`) под полным именем, и тест ниже держит их
+/// вместе.
+const SITE_LANG: &str = "site_lang";
 
 impl Device {
     /// Записи программы.
@@ -100,6 +107,21 @@ impl Device {
     /// Запомнить язык окна. `false` — `localStorage` отказал.
     pub fn set_ui_lang(&self, lang: Lang) -> bool {
         self.set("lang", lang.code())
+    }
+
+    /// Язык, который человек выбрал переключателем на страницах сайта, а окно
+    /// ещё не взяло (`ui/lang.rs`); `None` — не выбирал, окно его уже взяло
+    /// или запись не читается. Пишет её лендинг: это договор между версиями,
+    /// как запись калькулятора, — смысл не меняется, а незнакомый код языка —
+    /// «нет записи».
+    pub fn site_lang(&self) -> Option<Lang> {
+        Lang::from_code(&self.get(SITE_LANG)?)
+    }
+
+    /// Забыть язык сайта: окно его взяло или человек выбрал язык в самом
+    /// окне — тот новее. `false` — `localStorage` отказал.
+    pub fn clear_site_lang(&self) -> bool {
+        self.remove(SITE_LANG)
     }
 
     /// День, когда на этом устройстве начался пробный период; `None` —
@@ -355,6 +377,7 @@ impl Device {
                 "office",
                 "base",
                 CURSOR,
+                SITE_LANG,
                 "colors",
                 "license",
                 "license_told",
@@ -443,5 +466,19 @@ mod tests {
         let landing = include_str!("../../site/landing.js");
         let read = format!("localStorage.getItem(\"{}{CURSOR}\") === \"1\"", Device::new().prefix);
         assert!(landing.contains(&read), "в site/landing.js нет «{read}»");
+    }
+
+    /// Окно ищет язык, выбранный на страницах сайта, там, куда его пишет
+    /// лендинг: разойдись имена — выбор на сайте молча не дошёл бы до
+    /// программы. Что код из `hreflang` ссылки переключателя окно читает,
+    /// проверяет собранный сайт (`tools/browser/check.mjs`, «лендинг»).
+    #[test]
+    fn the_site_language_is_read_where_the_landing_writes_it() {
+        let landing = include_str!("../../site/landing.js");
+        let write = format!(
+            "localStorage.setItem(\"{}{SITE_LANG}\", link.hreflang)",
+            Device::new().prefix
+        );
+        assert!(landing.contains(&write), "в site/landing.js нет «{write}»");
     }
 }

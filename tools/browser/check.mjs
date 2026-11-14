@@ -565,6 +565,26 @@ async function landing(browser) {
     checks.check("программа: предлагает взять введённое в калькуляторе", await page.waitFor(`
       const card = document.querySelector("#home .handoff");
       return card && card.getClientRects().length > 0 && card.innerText.includes("1985") ? true : null;`));
+    // Язык, выбранный переключателем страниц сайта, берёт и программа
+    // (0.0.125): она уже помнит русский, а на лендинге выбрали English —
+    // «Open Kvartik» открывает её по-английски, и выбор запомнен. Язык
+    // страницы без переключателя выбранного не меняет: с армянского корня
+    // программа — по-прежнему на English.
+    await page.go(`${ORIGIN}/ru/`);
+    await page.waitFor(`return document.querySelector('.langs a[hreflang="en"]') ? true : null;`);
+    await page.eval(`document.querySelector('.langs a[hreflang="en"]').click(); return true;`);
+    await page.waitFor(`return location.pathname === "/en/" && document.querySelector('a.button[href="/app/?lang=en"]') ? true : null;`);
+    await page.eval(`document.querySelector('a.button[href="/app/?lang=en"]').click(); return true;`);
+    checks.check("программа: язык, выбранный на лендинге, сильнее выбранного в ней раньше", await page.waitFor(`
+      return location.pathname === "/app/" && document.querySelector(".app") && document.documentElement.lang === "en"
+        && localStorage.getItem("kvartik.lang") === "en" && localStorage.getItem("kvartik.site_lang") === null ? true : null;`));
+    await page.go(`${ORIGIN}/`);
+    await page.waitFor(`return document.querySelector('a.button[href="/app/?lang=hy"]') ? true : null;`);
+    await page.eval(`document.querySelector('a.button[href="/app/?lang=hy"]').click(); return true;`);
+    const opened = await page.waitFor(`return location.pathname === "/app/" && document.querySelector(".app")
+      ? document.documentElement.lang : null;`);
+    checks.check("программа: язык страницы лендинга без переключателя выбранного в ней не меняет", opened === "en",
+      `окно на ${opened}`);
     await page.go(`${ORIGIN}/#/documents`);
     checks.check("лендинг: старый адрес программы /#/… — в /app/ на тот же экран",
       await page.waitFor(`return location.pathname === "/app/" && location.hash === "#/documents" ? true : null;`));

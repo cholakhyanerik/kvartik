@@ -107,6 +107,7 @@ pub(super) fn forget_device() {
     if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten())
     {
         let _ = storage.remove_item("kvartik.lang");
+        let _ = storage.remove_item("kvartik.site_lang");
     }
 }
 
