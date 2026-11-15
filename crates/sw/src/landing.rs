@@ -419,7 +419,7 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
         headline = text(Key::WelcomeHeadline),
         lead = text(Key::LandingLead),
         open = text(Key::LandingOpen),
-        after_trial = text(Key::LandingAfterTrial),
+        after_trial = text(Key::WelcomeAfterTrial),
         features_title = text(Key::LandingFeaturesTitle),
         calendar_title = text(Key::LandingCalendarTitle),
         calendar_text = text(Key::LandingCalendarText),
@@ -578,7 +578,7 @@ fn buy_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -
         plan_card = plan_card(
             lang,
             "plan",
-            &format!("        <p class=\"hint\">{} {}</p>\n", trial(lang), text(Key::LandingAfterTrial))
+            &format!("        <p class=\"hint\">{} {}</p>\n", trial(lang), text(Key::WelcomeAfterTrial))
         ),
         faq = faq(lang),
         how = text(Key::BuyHow),
@@ -1007,7 +1007,7 @@ mod tests {
                 }
             }
             let plan = &html[html.find("<section class=\"card plan\"").expect("карточка тарифа")..at];
-            if !plan.contains(&format!("{} {}", trial(lang), text(Key::LandingAfterTrial))) {
+            if !plan.contains(&format!("{} {}", trial(lang), text(Key::WelcomeAfterTrial))) {
                 wrong.push(format!("{lang:?}: под тарифом не сказано, что после пробного периода"));
             }
         }

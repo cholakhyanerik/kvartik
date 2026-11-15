@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.129",
+      "date": "2026-11-15",
+      "hy": [
+        "Առաջին գործարկման էկրանն այժմ միանգամից ասում է, թե ինչ կլինի 14 օր փորձաշրջանից հետո. նոր հաշիվների և ակտերի թողարկումը և թվերը հաշվարկի համար՝ լիցենզիայի բանալիով, իսկ տվյալները, մատյանը, հարկը, PDF-ը և պահուստային պատճենն աշխատում են նաև առանց դրա։"
+      ],
+      "ru": [
+        "Экран первого запуска теперь сразу говорит, что будет после 14 дней пробного периода: выпуск новых счетов и актов и числа для расчёта — с ключом лицензии, а данные, книга, налог, PDF и резервная копия работают и без него."
+      ],
+      "en": [
+        "The first-run screen now says right away what happens after the 14-day trial: issuing new invoices and acts and the numbers for the return need a license key, while your data, ledger, tax, PDFs and backups work without one."
+      ]
+    },
+    {
       "version": "0.0.128",
       "date": "2026-11-15",
       "hy": [
@@ -266,19 +279,6 @@
       ],
       "en": [
         "The initials circle no longer counts the legal form as part of the name: “IE Erik Cholakhyan” now shows “EC”, not “IE”."
-      ]
-    },
-    {
-      "version": "0.0.109",
-      "date": "2026-11-11",
-      "hy": [
-        "«Այս ԱՁ-ի պատճենը հաճախորդի համար» բաժինն այժմ կոչվում է «Միայն այս ԱՁ-ի պատճենը», և դրանում այլևս չկա «հաճախորդ» բառը. ծրագրում հաճախորդը ձեր գնորդն է, իսկ այս պատճենը տալիս են հաշվապահին կամ տեղափոխում այլ սարք։"
-      ],
-      "ru": [
-        "Раздел «Копия этого ИП для клиента» теперь называется «Копия только этого ИП», и слова «клиент» в нём больше нет: в программе клиент — ваш покупатель, а эту копию отдают бухгалтеру или переносят на другое устройство."
-      ],
-      "en": [
-        "“Backup of this entrepreneur for the client” is now called “Backup of this entrepreneur only”, without the word “client”: in the app a client is your buyer, while this backup goes to an accountant or another device."
       ]
     }
   ]

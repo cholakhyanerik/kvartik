@@ -237,6 +237,15 @@ strings! {
     WelcomeHaveBackup = "У меня есть копия", "I have a backup", "Ունեմ պահուստային պատճեն";
     /// Шаблон: срок пробного периода — «14 дней».
     WelcomeTrial = "{} бесплатно, без регистрации.", "{} free, no sign-up.", "{} անվճար, առանց գրանցման։";
+    /// Сразу за сроком пробного периода — на экране первого запуска (задача
+    /// 98) и лендинга: что запирает его конец и что нет, как списки «Что
+    /// даёт ключ» экрана лицензии (условия, п. 4.4; решение человека
+    /// 2026-10-27). Цены здесь нет: на лендинге она — карточкой ниже, со
+    /// ссылкой на страницу «Купить» (задача 35), из ядра (`release::PRICE`).
+    WelcomeAfterTrial =
+        "Потом выпуск новых счетов и актов и числа для расчёта\u{A0}— с ключом лицензии. Данные, книга, налог, PDF выпущенных документов, выгрузка и резервная копия работают и без него.",
+        "After that, issuing new invoices and acts and the numbers for the return need a license key. Your data, ledger, tax, PDFs of issued documents, exports and backups work without one.",
+        "Դրանից հետո նոր հաշիվների և ակտերի թողարկումը և թվերը հաշվարկի համար՝ լիցենզիայի բանալիով։ Տվյալները, մատյանը, հարկը, թողարկված փաստաթղթերի PDF-ը, արտահանումը և պահուստային պատճենն աշխատում են նաև առանց դրա։";
     /// Шаг установки на экране первого запуска (`ui/onboarding.rs`).
     WelcomeInstallLater =
         "Продолжить без установки",
@@ -3977,14 +3986,6 @@ strings! {
         "For individual entrepreneurs (IE) on turnover tax. Kvartik issues invoices and acts, keeps your income and expense ledger, works out the quarterly tax and annual payments, and keeps track of deadlines.",
         "Շրջանառության հարկ վճարող ԱՁ-ների համար։ Kvartik-ը կազմում է հաշիվներ և ակտեր, վարում է եկամուտների և ծախսերի մատյանը, հաշվում է եռամսյակի հարկը և տարեկան վճարները և հիշում է ժամկետները։";
     LandingOpen = "Открыть Kvartik", "Open Kvartik", "Բացել Kvartik-ը";
-    /// Что запирает конец пробного периода — и что нет, как списки «Что даёт
-    /// ключ» экрана лицензии (решение человека 2026-10-27). Цены здесь нет: она — карточкой ниже,
-    /// со ссылкой на страницу «Купить» (задача 35), из ядра
-    /// (`release::PRICE`).
-    LandingAfterTrial =
-        "Потом выпуск новых счетов и актов и числа для расчёта\u{A0}— с ключом лицензии. Данные, книга, налог, PDF выпущенных документов, выгрузка и резервная копия работают и без него.",
-        "After that, issuing new invoices and acts and the numbers for the return need a license key. Your data, ledger, tax, PDFs of issued documents, exports and backups work without one.",
-        "Դրանից հետո նոր հաշիվների և ակտերի թողարկումը և թվերը հաշվարկի համար՝ լիցենզիայի բանալիով։ Տվյալները, մատյանը, հարկը, թողարկված փաստաթղթերի PDF-ը, արտահանումը և պահուստային պատճենն աշխատում են նաև առանց դրա։";
     LandingFeaturesTitle = "Что умеет Kvartik", "What Kvartik does", "Ինչ է անում Kvartik-ը";
     LandingDocsTitle = "Счёт и акт на трёх языках", "Invoices and acts in three languages", "Հաշիվ և ակտ երեք լեզվով";
     LandingDocsText =

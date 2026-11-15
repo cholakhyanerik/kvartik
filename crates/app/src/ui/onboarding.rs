@@ -74,11 +74,18 @@ pub fn Welcome(
             close(screen);
         }
     };
+    // Срок пробного периода и что потом (задача 98) — одним абзацем под
+    // кнопками, как на лендинге: о том, что запрёт конец срока, человек
+    // узнаёт до первых данных, а не на экране лицензии за неделю до конца.
+    // Над выбором языка эти шесть строк мелкого текста уводили «Продолжить»
+    // за край первого экрана телефона (360×780: низ кнопки — 818–860 точек
+    // вместо 734, глазной прогон задачи 98), а в дизайне экрана 01 под
+    // вводной — сразу выбор языка.
     let trial = move || {
         let lang = lang.get();
         let days = u64::from(TRIAL_DAYS.unsigned_abs());
         let days = fill(plural(lang, days, Key::DaysOne, Key::DaysFew, Key::DaysMany), &[&days.to_string()]);
-        fill(t(lang, Key::WelcomeTrial), &[&days])
+        format!("{} {}", fill(t(lang, Key::WelcomeTrial), &[&days]), t(lang, Key::WelcomeAfterTrial))
     };
     view! {
         <section class="welcome">
@@ -94,7 +101,6 @@ pub fn Welcome(
                 <div class="welcome-first" hidden=move || installing.get().is_some()>
                     <h1>{tr(lang, Key::WelcomeHeadline)}</h1>
                     <p class="lead">{tr(lang, Key::WelcomeAbout)}</p>
-                    <p class="hint">{trial}</p>
                     <fieldset class="welcome-langs">
                         <legend>{tr(lang, Key::WelcomeLang)}</legend>
                         {Lang::ALL
@@ -122,6 +128,7 @@ pub fn Welcome(
                     <button type="button" class="link" on:click=move |_| next(Some(Screen::Backup))>
                         <span class="label">{tr(lang, Key::WelcomeHaveBackup)}</span>
                     </button>
+                    <p class="hint">{trial}</p>
                 </div>
                 {move || installing.get().map(|screen| view! {
                     <InstallSection lang program />

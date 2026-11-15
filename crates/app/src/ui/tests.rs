@@ -531,7 +531,8 @@ fn welcome_choice(host: &HtmlElement) -> Option<String> {
 
 /// Первый запуск: пока язык окна не выбран, окно открывается экраном
 /// первого запуска на языке браузера, а само спрятано под ним; выбор языка
-/// сразу переводит экран и запоминается; «Продолжить» убирает экран,
+/// сразу переводит экран — и строку о том, что после пробного периода, —
+/// и запоминается; «Продолжить» убирает экран,
 /// и при новом открытии его нет. «У меня есть копия» запоминает язык
 /// и ведёт к копии, где в пустой базе восстановление стоит первым.
 #[wasm_bindgen_test]
@@ -566,6 +567,17 @@ async fn first_launch_asks_for_the_language() {
     let text = host.text_content().unwrap_or_default();
     if !text.contains(t(Lang::Ru, Key::WelcomeHeadline)) || welcome_choice(&host).as_deref() != Some("ru") {
         wrong.push(format!("выбор русского не перевёл экран: {:?}", welcome_choice(&host)));
+    }
+    // За сроком пробного периода — что потом без ключа (задача 98): в той
+    // же строке и на выбранном языке.
+    let hint = host
+        .query_selector(".welcome-first .hint")
+        .ok()
+        .flatten()
+        .and_then(|hint| hint.text_content())
+        .unwrap_or_default();
+    if !hint.ends_with(t(Lang::Ru, Key::WelcomeAfterTrial)) {
+        wrong.push(format!("за сроком пробного периода нет того, что потом: {hint:?}"));
     }
     if Device::new().ui_lang() != Some(Lang::Ru) {
         wrong.push(format!("выбор не запомнен: {:?}", Device::new().ui_lang()));
