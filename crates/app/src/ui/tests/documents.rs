@@ -1490,6 +1490,55 @@ async fn pdf_shows_the_logo_of_its_day() {
     assert!(wrong.is_empty(), "логотип в PDF: {wrong:#?}");
 }
 
+/// PDF выпущенного документа профиль не нужен: реквизиты ИП — в самом
+/// документе (найдено ревью задачи 63). Запись профиля не читается — PDF
+/// всё равно собирается: у документа с известным логотипом выпуска — как
+/// обычно, у выпущенного до задачи 63 — без логотипа и со словами об этом.
+/// Раньше оба не собирались: «документ не прочитался».
+#[wasm_bindgen_test]
+async fn issued_pdf_needs_no_profile() {
+    let client = fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let store = Store::open(|_| {}).await.expect("база открыта");
+    let owner = owner(&store).await;
+    let now = clock::now();
+    let issue = |documents: &[Document], logo| {
+        Document::create(invoice_data(&client), now)
+            .expect("черновик")
+            .issue(documents, 0, Some(&profile()), logo, &client, now)
+            .expect("выпущен")
+    };
+    let bare = issue(&[], Some(None));
+    let unknown = issue(std::slice::from_ref(&bare), None);
+    let mut writes = Writes::default();
+    writes.insert(&bare);
+    writes.insert(&unknown);
+    commit(writes).await;
+    spoil(&store, Profile::KIND, owner.id()).await;
+
+    let fonts = FontServer::install();
+    let mut wrong = Vec::new();
+    for (what, document, alert) in [
+        ("без логотипа", &bare, None),
+        ("выпущенный до задачи 63", &unknown, Some(t(lang, Key::PdfLogoSkipped))),
+    ] {
+        let number = document.number().map(|number| number.to_string()).unwrap_or_default();
+        let address = format!("#/documents/{}", document.id());
+        let (host, mounted) = mount_at(&address);
+        if !wait_for(&host, &number).await || !open_paper(&host, lang).await {
+            wrong.push(format!("{what}: PDF не собрался — {:?}", host.query_selector(".paper").ok().flatten().and_then(|p| p.text_content())));
+        } else if paper_alert(&host).as_deref() != alert {
+            wrong.push(format!("{what}: жалоба {:?}", paper_alert(&host)));
+        }
+        drop(mounted);
+        host.remove();
+    }
+    drop(fonts);
+    forget_device();
+    assert!(wrong.is_empty(), "PDF без профиля: {wrong:#?}");
+}
+
 /// Открыть страницы документа кнопкой «PDF»; `false` — файла не дождались.
 async fn open_paper(host: &HtmlElement, lang: Lang) -> bool {
     match button(host, &[t(lang, Key::DocPdf)]) {

@@ -113,22 +113,39 @@ split! {
 /// никакой, а черновику и документу, выпущенному до задачи 63, — нынешний
 /// логотип профиля. Нечитаемый логотип — не повод не собрать документ: он
 /// соберётся без него, и окно скажет об этом (`true` в ответе).
+///
+/// Профиль целиком нужен только черновику (`draft`): его реквизиты ИП —
+/// нынешние, а у выпущенного — в нём самом. Выпущенному профиль нужен разве
+/// что ради нынешнего логотипа, и нечитаемая запись профиля ему — «логотип
+/// не попал», а не «документ не прочитался»: PDF выпущенных документов
+/// работает всегда (CLAUDE.md, Правило 2; найдено ревью задачи 63).
 async fn profile(
     store: &Store,
+    draft: bool,
     at_issue: Option<Option<RecordId>>,
 ) -> Result<(Option<ProfileData>, Option<Image>, bool), StoreError> {
     let tx = store.read()?;
-    let profile = Profile::current(tx.all::<Profile>().await?);
-    let (image, damaged) = match (at_issue, &profile) {
-        (Some(Some(id)), _) => match tx.get::<IssuedLogo>(id).await {
-            Ok(Some(kept)) => (Some(kept.image().clone()), false),
-            // Пропала запись картинки — тоже «не прочиталась»: документ
-            // ссылается на неё, а нынешний логотип подставлять нельзя.
-            Ok(None) | Err(StoreError::Damaged) => (None, true),
-            Err(error) => return Err(error),
-        },
-        (Some(None), _) | (None, None) => (None, false),
-        (None, Some(profile)) => match tx.get::<Logo>(profile.id()).await {
+    match at_issue {
+        Some(Some(id)) => {
+            return match tx.get::<IssuedLogo>(id).await {
+                Ok(Some(kept)) => Ok((None, Some(kept.image().clone()), false)),
+                // Пропала запись картинки — тоже «не прочиталась»: документ
+                // ссылается на неё, а нынешний логотип подставлять нельзя.
+                Ok(None) | Err(StoreError::Damaged) => Ok((None, None, true)),
+                Err(error) => Err(error),
+            };
+        }
+        Some(None) => return Ok((None, None, false)),
+        None => {}
+    }
+    let profile = match tx.all::<Profile>().await {
+        Ok(profiles) => Profile::current(profiles),
+        Err(StoreError::Damaged) if !draft => return Ok((None, None, true)),
+        Err(error) => return Err(error),
+    };
+    let (image, damaged) = match &profile {
+        None => (None, false),
+        Some(profile) => match tx.get::<Logo>(profile.id()).await {
             Ok(logo) => (logo.filter(|logo| !logo.is_removed()).map(|logo| logo.image().clone()), false),
             Err(StoreError::Damaged) => (None, true),
             Err(error) => return Err(error),
@@ -150,7 +167,8 @@ async fn make(base: Base, request: Request) -> Result<Paper, PaperProblem> {
         Some(Some(_)) => Key::PdfIssuedLogoSkipped,
         _ => Key::PdfLogoSkipped,
     };
-    let (profile, image, damaged) = profile(&store, at_issue).await?;
+    let draft = matches!(request, Request::Draft { .. });
+    let (profile, image, damaged) = profile(&store, draft, at_issue).await?;
     // Реквизиты ИП черновика — нынешние; у выпущенного — в нём самом.
     let seller = Seller::from_profile(&profile.unwrap_or_default());
     let source = match &request {

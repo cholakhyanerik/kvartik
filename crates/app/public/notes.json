@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.131",
+      "date": "2026-11-15",
+      "hy": [
+        "Թողարկված հաշվի կամ ակտի PDF-ը կազմվում է նաև այն ժամանակ, երբ պրոֆիլի գրառումը չի կարդացվում. թողարկված փաստաթուղթն իր վավերապայմաններն ունի։"
+      ],
+      "ru": [
+        "PDF выпущенного счёта или акта собирается и тогда, когда запись профиля не читается: реквизиты у выпущенного документа свои."
+      ],
+      "en": [
+        "The PDF of an issued invoice or act is now built even when the profile record can't be read: an issued document carries its own details."
+      ]
+    },
+    {
       "version": "0.0.130",
       "date": "2026-11-15",
       "hy": [
@@ -266,19 +279,6 @@
       ],
       "en": [
         "A tax number with a hyphen no longer breaks across two lines in the client list on a narrow screen."
-      ]
-    },
-    {
-      "version": "0.0.111",
-      "date": "2026-11-11",
-      "hy": [
-        "Հայաստանի նոր հաճախորդի համար երկրորդ քայլում արժույթն ու փաստաթղթերի լեզուն արդեն ընտրված են՝ դրամ և հայերեն։ Դրանք կարելի է փոխել։"
-      ],
-      "ru": [
-        "У нового клиента из Армении на втором шаге валюта и язык документов уже выбраны: драмы и армянский. Сменить их можно, как и раньше."
-      ],
-      "en": [
-        "For a new client from Armenia, the second step now has the currency and document language already chosen: drams and Armenian. You can still change them."
       ]
     }
   ]
