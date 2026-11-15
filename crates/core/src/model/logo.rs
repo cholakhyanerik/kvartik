@@ -11,14 +11,20 @@
 //! (задача 12). Вид картинки узнаётся по первым байтам, а не по имени
 //! файла: расширение ничего не обещает.
 //!
+//! **Логотип выпущенного документа** (задача 63) — своя запись
+//! [`IssuedLogo`]: выпуск помнит картинку дня выпуска, и PDF старого счёта
+//! печатается с ней, а не с логотипом, поставленным потом (решение человека
+//! 2026-11-09 вместо «с нынешним» 2026-10-14).
+//!
 //! В данных: `{"meta":{…},"image":"iVBORw0KGgo…"}` — байты файла в base64
-//! (RFC 4648, как в файле копии).
+//! (RFC 4648, как в файле копии), у обоих видов.
 
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize, Serializer};
+use sha2::{Digest, Sha256};
 
 use super::profile::Profile;
-use super::record::{RecordMeta, Timestamp};
+use super::record::{RecordId, RecordMeta, Timestamp};
 use crate::format::{Stored, base64};
 
 /// Самый большой логотип. Логотип в шапке счёта — несколько сантиметров:
@@ -185,6 +191,81 @@ impl Logo {
     }
 }
 
+/// Логотип выпущенного документа (задача 63): картинка, с которой документ
+/// выпущен, — своей записью. Её не меняют ни новый логотип профиля, ни
+/// «убрать», ни восстановление копии с другим логотипом: запись логотипа
+/// профиля одна и переписывается, а эта — только добавляется.
+///
+/// Идентификатор — отпечаток картинки ([`IssuedLogo::id_of`]): одна картинка —
+/// одна запись, сколько бы документов с ней ни выпустили, а два устройства
+/// и две копии кладут её под одним идентификатором, и слияние копий дублей
+/// не плодит. Лежит только картинка, с которой выпускали: логотип,
+/// поставленный и сменённый без выпуска, места не занимает (предел
+/// [`MAX_BYTES`] у каждой). Нынешний логотип профиля с первым выпуском лежит
+/// в базе дважды — цена того, что запись выпуска не зависит от путей, какими
+/// меняют логотип профиля: форма, восстановление и слияние копий.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IssuedLogo {
+    meta: RecordMeta,
+    image: Image,
+}
+
+impl Stored for IssuedLogo {
+    const KIND: &'static str = "issued_logo";
+
+    fn meta(&self) -> &RecordMeta {
+        &self.meta
+    }
+}
+
+impl IssuedLogo {
+    /// Идентификатор записи картинки `image` — её отпечаток: первые 16 байтов
+    /// SHA-256 байтов файла (решение человека 2026-11-09), UUID версии 8
+    /// ([`RecordId::from_print`]). Выпуск кладёт его в документ
+    /// (`document::Issued`), а PDF по нему находит картинку одним чтением по
+    /// ключу. Ста двадцати двух битов отпечатка хватает с запасом: картинок
+    /// у ИП — единицы.
+    pub fn id_of(image: &Image) -> RecordId {
+        let print = Sha256::digest(image.bytes());
+        let mut head = [0_u8; 16];
+        head.copy_from_slice(&print[..16]);
+        RecordId::from_print(head)
+    }
+
+    /// Команда «логотип — к выпуску»: запись картинки `image` под её
+    /// отпечатком, если её ещё нет. `existing` — запись под
+    /// [`IssuedLogo::id_of`], прочитанная в той же транзакции; `None` —
+    /// писать нечего, такая уже лежит. Удалённой или с другой картинкой её
+    /// оставила бы только испорченная копия — запись возвращается к своей
+    /// картинке: документ ссылается на неё.
+    pub fn keep(existing: Option<&IssuedLogo>, image: &Image, now: Timestamp) -> Option<Self> {
+        match existing {
+            Some(kept) if !kept.meta.is_deleted() && kept.image == *image => None,
+            Some(kept) => {
+                let mut kept = kept.clone();
+                // Восстановление — тоже правка: момент сдвигается один раз.
+                if kept.meta.is_deleted() {
+                    kept.meta.restore(now);
+                } else {
+                    kept.meta.touch(now);
+                }
+                kept.image = image.clone();
+                Some(kept)
+            }
+            None => Some(Self {
+                meta: RecordMeta::with_id(Self::id_of(image), now),
+                image: image.clone(),
+            }),
+        }
+    }
+
+    /// Картинка.
+    pub const fn image(&self) -> &Image {
+        &self.image
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,6 +320,48 @@ mod tests {
         let replaced = Logo::set(Some(again), &profile, image(30), at(5_000));
         assert_eq!(replaced.meta().id(), profile.id());
         assert_eq!(replaced.meta().modified(), at(5_000));
+    }
+
+    /// Идентификатор логотипа выпуска — первые 16 байтов SHA-256 картинки,
+    /// UUID версии 8: числа посчитаны вне программы (`hashlib` Python,
+    /// 2026-11-15). Одна картинка — один идентификатор, другая — другой.
+    #[test]
+    fn issued_logo_id_is_the_print_of_the_image() {
+        let id = |len| IssuedLogo::id_of(&image(len)).to_string();
+        assert_eq!(id(10), "3d5ccb0c-ef4d-8fd8-b247-4faf2038fbbb");
+        assert_eq!(id(20), "035c3bc2-0b31-8a69-837a-bddc5ae1e294");
+    }
+
+    /// К выпуску картинка ложится один раз: новая — записью под отпечатком,
+    /// та же — ничем; удалённая или с чужой картинкой под этим отпечатком —
+    /// возвращается к своей. В данных — как логотип профиля.
+    #[test]
+    fn issued_logo_is_kept_once() {
+        let at = Timestamp::from_unix_millis;
+        let first = IssuedLogo::keep(None, &image(10), at(1_000)).expect("новая запись");
+        assert_eq!(first.meta().id(), IssuedLogo::id_of(&image(10)));
+        assert_eq!((first.meta().modified(), first.image()), (at(1_000), &image(10)));
+        assert_eq!(IssuedLogo::keep(Some(&first), &image(10), at(2_000)), None);
+        let mut deleted = first.clone();
+        deleted.meta.delete(at(2_000));
+        let back = IssuedLogo::keep(Some(&deleted), &image(10), at(3_000)).expect("оживает");
+        assert_eq!((back.meta().is_deleted(), back.meta().modified()), (false, at(3_000)));
+        let foreign = IssuedLogo {
+            image: image(20),
+            ..first.clone()
+        };
+        let fixed = IssuedLogo::keep(Some(&foreign), &image(10), at(4_000)).expect("своя картинка");
+        assert_eq!((fixed.meta().id(), fixed.image()), (first.meta().id(), &image(10)));
+        assert_eq!(fixed.meta().modified(), at(4_000));
+
+        let text = serde_json::to_string(&first).expect("записывается");
+        assert_eq!(
+            text,
+            r#"{"meta":{"id":"3d5ccb0c-ef4d-8fd8-b247-4faf2038fbbb","modified":1000,"deleted":null},"image":"iVBORw0KGgoAAA=="}"#
+        );
+        assert_eq!(serde_json::from_str::<IssuedLogo>(&text).ok(), Some(first));
+        let extra = text.replace(r#""image""#, r#""print":1,"image""#);
+        assert!(serde_json::from_str::<IssuedLogo>(&extra).is_err(), "незнакомое поле — порча");
     }
 
     /// В данных — base64, и читается только картинка, которую принял бы

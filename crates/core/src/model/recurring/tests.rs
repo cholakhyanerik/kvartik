@@ -93,7 +93,7 @@ fn invoice(client: &Client, date: Date, service: Date) -> Document {
     };
     Document::create(data, at(2_000))
         .expect("черновик")
-        .issue(&[], 0, Some(&profile()), client, at(3_000))
+        .issue(&[], 0, Some(&profile()), Some(None), client, at(3_000))
         .expect("выпущен")
 }
 
@@ -128,7 +128,7 @@ fn start_only_from_a_live_invoice() {
     let act_data = source.act_data(today).expect("акт");
     let act = Document::create(act_data, at(2_000))
         .expect("черновик")
-        .issue(&[], 0, Some(&profile()), &client, at(3_000))
+        .issue(&[], 0, Some(&profile()), Some(None), &client, at(3_000))
         .expect("выпущен");
     assert_eq!(Recurring::start(None, &act, today, at(4_000)), Err(DocError::NotInvoice));
     let annulled = source.annul(today, at(4_000)).expect("выпущен").expect("аннулирован");

@@ -28,6 +28,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use kvartik_core::format::Stored;
+use kvartik_core::doc::image::Picture;
 use kvartik_core::i18n::{self, Key, Lang, ParseError, fill, plural, t};
 use kvartik_core::model::activity::{ActivityCode, IncomeKind};
 use kvartik_core::model::bank::payable_abroad;
@@ -38,9 +39,10 @@ use kvartik_core::model::document::{
     DocError, DocKind, Document, DocumentData, Item, Payment, QUANTITY_DIGITS, Settlement, Status,
 };
 use kvartik_core::model::ledger;
+use kvartik_core::model::logo::{IssuedLogo, Logo};
 use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::model::profile::Profile;
-use kvartik_core::model::record::RecordId;
+use kvartik_core::model::record::{RecordId, Timestamp};
 use kvartik_core::model::recurring::Recurring;
 use kvartik_core::model::text::Line;
 use kvartik_core::tax::{settlement, turnover};
@@ -61,7 +63,7 @@ use super::split::{part, screen, split};
 use super::storage::error_key;
 use super::{Base, tr};
 use crate::platform::clock;
-use crate::store::{Store, StoreError, Writes};
+use crate::store::{Store, StoreError, Tx, Write, Writes};
 
 /// Сколько документов список показывает сразу и прибавляет по «Показать
 /// ещё»: за год у ИП их сотни, а рисовать окну — только то, что видно
@@ -341,7 +343,7 @@ enum Notice {
 
 /// Что не вышло: хранилище или команда ядра.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Problem {
+pub(super) enum Problem {
     Store(StoreError),
     Doc(DocError),
 }
@@ -2287,8 +2289,10 @@ pub(super) fn DateField(lang: ReadSignal<Lang>, label: Key, value: RwSignal<Stri
 
 /// Сохранить черновик или выпустить — одним действием: команды ядра и одна
 /// транзакция. Выпуск читает в ней же все документы (номер), профиль
-/// и клиента (копия реквизитов).
-async fn save(
+/// и клиента (копия реквизитов), логотип профиля и запись его картинки для
+/// выпуска (задача 63). Видна тестам окна: путь логотипа выпуска они
+/// проверяют им самим.
+pub(super) async fn save(
     store: &Store,
     id: Option<RecordId>,
     data: DocumentData,
@@ -2305,6 +2309,7 @@ async fn save(
         None => Document::create(data, now)?,
         Some(known) => known.edit(data, now)?.unwrap_or_else(|| known.clone()),
     };
+    let mut writes = Writes::default();
     let document = if issue {
         let listed = tx.list::<Document>().await?;
         let profile = Profile::current(tx.all::<Profile>().await?);
@@ -2312,17 +2317,18 @@ async fn save(
             .get::<Client>(draft.data().client)
             .await?
             .ok_or(DocError::ClientDeleted)?;
+        let logo = issued_logo(&tx, profile.as_ref(), &mut writes, now).await?;
         draft.issue(
             &listed.records,
             listed.unreadable,
             profile.as_ref().map(Profile::data),
+            logo,
             &client,
             now,
         )?
     } else {
         draft
     };
-    let mut writes = Writes::default();
     match &existing {
         None => writes.insert(&document),
         Some(known) if *known != document => writes.update(&document),
@@ -2330,6 +2336,54 @@ async fn save(
     }
     tx.commit(writes).await?;
     Ok(document)
+}
+
+/// Логотип профиля на день выпуска (задача 63) — что запомнит документ
+/// (`Document::issue`, `Issued::logo`); картинка ложится в `writes` записью
+/// под своим отпечатком, если в базе её ещё нет. Нечитаемая запись логотипа
+/// и картинка, которую PDF не возьмёт, — «неизвестно»: PDF возьмёт нынешний
+/// логотип, как у документов до задачи 63, а выпуск они не держат.
+/// Нечитаемая запись под отпечатком — испорченная
+/// копия той же картинки (отпечаток — её содержимое), и на её место встаёт
+/// исправная, а не отказ всему выпуску.
+async fn issued_logo(
+    tx: &Tx<Write>,
+    profile: Option<&Profile>,
+    writes: &mut Writes,
+    now: Timestamp,
+) -> Result<Option<Option<RecordId>>, StoreError> {
+    let Some(profile) = profile else {
+        return Ok(Some(None));
+    };
+    let logo = match tx.get::<Logo>(profile.id()).await {
+        Ok(logo) => logo.filter(|logo| !logo.is_removed()),
+        Err(StoreError::Damaged) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let Some(logo) = logo else {
+        return Ok(Some(None));
+    };
+    // Картинку, которую PDF не возьмёт (больше 2048 точек на сторону —
+    // `doc::image::MAX_PIXELS`), выпуск не запоминает: с ней документ навсегда
+    // остался бы без логотипа, а «неизвестно» берёт нынешний — исправленный
+    // в профиле логотип дойдёт и до него, как до задачи 63 (ревью задачи 63).
+    if !Picture::fits(logo.image()) {
+        return Ok(None);
+    }
+    let id = IssuedLogo::id_of(logo.image());
+    let (existing, damaged) = match tx.get::<IssuedLogo>(id).await {
+        Ok(existing) => (existing, false),
+        Err(StoreError::Damaged) => (None, true),
+        Err(error) => return Err(error),
+    };
+    if let Some(kept) = IssuedLogo::keep(existing.as_ref(), logo.image(), now) {
+        if existing.is_none() && !damaged {
+            writes.insert(&kept);
+        } else {
+            writes.update(&kept);
+        }
+    }
+    Ok(Some(Some(id)))
 }
 
 /// Выпущенный документ карточкой (дизайн «Kvartik Design»): статус, итог,

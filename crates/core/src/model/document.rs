@@ -479,8 +479,8 @@ pub struct Seller {
 impl Seller {
     /// Копия реквизитов профиля. Логотипа в ней нет: он — отдельная запись
     /// в сотни килобайт, и копировать его в каждый документ — раздувать базу
-    /// и копию. PDF старого документа берёт нынешний логотип профиля (решение
-    /// человека 2026-10-14; задача 63).
+    /// и копию. Выпуск помнит его отпечатком ([`Issued::logo`]), а картинку —
+    /// одной записью на все документы с ней (`logo::IssuedLogo`, задача 63).
     pub fn from_profile(profile: &ProfileData) -> Self {
         Self {
             name: profile.name.clone(),
@@ -504,6 +504,14 @@ pub struct Issued {
     /// документ с клиентом, а лишние поля (валюта и язык по умолчанию) —
     /// несколько байтов.
     buyer: ClientData,
+    /// Логотип профиля на день выпуска (с версии формата 22, задача 63):
+    /// `Some(Some(id))` — запись `logo::IssuedLogo` с его картинкой,
+    /// `Some(None)` — логотипа не было, `None` — неизвестно: документ выпущен
+    /// до 0.0.130, запись логотипа тогда не читалась или его картинку PDF не
+    /// взял бы, и PDF берёт нынешний логотип, как было до задачи 63.
+    /// Неизвестное в данных — нет ключа.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    logo: Option<Option<RecordId>>,
 }
 
 impl Issued {
@@ -520,6 +528,13 @@ impl Issued {
     /// Реквизиты клиента на день выпуска.
     pub const fn buyer(&self) -> &ClientData {
         &self.buyer
+    }
+
+    /// Логотип на день выпуска: `Some(Some(id))` — запись
+    /// `logo::IssuedLogo`, `Some(None)` — без логотипа, `None` — неизвестно
+    /// (поле выше), и тогда — нынешний логотип профиля.
+    pub const fn logo(&self) -> Option<Option<RecordId>> {
+        self.logo
     }
 }
 
@@ -741,13 +756,18 @@ impl Document {
     /// `documents` — все документы, прочитанные в той же транзакции,
     /// включая удалённые и аннулированные; `unreadable` — сколько записей
     /// документов не прочиталось: с ними номер мог бы повториться, и выпуск
-    /// отказывает. `profile` — профиль, с которым работает окно; `client` —
-    /// запись клиента документа.
+    /// отказывает. `profile` — профиль, с которым работает окно; `logo` — его
+    /// логотип на этот день, как его помнит выпуск ([`Issued::logo`]):
+    /// `logo::IssuedLogo::id_of` картинки, которую окно кладёт в ту же
+    /// транзакцию (`IssuedLogo::keep`), `Some(None)` — логотипа нет или он
+    /// убран, `None` — его запись не читается или картинку PDF не взял бы.
+    /// `client` — запись клиента документа.
     pub fn issue(
         &self,
         documents: &[Document],
         unreadable: usize,
         profile: Option<&ProfileData>,
+        logo: Option<Option<RecordId>>,
         client: &Client,
         now: Timestamp,
     ) -> Result<Self, DocError> {
@@ -783,6 +803,7 @@ impl Document {
             number,
             seller: Seller::from_profile(profile),
             buyer: client.data().clone(),
+            logo,
         });
         // Без этого акт, ставший документом дохода вместо отмеченного счёта,
         // снова ждал бы расчётного документа, уже выписанного, а акт по

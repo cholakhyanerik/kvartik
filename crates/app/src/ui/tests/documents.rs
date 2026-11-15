@@ -2,28 +2,32 @@
 //! DOM и настоящей IndexedDB. Профиль и клиенты кладутся в базу командами
 //! ядра — их формы проверяют свои тесты.
 
+use kvartik_core::format::Stored;
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
 use kvartik_core::model::activity::{ActivityCode, IncomeKind};
 use kvartik_core::model::client::{Client, ClientData};
 use kvartik_core::model::country::Country;
 use kvartik_core::model::date::Date;
-use kvartik_core::model::document::{DocKind, Document, DocumentData, Item, Payment, Settlement, Status};
+use kvartik_core::model::document::{DocKind, Document, DocumentData, Issued, Item, Payment, Settlement, Status};
+use kvartik_core::model::logo::{Image, IssuedLogo, Logo};
 use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::model::profile::{Profile, ProfileData};
-use kvartik_core::model::record::RecordId;
+use kvartik_core::model::record::{RecordId, Timestamp};
 use kvartik_core::model::recurring::Recurring;
 use kvartik_core::model::text::{Line, Lines};
-use js_sys::{Function, Promise, Reflect, Uint8Array};
+use js_sys::{Array, Function, Promise, Reflect, Uint8Array};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_test::wasm_bindgen_test;
 use web_sys::{HtmlElement, Response};
 
+use super::ledger::png;
 use super::share::ShareStub;
 use super::{
     button, choose_file, field, mount, mount_at, pick_client, select, shown_step, sleep, type_into,
     visit, wait_for,
 };
+use crate::ui::documents::save;
 use crate::ui::route::Screen;
 use crate::platform::clock;
 use crate::store::device::Device;
@@ -628,7 +632,7 @@ async fn a_repeating_invoice_appears_when_the_app_opens() {
     };
     let source = Document::create(data, now)
         .expect("черновик")
-        .issue(&[], 0, Some(&profile()), &client, now)
+        .issue(&[], 0, Some(&profile()), Some(None), &client, now)
         .expect("выпущен");
     let recurring = Recurring::start(None, &source, date, now)
         .expect("годится")
@@ -787,7 +791,7 @@ async fn documents_are_found_opened_and_marked_paid() {
     let issue = |kind: DocKind, price: i64, before: &[Document]| {
         Document::create(data(kind, price), now)
             .expect("черновик")
-            .issue(before, 0, Some(&profile()), &client, now)
+            .issue(before, 0, Some(&profile()), Some(None), &client, now)
             .expect("выпущен")
     };
     let first = issue(DocKind::Invoice, 240_000, &[]);
@@ -945,7 +949,7 @@ async fn an_annulled_invoice_asks_for_no_payment() {
     let issue = |before: &[Document]| {
         Document::create(data.clone(), now)
             .expect("черновик")
-            .issue(before, 0, Some(&profile()), &client, now)
+            .issue(before, 0, Some(&profile()), Some(None), &client, now)
             .expect("выпущен")
             .add_payment(Payment { date: today, amount: 100_000 }, now)
             .expect("оплата отмечена")
@@ -1006,7 +1010,7 @@ async fn a_removed_payment_is_said_and_can_be_returned() {
     let payment = Payment { date: today, amount: 100_000 };
     let invoice = Document::create(invoice_data(&client), now)
         .expect("черновик")
-        .issue(&[], 0, Some(&profile()), &client, now)
+        .issue(&[], 0, Some(&profile()), Some(None), &client, now)
         .expect("выпущен")
         .add_payment(payment, now)
         .expect("оплата отмечена");
@@ -1188,7 +1192,7 @@ async fn issued_document_gives_a_pdf_and_a_draft_a_preview() {
     let data = invoice_data(&client);
     let invoice = Document::create(data.clone(), now)
         .expect("черновик")
-        .issue(&[], 0, Some(&profile()), &client, now)
+        .issue(&[], 0, Some(&profile()), Some(None), &client, now)
         .expect("выпущен");
     let draft = Document::create(data, now).expect("черновик");
     let mut writes = Writes::default();
@@ -1279,6 +1283,213 @@ async fn issued_document_gives_a_pdf_and_a_draft_a_preview() {
     assert!(wrong.is_empty(), "PDF и превью: {wrong:#?}");
 }
 
+/// Поставить профилю логотип `image` или, без картинки, убрать его —
+/// командой ядра, как форма профиля.
+async fn put_logo(store: &Store, profile: &Profile, image: Option<Image>) {
+    let tx = store.write().expect("транзакция записи");
+    let existing = tx.get::<Logo>(profile.id()).await.expect("логотип читается");
+    let now = clock::now();
+    let logo = match image {
+        Some(image) => Logo::set(existing.clone(), profile, image, now),
+        None => existing.clone().expect("убирают поставленный").remove(now),
+    };
+    let mut writes = Writes::default();
+    if existing.is_some() {
+        writes.update(&logo);
+    } else {
+        writes.insert(&logo);
+    }
+    tx.commit(writes).await.expect("записано");
+}
+
+/// Когда менялась запись картинки выпуска `id`; `None` — её нет или она не
+/// читается.
+async fn kept_at(store: &Store, id: RecordId) -> Option<Timestamp> {
+    let tx = store.read().expect("транзакция чтения");
+    tx.get::<IssuedLogo>(id).await.ok().flatten().map(|kept| kept.meta().modified())
+}
+
+/// Испортить запись: под ключом `[вид, id]` — строка, которая не JSON.
+async fn spoil(store: &Store, kind: &str, id: RecordId) {
+    let key: JsValue = Array::of2(&kind.into(), &id.to_string().into()).into();
+    crate::store::tests::put_raw(store, &key, "не JSON").await;
+}
+
+/// Профиль базы, которую завёл [`fresh_base_with_client`].
+async fn owner(store: &Store) -> Profile {
+    let tx = store.read().expect("транзакция чтения");
+    Profile::current(tx.all::<Profile>().await.expect("профили читаются")).expect("профиль есть")
+}
+
+/// Что выпуск помнит о логотипе (задача 63) — выпуском окна (`save`).
+/// Картинку логотипа он кладёт записью под её отпечатком один раз: второй
+/// выпуск с той же картинкой её не переписывает и не спотыкается о занятый
+/// ключ, а испорченную запись под отпечатком первый чинит. С убранным
+/// логотипом документ — «без логотипа»; с картинкой, которую PDF не возьмёт
+/// (больше 2048 точек на сторону), и с нечитаемой записью логотипа —
+/// «неизвестно», и такой картинки он не кладёт.
+#[wasm_bindgen_test]
+async fn issue_remembers_the_logo_of_its_day() {
+    let client = fresh_base_with_client().await;
+    let store = Store::open(|_| {}).await.expect("база открыта");
+    let owner = owner(&store).await;
+    let old = png(2, 2).await;
+    let image = |bytes: &[u8]| Image::new(bytes.to_vec()).expect("годная картинка");
+    let print = IssuedLogo::id_of(&image(&old));
+    let mut wrong = Vec::new();
+
+    put_logo(&store, &owner, Some(image(&old))).await;
+    spoil(&store, IssuedLogo::KIND, print).await;
+    let first = save(&store, None, invoice_data(&client), true).await;
+    let once = kept_at(&store, print).await;
+    let second = save(&store, None, invoice_data(&client), true).await;
+    if once.is_none() || kept_at(&store, print).await != once {
+        wrong.push(format!("картинка выпуска не починена или переписана вторым выпуском: {once:?}"));
+    }
+    put_logo(&store, &owner, None).await;
+    let bare = save(&store, None, invoice_data(&client), true).await;
+    // Пустой холст в 2100 точек — лёгкий файл, а PDF его не возьмёт.
+    let huge = png(2_100, 2_100).await;
+    put_logo(&store, &owner, Some(image(&huge))).await;
+    let oversized = save(&store, None, invoice_data(&client), true).await;
+    spoil(&store, Logo::KIND, owner.id()).await;
+    let unread = save(&store, None, invoice_data(&client), true).await;
+
+    let mark = |issued: &Result<Document, _>| issued.as_ref().ok().and_then(Document::issued).map(Issued::logo);
+    for (what, issued, expected) in [
+        ("первый", &first, Some(Some(print))),
+        ("второй с той же картинкой", &second, Some(Some(print))),
+        ("с убранным логотипом", &bare, Some(None)),
+        ("с логотипом больше PDF", &oversized, None),
+        ("с нечитаемой записью логотипа", &unread, None),
+    ] {
+        if mark(issued) != Some(expected) {
+            wrong.push(format!("{what}: {issued:?}"));
+        }
+    }
+    let kept = {
+        let tx = store.read().expect("транзакция чтения");
+        tx.list::<IssuedLogo>().await.expect("логотипы выпуска читаются").records
+    };
+    if kept.len() != 1 || kept[0].image().bytes() != old.as_slice() || kept[0].meta().id() != print {
+        wrong.push(format!("картинок выпуска {}, а нужна одна — первая", kept.len()));
+    }
+    forget_device();
+    assert!(wrong.is_empty(), "выпуск и логотип: {wrong:#?}");
+}
+
+/// PDF — с логотипом дня выпуска (задача 63), хотя в профиле уже другой.
+/// У документа, выпущенного до задачи 63, — нынешний, у «без логотипа»
+/// картинки нет, а пропавшую или нечитаемую картинку дня выпуска окно
+/// называет словами и нынешней не подменяет. Превью черновика — с нынешним:
+/// что в превью, то и в PDF выпущенного. Документы — командами ядра.
+#[wasm_bindgen_test]
+async fn pdf_shows_the_logo_of_its_day() {
+    let client = fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let store = Store::open(|_| {}).await.expect("база открыта");
+    let owner = owner(&store).await;
+    let (old, new) = (png(2, 2).await, png(3, 3).await);
+    let image = |bytes: &[u8]| Image::new(bytes.to_vec()).expect("годная картинка");
+    put_logo(&store, &owner, Some(image(&new))).await;
+
+    let now = clock::now();
+    let kept = IssuedLogo::keep(None, &image(&old), now).expect("новая картинка выпуска");
+    let rotten = RecordId::random();
+    let mut documents: Vec<Document> = Vec::new();
+    for logo in [
+        Some(Some(kept.meta().id())),
+        Some(None),
+        None,
+        Some(Some(RecordId::random())),
+        Some(Some(rotten)),
+    ] {
+        let issued = Document::create(invoice_data(&client), now)
+            .expect("черновик")
+            .issue(&documents, 0, Some(&profile()), logo, &client, now)
+            .expect("выпущен");
+        documents.push(issued);
+    }
+    let draft = Document::create(invoice_data(&client), now).expect("черновик");
+    let mut writes = Writes::default();
+    writes.insert(&kept);
+    writes.insert(&draft);
+    for document in &documents {
+        writes.insert(document);
+    }
+    commit(writes).await;
+    spoil(&store, IssuedLogo::KIND, rotten).await;
+
+    let fonts = FontServer::install();
+    let skipped = t(lang, Key::PdfIssuedLogoSkipped);
+    let mut wrong = Vec::new();
+    let pictured = |host: &HtmlElement| {
+        host.query_selector(".paper .paper-page image")
+            .ok()
+            .flatten()
+            .and_then(|image| image.get_attribute("href"))
+    };
+    for (what, document, logo, alert) in [
+        ("с картинкой дня выпуска", &documents[0], Some(&old), None),
+        ("без логотипа", &documents[1], None, None),
+        ("до задачи 63 — нынешний", &documents[2], Some(&new), None),
+        ("картинка пропала — словами", &documents[3], None, Some(skipped)),
+        ("картинка не читается — словами", &documents[4], None, Some(skipped)),
+    ] {
+        let number = document.number().map(|number| number.to_string()).unwrap_or_default();
+        let address = format!("#/documents/{}", document.id());
+        let (host, mounted) = mount_at(&address);
+        if !wait_for(&host, &number).await || !open_paper(&host, lang).await {
+            wrong.push(format!("{what}: PDF не собрался"));
+        }
+        let shown = match pictured(&host) {
+            Some(href) => fonts.bytes(&href).await,
+            None => None,
+        };
+        if shown.as_ref() != logo || paper_alert(&host).as_deref() != alert {
+            wrong.push(format!(
+                "{what}: картинка {:?} Б, жалоба {:?}",
+                shown.map(|bytes| bytes.len()),
+                paper_alert(&host)
+            ));
+        }
+        drop(mounted);
+        host.remove();
+    }
+
+    // Черновик: строка списка открывает форму, а в ней — «Как будет выглядеть».
+    let (host, mounted) = mount_at("#/documents");
+    let draft_row = "a.entry[href=\"#/documents\"]";
+    if !wait_selector(&host, draft_row).await {
+        wrong.push("в списке нет черновика".to_owned());
+    }
+    if let Some(entry) = host.query_selector(draft_row).ok().flatten() {
+        entry.unchecked_into::<HtmlElement>().click();
+    }
+    if !wait_until(|| button(&host, &[t(lang, Key::DocPreview)]).is_some()).await {
+        wrong.push("в форме черновика нет «Как будет выглядеть»".to_owned());
+    }
+    if let Some(preview) = button(&host, &[t(lang, Key::DocPreview)]) {
+        preview.click();
+    }
+    if !wait_selector(&host, ".paper .paper-page").await {
+        wrong.push("у черновика нет страниц".to_owned());
+    }
+    let shown = match pictured(&host) {
+        Some(href) => fonts.bytes(&href).await,
+        None => None,
+    };
+    if shown.as_ref() != Some(&new) {
+        wrong.push(format!("превью черновика: картинка {:?} Б", shown.map(|bytes| bytes.len())));
+    }
+    drop(mounted);
+    host.remove();
+    drop(fonts);
+    forget_device();
+    assert!(wrong.is_empty(), "логотип в PDF: {wrong:#?}");
+}
+
 /// Открыть страницы документа кнопкой «PDF»; `false` — файла не дождались.
 async fn open_paper(host: &HtmlElement, lang: Lang) -> bool {
     match button(host, &[t(lang, Key::DocPdf)]) {
@@ -1309,7 +1520,7 @@ async fn issued_document_is_sent_by_the_share_menu() {
     let now = clock::now();
     let invoice = Document::create(invoice_data(&client), now)
         .expect("черновик")
-        .issue(&[], 0, Some(&profile()), &client, now)
+        .issue(&[], 0, Some(&profile()), Some(None), &client, now)
         .expect("выпущен");
     let mut writes = Writes::default();
     writes.insert(&invoice);
@@ -1438,11 +1649,11 @@ async fn an_invoice_with_an_act_leaves_the_rate_to_the_act() {
     let today = clock::today().expect("часы с датой");
     let invoice = Document::create(invoice_data(&client), now)
         .expect("черновик счёта")
-        .issue(&[], 0, Some(&profile()), &client, now)
+        .issue(&[], 0, Some(&profile()), Some(None), &client, now)
         .expect("счёт выпущен");
     let act = Document::create(invoice.act_data(today).expect("акт по счёту"), now)
         .expect("черновик акта")
-        .issue(&[], 0, Some(&profile()), &client, now)
+        .issue(&[], 0, Some(&profile()), Some(None), &client, now)
         .expect("акт выпущен");
     let mut writes = Writes::default();
     writes.insert(&invoice);
@@ -1494,13 +1705,13 @@ async fn the_next_act_stage_shows_what_is_left_once() {
     let today = clock::today().expect("часы с датой");
     let invoice = Document::create(invoice_data(&client), now)
         .expect("черновик счёта")
-        .issue(&[], 0, Some(&profile()), &client, now)
+        .issue(&[], 0, Some(&profile()), Some(None), &client, now)
         .expect("счёт выпущен");
     let mut half = invoice.act_data(today).expect("акт по счёту");
     half.items[0].price = 120_000;
     let act = Document::create(half, now)
         .expect("черновик акта")
-        .issue(std::slice::from_ref(&invoice), 0, Some(&profile()), &client, now)
+        .issue(std::slice::from_ref(&invoice), 0, Some(&profile()), Some(None), &client, now)
         .expect("первый акт выпущен");
     let mut writes = Writes::default();
     writes.insert(&invoice);
@@ -1557,17 +1768,17 @@ async fn acts_covering_the_invoice_say_so_plainly() {
     let today = clock::today().expect("часы с датой");
     let invoice = Document::create(invoice_data(&client), now)
         .expect("черновик счёта")
-        .issue(&[], 0, Some(&profile()), &client, now)
+        .issue(&[], 0, Some(&profile()), Some(None), &client, now)
         .expect("счёт выпущен");
     let mut half = invoice.act_data(today).expect("акт по счёту");
     half.items[0].price = 120_000;
     let first = Document::create(half.clone(), now)
         .expect("черновик акта")
-        .issue(std::slice::from_ref(&invoice), 0, Some(&profile()), &client, now)
+        .issue(std::slice::from_ref(&invoice), 0, Some(&profile()), Some(None), &client, now)
         .expect("первый акт выпущен");
     let second = Document::create(half, now)
         .expect("черновик второго акта")
-        .issue(&[invoice.clone(), first.clone()], 0, Some(&profile()), &client, now)
+        .issue(&[invoice.clone(), first.clone()], 0, Some(&profile()), Some(None), &client, now)
         .expect("второй акт выпущен");
     let mut writes = Writes::default();
     writes.insert(&invoice);
@@ -1605,7 +1816,7 @@ async fn the_income_row_is_set_in_the_card_and_kept_by_the_act() {
     let now = clock::now();
     let invoice = Document::create(invoice_data(&client), now)
         .expect("черновик")
-        .issue(&[], 0, Some(&profile()), &client, now)
+        .issue(&[], 0, Some(&profile()), Some(None), &client, now)
         .expect("выпущен");
     let mut writes = Writes::default();
     writes.insert(&invoice);
@@ -1686,7 +1897,7 @@ async fn the_income_row_is_set_in_the_card_and_kept_by_the_act() {
     let (documents, _) = stored().await;
     let draft = documents.iter().find(|document| document.data().kind == DocKind::Act).expect("черновик акта");
     let later = clock::now();
-    let issued = draft.issue(&documents, 0, Some(&profile()), &client, later).expect("акт выпущен");
+    let issued = draft.issue(&documents, 0, Some(&profile()), Some(None), &client, later).expect("акт выпущен");
     let mut writes = Writes::default();
     writes.update(&issued);
     commit(writes).await;
@@ -1741,7 +1952,7 @@ async fn the_code_is_cleared_beside_an_income_row() {
     data.income_kind = Some(IncomeKind::Assets);
     let invoice = Document::create(data, now)
         .expect("черновик")
-        .issue(&[], 0, Some(&seller), &client, now)
+        .issue(&[], 0, Some(&seller), Some(None), &client, now)
         .expect("выпущен");
     let mut writes = Writes::default();
     writes.update(&saved_profile);
@@ -1818,7 +2029,7 @@ async fn settlement_documents_are_marked_and_listed() {
         };
         Document::create(data, now)
             .expect("черновик")
-            .issue(before, 0, Some(&profile()), &client, now)
+            .issue(before, 0, Some(&profile()), Some(None), &client, now)
             .expect("выпущен")
     };
     let late = issue(yesterday, &[]);

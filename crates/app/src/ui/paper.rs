@@ -21,9 +21,10 @@ use kvartik_core::doc::pdf::{self, Info};
 use kvartik_core::doc::sheet::{Sheet, Source};
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
 use kvartik_core::model::client::ClientData;
-use kvartik_core::model::document::{DocKind, Document, DocumentData, Number, Seller};
-use kvartik_core::model::logo::Logo;
+use kvartik_core::model::document::{DocKind, Document, DocumentData, Issued, Number, Seller};
+use kvartik_core::model::logo::{Image, IssuedLogo, Logo};
 use kvartik_core::model::profile::{Profile, ProfileData};
+use kvartik_core::model::record::RecordId;
 use leptos::prelude::*;
 
 use super::icon::{Icon, icon};
@@ -64,8 +65,9 @@ pub struct Paper {
     logo: Option<Arc<Picture>>,
     /// Знаки, которых нет в шрифтах документа.
     missing: Vec<char>,
-    /// Логотип есть, но в документ не попал: картинку не прочитать.
-    logo_skipped: bool,
+    /// Логотип есть, но в документ не попал: картинку не прочитать. Слова
+    /// — какой: нынешний профиля или дня выпуска (задача 63).
+    logo_skipped: Option<Key>,
 }
 
 /// Почему документ не собран.
@@ -105,26 +107,50 @@ split! {
     }
 }
 
-/// Профиль, с которым работает окно, и его логотип — одним чтением.
-/// Нечитаемый логотип — не повод не собрать документ: он соберётся без
-/// него, и окно скажет об этом.
-async fn profile(store: &Store) -> Result<(Option<ProfileData>, Option<Logo>, bool), StoreError> {
+/// Профиль, с которым работает окно, и картинка логотипа документа — одним
+/// чтением. `at_issue` — логотип выпуска (`Issued::logo`, задача 63):
+/// выпущенному с ним — картинка дня выпуска (`IssuedLogo`), без него —
+/// никакой, а черновику и документу, выпущенному до задачи 63, — нынешний
+/// логотип профиля. Нечитаемый логотип — не повод не собрать документ: он
+/// соберётся без него, и окно скажет об этом (`true` в ответе).
+async fn profile(
+    store: &Store,
+    at_issue: Option<Option<RecordId>>,
+) -> Result<(Option<ProfileData>, Option<Image>, bool), StoreError> {
     let tx = store.read()?;
-    let Some(profile) = Profile::current(tx.all::<Profile>().await?) else {
-        return Ok((None, None, false));
+    let profile = Profile::current(tx.all::<Profile>().await?);
+    let (image, damaged) = match (at_issue, &profile) {
+        (Some(Some(id)), _) => match tx.get::<IssuedLogo>(id).await {
+            Ok(Some(kept)) => (Some(kept.image().clone()), false),
+            // Пропала запись картинки — тоже «не прочиталась»: документ
+            // ссылается на неё, а нынешний логотип подставлять нельзя.
+            Ok(None) | Err(StoreError::Damaged) => (None, true),
+            Err(error) => return Err(error),
+        },
+        (Some(None), _) | (None, None) => (None, false),
+        (None, Some(profile)) => match tx.get::<Logo>(profile.id()).await {
+            Ok(logo) => (logo.filter(|logo| !logo.is_removed()).map(|logo| logo.image().clone()), false),
+            Err(StoreError::Damaged) => (None, true),
+            Err(error) => return Err(error),
+        },
     };
-    let (logo, damaged) = match tx.get::<Logo>(profile.id()).await {
-        Ok(logo) => (logo.filter(|logo| !logo.is_removed()), false),
-        Err(StoreError::Damaged) => (None, true),
-        Err(error) => return Err(error),
-    };
-    Ok((Some(profile.data().clone()), logo, damaged))
+    Ok((profile.map(|profile| profile.data().clone()), image, damaged))
 }
 
 /// Документ: строки, шрифты у сайта, страницы и, у выпущенного, файл.
 async fn make(base: Base, request: Request) -> Result<Paper, PaperProblem> {
     let store = base.get().ok_or(PaperProblem::Read)?;
-    let (profile, logo, damaged) = profile(&store).await?;
+    let at_issue = match &request {
+        Request::Issued { document, .. } => document.issued().and_then(Issued::logo),
+        Request::Draft { .. } => None,
+    };
+    // Не прочиталась картинка дня выпуска — «сохраните заново» не поможет:
+    // у документа свои слова.
+    let fault = match at_issue {
+        Some(Some(_)) => Key::PdfIssuedLogoSkipped,
+        _ => Key::PdfLogoSkipped,
+    };
+    let (profile, image, damaged) = profile(&store, at_issue).await?;
     // Реквизиты ИП черновика — нынешние; у выпущенного — в нём самом.
     let seller = Seller::from_profile(&profile.unwrap_or_default());
     let source = match &request {
@@ -143,9 +169,9 @@ async fn make(base: Base, request: Request) -> Result<Paper, PaperProblem> {
     let fonts = Fonts::new(files.iter().map(|(name, bytes)| (*name, bytes.as_slice())))
         .map_err(|_| PaperProblem::Fonts)?;
 
-    let image = logo.as_ref().map(Logo::image);
+    let image = image.as_ref();
     let picture = image.map(LogoPicture::new);
-    let logo_skipped = damaged || matches!(picture, Some(Err(_)));
+    let logo_skipped = (damaged || matches!(picture, Some(Err(_)))).then_some(fault);
     let picture = picture.and_then(Result::ok);
     let pages = sheet.pages(&fonts, picture.as_ref().map(LogoPicture::size));
     let missing = fonts.missing(&pages).into_iter().collect();
@@ -253,7 +279,7 @@ fn ready(lang: ReadSignal<Lang>, paper: &Paper, draft: bool) -> impl IntoView {
         {(!missing.is_empty()).then(|| view! {
             <p role="alert">{move || fill(t(lang.get(), Key::PdfMissingChars), &[&missing])}</p>
         })}
-        {paper.logo_skipped.then(|| view! { <p role="alert">{tr(lang, Key::PdfLogoSkipped)}</p> })}
+        {paper.logo_skipped.map(|key| view! { <p role="alert">{tr(lang, key)}</p> })}
         {paper.pdf.as_ref().map(|download| sending(lang, download))}
         {paper
             .pages

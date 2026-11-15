@@ -147,6 +147,47 @@ fn broken_and_huge_files_are_errors() {
     assert_eq!(png(&bad_filter).err(), Some(PictureError::Malformed));
 }
 
+/// JPEG с маркером кадра SOF2: ширина и высота — как скажут.
+fn jpeg_file(width: u16, height: u16) -> Vec<u8> {
+    let mut file = vec![0xFF, 0xD8];
+    file.extend([0xFF, 0xC2, 0x00, 0x11, 8]);
+    file.extend(height.to_be_bytes());
+    file.extend(width.to_be_bytes());
+    file.extend([3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]);
+    file.extend([0xFF, 0xD9]);
+    file
+}
+
+/// Возьмёт ли PDF картинку — по заголовку, без распаковки (задача 63):
+/// в пределе — да, и PNG, у которого сжатых данных нет вовсе, — их не
+/// разжимают; на точку больше [`MAX_PIXELS`] — нет; PNG, где IHDR — не первый
+/// кусок, или с глубиной, какой не бывает, — нет.
+#[test]
+fn fits_reads_only_the_header() {
+    let image = |bytes: Vec<u8>| Image::new(bytes).expect("PNG или JPEG");
+    let small = png_file(1, 1, 8, 2, false, &[0, 1, 2, 3], &[]);
+    // Первым куском — не IHDR, хотя его тело — годный заголовок 1×1.
+    let mut late = small[..8].to_vec();
+    late.extend(chunk(b"tEXt", &small[16..29]));
+    late.extend_from_slice(&small[8..]);
+    let mut wrong = Vec::new();
+    for (what, bytes, expected) in [
+        ("PNG 1×1", small.clone(), true),
+        ("PNG 2048×2048 без данных", png_file(2048, 2048, 8, 2, false, &[], &[]), true),
+        ("PNG 2049×2048", png_file(2049, 2048, 8, 2, false, &[], &[]), false),
+        ("PNG с глубиной 3", png_file(1, 1, 3, 2, false, &[0, 1, 2, 3], &[]), false),
+        ("PNG, где IHDR вторым", late, false),
+        ("JPEG 2048×2048", jpeg_file(2048, 2048), true),
+        ("JPEG 2048×2049", jpeg_file(2048, 2049), false),
+        ("JPEG без кадра", vec![0xFF, 0xD8, 0xFF, 0xD9], false),
+    ] {
+        if Picture::fits(&image(bytes)) != expected {
+            wrong.push(what);
+        }
+    }
+    assert!(wrong.is_empty(), "по заголовку не так: {wrong:?}");
+}
+
 /// JPEG: размеры и цвета — из маркера кадра, после маркеров приложений;
 /// байты — те же, что в файле.
 #[test]

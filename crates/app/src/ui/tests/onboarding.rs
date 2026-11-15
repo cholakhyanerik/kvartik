@@ -226,7 +226,7 @@ async fn the_last_step_opens_the_invoice_and_finishes() {
     let now = clock::now();
     let issued = Document::create(invoice_data(&client), now)
         .expect("черновик")
-        .issue(&[], 0, Some(&profile()), &client, now)
+        .issue(&[], 0, Some(&profile()), Some(None), &client, now)
         .expect("выпущен");
     let mut writes = Writes::default();
     writes.insert(&issued);
@@ -283,11 +283,11 @@ async fn a_settled_entrepreneur_sees_no_first_steps() {
     let now = clock::now();
     let first = Document::create(invoice_data(&client), now)
         .expect("черновик")
-        .issue(&[], 0, Some(&profile()), &client, now)
+        .issue(&[], 0, Some(&profile()), Some(None), &client, now)
         .expect("выпущен");
     let second = Document::create(invoice_data(&client), now)
         .expect("черновик")
-        .issue(std::slice::from_ref(&first), 0, Some(&profile()), &client, now)
+        .issue(std::slice::from_ref(&first), 0, Some(&profile()), Some(None), &client, now)
         .expect("выпущен");
     let mut writes = Writes::default();
     writes.insert(&first);

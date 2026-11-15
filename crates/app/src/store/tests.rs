@@ -135,8 +135,9 @@ async fn sleep(ms: i32) {
     promise.await.expect("таймер срабатывает");
 }
 
-/// Записать в базу строку как есть, в обход `format`.
-async fn put_raw(store: &Store, key: &JsValue, value: &str) {
+/// Записать в базу строку как есть, в обход `format`. Берут и тесты окна:
+/// испорченная запись логотипа выпуска (задача 63).
+pub(crate) async fn put_raw(store: &Store, key: &JsValue, value: &str) {
     let tx = store
         .db
         .transaction_with_str_and_mode(RECORDS, IdbTransactionMode::Readwrite)

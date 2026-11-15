@@ -65,6 +65,26 @@ impl<'a> Picture<'a> {
         }
     }
 
+    /// Возьмёт ли PDF эту картинку, — без распаковки: у JPEG — по маркеру
+    /// кадра, как [`Picture::new`], у PNG — по заголовку IHDR, первому куску
+    /// файла (RFC 2083, §4.1.1): размеры не больше [`MAX_PIXELS`] и сочетание
+    /// глубины и вида цвета, какое бывает. Выпуск не запоминает картинку,
+    /// которую PDF не возьмёт (задача 63): логотип, выгруженный в тысячи
+    /// точек, лёгок и проходит предел файла профиля, а у PDF он — «больше
+    /// предела». Порчу внутри сжатых данных так не увидеть: её видит только
+    /// распаковка, а она для картинки в 2048 точек — десятки мегабайт
+    /// и сотни миллисекунд на телефоне.
+    pub fn fits(image: &Image) -> bool {
+        match image.format() {
+            ImageFormat::Jpeg => jpeg(image.bytes()).is_ok(),
+            ImageFormat::Png => {
+                let bytes = image.bytes();
+                bytes.get(12..16) == Some(b"IHDR".as_slice())
+                    && bytes.get(16..29).is_some_and(|body| Header::read(body).is_ok())
+            }
+        }
+    }
+
     /// Ширина и высота в точках.
     pub const fn size(&self) -> (u32, u32) {
         match self {
@@ -160,6 +180,29 @@ struct Header {
 }
 
 impl Header {
+    /// Заголовок из куска IHDR: размеры, глубина и вид цвета — только те
+    /// сочетания, что бывают у PNG, — и не больше [`MAX_PIXELS`].
+    fn read(body: &[u8]) -> Result<Self, PictureError> {
+        let header = Self {
+            width: u32_at(body, 0)?,
+            height: u32_at(body, 4)?,
+            depth: *body.get(8).ok_or(PictureError::Malformed)?,
+            color: *body.get(9).ok_or(PictureError::Malformed)?,
+            interlaced: *body.get(12).ok_or(PictureError::Malformed)? == 1,
+        };
+        let fits = match header.color {
+            0 => matches!(header.depth, 1 | 2 | 4 | 8 | 16),
+            3 => matches!(header.depth, 1 | 2 | 4 | 8),
+            2 | 4 | 6 => matches!(header.depth, 8 | 16),
+            _ => false,
+        };
+        if !fits {
+            return Err(PictureError::Malformed);
+        }
+        checked_size(header.width, header.height)?;
+        Ok(header)
+    }
+
     /// Значений на точку: серый — 1, RGB — 3, палитра — 1, серый
     /// с прозрачностью — 2, RGBA — 4.
     fn channels(&self) -> usize {
@@ -196,26 +239,7 @@ fn png(bytes: &[u8]) -> Result<Picture<'static>, PictureError> {
         let end = (at + 8).checked_add(len).ok_or(PictureError::Malformed)?;
         let body = bytes.get(at + 8..end).ok_or(PictureError::Malformed)?;
         match kind {
-            b"IHDR" => {
-                let header_of = Header {
-                    width: u32_at(body, 0)?,
-                    height: u32_at(body, 4)?,
-                    depth: *body.get(8).ok_or(PictureError::Malformed)?,
-                    color: *body.get(9).ok_or(PictureError::Malformed)?,
-                    interlaced: *body.get(12).ok_or(PictureError::Malformed)? == 1,
-                };
-                let fits = match header_of.color {
-                    0 => matches!(header_of.depth, 1 | 2 | 4 | 8 | 16),
-                    3 => matches!(header_of.depth, 1 | 2 | 4 | 8),
-                    2 | 4 | 6 => matches!(header_of.depth, 8 | 16),
-                    _ => false,
-                };
-                if !fits {
-                    return Err(PictureError::Malformed);
-                }
-                checked_size(header_of.width, header_of.height)?;
-                header = Some(header_of);
-            }
+            b"IHDR" => header = Some(Header::read(body)?),
             b"PLTE" => palette = body,
             b"tRNS" => transparency = body,
             b"IDAT" => data.extend_from_slice(body),

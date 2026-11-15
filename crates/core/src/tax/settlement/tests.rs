@@ -72,7 +72,7 @@ fn invoice_data(client: &Client, service: Date) -> DocumentData {
 fn issue(data: DocumentData, client: &Client, documents: &[Document]) -> Document {
     Document::create(data, at(2_000))
         .expect("годный черновик")
-        .issue(documents, 0, Some(&profile()), client, at(3_000))
+        .issue(documents, 0, Some(&profile()), Some(None), client, at(3_000))
         .expect("выпускается")
 }
 

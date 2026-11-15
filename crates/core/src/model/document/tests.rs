@@ -110,6 +110,43 @@ fn data_shape_is_pinned() {
     assert_eq!(serde_json::to_string(&act).ok().as_deref(), Some(ACT));
 }
 
+/// Логотип выпуска (задача 63): выпуск кладёт в документ, что ему дали, —
+/// отпечаток, «без логотипа» или «неизвестно», — а запись хранит все три:
+/// отпечаток — строкой идентификатора, «без логотипа» — `null`,
+/// неизвестное — без ключа, как у документов прежних версий (образец
+/// [`INVOICE`] выпущен до задачи 63). Другое в поле — порча.
+#[test]
+fn issued_logo_keeps_three_states() {
+    let client = client();
+    let draft = Document::create(data(DocKind::Invoice, &client, day(2026, 10, 1)), at(1_000)).expect("черновик");
+    let print = RecordId::parse("3d5ccb0c-ef4d-8fd8-b247-4faf2038fbbb").expect("отпечаток");
+    let mut wrong = Vec::new();
+    for (logo, key) in [
+        (Some(Some(print)), Some(r#""logo":"3d5ccb0c-ef4d-8fd8-b247-4faf2038fbbb"}"#)),
+        (Some(None), Some(r#""logo":null}"#)),
+        (None, None),
+    ] {
+        let issued = draft
+            .issue(&[], 0, Some(&profile()), logo, &client, at(2_000))
+            .expect("выпущен");
+        let text = serde_json::to_string(&issued).expect("записывается");
+        let back = serde_json::from_str::<Document>(&text).ok();
+        let written = key.map_or(!text.contains(r#""logo""#), |key| text.contains(key));
+        if issued.issued().map(Issued::logo) != Some(logo) || back.as_ref() != Some(&issued) || !written {
+            wrong.push(format!("{logo:?}: {text}"));
+        }
+    }
+    assert!(wrong.is_empty(), "логотип выпуска: {wrong:#?}");
+
+    let old: Document = serde_json::from_str(INVOICE).expect("счёт читается");
+    assert_eq!(old.issued().map(Issued::logo), Some(None::<Option<RecordId>>));
+    let with = |value: &str| INVOICE.replacen(r#""payment_days":14}}"#, &format!(r#""payment_days":14}},"logo":{value}}}"#), 1);
+    assert!(serde_json::from_str::<Document>(&with("null")).is_ok());
+    for bad in ["5", r#""не идентификатор""#, "[]"] {
+        assert!(serde_json::from_str::<Document>(&with(bad)).is_err(), "принято {bad}");
+    }
+}
+
 /// Документ версии формата 5 — без поля курса — читается с неизвестным
 /// курсом, а пишется уже с полем (Правило 2): данные прошлых версий не
 /// теряются.
@@ -223,13 +260,13 @@ fn an_act_takes_the_income_kind_of_its_invoice() {
     let marked = invoice.set_income_kind(Some(IncomeKind::Rent), at(5_000)).expect("годен").expect("указана");
     let profile = profile();
     let documents = [marked.clone()];
-    let act = draft.issue(&documents, 0, Some(&profile), &client, at(6_000)).expect("выпущен");
+    let act = draft.issue(&documents, 0, Some(&profile), Some(None), &client, at(6_000)).expect("выпущен");
     assert_eq!(act.data().income_kind, Some(IncomeKind::Rent));
 
     let mut own = invoice.act_data(day(2026, 10, 13)).expect("акт");
     own.income_kind = Some(IncomeKind::Assets);
     let draft = Document::create(own, at(4_000)).expect("черновик");
-    let act = draft.issue(&documents, 0, Some(&profile), &client, at(6_000)).expect("выпущен");
+    let act = draft.issue(&documents, 0, Some(&profile), Some(None), &client, at(6_000)).expect("выпущен");
     assert_eq!(act.data().income_kind, Some(IncomeKind::Assets));
 }
 
@@ -489,7 +526,7 @@ fn data(kind: DocKind, client: &Client, date: Date) -> DocumentData {
 fn issued(kind: DocKind, client: &Client, date: Date, documents: &[Document]) -> Document {
     Document::create(data(kind, client, date), at(2_000))
         .expect("годный черновик")
-        .issue(documents, 0, Some(&profile()), client, at(3_000))
+        .issue(documents, 0, Some(&profile()), Some(None), client, at(3_000))
         .expect("выпускается")
 }
 
@@ -541,7 +578,7 @@ fn issue_copies_both_sides() {
     let draft = Document::create(data(DocKind::Invoice, &client, day(2026, 10, 1)), at(2_000))
         .expect("черновик");
     let document = draft
-        .issue(&[], 0, Some(&profile()), &client, at(3_000))
+        .issue(&[], 0, Some(&profile()), Some(None), &client, at(3_000))
         .expect("выпускается");
     assert_eq!(document.id(), draft.id());
     assert_eq!(document.meta().modified(), at(3_000));
@@ -565,28 +602,28 @@ fn issue_refuses_what_it_cannot_do_safely() {
     let draft = Document::create(data(DocKind::Invoice, &client, day(2026, 10, 1)), at(2_000))
         .expect("черновик");
     let profile = profile();
-    let ok = |document: &Document| document.issue(&[], 0, Some(&profile), &client, at(3_000));
+    let ok = |document: &Document| document.issue(&[], 0, Some(&profile), Some(None), &client, at(3_000));
     let issued = ok(&draft).expect("выпускается");
     assert_eq!(ok(&issued), Err(DocError::Issued));
     let deleted = draft.delete(at(2_500)).expect("черновик").expect("удалён");
     assert_eq!(ok(&deleted), Err(DocError::Deleted));
 
     let other = Client::create(client.data().clone(), at(1_000)).expect("годный");
-    assert_eq!(draft.issue(&[], 0, Some(&profile), &other, at(3_000)), Err(DocError::WrongClient));
+    assert_eq!(draft.issue(&[], 0, Some(&profile), Some(None), &other, at(3_000)), Err(DocError::WrongClient));
     let gone = client.delete(at(1_500)).expect("удаляется");
-    assert_eq!(draft.issue(&[], 0, Some(&profile), &gone, at(3_000)), Err(DocError::ClientDeleted));
+    assert_eq!(draft.issue(&[], 0, Some(&profile), Some(None), &gone, at(3_000)), Err(DocError::ClientDeleted));
 
-    assert_eq!(draft.issue(&[], 0, None, &client, at(3_000)), Err(DocError::NoSellerName));
+    assert_eq!(draft.issue(&[], 0, None, Some(None), &client, at(3_000)), Err(DocError::NoSellerName));
     let mut english = data(DocKind::Invoice, &client, day(2026, 10, 1));
     english.lang = Lang::En;
     let english = Document::create(english, at(2_000)).expect("черновик");
     assert_eq!(
-        english.issue(&[], 0, Some(&profile), &client, at(3_000)),
+        english.issue(&[], 0, Some(&profile), Some(None), &client, at(3_000)),
         Err(DocError::NoSellerName),
         "имени по-английски в профиле нет"
     );
     assert_eq!(
-        draft.issue(&[], 1, Some(&profile), &client, at(3_000)),
+        draft.issue(&[], 1, Some(&profile), Some(None), &client, at(3_000)),
         Err(DocError::NumbersUnknown)
     );
 }
@@ -732,7 +769,7 @@ fn an_act_takes_the_settlement_of_its_invoice() {
     let act_of = |invoice: &Document| {
         Document::create(invoice.act_data(day(2026, 10, 13)).expect("акт по счёту"), at(5_000))
             .expect("черновик акта")
-            .issue(std::slice::from_ref(invoice), 0, Some(&profile()), &client, at(6_000))
+            .issue(std::slice::from_ref(invoice), 0, Some(&profile()), Some(None), &client, at(6_000))
             .expect("акт выпущен")
     };
     assert_eq!(act_of(&marked).settlement(), Some(&mark));
@@ -817,7 +854,7 @@ fn payments_move_the_status() {
     with_due.due = Some(day(2026, 10, 11));
     let invoice = Document::create(with_due, at(2_000))
         .expect("черновик")
-        .issue(&[], 0, Some(&profile()), &client, at(3_000))
+        .issue(&[], 0, Some(&profile()), Some(None), &client, at(3_000))
         .expect("выпущен");
     let (before, after) = (day(2026, 10, 11), day(2026, 10, 12));
     assert_eq!(invoice.status(before), Status::Unpaid);
@@ -949,7 +986,7 @@ fn staged_acts_stay_within_their_invoice() {
     three.items[0].quantity_e3 = 3_000;
     let invoice = Document::create(three, at(2_000))
         .expect("черновик")
-        .issue(&[], 0, Some(&profile()), &client, at(3_000))
+        .issue(&[], 0, Some(&profile()), Some(None), &client, at(3_000))
         .expect("выпускается");
     let mut documents = vec![invoice.clone()];
     // Акт на `months` месяцев по этому счёту, выпущенный среди `documents`.
@@ -958,7 +995,7 @@ fn staged_acts_stay_within_their_invoice() {
         data.items[0].quantity_e3 = months * 1_000;
         Document::create(data, at(4_000))
             .expect("черновик акта")
-            .issue(documents, 0, Some(&profile()), &client, at(5_000))
+            .issue(documents, 0, Some(&profile()), Some(None), &client, at(5_000))
     };
     let first = act(1, &documents).expect("первый этап");
     documents.push(first.clone());
@@ -986,7 +1023,7 @@ fn staged_acts_stay_within_their_invoice() {
     dollars.items[0].quantity_e3 = 1;
     let draft = Document::create(dollars, at(4_000)).expect("черновик");
     assert_eq!(
-        draft.issue(&documents, 0, Some(&profile()), &client, at(5_000)).err(),
+        draft.issue(&documents, 0, Some(&profile()), Some(None), &client, at(5_000)).err(),
         Some(DocError::ActCurrency),
         "акт в долларах по счёту в драмах"
     );
@@ -1002,7 +1039,7 @@ fn dollar_invoice(client: &Client) -> Document {
     dollars.service_date = day(2026, 9, 30);
     Document::create(dollars, at(2_000))
         .expect("черновик")
-        .issue(&[], 0, Some(&profile()), client, at(3_000))
+        .issue(&[], 0, Some(&profile()), Some(None), client, at(3_000))
         .expect("выпускается")
 }
 
@@ -1130,7 +1167,7 @@ fn invoices_awaiting_payment() {
         data.due = due;
         Document::create(data, at(2_000))
             .expect("черновик")
-            .issue(documents, 0, Some(&profile()), &client, at(3_000))
+            .issue(documents, 0, Some(&profile()), Some(None), &client, at(3_000))
             .expect("выпущен")
     };
     let late = with_due(day(2026, 9, 1), Some(day(2026, 10, 1)), &[]);
@@ -1174,5 +1211,5 @@ fn profile_record_is_enough_to_issue() {
     let saved = Profile::save(None, profile(), at(1_000)).expect("годно").expect("новый");
     let draft = Document::create(data(DocKind::Invoice, &client, day(2026, 10, 1)), at(2_000))
         .expect("черновик");
-    assert!(draft.issue(&[], 0, Some(saved.data()), &client, at(3_000)).is_ok());
+    assert!(draft.issue(&[], 0, Some(saved.data()), Some(None), &client, at(3_000)).is_ok());
 }

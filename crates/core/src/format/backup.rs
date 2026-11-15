@@ -97,7 +97,7 @@ use crate::model::client::Client;
 use crate::model::date::Date;
 use crate::model::document::Document;
 use crate::model::ledger::Operation;
-use crate::model::logo::Logo;
+use crate::model::logo::{IssuedLogo, Logo};
 use crate::model::office::Ip;
 use crate::model::profile::{Localized, Profile};
 use crate::model::record::{RecordId, RecordMeta, Timestamp};
@@ -289,6 +289,7 @@ pub const KINDS: &[Kind] = &[
     Kind::of::<Closing>(),
     Kind::of::<License>(),
     Kind::of::<Opening>(),
+    Kind::of::<IssuedLogo>(),
 ];
 
 /// Виды записей конторы (задача 38): то, что копия всех ИП берёт из базы
@@ -310,6 +311,7 @@ pub const FILE_KINDS: &[Kind] = &[
     Kind::of::<Closing>(),
     Kind::of::<License>(),
     Kind::of::<Opening>(),
+    Kind::of::<IssuedLogo>(),
     Kind::of::<Ip>(),
 ];
 

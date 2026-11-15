@@ -49,7 +49,7 @@ async fn issued_invoice(rate: Option<i64>) -> Document {
     data.rate = rate.map(|rate| data.rate_for(rate).expect("курс годится"));
     let invoice = Document::create(data, now)
         .expect("черновик")
-        .issue(&[], 0, Some(&profile()), &client, now)
+        .issue(&[], 0, Some(&profile()), Some(None), &client, now)
         .expect("выпущен");
     let mut writes = Writes::default();
     writes.insert(&invoice);
@@ -324,7 +324,7 @@ fn choose_files(input: &HtmlInputElement, files: &[File]) {
 }
 
 /// PNG `width`×`height` — пустой холст браузера.
-async fn png(width: u32, height: u32) -> Vec<u8> {
+pub(super) async fn png(width: u32, height: u32) -> Vec<u8> {
     let canvas = OffscreenCanvas::new(width, height).expect("холст есть");
     let _ = canvas.get_context("2d").expect("2d есть");
     let options = ImageEncodeOptions::new();

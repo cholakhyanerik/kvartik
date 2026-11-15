@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.130",
+      "date": "2026-11-15",
+      "hy": [
+        "Հին հաշվի կամ ակտի PDF-ն այժմ այն լոգոտիպով է, որով փաստաթուղթը թողարկվել է. պրոֆիլի նոր լոգոտիպն այն այլևս չի փոխում։ Մինչև այս տարբերակը թողարկված փաստաթղթերի լոգոտիպը մնում է ներկայիսը։"
+      ],
+      "ru": [
+        "PDF старого счёта или акта теперь с тем логотипом, с которым документ выпущен: новый логотип в профиле его больше не меняет. У документов, выпущенных до этой версии, логотип по-прежнему нынешний."
+      ],
+      "en": [
+        "The PDF of an older invoice or act now carries the logo it was issued with: a new logo in the profile no longer changes it. Documents issued before this version still use the current logo."
+      ]
+    },
+    {
       "version": "0.0.129",
       "date": "2026-11-15",
       "hy": [
@@ -266,19 +279,6 @@
       ],
       "en": [
         "For a new client from Armenia, the second step now has the currency and document language already chosen: drams and Armenian. You can still change them."
-      ]
-    },
-    {
-      "version": "0.0.110",
-      "date": "2026-11-11",
-      "hy": [
-        "Սկզբնատառերով շրջանակն այլևս սեփականության ձևն անվան բառ չի համարում. «ԱՁ Արամ Պետրոսյան»-ի մոտ այն «ԱՊ» է, ոչ թե «ԱԱ»։"
-      ],
-      "ru": [
-        "Кружок с инициалами больше не считает форму собственности словом имени: у «ИП Ани Саргсян» теперь «АС», а не «ИА»."
-      ],
-      "en": [
-        "The initials circle no longer counts the legal form as part of the name: “IE Erik Cholakhyan” now shows “EC”, not “IE”."
       ]
     }
   ]
