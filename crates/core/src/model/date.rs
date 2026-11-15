@@ -113,8 +113,9 @@ impl Date {
 
     /// Дата по номеру дня от 1970-01-01 — обратный `day_number` (алгоритм
     /// `civil_from_days` там же). `None` — день за пределами
-    /// `MIN_YEAR..=MAX_YEAR`.
-    const fn from_day_number(number: i32) -> Option<Self> {
+    /// `MIN_YEAR..=MAX_YEAR`. Крейту — для дня момента записи
+    /// (`license::data_since`).
+    pub(crate) const fn from_day_number(number: i32) -> Option<Self> {
         // Сдвиг к 0000-03-01: для лет от первого число неотрицательно,
         // и деление на эры округляет к нулю, как и надо.
         let shifted = number as i64 + 719_468;

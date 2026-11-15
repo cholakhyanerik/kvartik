@@ -8,6 +8,7 @@
 //! иначе выпуск в тестах документов оказался бы заперт.
 
 use ed25519_dalek::{Signer, SigningKey};
+use kvartik_core::format::Stored;
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
 use kvartik_core::license::{self, License, Plan};
 use kvartik_core::model::activity::ActivityCode;
@@ -17,6 +18,7 @@ use kvartik_core::model::document::Document;
 use kvartik_core::model::ledger::{Flow, Operation, OperationData};
 use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::model::profile::Profile;
+use kvartik_core::model::record::Timestamp;
 use kvartik_core::model::text::Line;
 use kvartik_core::model::tin::Tin;
 use wasm_bindgen::JsCast;
@@ -60,12 +62,19 @@ fn trial_from(start: Date) {
 }
 
 /// Забыть пробный период устройства — следующее окно начнёт его сегодня, —
-/// и что устройство помнит о ключе базы: каким его нашла часть и о конце
+/// и первый день данных (задача 99), и что устройство помнит о ключе базы:
+/// каким его нашла часть и о конце
 /// какого сказано окном (задача 92), — и что сказано о конце пробного
 /// периода (задача 93).
 fn forget_trial() {
     if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
-        for name in ["kvartik.trial", "kvartik.license", "kvartik.license_told", "kvartik.trial_told"] {
+        for name in [
+            "kvartik.trial",
+            "kvartik.trial_data",
+            "kvartik.license",
+            "kvartik.license_told",
+            "kvartik.trial_told",
+        ] {
             let _ = storage.remove_item(name);
         }
     }
@@ -706,6 +715,61 @@ async fn an_ended_term_opens_the_license_screen_at_launch() {
     sleep(300).await;
     if shown_screens(&host) != ["home"] {
         wrong.push(format!("срок идёт, а запуск увёл с главного: видны {:?}", shown_screens(&host)));
+    }
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_trial();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Пробный период едет с данными (задача 99; условия, п. 3, редакция от
+/// 15.11.2026): клиент, записанный двадцать дней назад, в браузере, открытом
+/// сегодня, приносит и прошедшие дни — экран лицензии говорит, что пробный
+/// период кончился и считается с первого дня данных, а устройство запоминает
+/// этот день. Со следующего запуска срок знает и главный wasm: у пустой базы
+/// части нет, а метка — «кончился».
+#[wasm_bindgen_test]
+async fn the_trial_travels_with_the_data() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    forget_trial();
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let today = clock::today().expect("часы с датой");
+    let mut wrong = Vec::new();
+    trial_from(today);
+    let then = Timestamp::from_unix_millis(clock::now().unix_millis() - 20 * 86_400_000);
+    let client = Client::create(acme(), then).expect("годный клиент");
+    let mut writes = Writes::default();
+    writes.insert(&client);
+    commit(writes).await;
+    let data = license::data_since(license::moments(client.meta()), today).expect("день данных");
+
+    let href = Screen::License.href();
+    let (host, mounted) = mount_at(&href);
+    let last = license::trial_last(data).expect("дата");
+    let ended = fill(t(lang, Key::LicenseTrialEnded), &[&i18n::date(lang, last)]);
+    let why = fill(t(lang, Key::LicenseTrialFromData), &[&i18n::date(lang, data)]);
+    let said = wait_until(|| {
+        let text = license_text(&host);
+        text.contains(&ended) && text.contains(&why)
+    })
+    .await;
+    if !said {
+        wrong.push(format!("экран лицензии: «{}», а ждали «{ended}» и «{why}»", license_text(&host)));
+    }
+    if !wait_until(|| Device::new().trial_data() == Some(data)).await {
+        wrong.push(format!("устройство помнит день данных как {:?}", Device::new().trial_data()));
+    }
+    drop(mounted);
+    host.remove();
+
+    // Пустая база — части нет, а срок уже известен по записи устройства.
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let (host, mounted) = mount_at("#/");
+    let chip = t(lang, Key::LicenseChipTrialEnded);
+    if let Err(seen) = wait_chip(&host, "nav", chip).await {
+        wrong.push(format!("следующий запуск: метка «{seen}», а не «{chip}»"));
     }
     drop(mounted);
     host.remove();

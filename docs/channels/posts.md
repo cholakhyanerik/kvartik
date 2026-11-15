@@ -64,7 +64,7 @@
 > Ищу 20 человек, которые закроют в программе хотя бы один квартал
 > и расскажут, что мешало. Взамен — ключ лицензии на год бесплатно.
 > Напишите на cholakhyanerik@gmail.com ИНН (ՀՎՀՀ) вашего ИП, его имя
-> и слова «Принимаю условия лицензии Kvartik в редакции от 13.11.2026»
+> и слова «Принимаю условия лицензии Kvartik в редакции от 15.11.2026»
 > (условия — kvartik.com/ru/terms/) — пришлю ключ на ваш ՀՎՀՀ.
 >
 > Посчитать налог квартала и годовые платежи без регистрации:
@@ -138,7 +138,7 @@
 > and tell me what got in the way. In return, a free one-year license key.
 > Email cholakhyanerik@gmail.com the TIN (ՀՎՀՀ) of your IE, its name and
 > the words “I accept the Kvartik license terms in the edition of November
-> 13, 2026” (the terms: kvartik.com/en/terms/), and I'll send a key for
+> 15, 2026” (the terms: kvartik.com/en/terms/), and I'll send a key for
 > your TIN.
 >
 > Try the tax calculator, no sign-up: kvartik.com/en/
@@ -174,7 +174,7 @@
 > Փնտրում եմ 20 մարդ, ովքեր ծրագրում կփակեն գոնե մեկ եռամսյակ և կպատմեն,
 > թե ինչն էր խանգարում։ Փոխարենը՝ լիցենզիայի բանալի մեկ տարով անվճար։
 > Գրեք cholakhyanerik@gmail.com հասցեին ձեր ԱՁ-ի ՀՎՀՀ-ն, անունը
-> և «Ընդունում եմ Kvartik-ի լիցենզիայի պայմանները՝ 13.11.2026
+> և «Ընդունում եմ Kvartik-ի լիցենզիայի պայմանները՝ 15.11.2026
 > խմբագրությամբ» բառերը (պայմանները՝ kvartik.com/terms/)՝ կուղարկեմ
 > բանալին ձեր ՀՎՀՀ-ի համար։
 >
@@ -281,17 +281,17 @@
 > Спасибо, что откликнулись! Ключ беты выдаётся на тех же условиях
 > лицензии, что и купленный, поэтому пришлите, пожалуйста, ответом на это
 > письмо ИНН (ՀՎՀՀ) вашего ИП, его имя и слова «Принимаю условия лицензии
-> Kvartik в редакции от 13.11.2026». Условия — kvartik.com/ru/terms/.
+> Kvartik в редакции от 15.11.2026». Условия — kvartik.com/ru/terms/.
 
 > Thank you for joining! A beta key is issued under the same license terms
 > as a purchased one, so please reply to this email with the TIN (ՀՎՀՀ) of
 > your IE, its name and the words “I accept the Kvartik license terms in
-> the edition of November 13, 2026”. The terms: kvartik.com/en/terms/.
+> the edition of November 15, 2026”. The terms: kvartik.com/en/terms/.
 
 > Շնորհակալություն արձագանքի համար։ Բետայի բանալին տրվում է լիցենզիայի
 > նույն պայմաններով, ինչ գնվածը, ուստի խնդրում եմ այս նամակին ի պատասխան
 > ուղարկել ձեր ԱՁ-ի ՀՎՀՀ-ն, անունը և «Ընդունում եմ Kvartik-ի լիցենզիայի
-> պայմանները՝ 13.11.2026 խմբագրությամբ» բառերը։ Պայմանները՝
+> պայմանները՝ 15.11.2026 խմբագրությամբ» բառերը։ Պայմանները՝
 > kvartik.com/terms/։
 
 Ключ — тому, кто прислал ՀՎՀՀ, имя и слова согласия:

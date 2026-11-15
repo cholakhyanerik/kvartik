@@ -14,6 +14,10 @@
 //!
 //! День начала пробного периода помнит устройство (`store/device.rs`),
 //! а ключ — база: ключ выдан на ИП, а не на устройство, и переезжает с копией.
+//! С копией переезжают и прошедшие дни (задача 99): пробный период — с первого
+//! дня данных, если он раньше первого запуска (`license::data_since`). Его
+//! считают части по моментам записей открытой базы ([`Licenses::access`])
+//! и запоминают на устройстве, а главный wasm только берёт запись при запуске.
 //!
 //! Сколько дней осталось — всегда на виду (задача 92, решение человека
 //! 2026-11-11): меткой ([`LicenseChip`]) в меню на компьютере и на главном
@@ -29,9 +33,11 @@
 
 use std::sync::Arc;
 
+use kvartik_core::format::Stored;
 use kvartik_core::i18n::{self, Key, Lang, fill, plural, t};
 use kvartik_core::license::{self, Access, KeyError, License, PUBLIC_KEY_BYTES, Paid, Plan, Term};
 use kvartik_core::model::date::{Date, Quarter};
+use kvartik_core::model::record::RecordMeta;
 use kvartik_core::model::tin::Tin;
 use kvartik_core::release;
 use leptos::ev::SubmitEvent;
@@ -41,6 +47,8 @@ use wasm_bindgen::JsCast;
 use web_sys::{HtmlElement, KeyboardEvent};
 
 use super::backup::{BackupChip, chip};
+use super::clients::Clients;
+use super::documents::Documents;
 use super::form::Forms;
 use super::icon::{Icon, icon};
 use super::ledger::tax_part;
@@ -82,8 +90,11 @@ pub struct Licenses {
     /// кто позвал `watch` первым, — первой может позвать форма, а она
     /// закрывается (ревью задачи 25).
     root: StoredValue<Option<Owner>>,
-    /// День начала пробного периода на этом устройстве; `None` —
-    /// устройство его не помнит и часы без даты.
+    /// День начала пробного периода на этом устройстве — первый запуск или
+    /// первый день данных, которые устройство помнит (`Device::trial_data`),
+    /// если он раньше; `None` — устройство не помнит ни того, ни другого,
+    /// а часы без даты. Данные, открытые в этом окне, части добавляют сами
+    /// ([`Licenses::access`]).
     trial: Option<Date>,
     /// Открытый ключ, которым проверяется подпись: в программе —
     /// [`PUBLIC_KEY`], в тестах — ключ проб.
@@ -103,22 +114,26 @@ pub struct Licenses {
     /// Запуск ли это программы во вкладке, а срок ещё не стал известен:
     /// тогда кончившийся срок открывает экран лицензии ([`Licenses::show`]).
     launch: StoredValue<bool>,
-    /// Что мешает увести на экран лицензии и поднять окно о конце ключа, —
-    /// одной ручкой: `Licenses` лежит в `Ctx` каждого экрана, и поле в нём —
-    /// байты при каждом переносе `Ctx`, а у профиля — ещё и вариант
-    /// перечисления больше порога клиппи.
-    calm: StoredValue<Calm>,
+    /// Что мешает увести на экран лицензии и поднять окно о конце ключа,
+    /// и данные открытой базы — одной ручкой: `Licenses` лежит в `Ctx`
+    /// каждого экрана, и поле в нём — байты при каждом переносе `Ctx`, а у
+    /// профиля — ещё и вариант перечисления больше порога клиппи.
+    around: StoredValue<Around>,
 }
 
-/// Что мешает увести на экран лицензии и поднять окно о конце ключа
-/// (задача 92): начатая форма, экран первого запуска, окно «Что нового» —
-/// и экран, с которым окно открылось.
+/// Что вокруг срока. Что мешает увести на экран лицензии и поднять окно
+/// о конце ключа (задача 92): начатая форма, экран первого запуска, окно
+/// «Что нового» — и экран, с которым окно открылось. И данные открытой базы:
+/// по моментам их записей пробный период идёт с первого дня данных
+/// (задача 99, [`Licenses::data_since`]).
 #[derive(Clone, Copy)]
-struct Calm {
+struct Around {
     router: Router,
     forms: Forms,
     welcome: RwSignal<bool>,
     program: Program,
+    documents: Documents,
+    clients: Clients,
 }
 
 /// О конце какого срока говорит окно поверх программы: ключа (задача 92) или
@@ -164,22 +179,28 @@ enum State {
 
 impl Licenses {
     /// Ключи окна и пробный период: начат ли он на этом устройстве, а нет —
-    /// начинается сегодня. Не запомнилось (`localStorage` отказал) — период
-    /// начнётся заново при следующем открытии: бороться с этим не нужно
-    /// (`kvartik_core::license`).
+    /// начинается сегодня; а были на устройстве данные раньше — с первого их
+    /// дня (задача 99, `Device::trial_data`). Не запомнилось (`localStorage`
+    /// отказал) — период начнётся заново при следующем открытии: бороться
+    /// с этим не нужно (`kvartik_core::license`). Документы и клиенты — базы,
+    /// которую откроет окно: по моментам их записей части считают день
+    /// данных ([`Licenses::data_since`]).
     pub fn start(
         today: Option<Date>,
         router: Router,
         forms: Forms,
         welcome: RwSignal<bool>,
         program: Program,
+        documents: Documents,
+        clients: Clients,
     ) -> Self {
         let device = Device::new();
-        let trial = device.trial_start().or_else(|| {
+        let first = device.trial_start().or_else(|| {
             let today = today?;
             device.set_trial_start(today);
             Some(today)
         });
+        let trial = license::trial_start(first, device.trial_data());
         Self {
             state: RwSignal::new(State::Loading),
             watched: StoredValue::new(false),
@@ -191,11 +212,13 @@ impl Licenses {
             base_name: RwSignal::new(String::new()),
             covering: RwSignal::new(false),
             launch: StoredValue::new(!device::relaunched()),
-            calm: StoredValue::new(Calm {
+            around: StoredValue::new(Around {
                 router,
                 forms,
                 welcome,
                 program,
+                documents,
+                clients,
             }),
         }
     }
@@ -241,7 +264,7 @@ impl Licenses {
         if self.launch.get_value() {
             self.launch.set_value(false);
             let ended = self.today.is_some_and(|today| !access.issue(today));
-            let calm = self.calm.get_value();
+            let calm = self.around.get_value();
             // Адресом, а не `Router::go`: окно идёт за адресом само, и «Назад»
             // вернёт прежний экран.
             if ended && !calm.welcome.get_untracked() && calm.router.untouched() && !calm.forms.busy() {
@@ -297,6 +320,17 @@ impl Licenses {
                 let device = Device::new();
                 if !name.is_empty() && device.key_term(&name) != Some(access.key()) {
                     device.set_key_term(&name, access.key());
+                }
+                // Данные открытой базы старше того, с чего устройство считает
+                // пробный период, — запомнить их первый день: со следующего
+                // запуска метка срока и экран лицензии знают его сразу, без
+                // части (задача 99). Только раньше прежнего: день данных
+                // устройства не «молодеет», когда открыт другой ИП.
+                if let Some(day) = licenses.data_since(profiles)
+                    && licenses.trial.is_none_or(|start| day < start)
+                    && device.trial_data().is_none_or(|known| day < known)
+                {
+                    device.set_trial_data(day);
                 }
             });
         };
@@ -391,13 +425,44 @@ impl Licenses {
     /// (шапка модуля); пока ключи читаются, считается один пробный период.
     pub(super) fn access(&self, profiles: Profiles) -> Access {
         let tin = profiles.with(|data| data.and_then(|data| data.tin.clone()));
+        let trial = license::trial_start(self.trial, self.data_since(profiles));
         self.state.with(|state| {
             let licenses: &[License] = match state {
                 State::Ready { licenses, .. } => licenses,
                 State::Loading | State::Failed(_) => &[],
             };
-            Access::new(&self.public, License::keys(licenses), tin.as_ref(), self.trial)
+            Access::new(&self.public, License::keys(licenses), tin.as_ref(), trial)
         })
+    }
+
+    /// Первый день данных открытой базы (задача 99, `license::data_since`) —
+    /// по моментам записей профиля, клиентов, документов, повторов и ключей,
+    /// удалённых тоже. Отслеживаемое: восстановленная копия приносит свои
+    /// моменты сразу. Пока что-то читается — по прочитанному: день станет
+    /// только раньше. Проход по всем записям — только в частях (шапка модуля).
+    fn data_since(&self, profiles: Profiles) -> Option<Date> {
+        let today = self.today?;
+        let Around { documents, clients, .. } = self.around.get_value();
+        let since = |metas: &mut dyn Iterator<Item = &RecordMeta>| license::data_since(metas.flat_map(license::moments), today);
+        let profile = profiles.profile().and_then(|profile| since(&mut std::iter::once(profile.meta())));
+        let clients = clients.with(|list, _| since(&mut list.iter().map(Stored::meta)));
+        let documents = documents.with(|documents, recurrings, _| {
+            since(&mut documents.iter().map(Stored::meta).chain(recurrings.iter().map(Stored::meta)))
+        });
+        let keys = self.with_keys(|licenses| since(&mut licenses.iter().map(Stored::meta)));
+        [profile, clients, documents, keys].into_iter().flatten().min()
+    }
+
+    /// С какого дня идёт пробный период, когда его начало — первый день данных,
+    /// а не первый запуск на этом устройстве (задача 99): экран лицензии и окно
+    /// о конце пробного периода говорят, почему срок короче 14 дней.
+    /// Отслеживаемое; `None` — период идёт с первого запуска.
+    pub(super) fn trial_from_data(&self, profiles: Profiles) -> Option<Date> {
+        let start = license::trial_start(self.trial, self.data_since(profiles))?;
+        Device::new()
+            .trial_start()
+            .is_none_or(|first| start < first)
+            .then_some(start)
     }
 
     /// Введён ли ключ, выданный на `tin`, — по записи, без проверки
@@ -671,7 +736,7 @@ pub(super) fn RenewDialog(ctx: tax::Ctx) -> impl IntoView {
         let Some(ending) = licenses.ending(access.get(), told) else {
             return;
         };
-        let calm = licenses.calm.get_value();
+        let calm = licenses.around.get_value();
         if !calm.welcome.get() && !calm.program.blocks() && !ctx.forms.any() {
             licenses.covering.set(true);
             up.set(Some(ending));
@@ -693,7 +758,7 @@ const RENEW_TITLE: &str = "renew-title";
 /// как у «Что нового».
 #[component]
 fn RenewCard(ctx: tax::Ctx, up: RwSignal<Option<Ending>>, told: RwSignal<Option<Ending>>) -> impl IntoView {
-    let tax::Ctx { lang, licenses, .. } = ctx;
+    let tax::Ctx { lang, licenses, sources, .. } = ctx;
     // Какой срок, окно знает с первого кадра и, пока стоит, его не меняет.
     let trial = matches!(up.get_untracked(), Some(Ending::Trial(_)));
     request_animation_frame(|| {
@@ -721,6 +786,12 @@ fn RenewCard(ctx: tax::Ctx, up: RwSignal<Option<Ending>>, told: RwSignal<Option<
         let template = if trial { Key::TrialSoonText } else { Key::LicenseSoonText };
         Some(fill(t(lang, template), &[&days(lang, left), &i18n::date(lang, ending.last())]))
     };
+    // Пробный период — с первого дня данных (задача 99): почему он кончается
+    // раньше, чем через 14 дней после первого запуска.
+    let from_data = move || {
+        let start = licenses.trial_from_data(sources.profiles)?;
+        Some(fill(t(lang.get(), Key::LicenseTrialFromData), &[&i18n::date(lang.get(), start)]))
+    };
     let (title, act) = if trial {
         (Key::TrialSoonTitle, Key::LicenseBuy)
     } else {
@@ -731,6 +802,7 @@ fn RenewCard(ctx: tax::Ctx, up: RwSignal<Option<Ending>>, told: RwSignal<Option<
             <div class="update-card">
                 <h2 id=RENEW_TITLE tabindex="-1">{tr(lang, title)}</h2>
                 <p class="renew-words">{words}</p>
+                {trial.then_some(move || from_data().map(|words| view! { <p class="renew-words">{words}</p> }))}
                 {(!trial).then(|| view! { <p class="renew-words">{tr(lang, Key::LicenseRenewKeeps)}</p> })}
                 <button type="button" class="wide" on:click=renew>
                     <span class="label">{tr(lang, act)}</span>
@@ -830,6 +902,13 @@ pub(super) fn LicensePage(ctx: tax::Ctx) -> impl IntoView {
             return None;
         }
         let mut lines = vec![(term_words(lang, access, today), false)];
+        // Пробный период — с первого дня данных (задача 99): почему он короче
+        // 14 дней.
+        if matches!(access.term(), Some(Term::Trial { .. }))
+            && let Some(start) = licenses.trial_from_data(profiles)
+        {
+            lines.push((fill(t(lang, Key::LicenseTrialFromData), &[&i18n::date(lang, start)]), false));
+        }
         match access.days_left(today) {
             Some(left) if matches!(access.term(), Some(Term::Key { .. })) && left <= RENEW_DAYS => {
                 lines.push((t(lang, Key::LicenseRenew).to_owned(), true));

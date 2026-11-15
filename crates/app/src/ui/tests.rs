@@ -910,10 +910,16 @@ async fn restoring_a_backup_shows_its_profile() {
     host.remove();
     if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten())
     {
-        for name in ["kvartik.lang", "kvartik.backup_key", "kvartik.last_backup"] {
+        // И день данных: образец копии приносит прошедшие дни пробного
+        // периода, и устройство их помнит (задача 99) — следующим тестам
+        // нужен свой пробный период.
+        for name in ["kvartik.lang", "kvartik.backup_key", "kvartik.last_backup", "kvartik.trial_data"] {
             let _ = storage.remove_item(name);
         }
     }
+    // База с записями образца — тоже: по их моментам пробный период
+    // следующих тестов кончился бы (задача 99).
+    crate::store::delete_database(crate::store::DB_NAME).await;
     assert!(wrong.is_empty(), "восстановление: {wrong:#?}");
 }
 
@@ -1050,7 +1056,10 @@ async fn a_backup_of_another_ie_asks_before_merging() {
     host.remove();
     if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten())
     {
-        for name in ["kvartik.lang", "kvartik.backup_key", "kvartik.last_backup"] {
+        // И день данных: образец копии приносит прошедшие дни пробного
+        // периода, и устройство их помнит (задача 99) — следующим тестам
+        // нужен свой пробный период.
+        for name in ["kvartik.lang", "kvartik.backup_key", "kvartik.last_backup", "kvartik.trial_data"] {
             let _ = storage.remove_item(name);
         }
     }
@@ -1679,10 +1688,16 @@ async fn restoring_a_backup_shows_its_clients() {
     host.remove();
     if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten())
     {
-        for name in ["kvartik.lang", "kvartik.backup_key", "kvartik.last_backup"] {
+        // И день данных: образец копии приносит прошедшие дни пробного
+        // периода, и устройство их помнит (задача 99) — следующим тестам
+        // нужен свой пробный период.
+        for name in ["kvartik.lang", "kvartik.backup_key", "kvartik.last_backup", "kvartik.trial_data"] {
             let _ = storage.remove_item(name);
         }
     }
+    // База с записями образца — тоже: по их моментам пробный период
+    // следующих тестов кончился бы (задача 99).
+    crate::store::delete_database(crate::store::DB_NAME).await;
     assert!(wrong.is_empty(), "восстановление клиентов: {wrong:#?}");
 }
 

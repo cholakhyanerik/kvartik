@@ -1,15 +1,17 @@
 # Kvartik License Terms
 
-> **Редакция от 13.11.2026** (задача 93): перевод нового п. 4.1 и даты
-> русского текста той же редакции. Прежняя редакция, от 09.11.2026, —
-> [terms.2026-11-09.en.md](terms.2026-11-09.en.md), на сайте — по адресу
-> /en/terms/2026-11-09/ (п. 11).
+> **Редакция от 15.11.2026** (задача 99): перевод нового п. 3 и даты
+> русского текста той же редакции. Прежние редакции — от 13.11.2026
+> ([terms.2026-11-13.en.md](terms.2026-11-13.en.md), на сайте —
+> /en/terms/2026-11-13/) и от 09.11.2026
+> ([terms.2026-11-09.en.md](terms.2026-11-09.en.md),
+> /en/terms/2026-11-09/), каждая по своему адресу (п. 11).
 >
 > Перевод [terms.ru.md](terms.ru.md), утверждённого 2026-11-06. Блоки
 > «Для проверки» — только в русском тексте. Квадратные скобки заполнены
 > 2026-11-09 вместе с русским текстом.
 
-**Edition of November 13, 2026. Public offer.**
+**Edition of November 15, 2026. Public offer.**
 
 ## 1. Parties and subject
 
@@ -23,16 +25,18 @@ entrepreneurs and only for their business.
 1. The user picks a plan on the “Buy” page and writes to the seller at
    cholakhyanerik@gmail.com: the TIN (ՀՎՀՀ) of their IE, its name, a contact to send the
    key to, and the words “I accept the Kvartik license terms in the
-   edition of November 13, 2026”.
+   edition of November 15, 2026”.
 2. The user pays for the key. The contract is made upon payment.
 3. The seller sends the key to that contact within one business day after
    payment, together with the settlement document.
 
 ## 3. Trial period
 
-The app is free to use for 14 days from the first opening on a device,
-with no sign-up and with every feature. That is how you can try it before
-buying.
+The app is free to use for 14 days, with no sign-up and with every
+feature. That is how you can try it before buying. The 14 days count from
+the first opening on a device or from the first day of the data in the
+app, whichever is earlier: data moved with a backup to another device or
+browser brings the days already used along with it.
 
 ## 4. The license: what you may do and for how long
 

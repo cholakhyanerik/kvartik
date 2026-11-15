@@ -231,6 +231,98 @@ fn the_trial_lasts_fourteen_days() {
     assert!(!nothing.report(Quarter::new(2026, 3).expect("квартал"), start));
 }
 
+/// Момент `hour:minute` дня по UTC.
+fn utc(on: Date, hour: i64, minute: i64) -> Timestamp {
+    let days = i64::from(on.days_since(day(1970, 1, 1)));
+    Timestamp::from_unix_millis(((days * 24 + hour) * 60 + minute) * 60_000)
+}
+
+/// День данных — самый ранний из моментов записей; моментов нет — нет и дня
+/// (задача 99).
+#[test]
+fn the_data_day_is_the_earliest_moment() {
+    let today = day(2026, 11, 15);
+    let moments = [utc(day(2026, 11, 5), 10, 0), utc(day(2026, 11, 3), 5, 0), utc(day(2026, 11, 10), 23, 0)];
+    assert_eq!(data_since(moments, today), Some(day(2026, 11, 3)));
+    assert_eq!(data_since([], today), None);
+}
+
+/// День момента — не раньше местного ни в одном поясе Земли, от UTC−12 до
+/// UTC+14: день данных никогда не отнимет у человека дней. Сутки — по
+/// четверти часа, пояса — по часу; провалы — списком в конце.
+#[test]
+fn the_data_day_is_never_before_the_local_one() {
+    let today = day(2026, 11, 30);
+    let mut failures = Vec::new();
+    for quarter in 0..96 {
+        let at = utc(day(2026, 11, 3), 0, quarter * 15);
+        let Some(data) = data_since([at], today) else {
+            failures.push(format!("{} мс: дня нет", at.unix_millis()));
+            continue;
+        };
+        for zone in -12..=14_i64 {
+            let shifted = at.unix_millis() + zone * 3_600_000;
+            let local = day(1970, 1, 1)
+                .add_days(i32::try_from(shifted.div_euclid(86_400_000)).expect("сутки"))
+                .expect("день");
+            if data < local {
+                failures.push(format!("{} мс, UTC{zone:+}: день данных {}, местный {}", at.unix_millis(), data.iso(), local.iso()));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+    // Край суток в Ереване (UTC+4): 20:30 UTC 3 ноября — уже 4 ноября там,
+    // и день данных тот же; 09:59 UTC — 3 ноября везде до UTC+14.
+    assert_eq!(data_since([utc(day(2026, 11, 3), 20, 30)], today), Some(day(2026, 11, 4)));
+    assert_eq!(data_since([utc(day(2026, 11, 3), 9, 59)], today), Some(day(2026, 11, 3)));
+    assert_eq!(data_since([utc(day(2026, 11, 3), 10, 0)], today), Some(day(2026, 11, 4)));
+}
+
+/// Момент раньше первой версии программы или позже сегодняшнего дня —
+/// ошибка часов, а не данные: не в счёт. День первой версии — в счёт.
+#[test]
+fn clock_errors_are_not_data() {
+    let today = day(2026, 11, 15);
+    let before = utc(day(2026, 10, 1), 12, 0);
+    let later = utc(day(2026, 11, 20), 12, 0);
+    // 08:00 UTC — ещё 8 ноября и в UTC+14 (22:00).
+    let real = utc(day(2026, 11, 8), 8, 0);
+    assert_eq!(data_since([before, later, real], today), Some(day(2026, 11, 8)));
+    assert_eq!(data_since([before, later], today), None);
+    assert_eq!(data_since([utc(FIRST_DAY, 0, 0)], today), Some(FIRST_DAY));
+    assert_eq!(data_since([Timestamp::from_unix_millis(i64::MIN)], today), None);
+}
+
+/// Удалённая запись — тоже данные: её моменты в счёт.
+#[test]
+fn deleted_records_count() {
+    let mut meta = RecordMeta::new(utc(day(2026, 11, 2), 8, 0));
+    meta.delete(utc(day(2026, 11, 4), 8, 0));
+    let deleted: Vec<Timestamp> = moments(&meta).collect();
+    assert_eq!(deleted, [utc(day(2026, 11, 4), 8, 0), utc(day(2026, 11, 4), 8, 0)]);
+    assert_eq!(data_since(deleted, day(2026, 11, 15)), Some(day(2026, 11, 4)));
+    let alive = RecordMeta::new(utc(day(2026, 11, 2), 8, 0));
+    assert_eq!(moments(&alive).collect::<Vec<_>>(), [utc(day(2026, 11, 2), 8, 0)]);
+}
+
+/// Пробный период — с первого запуска на устройстве или с первого дня данных,
+/// если он раньше (условия, п. 3, редакция от 15.11.2026): копия с данными
+/// с 20 октября, восстановленная в браузере, открытом 14 ноября, приносит
+/// и прошедшие дни, и 15 ноября срок уже кончился.
+#[test]
+fn the_trial_starts_with_the_earlier_day() {
+    let device = day(2026, 11, 14);
+    let data = day(2026, 10, 20);
+    assert_eq!(trial_start(Some(device), Some(data)), Some(data));
+    assert_eq!(trial_start(Some(data), Some(device)), Some(data));
+    assert_eq!(trial_start(Some(device), None), Some(device));
+    assert_eq!(trial_start(None, Some(data)), Some(data));
+    assert_eq!(trial_start(None, None), None);
+    let today = day(2026, 11, 15);
+    assert!(Access::new(&public(), [], None, Some(device)).issue(today));
+    assert!(!Access::new(&public(), [], None, trial_start(Some(device), Some(data))).issue(today));
+}
+
 /// После срока числа для расчёта открыты за кварталы, кончившиеся в срок, —
 /// и у пробного периода, и у ключа; пока срок идёт — за любой.
 #[test]

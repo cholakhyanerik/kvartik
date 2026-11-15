@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.127",
+      "date": "2026-11-15",
+      "hy": [
+        "Փորձաշրջանն այժմ տեղափոխվում է տվյալների հետ. նոր դիտարկիչում կամ այլ սարքում վերականգնված պատճենն իր հետ բերում է նաև արդեն անցած օրերը՝ 14 օրը հաշվվում է տվյալների առաջին օրից, եթե այն ավելի վաղ է առաջին բացումից։ «Լիցենզիա» էկրանը ցույց է տալիս, թե որ օրից է հաշվվում փորձաշրջանը։",
+        "Լիցենզիայի պայմանների նոր խմբագրություն՝ 15.11.2026. դրա մասին է 3-րդ կետը, իսկ նախորդ խմբագրությունը մնում է կայքում՝ իր հասցեով։"
+      ],
+      "ru": [
+        "Пробный период теперь едет с данными: копия, восстановленная в новом браузере или на другом устройстве, приносит с собой и прошедшие дни — 14 дней считаются с первого дня данных, если он раньше первого открытия. Экран «Лицензия» говорит, с какого дня идёт период.",
+        "Новая редакция условий лицензии от 15.11.2026 — об этом её п. 3; прежняя осталась на сайте по своему адресу."
+      ],
+      "en": [
+        "The trial now travels with your data: a backup restored in a new browser or on another device brings the days already used along with it — the 14 days count from the first day of the data if it's earlier than the first opening. The License screen says which day the trial counts from.",
+        "A new edition of the license terms, dated November 15, 2026 — section 3 covers this; the previous edition stays on the site at its own address."
+      ]
+    },
+    {
       "version": "0.0.126",
       "date": "2026-11-14",
       "hy": [
@@ -263,19 +279,6 @@
       ],
       "en": [
         "A large logo is no longer refused with “make it smaller”: the app makes it smaller itself, like receipt photos in the ledger."
-      ]
-    },
-    {
-      "version": "0.0.107",
-      "date": "2026-11-11",
-      "hy": [
-        "Պատճենից վերականգնելիս, քանի դեռ ֆայլն ընտրված է, և դատարկ ծրագրում «Պահուստային պատճեն» էկրանին մնում է միայն վերականգնումը. նոր պատճենի գաղտնաբառերն այլևս կողքին չեն, և պատճենի գաղտնաբառը սխալ դաշտում մուտքագրելը դժվար է։"
-      ],
-      "ru": [
-        "Пока вы восстанавливаете копию, и в пустой программе на экране копии остаётся только восстановление: пароли новой копии больше не стоят рядом, и пароль копии не ввести не туда."
-      ],
-      "en": [
-        "While you're restoring a backup, and in an empty app, the backup screen shows only the restore: the new backup's password fields no longer sit right below, so the backup's password won't go into the wrong field."
       ]
     }
   ]

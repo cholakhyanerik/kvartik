@@ -108,6 +108,9 @@ pub(super) fn forget_device() {
     {
         let _ = storage.remove_item("kvartik.lang");
         let _ = storage.remove_item("kvartik.site_lang");
+        // День данных пробного периода (задача 99): копия со старыми
+        // записями сократила бы пробный период следующим тестам.
+        let _ = storage.remove_item("kvartik.trial_data");
     }
 }
 
@@ -580,10 +583,16 @@ async fn restoring_a_backup_shows_its_documents() {
     host.remove();
     if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten())
     {
-        for name in ["kvartik.lang", "kvartik.backup_key", "kvartik.last_backup"] {
+        // И день данных: образец копии приносит прошедшие дни пробного
+        // периода, и устройство их помнит (задача 99) — следующим тестам
+        // нужен свой пробный период.
+        for name in ["kvartik.lang", "kvartik.backup_key", "kvartik.last_backup", "kvartik.trial_data"] {
             let _ = storage.remove_item(name);
         }
     }
+    // База с записями образца — тоже: по их моментам пробный период
+    // следующих тестов кончился бы (задача 99).
+    crate::store::delete_database(crate::store::DB_NAME).await;
     assert!(wrong.is_empty(), "восстановление документов: {wrong:#?}");
 }
 
