@@ -77,10 +77,12 @@ const cases = [
   ["deny", "Bash", { command: "cargo run -q -p kvartik-keygen --release -- issue --tin 00054321 --plan standard --until 2027-10-10" }],
   ["deny", "PowerShell", { command: "& .\\target\\release\\kvartik-keygen.exe issue --tin 00054321 --plan pro --until 2027-10-10" }],
   ["deny", "Bash", { command: "cargo run -p kvartik-keygen -- issue --key ~/kvartik-license/license.txt --tin 00054321 --plan standard --until 2027-10-10" }],
+  ["deny", "Bash", { command: "cargo run -q -p kvartik-keygen --release -- issue --tin 00054321 --plan standard --renew" }],
   ["allow", "Read", { file_path: "C:/tmp/k26/kvartik-licenses/notes.txt" }],
   ["allow", "Grep", { pattern: "kvartik-license", path: `${P}/crates/keygen` }],
   ["allow", "Bash", { command: "git commit -m \"0.0.61: журнал рядом с ключом в kvartik-license\"" }],
   ["allow", "Bash", { command: "cargo run -p kvartik-keygen -- issue --key C:/tmp/k26/seed.txt --tin 00054321 --plan standard --until 2027-10-10" }],
+  ["allow", "Bash", { command: "cargo run -q -p kvartik-keygen -- issue --key C:/tmp/k97/probe/seed.txt --tin 00054321 --plan standard --renew" }],
   ["allow", "Bash", { command: "cargo clippy -p kvartik-keygen --all-targets -- -D warnings" }],
   // PowerShell 5.1 и текстовые файлы проекта.
   ["deny", "PowerShell", { command: "Set-Content -Path CLAUDE.md -Value $text" }],

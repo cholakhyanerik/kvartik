@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.128",
+      "date": "2026-11-15",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել. բանալին երկարաձգելիս հեղինակն այլևս ձեռքով չի հաշվում նոր բանալու վերջին օրը՝ այն հաշվվում է նախորդ բանալու վերջին օրից ավտոմատ կերպով, առանց մեկ օրվա սխալի։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось: продлевая ключ, автор больше не считает последний день нового ключа вручную — он считается от последнего дня прежнего сам, без ошибки на день."
+      ],
+      "en": [
+        "Nothing changed in the app: when renewing a key, the author no longer works out the new key's last day by hand — it's calculated from the current key's last day automatically, with no day lost or gained by mistake."
+      ]
+    },
+    {
       "version": "0.0.127",
       "date": "2026-11-15",
       "hy": [
@@ -266,19 +279,6 @@
       ],
       "en": [
         "“Backup of this entrepreneur for the client” is now called “Backup of this entrepreneur only”, without the word “client”: in the app a client is your buyer, while this backup goes to an accountant or another device."
-      ]
-    },
-    {
-      "version": "0.0.108",
-      "date": "2026-11-11",
-      "hy": [
-        "Մեծ լոգոտիպն այլևս չի մերժվում «փոքրացրեք այն» բառերով. ծրագիրը փոքրացնում է այն ինքը, ինչպես մատյանի կտրոնների լուսանկարները։"
-      ],
-      "ru": [
-        "Большой логотип больше не отвергается словами «уменьшите её»: программа уменьшает его сама, как фото чеков в книге."
-      ],
-      "en": [
-        "A large logo is no longer refused with “make it smaller”: the app makes it smaller itself, like receipt photos in the ledger."
       ]
     }
   ]
