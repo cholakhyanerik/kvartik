@@ -9,7 +9,8 @@ use kvartik_core::model::client::{Client, ClientData};
 use kvartik_core::model::country::Country;
 use kvartik_core::model::date::Date;
 use kvartik_core::model::document::{DocKind, Document, DocumentData, Issued, Item, Payment, Settlement, Status};
-use kvartik_core::model::logo::{Image, IssuedLogo, Logo};
+use kvartik_core::doc::image::Picture;
+use kvartik_core::model::logo::{self, Image, IssuedLogo, Logo};
 use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::model::profile::{Profile, ProfileData};
 use kvartik_core::model::record::{RecordId, Timestamp};
@@ -28,6 +29,7 @@ use super::{
     visit, wait_for,
 };
 use crate::ui::documents::save;
+use crate::ui::profile::fitted;
 use crate::ui::route::Screen;
 use crate::platform::clock;
 use crate::store::device::Device;
@@ -1488,6 +1490,28 @@ async fn pdf_shows_the_logo_of_its_day() {
     drop(fonts);
     forget_device();
     assert!(wrong.is_empty(), "логотип в PDF: {wrong:#?}");
+}
+
+/// Лёгкий логотип больше 2048 точек на сторону форма профиля уменьшает
+/// сама, как тяжёлый файл: такой PDF не берёт (найдено ревью задачи 63).
+/// Логотип в пределе ложится как есть.
+#[wasm_bindgen_test]
+async fn a_logo_beyond_the_pdf_limit_is_made_smaller() {
+    let huge = png(2_100, 2_100).await;
+    let small = png(3, 3).await;
+    let mut wrong = Vec::new();
+    if huge.len() > logo::MAX_BYTES {
+        wrong.push(format!("пустой холст весит {} Б — не лёгкий", huge.len()));
+    }
+    match fitted(huge, "image/png").await {
+        Ok(image) if Picture::fits(&image) => {}
+        other => wrong.push(format!("больше 2048 точек: {:?}", other.map(|image| image.bytes().len()))),
+    }
+    match fitted(small.clone(), "image/png").await {
+        Ok(image) if image.bytes() == small.as_slice() => {}
+        other => wrong.push(format!("в пределе: {other:?}")),
+    }
+    assert!(wrong.is_empty(), "логотип формы: {wrong:#?}");
 }
 
 /// PDF выпущенного документа профиль не нужен: реквизиты ИП — в самом

@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.132",
+      "date": "2026-11-15",
+      "hy": [
+        "2048 կետից մեծ կողմով լոգոտիպը պրոֆիլի ձևն այժմ ինքն է փոքրացնում՝ մինչև 512 կետ, ինչպես ծանր ֆայլը. նախկինում այն PDF չէր մտնում։"
+      ],
+      "ru": [
+        "Логотип больше 2048 точек на сторону форма профиля теперь уменьшает сама — до 512 точек, как тяжёлый файл: раньше такой в PDF не попадал."
+      ],
+      "en": [
+        "The profile form now shrinks a logo larger than 2048 pixels on a side to 512 pixels by itself, as it does with a heavy file; before, such a logo didn't make it into the PDF."
+      ]
+    },
+    {
       "version": "0.0.131",
       "date": "2026-11-15",
       "hy": [
@@ -266,19 +279,6 @@
       ],
       "en": [
         "When turnover is under one percent of the threshold, the Tax screen now says “less than 1%” instead of “0%”."
-      ]
-    },
-    {
-      "version": "0.0.112",
-      "date": "2026-11-11",
-      "hy": [
-        "Գծիկով հարկային համարը հաճախորդների ցանկում նեղ էկրանին այլևս չի կիսվում երկու տողի։"
-      ],
-      "ru": [
-        "Налоговый номер с дефисом больше не рвётся на две строки в списке клиентов на узком экране."
-      ],
-      "en": [
-        "A tax number with a hyphen no longer breaks across two lines in the client list on a narrow screen."
       ]
     }
   ]

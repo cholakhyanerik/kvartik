@@ -14,6 +14,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use kvartik_core::doc::image::Picture as PdfPicture;
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
 use kvartik_core::model::activity::{ActivityCode, CodeError, IncomeKind};
 use kvartik_core::model::bank::{BankAccount, Swift};
@@ -744,7 +745,7 @@ struct Form {
 
 /// Почему не принят логотип.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum LogoProblem {
+pub(super) enum LogoProblem {
     TooLarge,
     NotSupported,
     Unreadable,
@@ -1343,10 +1344,15 @@ const LOGO_PICK_LIMIT: u64 = 20 * 1024 * 1024;
 /// записи — как есть; больше предела или другого вида, который браузер
 /// открывает (WebP, HEIC), — уменьшенная им (`platform::image::logo`), как
 /// фото книги, а не отказ «уменьшите её» (полный прогон 2026-11-10, п. 13).
-async fn fitted(bytes: Vec<u8>, mime: &str) -> Result<Image, LogoProblem> {
+/// Так же — лёгкий, но больше 2048 точек на сторону: такой PDF не берёт
+/// (`doc::image::MAX_PIXELS`), а логотип, выгруженный в тысячи точек, весит
+/// десятки килобайт. Раньше он ложился как есть, и превью советовало
+/// «сохраните его заново», что не помогало (найдено ревью задачи 63).
+pub(super) async fn fitted(bytes: Vec<u8>, mime: &str) -> Result<Image, LogoProblem> {
     if bytes.len() <= logo::MAX_BYTES {
         match Image::new(bytes.clone()) {
-            Ok(image) => return Ok(image),
+            Ok(image) if PdfPicture::fits(&image) => return Ok(image),
+            Ok(_) => {}
             Err(ImageError::NotSupported) if !mime.starts_with("image/") => return Err(LogoProblem::NotSupported),
             Err(ImageError::NotSupported | ImageError::TooLarge) => {}
         }
