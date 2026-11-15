@@ -69,6 +69,11 @@ jobs:
   check:
     name: Linux
     runs-on: ubuntu-latest
+    # Втрое дольше обычного прогона (13 минут, 2026-11-15). Без предела
+    # GitHub ждёт зависшее задание шесть часов, а минуты CI у приватного
+    # репозитория считаются: «Собранный сайт в браузере» однажды простоял
+    # 22 минуты, пока прогон не отменили (2026-11-15).
+    timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -245,6 +250,9 @@ jobs:
     needs: check
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    # Обычно — минута; проверка выкладки повторяет устаревший ответ до трёх
+    # минут на адрес (`tools/deploy/check.sh`), и 20 минут — с запасом.
+    timeout-minutes: 20
 
     steps:
       # Из репозитория нужны только wrangler с замком и скрипты выкладки.

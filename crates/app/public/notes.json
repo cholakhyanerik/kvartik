@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.133",
+      "date": "2026-11-15",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել. այս տարբերակն ուղղում է ստուգումներից մեկը, որոնք կատարվում են յուրաքանչյուր թողարկումից առաջ։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось: эта версия чинит одну из проверок, которые идут перед каждой выкладкой."
+      ],
+      "en": [
+        "Nothing changed in the app: this version fixes one of the checks that run before every release."
+      ]
+    },
+    {
       "version": "0.0.132",
       "date": "2026-11-15",
       "hy": [
@@ -266,19 +279,6 @@
       ],
       "en": [
         "The “Installing the app” block on the home screen now comes after the tax, deadline and unpaid invoice cards. On iPhone, iPad and Mac it stays at the top as before."
-      ]
-    },
-    {
-      "version": "0.0.113",
-      "date": "2026-11-11",
-      "hy": [
-        "Հարկի էկրանը, երբ շրջանառությունը շեմի մեկ տոկոսից պակաս է, այժմ ասում է «շեմի 1%-ից պակաս», այլ ոչ թե «0%»։"
-      ],
-      "ru": [
-        "Экран налога при обороте меньше процента порога теперь говорит «меньше 1 %», а не «0 %»."
-      ],
-      "en": [
-        "When turnover is under one percent of the threshold, the Tax screen now says “less than 1%” instead of “0%”."
       ]
     }
   ]

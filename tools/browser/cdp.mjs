@@ -29,6 +29,11 @@ export const CHROME = process.env.CHROME
   ?? (WINDOWS ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : "google-chrome");
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/// Сколько ждать ответа одной команды DevTools. Самое долгое законное
+/// ожидание проверок — опрос `waitFor` по 60 с, но он — много коротких
+/// команд; одна команда дольше минуты — значит, ответа не будет.
+const SEND_MS = 120_000;
+
 /// Эмуляции окна: телефон и компьютер (Правило 2: 360 и 1280).
 export const DEVICES = {
   360: { width: 360, height: 780, deviceScaleFactor: 2, mobile: true },
@@ -91,10 +96,25 @@ export class Browser {
     }
   }
 
+  /// Команда DevTools. Ответа нет за [`SEND_MS`] — отказ с её именем, а не
+  /// вечное ожидание: обещание в странице, которое так и не разрешилось
+  /// (`await` в `eval`), держало бы проверку, пока CI не снимет задание
+  /// (2026-11-15: «Собранный сайт в браузере» простоял 22 минуты до отмены).
+  /// Таймер не держит Node после конца проверки (`unref`).
   send(method, params = {}, sessionId) {
     const id = ++this.id;
     this.ws.send(JSON.stringify({ id, method, params, sessionId }));
-    return new Promise((res, rej) => this.pending.set(id, { res, rej, method }));
+    return new Promise((res, rej) => {
+      const timer = setTimeout(() => {
+        if (this.pending.delete(id)) rej(new Error(`${method}: нет ответа за ${SEND_MS / 1000} с`));
+      }, SEND_MS);
+      timer.unref();
+      this.pending.set(id, {
+        res: (value) => { clearTimeout(timer); res(value); },
+        rej: (error) => { clearTimeout(timer); rej(error); },
+        method,
+      });
+    });
   }
 
   /// Вкладка. `context: true` — в своём контексте браузера, как в инкогнито:

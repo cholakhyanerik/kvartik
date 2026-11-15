@@ -75,7 +75,14 @@ export function own(dist, port, { quality = 11 } = {}) {
     });
     res.end(br ? f.br : f.raw);
   }).listen(port, "127.0.0.1");
-  return { port, stop: () => new Promise((r) => server.close(r)) };
+  // `server.close` ждёт, пока закроются все соединения, а браузер держит их
+  // живыми и шлёт по ним новые запросы: проверка могла стоять на остановке
+  // сервера без конца (CI, 2026-11-15). Поэтому соединения закрываются сразу.
+  const stop = () => new Promise((r) => {
+    server.close(r);
+    server.closeAllConnections();
+  });
+  return { port, stop };
 }
 
 /// `wrangler pages dev`. Он кладёт `.wrangler/` в текущую папку — поэтому
