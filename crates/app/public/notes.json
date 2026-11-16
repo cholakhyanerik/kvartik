@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.137",
+      "date": "2026-11-16",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել. այս տարբերակն ուղղում է ստուգումներից մեկը, որոնք կատարվում են յուրաքանչյուր թողարկումից առաջ։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось: эта версия чинит одну из проверок, которые идут перед каждой выкладкой."
+      ],
+      "en": [
+        "Nothing changed in the app: this version fixes one of the checks that run before every release."
+      ]
+    },
+    {
       "version": "0.0.136",
       "date": "2026-11-16",
       "hy": [
@@ -266,19 +279,6 @@
         "How many days are left on your trial or key is now always in view: in the menu on a computer and on the home screen of a phone, and in the last week at the top of every screen too.",
         "When the term has ended, the app opens on the License screen at launch — everything about buying a key is there. Your data, ledger, tax and backups keep working without a key.",
         "A week before your key expires, the app tells you once, in a window with a “Renew” button."
-      ]
-    },
-    {
-      "version": "0.0.117",
-      "date": "2026-11-11",
-      "hy": [
-        "Մինչ ծրագիրը բեռնվում է, էկրանին արդեն Kvartik նշանն է, ոչ թե դատարկ էջ։ Ծրագիրն ինքը բացվում է նույնքան արագ, որքան առաջ։"
-      ],
-      "ru": [
-        "Пока программа загружается, на экране — знак Kvartik, а не пустая страница. Сама программа открывается так же быстро, как раньше."
-      ],
-      "en": [
-        "While the app is loading, you now see the Kvartik name instead of a blank page. The app itself opens as fast as before."
       ]
     }
   ]

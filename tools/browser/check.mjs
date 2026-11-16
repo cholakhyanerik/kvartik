@@ -417,6 +417,15 @@ async function blocked(browser) {
 /// в корне) — в /app/ с тем же экраном. В своём контексте браузера: service
 /// worker, которого поставит переход в программу, не должен править
 /// вкладкой следующих шагов.
+// Скрипт лендинга подключён с `defer`: пока он не выполнился, переход между
+// страницами в программу никто не снимает, и Chrome отменяет его уже в ней —
+// ошибкой в её консоли (`site/landing.js`), а поля калькулятора ещё не
+// слушают ввода. Шаг, который нажимает на странице лендинга, ждёт, пока он
+// выполнится: `complete` — после отложенных скриптов (по спецификации HTML).
+// Без этого проверка однажды нажала ссылку в программу раньше и покраснела
+// (CI, Chrome 157 без видеокарты, 2026-11-16).
+const SCRIPTED = `document.readyState === "complete"`;
+
 async function landing(browser) {
   const page = await browser.page({ context: true });
   try {
@@ -509,10 +518,10 @@ async function landing(browser) {
         .querySelector('article.legal .editions a[href="${at}"]') && !document.querySelector('meta[name="robots"]') ? true : null;`));
     }
     await page.go(`${ORIGIN}/ru/`);
-    await page.waitFor(`return document.querySelector('footer a[href="/ru/terms/"]') ? true : null;`);
+    await page.waitFor(`return document.querySelector('footer a[href="/ru/terms/"]') && ${SCRIPTED} ? true : null;`);
     await page.eval(`document.querySelector('footer a[href="/ru/terms/"]').click(); return true;`);
     checks.check("лендинг: подвал ведёт к условиям своего языка", await page.waitFor(`return location.pathname
-      === "/ru/terms/" && document.querySelector("article.legal") ? true : null;`));
+      === "/ru/terms/" && document.querySelector("article.legal") && ${SCRIPTED} ? true : null;`));
     // Условия зовут страницу «Купить» по имени (п. 2), и с их страницы до
     // неё — ссылка подвала.
     await page.eval(`document.querySelector('footer a[href="/ru/buy/"]').click(); return true;`);
@@ -527,7 +536,7 @@ async function landing(browser) {
       f.dispatchEvent(new Event(f.tagName === "SELECT" ? "change" : "input", { bubbles: true })); return true;`;
     const shown = (name) => `return document.querySelector('[data-field="${name}"]').getClientRects().length > 0;`;
     await page.go(`${ORIGIN}/ru/`);
-    await page.waitFor(`return document.querySelector("section[data-module]") ? true : null;`);
+    await page.waitFor(`return document.querySelector("section[data-module]") && ${SCRIPTED} ? true : null;`);
     await page.eval(field("turnover", "1 000 000"));
     checks.check("калькулятор: IT 1 000 000 ֏ — налог 10 000 ֏", await page.waitFor(`const s = document
       .querySelector("section[data-module] .result .sum"); return s && s.textContent.replace(/\\D/g, "") === "10000" ? true : null;`));
@@ -571,15 +580,16 @@ async function landing(browser) {
     // страницы без переключателя выбранного не меняет: с армянского корня
     // программа — по-прежнему на English.
     await page.go(`${ORIGIN}/ru/`);
-    await page.waitFor(`return document.querySelector('.langs a[hreflang="en"]') ? true : null;`);
+    await page.waitFor(`return document.querySelector('.langs a[hreflang="en"]') && ${SCRIPTED} ? true : null;`);
     await page.eval(`document.querySelector('.langs a[hreflang="en"]').click(); return true;`);
-    await page.waitFor(`return location.pathname === "/en/" && document.querySelector('a.button[href="/app/?lang=en"]') ? true : null;`);
+    await page.waitFor(`return location.pathname === "/en/" && document.querySelector('a.button[href="/app/?lang=en"]')
+      && ${SCRIPTED} ? true : null;`);
     await page.eval(`document.querySelector('a.button[href="/app/?lang=en"]').click(); return true;`);
     checks.check("программа: язык, выбранный на лендинге, сильнее выбранного в ней раньше", await page.waitFor(`
       return location.pathname === "/app/" && document.querySelector(".app") && document.documentElement.lang === "en"
         && localStorage.getItem("kvartik.lang") === "en" && localStorage.getItem("kvartik.site_lang") === null ? true : null;`));
     await page.go(`${ORIGIN}/`);
-    await page.waitFor(`return document.querySelector('a.button[href="/app/?lang=hy"]') ? true : null;`);
+    await page.waitFor(`return document.querySelector('a.button[href="/app/?lang=hy"]') && ${SCRIPTED} ? true : null;`);
     await page.eval(`document.querySelector('a.button[href="/app/?lang=hy"]').click(); return true;`);
     const opened = await page.waitFor(`return location.pathname === "/app/" && document.querySelector(".app")
       ? document.documentElement.lang : null;`);
