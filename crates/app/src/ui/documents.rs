@@ -51,6 +51,7 @@ use leptos::prelude::*;
 
 use super::avatar::{Avatar, tone};
 use super::backup::{BackupChip, Backups};
+use super::cba::{self, CbaHint};
 use super::clients::Clients;
 use super::form::{CURRENCIES, Forms, TextField, WizardHead, currency_code, currency_key};
 use super::icon::{Icon, icon};
@@ -2131,6 +2132,12 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                         }}
                         <input type="text" inputmode="decimal" autocomplete="off" maxlength="24" bind:value=form.rate />
                     </label>
+                    <CbaHint
+                        lang
+                        currency=Signal::derive(move || form.currency.get())
+                        day=Signal::derive(move || form.service_date.with(|text| Date::from_iso(text)))
+                        field=form.rate
+                    />
                     <p class="hint">{tr(lang, Key::RateHint)}</p>
                     {shown_problem(tried, move || form.rate.with(|text| rate_problem(lang.get(), text)))}
                     {wizard.then(|| view! { <p class="hint">{in_drams}</p> })}
@@ -2767,6 +2774,30 @@ fn DocRate(
     let currency = data.currency;
     let service = data.service_date;
     let total = data.total().ok();
+    let ours = Signal::derive(move || Some(currency));
+    let day = Signal::derive(move || Some(service));
+    // Курса нет, а курс ЦБ для дня услуги есть — «Указать курс ЦБ» одним
+    // нажатием, с курсом в подписи (задача 43).
+    let found = cba::hint(ours, day);
+    let quick = move || match (rate, found.get()) {
+        (None, Some(cba::Hint::Rate { per_unit_e4, .. })) => Some(view! {
+            <button
+                type="button"
+                disabled=move || busy.get()
+                on:click=move |_| {
+                    act(ctx, busy, failure, id, Change::SetRate(Some(per_unit_e4)), move |_| {
+                        notice.set(Some(Notice::RateSaved));
+                    });
+                }
+            >
+                <span class="label">{move || {
+                    let lang = lang.get();
+                    fill(t(lang, Key::DocRateCba), &[&i18n::rate_pair(lang, currency, per_unit_e4)])
+                }}</span>
+            </button>
+        }),
+        _ => None,
+    };
     view! {
         <div class="rate-box">
             {move || if editing.get() {
@@ -2775,6 +2806,7 @@ fn DocRate(
                         {move || fill(t(lang.get(), Key::OpRate), &[currency_code(currency)])}
                         <input type="text" inputmode="decimal" autocomplete="off" maxlength="24" bind:value=typed />
                     </label>
+                    <CbaHint lang currency=ours day field=typed />
                     <p class="hint">{tr(lang, Key::RateHint)}</p>
                     {shown_problem(tried, move || typed.with(|text| rate_problem(lang.get(), text)))}
                     <p class="hint">{move || {
@@ -2793,6 +2825,7 @@ fn DocRate(
                 .into_any()
             } else {
                 view! {
+                    {quick}
                     <button type="button" class="secondary" on:click=move |_| editing.set(true)>
                         <span class="label">{tr(lang, if rate.is_some() { Key::DocRateChange } else { Key::DocRateSet })}</span>
                     </button>

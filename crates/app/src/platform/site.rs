@@ -1,5 +1,5 @@
-//! Файлы своего сайта по адресу: шрифты для документа (задача 12) и тексты
-//! лицензий (задача 51).
+//! Файлы своего сайта по адресу: шрифты для документа (задача 12), тексты
+//! лицензий (задача 51) и курсы ЦБ (задача 43).
 //!
 //! Шрифты PDF — те же файлы, что у окна (`public/fonts/`, `doc::fonts`):
 //! service worker кладёт их в кэш с первого захода (Правило 2), и без сети
@@ -67,6 +67,18 @@ pub async fn text(name: &str) -> Result<String, Unreachable> {
         .map_err(|error| log(name, &error))?
         .as_string()
         .ok_or(Unreachable)
+}
+
+/// Текст необязательного файла `name` папки программы — курсов ЦБ (задача
+/// 43): без него окно просто не подсказывает курс, поэтому ответ не 2xx —
+/// `None` без записи в консоль. Обрыв сети браузер пишет в консоль сам.
+pub async fn optional_text(name: &str) -> Option<String> {
+    let window = web_sys::window()?;
+    let response: Response = window.fetch_with_str(name).await.ok()?.dyn_into().ok()?;
+    if !response.ok() {
+        return None;
+    }
+    response.text().ok()?.await.ok()?.as_string()
 }
 
 fn log(name: &str, error: &JsValue) -> Unreachable {

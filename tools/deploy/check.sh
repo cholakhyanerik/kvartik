@@ -282,8 +282,10 @@ while IFS= read -r path; do
   esac
   # Тело обоих `sw.js` — этой сборки: по `sw.js` программы браузер
   # узнаёт новую версию, а по `sw.js` корня — что прежний service worker
-  # корня пора снять.
-  if [ "${path##*/}" = sw.js ]; then
+  # корня пора снять. Тело файла курсов ЦБ (задача 43) — этой выкладки: его
+  # кладёт выкладка, а не сборка, и выкладка курсов по расписанию меняет
+  # только его.
+  if [ "${path##*/}" = sw.js ] || [ "$path" = app/rates.json ]; then
     while :; do
       if curl -sS --compressed -o "$work/sw" "$site/$path" && cmp -s "$work/sw" "$dist/$path"; then
         break

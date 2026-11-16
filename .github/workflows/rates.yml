@@ -1,0 +1,146 @@
+# Курсы ЦБ на сайт раз в день (задача 43): программа подсказывает курс ЦБ
+# у поля курса из файла `app/rates.json` своего сайта (`tax::cba`), а ЦБ
+# публикует новый каждый рабочий день. Выкладка CI кладёт файл при каждой
+# выкладке (`ci.yml`), а между выкладками — это задание: тот же сайт с новыми
+# курсами, без пересборки.
+#
+# Сайт — артефакт `site`, который выкладка CI кладёт перед выкладкой всем
+# (`ci.yml`, «Выкладываемое — выкладке курсов»), а это задание — перед своей.
+# Ему здесь не верят: до выкладки каждый отдаваемый файл, кроме файла курсов,
+# сверяется с живым сайтом байт в байт, а `_headers` — с репозиторием
+# (`tools/deploy/same.mjs`). Подменённый или отставший артефакт — отказ, а не
+# откат сайта к прежней сборке; поменять эта выкладка может только файл
+# курсов. Кэша Actions здесь нет: его пишет любое задание ветки main, и код
+# сборки подложил бы заданию с токеном свои скрипты (ревью задачи 43).
+#
+# Программы — репозитория, и программа курсов до выкладки сверяется
+# с образцом ответа ЦБ (`rates.mjs --sample`), как в проверке CI: коммит,
+# у которого CI красный, своих курсов на сайт не выложит. После выкладки —
+# та же проверка сайта, что у CI (`tools/deploy/check.sh`), на своём домене.
+# Курсы те же, что на сайте (выходной, праздник), — не выкладывается ничего.
+# Минуты CI считаются (CLAUDE.md, Правило 11): в выходной — полминуты,
+# в рабочий день — около двух.
+#
+# Действия — по SHA коммита (Правило 13).
+name: Курсы ЦБ
+
+on:
+  # 19:30 в Ереване (UTC+4): курс дня ЦБ публикует днём — Armenpress
+  # сообщает его около 17:25 (2026-02-13, 2026-03-10), а в 19:18 2026-11-16
+  # у ЦБ уже был курс этого дня. GitHub запускает задания по расписанию
+  # с опозданием, иногда на час: курс всё равно приходит в вечер дня
+  # публикации, а нужен он с утра следующего.
+  schedule:
+    - cron: "30 15 * * *"
+  workflow_dispatch:
+
+# По одному: второе задание ждёт первое, а не снимает его и не встаёт
+# ждущим в группу выкладки сайта поверх выкладки CI (`ci.yml`, шапка
+# `concurrency` задания выкладки).
+concurrency:
+  group: rates
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PAGES_PROJECT: kvartik
+  SITE_URL: https://kvartik.com
+
+jobs:
+  rates:
+    name: Курсы ЦБ на сайт
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Артефакт другого прогона — прочесть, прежние свои — убрать.
+    permissions:
+      contents: read
+      actions: write
+    concurrency:
+      group: pages-production
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            /tools/deploy/
+            /crates/core/tests/rates/
+            /crates/app/public/root/_headers
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Программа курсов сходится с образцом
+        run: node tools/deploy/rates.mjs --sample crates/core/tests/rates
+
+      # Новейший артефакт `site` ветки main: его клала последняя выкладка —
+      # CI или это задание. Нет его (неделю не было выкладки) — задание
+      # красное, и курсы выложит следующая выкладка CI.
+      - name: Последний выложенный сайт
+        id: site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=site&per_page=1" \
+            --jq '.artifacts[0] | select(.expired == false and .workflow_run.head_branch == "main") | .workflow_run.id')"
+          [ -n "$run" ] || { echo "артефакта site нет: курсы выложит следующая выкладка CI"; exit 1; }
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: site
+          path: site
+          run-id: ${{ steps.site.outputs.run }}
+          github-token: ${{ github.token }}
+
+      - name: Курсы ЦБ
+        id: rates
+        run: |
+          node tools/deploy/rates.mjs site/dist
+          if curl -sSf -o live-rates.json "$SITE_URL/app/rates.json" && cmp -s live-rates.json site/dist/app/rates.json; then
+            echo "same=1" >> "$GITHUB_OUTPUT"
+            echo "Курсы на сайте — те же: выкладывать нечего" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Артефакт — это сайт
+        if: steps.rates.outputs.same != '1'
+        run: node tools/deploy/same.mjs "$SITE_URL" site/dist crates/app/public/root/_headers
+
+      - if: steps.rates.outputs.same != '1'
+        run: npm ci --ignore-scripts
+        working-directory: tools/deploy
+
+      # Свой артефакт — до выкладки, как у CI: следующее задание возьмёт его.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.rates.outputs.same != '1'
+        with:
+          name: site
+          path: site
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Выкладка всем
+        if: steps.rates.outputs.same != '1'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          commit="$(cat site/commit)"
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo "в артефакте не коммит: «$commit»"; exit 1; }
+          url="$(bash tools/deploy/deploy.sh main site/dist "$commit")"
+          echo "Сайт с новыми курсами: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Проверка своего домена
+        if: steps.rates.outputs.same != '1'
+        run: bash tools/deploy/check.sh "$SITE_URL" site/dist
+
+      # Прежние артефакты `site` больше не нужны: место артефактов у GitHub
+      # Free — 500 МБ на всё. Новейший — только что положенный — остаётся.
+      - name: Прежние артефакты
+        if: steps.rates.outputs.same != '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=site&per_page=100" --jq '.artifacts[1:][] | .id' \
+            | while read -r id; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"; done

@@ -38,8 +38,10 @@ const TYPES = {
   ".xml": "application/xml",
 };
 
-/// Свой сервер. Возвращает `{ port, stop() }`.
-export function own(dist, port, { quality = 11 } = {}) {
+/// Свой сервер. Возвращает `{ port, stop() }`. `extra` — файлы, которых нет
+/// в сборке, адрес → байты: файл курсов ЦБ кладёт на сайт выкладка, а не
+/// сборка (задача 43), и проверка отдаёт свой образец, не трогая `dist/`.
+export function own(dist, port, { quality = 11, extra = {} } = {}) {
   const files = new Map();
   const walk = (dir, prefix) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -55,6 +57,13 @@ export function own(dist, port, { quality = 11 } = {}) {
     }
   };
   walk(dist, "");
+  for (const [url, body] of Object.entries(extra)) {
+    const raw = Buffer.from(body);
+    files.set(url, {
+      raw, br: zlib.brotliCompressSync(raw, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: quality } }),
+      type: TYPES[path.extname(url)] ?? "application/octet-stream",
+    });
+  }
   const notFound = (p) => {
     for (let dir = path.posix.dirname(p); ; dir = path.posix.dirname(dir)) {
       const f = files.get(`${dir === "/" ? "" : dir}/404.html`);

@@ -77,7 +77,8 @@ fn file(exclusions: &[Value], pensions: &[Value]) -> String {
         "settlement_due": [],
         "deadline_shift": [],
         "holidays": [],
-        "days_off": []
+        "days_off": [],
+        "rate_day": []
     })
     .to_string()
 }
@@ -567,7 +568,7 @@ fn version_parse_is_strict() {
 
 /// Отпечаток значений текущей версии правил: её запись и FNV-1a значений
 /// файла ([`values`]).
-const PINNED: (&str, u64) = ("2026.10", 0x0a12_fef8_e50b_46a0);
+const PINNED: (&str, u64) = ("2026.11", 0xba57_f7a7_2af1_03d6);
 
 /// Значения файла правил одной строкой: всё, кроме версии и источников, —
 /// JSON с ключами по алфавиту. Источник — когда сверили и где лежит
@@ -663,7 +664,7 @@ fn values_see_rules_not_sources() {
         r#"{{"days_off": [], "deadline_shift": [], "funded_pension": [{}], "health_insurance": [], "high_tech": [],
             "holidays": [], "income_declaration": [], "micro_application": [], "micro_exclusions": [], "micro_report": [], "micro_threshold": [], "profit_tax": [], "settlement_due": [], "social_payment": [], "stamp_duty": [], "turnover_application": [],
             "turnover_carry": [], "turnover_due": [], "turnover_exclusions": [{}], "turnover_expenses": [], "turnover_form": [], "turnover_place": [], "turnover_rates": [],
-            "turnover_threshold": [], "version": "2026.1"}}"#,
+            "turnover_threshold": [], "rate_day": [], "version": "2026.1"}}"#,
         pension("2014-01-01", None),
         exclusion(&["69"], "2025-07-01", None),
     );

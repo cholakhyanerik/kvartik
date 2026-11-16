@@ -9,6 +9,7 @@ mod about;
 mod annual;
 mod avatar;
 mod backup;
+mod cba;
 mod clients;
 mod deadlines;
 mod documents;

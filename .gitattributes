@@ -11,6 +11,11 @@
 # сохранила программа.
 crates/core/tests/backups/**/*.json -text
 
+# Образцы курсов ЦБ (задача 43): ответ ЦБ и файл курсов, который из него
+# пишет `tools/deploy/rates.mjs`, — байт в байт: `tools/browser/check.mjs`
+# сверяет вывод программы выкладки с файлом, который читает тест ядра.
+crates/core/tests/rates/** -text
+
 # Дизайн человека «Kvartik Design» — файл как он есть, байт в байт: git не
 # трогает в нём концы строк.
 docs/design/** -text

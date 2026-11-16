@@ -60,6 +60,31 @@ pub fn hash() -> String {
         .unwrap_or_default()
 }
 
+/// Звать `handler`, когда страница снова на глазах: человек вернулся
+/// к вкладке или окну. Слушатель — на всё время страницы. Свойство
+/// `onvisibilitychange` занято проверкой новой версии (`platform::pwa`),
+/// поэтому — `addEventListener`, как у `autobackup::when_hidden`.
+pub fn when_shown(handler: impl Fn() + 'static) {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::closure::Closure;
+
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+    let watched = document.clone();
+    let listener = Closure::<dyn Fn()>::new(move || {
+        if watched.visibility_state() == web_sys::VisibilityState::Visible {
+            handler();
+        }
+    });
+    if document
+        .add_event_listener_with_callback("visibilitychange", listener.as_ref().unchecked_ref())
+        .is_ok()
+    {
+        listener.forget();
+    }
+}
+
 /// Сменить часть адреса после `#`. Браузер запоминает шаг в истории —
 /// кнопка «Назад» вернёт прежний адрес — и шлёт `hashchange`.
 pub fn set_hash(hash: &str) {

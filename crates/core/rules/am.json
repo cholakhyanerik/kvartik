@@ -1,5 +1,5 @@
 {
-  "version": "2026.10",
+  "version": "2026.11",
   "turnover_exclusions": [
     {
       "codes": ["69", "70", "78.2", "78.3"],
@@ -554,6 +554,19 @@
         "article": "կետ 1",
         "url": "https://www.arlis.am/hy/acts/220084",
         "checked": "2026-10-20"
+      }
+    }
+  ],
+  "rate_day": [
+    {
+      "day": "previous_working_day",
+      "from": "2026-07-01",
+      "until": null,
+      "source": {
+        "law": "ՀՕ-165-Ն ՀՀ հարկային օրենսգիրք (06.05.26 ՀՕ-234-Ն)",
+        "article": "հոդված 16, մաս 1, կետ 2; մաս 2, կետ 1; ՀՕ-234-Ն՝ հոդված 2, հոդված 33, մաս 1 (https://www.arlis.am/hy/acts/226008)",
+        "url": "https://www.arlis.am/hy/acts/230455",
+        "checked": "2026-11-16"
       }
     }
   ]

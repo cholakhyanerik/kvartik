@@ -9,10 +9,11 @@ use kvartik_core::model::attachment::{Attachment, FileKind};
 use kvartik_core::model::date::Date;
 use kvartik_core::model::document::{DocKind, Document};
 use kvartik_core::model::ledger::{Cost, Flow, Nature, Operation, OperationData, Proof};
-use kvartik_core::model::money::{Currency, Money};
+use kvartik_core::model::money::{Currency, Lumas, Money};
 use kvartik_core::model::profile::Profile;
 use kvartik_core::model::record::RecordId;
 use kvartik_core::model::text::Line;
+use kvartik_core::tax::cba::Rates;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::wasm_bindgen_test;
 use web_sys::{
@@ -25,6 +26,7 @@ use super::documents::{
 };
 use super::{button, field, mount_at, pick, select, sleep, type_into, wait_for};
 use crate::platform::{clock, set_hash};
+use crate::ui::cba;
 use crate::store::device::Device;
 use crate::store::{Store, Writes};
 
@@ -461,6 +463,151 @@ async fn files_are_attached_shrunk_and_removed() {
     set_hash("");
     forget_device();
     assert!(wrong.is_empty(), "файлы: {wrong:#?}");
+}
+
+/// Подсказка курса ЦБ (задача 43) по файлу выкладки (`tests/rates/rates.json`
+/// ядра): у дохода в долларах с днём услуги в понедельник 16 ноября 2026
+/// года — курс, опубликованный в пятницу 13-го, 360,54 ֏; «Подставить» пишет
+/// его в поле и само уходит, а сумма в драмах — по нему. День услуги 18-го —
+/// курс 17-го, которого в файле ещё нет: «пока нет». У карточки выпущенного
+/// счёта без курса — «Указать курс ЦБ» с курсом в подписи, одним нажатием,
+/// и в базе — тот курс на день услуги. Дни — числами, а не «сегодня»: файл
+/// кончается 16 ноября.
+#[wasm_bindgen_test]
+async fn cba_rate_is_suggested() {
+    let client = fresh_base_with_client().await;
+    let rates = Rates::parse(include_str!("../../../../core/tests/rates/rates.json")).expect("файл выкладки");
+    cba::set_for_tests(Some(rates));
+    let monday = Date::new(2026, 11, 16).expect("день");
+    let friday = Date::new(2026, 11, 13).expect("день");
+    // Выпущенный счёт без курса — в базе до открытия окна: документы окно
+    // читает при открытии базы.
+    let now = clock::now();
+    let mut data = invoice_data(&client);
+    data.date = monday;
+    data.service_date = monday;
+    let invoice = Document::create(data, now)
+        .expect("черновик")
+        .issue(&[], 0, Some(&profile()), Some(None), &client, now)
+        .expect("выпущен");
+    let mut writes = Writes::default();
+    writes.insert(&invoice);
+    commit(writes).await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at("#/ledger");
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::LedgerAddIncome)).await {
+        wrong.push("книга не открылась".to_owned());
+    }
+    press(&host, t(lang, Key::LedgerAddIncome), &mut wrong);
+    sleep(50).await;
+    choose(&host, t(lang, Key::DocCurrency), "USD", &mut wrong);
+    fill_field(&host, t(lang, Key::DocServiceDate), &monday.iso(), &mut wrong);
+    fill_field(
+        &host,
+        t(lang, Key::OpAmount),
+        &i18n::amount(lang, Money::new(10_000, Currency::Usd)),
+        &mut wrong,
+    );
+    let said = fill(
+        t(lang, Key::CbaRate),
+        &[&i18n::date(lang, friday), &i18n::rate_pair(lang, Currency::Usd, 3_605_400)],
+    );
+    if !wait_for(&host, &said).await {
+        wrong.push(format!("нет подсказки «{said}»"));
+    }
+    press(&host, t(lang, Key::CbaRateUse), &mut wrong);
+    sleep(50).await;
+    let rate_label = fill(t(lang, Key::OpRate), &["USD"]);
+    let typed = field(&host, &rate_label, 0).map(|input| input.value());
+    if typed.as_deref() != Some(i18n::rate(lang, 3_605_400).as_str()) {
+        wrong.push(format!("в поле курса не подставлено: {typed:?}"));
+    }
+    if button(&host, &[t(lang, Key::CbaRateUse)]).is_some() {
+        wrong.push("«Подставить» осталось при курсе подсказки".to_owned());
+    }
+    // 100,00 $ по 360,54 ֏ — 36 054,00 ֏.
+    let in_drams = fill(
+        t(lang, Key::RateEquivalent),
+        &[
+            &i18n::lumas(lang, Lumas::new(3_605_400)),
+            &i18n::rate_pair(lang, Currency::Usd, 3_605_400),
+        ],
+    );
+    if !wait_for(&host, &in_drams).await {
+        wrong.push(format!("сумма в драмах — не по подставленному курсу: нет «{in_drams}»"));
+    }
+    // Подставленный курс следует за днём: 17-е — курс понедельника 16-го,
+    // 360,44 ֏; 18-е — курса 17-го в файле нет, и поле пустое, а не с курсом
+    // чужого дня.
+    let tuesday = Date::new(2026, 11, 17).expect("день");
+    fill_field(&host, t(lang, Key::DocServiceDate), &tuesday.iso(), &mut wrong);
+    sleep(100).await;
+    let typed = field(&host, &rate_label, 0).map(|input| input.value());
+    if typed.as_deref() != Some(i18n::rate(lang, 3_604_400).as_str()) {
+        wrong.push(format!("подставленный курс не пошёл за днём: {typed:?}"));
+    }
+    let wednesday = Date::new(2026, 11, 18).expect("день");
+    fill_field(&host, t(lang, Key::DocServiceDate), &wednesday.iso(), &mut wrong);
+    let not_yet = fill(t(lang, Key::CbaRateNotYet), &[&i18n::date(lang, tuesday)]);
+    if !wait_for(&host, &not_yet).await {
+        wrong.push(format!("нет слов «{not_yet}»"));
+    }
+    let typed = field(&host, &rate_label, 0).map(|input| input.value());
+    if typed.as_deref() != Some("") {
+        wrong.push(format!("без курса дня в поле остался курс чужого дня: {typed:?}"));
+    }
+    // Подставили, потом набрали свой курс руками: сменили день — свой курс
+    // остаётся, а «Подставить» предлагает курс нового дня.
+    fill_field(&host, t(lang, Key::DocServiceDate), &monday.iso(), &mut wrong);
+    if !wait_for(&host, &said).await {
+        wrong.push("нет подсказки после смены дня".to_owned());
+    }
+    press(&host, t(lang, Key::CbaRateUse), &mut wrong);
+    sleep(50).await;
+    fill_field(&host, &rate_label, &i18n::rate(lang, 4_000_000), &mut wrong);
+    fill_field(&host, t(lang, Key::DocServiceDate), &tuesday.iso(), &mut wrong);
+    sleep(100).await;
+    let typed = field(&host, &rate_label, 0).map(|input| input.value());
+    if typed.as_deref() != Some(i18n::rate(lang, 4_000_000).as_str()) {
+        wrong.push(format!("набранный курс тронут: {typed:?}"));
+    }
+    if button(&host, &[t(lang, Key::CbaRateUse)]).is_none() {
+        wrong.push("у набранного курса нет «Подставить»".to_owned());
+    }
+    press(&host, t(lang, Key::Cancel), &mut wrong);
+    sleep(50).await;
+
+    // Карточка выпущенного счёта без курса — одним нажатием.
+    set_hash(&crate::ui::route::Screen::Document(invoice.id()).href());
+    let quick = fill(t(lang, Key::DocRateCba), &[&i18n::rate_pair(lang, Currency::Usd, 3_605_400)]);
+    if !wait_for(&host, &quick).await {
+        wrong.push(format!("в карточке нет «{quick}»"));
+    }
+    press(&host, &quick, &mut wrong);
+    if !wait_for(&host, t(lang, Key::DocRateSaved)).await {
+        wrong.push("курс из карточки не сохранился".to_owned());
+    }
+    let store = Store::open(|_| {}).await.expect("база открыта");
+    let saved = store
+        .read()
+        .expect("транзакция чтения")
+        .get::<Document>(invoice.id())
+        .await
+        .expect("счёт читается")
+        .expect("счёт есть");
+    let rate = saved.data().rate.map(|rate| (rate.per_unit_e4(), rate.date()));
+    if rate != Some((3_605_400, monday)) {
+        wrong.push(format!("в базе курс не тот: {rate:?}"));
+    }
+
+    cba::set_for_tests(None);
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "курс ЦБ: {wrong:#?}");
 }
 
 /// Курс документа: у выпущенного счёта в долларах без курса книга говорит

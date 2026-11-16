@@ -39,6 +39,7 @@ use leptos::wasm_split::SplitLoaderError;
 use web_sys::HtmlInputElement;
 
 use super::backup::{self, AutoView, BackupChip, Backups};
+use super::cba::CbaHint;
 use super::clients::Clients;
 use super::documents::{DateField, Documents, kind_key, number_problem, retype, shown_problem};
 use super::form::{CURRENCIES, Forms, TextField, currency_code, currency_key, optional};
@@ -154,6 +155,10 @@ pub(super) enum BookView {
     /// разметка у них общая с экранами, и своя часть умножила бы общие куски
     /// (CLAUDE.md, Правило 6).
     Office(office::OfficeView),
+    /// Начать обновлять курсы ЦБ с сайта (`ui/cba.rs`, задача 43) — при
+    /// открытии программы, у всех: подсказка курса — в части книги
+    /// и документов, и своя часть ради запроса умножила бы общие куски.
+    Rates,
 }
 
 split! {
@@ -169,8 +174,18 @@ split! {
             BookView::Tax(ctx, part) => tax::content(ctx, part),
             BookView::Auto(view) => backup::auto_view(view),
             BookView::Office(view) => office::view(view),
+            BookView::Rates => {
+                super::cba::start();
+                ().into_any()
+            }
         }
     }
+}
+
+/// Начать обновлять курсы ЦБ — частью книги. Зовёт загрузка частей
+/// (`split::preload`) при открытии программы.
+pub(super) async fn start_rates() {
+    let _ = book_part(BookView::Rates).await;
 }
 
 /// Налог — карточку или экран — из части книги (`ui/tax.rs`). В тестах
@@ -1606,6 +1621,12 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
                     }}
                     <input type="text" inputmode="decimal" autocomplete="off" maxlength="24" bind:value=form.rate />
                 </label>
+                <CbaHint
+                    lang
+                    currency=Signal::derive(move || Some(form.currency.get()))
+                    day=Signal::derive(move || form.date.with(|text| Date::from_iso(text)))
+                    field=form.rate
+                />
                 <p class="hint">{tr(lang, Key::RateHint)}</p>
                 {shown_problem(tried, move || form.rate.with(|text| rate_problem(lang.get(), text)))}
             </Show>

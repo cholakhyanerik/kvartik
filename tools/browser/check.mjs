@@ -26,7 +26,10 @@
 //    выпущенного документа, PDF, выгрузка с закрытым кварталом, разошедшимся
 //    с поданным, новая копия, свои цвета настроек и они же после
 //    перезагрузки (задача 88) — каждая из десяти частей;
-//    и все части `dist/app/split_*.wasm` загружены. «Установить» на
+//    и все части `dist/app/split_*.wasm` загружены. Курс ЦБ (задача 43):
+//    программа выкладки пишет из образца ответа ЦБ тот же файл курсов, что
+//    читает тест ядра, программа берёт его со своего сайта, помнит
+//    и подсказывает у поля курса формы книги. «Установить» на
 //    главном экране — и без вопроса браузера, и раскладка, которую видно
 //    только с настоящим CSS: раздел с отступом под карточкой налога.
 // 3. Сервер выключен: программа открывается из кэша service worker, и те же
@@ -60,6 +63,7 @@ import path from "node:path";
 import { Browser, Checks, DEVICES, sleep } from "./cdp.mjs";
 import { REPO, newVersion, own } from "./serve.mjs";
 import { samples, t } from "./strings.mjs";
+import { parse as parseCba, render as renderRates } from "../deploy/rates.mjs";
 
 const { values: opt } = parseArgs({
   options: {
@@ -75,6 +79,11 @@ const WORK = opt.work ? path.resolve(opt.work) : fs.mkdtempSync(path.join(os.tmp
 fs.mkdirSync(WORK, { recursive: true });
 const PORT = Number(opt.port);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
+// Курсы ЦБ (задача 43): файл курсов кладёт на сайт выкладка, а не сборка, —
+// сервер проверки отдаёт образец, который читает и тест ядра (`tax::cba`).
+const RATES_DIR = path.join(REPO, "crates/core/tests/rates");
+const RATES_FILE = fs.readFileSync(path.join(RATES_DIR, "rates.json"), "utf8");
+const SERVED = { quality: 5, extra: { "/app/rates.json": RATES_FILE } };
 const s = (key) => t(key, opt.lang);
 const checks = new Checks();
 // Страница «Купить» (задача 35) на языке `lang` — `release::buy_path`,
@@ -862,6 +871,40 @@ async function motion(browser) {
   }
 }
 
+/// Курс ЦБ (задача 43): программа берёт файл курсов со своего сайта
+/// и помнит его на устройстве, а форма дохода в долларах с днём услуги
+/// в понедельник 16 ноября 2026 года подсказывает курс, опубликованный
+/// в пятницу 13-го, — 360,54 ֏ из образца выкладки; «Подставить» пишет его
+/// в поле. Браузерные тесты кладут курсы сами и запроса к сайту не видят.
+async function rates(page) {
+  await go(page, "#/ledger");
+  await page.waitFor(`return ${BUTTON("#ledger", s("LedgerAddIncome"))} ? true : null;`);
+  await press(page, "#ledger", s("LedgerAddIncome"));
+  await page.waitFor(TEXT_IN("#ledger", s("OpNewIncome")));
+  const set = await page.eval(`
+    const label = (text) => [...document.querySelectorAll("#ledger label")]
+      .find((l) => l.firstChild?.textContent?.trim() === text && l.getClientRects().length > 0);
+    const currency = label(${JSON.stringify(s("DocCurrency"))})?.querySelector("select");
+    const day = label(${JSON.stringify(s("DocServiceDate"))})?.querySelector("input");
+    if (!currency || !day) return null;
+    currency.value = "USD"; currency.dispatchEvent(new Event("change", { bubbles: true }));
+    day.value = "2026-11-16"; day.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;`);
+  checks.check("курс ЦБ: форма дохода в долларах", set === true);
+  const [date, rate] = opt.lang === "en" ? ["Nov 13, 2026", "360.54"] : ["13.11.2026", "360,54"];
+  checks.check("курс ЦБ: подсказка — курс, опубликованный 13 ноября, с сайта",
+    await page.waitFor(`const text = document.querySelector("#ledger")?.innerText ?? "";
+      return text.includes(${JSON.stringify(date)}) && text.includes(${JSON.stringify(rate)}) ? true : null;`));
+  await press(page, "#ledger", s("CbaRateUse"));
+  checks.check("курс ЦБ: «Подставить» пишет курс в поле",
+    await page.waitFor(`return [...document.querySelectorAll("#ledger label input")]
+      .some((input) => input.value === ${JSON.stringify(rate)}) ? true : null;`));
+  checks.check("курс ЦБ: файл курсов запомнен на устройстве",
+    (await page.eval(`return localStorage.getItem("kvartik.rates");`)) === RATES_FILE);
+  await press(page, "#ledger", s("Cancel"));
+  checks.check("курс ЦБ: форма закрылась", await page.waitFor(NO_TEXT_IN("#ledger", s("OpNewIncome"))));
+}
+
 /// Восстановить последний образец копии: в нём есть выпущенные документы.
 /// Пароль образца станет паролем копий устройства.
 async function restore(page) {
@@ -998,7 +1041,7 @@ async function update(page, password) {
   const next = newVersion(DIST, path.join(WORK, "v2"));
   const later = newVersion(next.dir, path.join(WORK, "v3"));
   const refused = newVersion(later.dir, path.join(WORK, "v4"));
-  let srv = own(next.dir, PORT, { quality: 5 });
+  let srv = own(next.dir, PORT, SERVED);
   const NOTICE = TEXT_IN("main", s("UpdateAfterForm"));
   try {
     page.errors.length = 0;
@@ -1031,7 +1074,7 @@ async function update(page, password) {
     // а не нового кэша, иначе «Понятно» нажимается в окне страницы, которая
     // уже уходит (CI, 2026-11-09: окно встало снова через 0,2 с).
     await srv.stop();
-    srv = own(later.dir, PORT, { quality: 5 });
+    srv = own(later.dir, PORT, SERVED);
     await page.eval(SEEN("0.0.1"));
     await page.fresh(`${ORIGIN}/app/#/`);
     checks.check("новая версия: зашли на страницу — страница перезагрузилась сама",
@@ -1041,7 +1084,7 @@ async function update(page, password) {
 
     // Попытка включить эту версию уже была: она ждёт, а страница стоит.
     await srv.stop();
-    srv = own(refused.dir, PORT, { quality: 5 });
+    srv = own(refused.dir, PORT, SERVED);
     await page.eval(`localStorage.setItem("kvartik.update_tried", ${JSON.stringify(refused.version)});
       window.__old = 1; return true;`);
     await page.eval(`navigator.serviceWorker.getRegistration().then((r) => r.update()); return true;`);
@@ -1072,7 +1115,13 @@ async function firstSteps(page) {
 async function main() {
   const parts = fs.readdirSync(path.join(DIST, "app")).filter((n) => /^split_\w+-\w+\.wasm$/.test(n));
   checks.check("в сборке есть части wasm", parts.length > 0, parts.join(", "));
-  let srv = own(DIST, PORT, { quality: 5 });
+  // Программа выкладки пишет из ответа ЦБ тот самый файл, который читают
+  // тест ядра и программа: разойдись они — курсы на сайте окно отвергло бы.
+  checks.check("курсы ЦБ: rates.mjs пишет из образца ответа ЦБ файл, который читает тест ядра",
+    renderRates(parseCba(fs.readFileSync(path.join(RATES_DIR, "cba.xml"), "utf8"))) === RATES_FILE);
+  checks.check("курсы ЦБ: в сборке файла курсов нет — его кладёт выкладка",
+    !fs.existsSync(path.join(DIST, "app/rates.json")));
+  let srv = own(DIST, PORT, SERVED);
   const browser = await Browser.launch({ work: WORK, name: "check", port: 9340 });
   try {
     await blocked(browser);
@@ -1091,6 +1140,7 @@ async function main() {
     const sample = await restore(page);
     checks.check("с сетью: страницей правит service worker", (await page.waitFor(CONTROLLER)) === `${ORIGIN}/app/sw.js`);
     await home(page);
+    await rates(page);
     await go(page, "#/");
     checks.check("первые шаги: у копии с документами карточки нет", await page.waitFor(HIDDEN("#home .first-steps")));
     await forms(page, "с сетью");

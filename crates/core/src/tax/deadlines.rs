@@ -187,7 +187,8 @@ pub struct Reminder {
 /// Рабочий ли день `day` для срока по правилам `rules`: рабочий по решению
 /// правительства — рабочий, хоть и выходной; нерабочий по решению,
 /// праздник или выходной день недели — нет. Правил на этот день нет —
-/// рабочий: переносить не по чему.
+/// рабочий: переносить не по чему. Те же дни — у курса ЦБ «предыдущего
+/// рабочего дня» ([`previous_working`]).
 fn working(rules: &Rules, day: Date) -> bool {
     let decided = rules.days_off().iter().filter(|decision| decision.period().contains(day));
     let mut off = false;
@@ -207,6 +208,23 @@ fn working(rules: &Rules, day: Date) -> bool {
 /// если рабочий, иначе — следующий рабочий (ՀՕ-180-Ն, ст. 32, ч. 4).
 pub fn last_day(day: Date) -> Date {
     shifted(rules::armenia(), day)
+}
+
+/// Рабочий день, предыдущий дню `day`, по правилам `rules`: курс ЦБ,
+/// опубликованный в этот день, берёт закон для поставки дня `day`
+/// (`tax::cba`, задача 43). Рабочие дни — те же, что у переноса сроков:
+/// дни, в которые ЦБ публиковал курс с 2025-01-03 по 2026-11-16 (471),
+/// совпали с ними все до одного (сверено 2026-11-16, задача 43). `None` —
+/// рабочего дня не нашлось за [`MAX_SHIFT`] дней или календарь кончился.
+pub(crate) fn previous_working(rules: &Rules, day: Date) -> Option<Date> {
+    let mut before = day;
+    for _ in 0..MAX_SHIFT {
+        before = before.add_days(-1)?;
+        if working(rules, before) {
+            return Some(before);
+        }
+    }
+    None
 }
 
 fn shifted(rules: &Rules, day: Date) -> Date {

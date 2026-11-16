@@ -7,7 +7,8 @@
 //! устройства и когда вводили пароль, — настройки окна (задача 88): включён
 //! ли кружок у курсора и свои цвета, — и срок ключа каждой базы с днём, о конце
 //! которого окно уже сказало (задача 92), а о конце пробного периода и ключа
-//! «Pro» — одним днём на устройство (задачи 93 и 38). Папку и ключ автокопии
+//! «Pro» — одним днём на устройство (задачи 93 и 38), — и последние курсы ЦБ
+//! с сайта (задача 43): копия файла сайта, а не данные. Папку и ключ автокопии
 //! `localStorage` не держит — это объекты браузера, они в своей базе
 //! (`store/autobackup.rs`).
 //!
@@ -362,6 +363,30 @@ impl Device {
         self.remove("colors")
     }
 
+    /// Курсы ЦБ с сайта (задача 43) — текстом файла `rates.json`, каким он
+    /// пришёл; разбирает ядро (`tax::cba::Rates::parse`). Это не данные
+    /// человека, а копия файла сайта: без сети подсказка курса берёт её.
+    /// `None` — курсов на устройстве нет.
+    pub fn rates(&self) -> Option<String> {
+        self.get("rates")
+    }
+
+    /// Запомнить курсы ЦБ. `false` — `localStorage` отказал: подсказка
+    /// будет по прежним курсам, а файл окно спросит снова.
+    pub fn set_rates(&self, text: &str) -> bool {
+        self.set("rates", text)
+    }
+
+    /// Когда курсы ЦБ взяты с сайта; `None` — не брали.
+    pub fn rates_at(&self) -> Option<Timestamp> {
+        self.moment("rates_at")
+    }
+
+    /// Запомнить, когда взяты курсы. `false` — `localStorage` отказал.
+    pub fn set_rates_at(&self, at: Timestamp) -> bool {
+        self.set("rates_at", &at.unix_millis().to_string())
+    }
+
     /// Момент под этим именем — как у [`Self::last_backup`].
     fn moment(&self, name: &str) -> Option<Timestamp> {
         let millis: i64 = self.get(name)?.parse().ok()?;
@@ -419,6 +444,8 @@ impl Device {
                 "trial_told",
                 "trial_data",
                 "pro_told",
+                "rates",
+                "rates_at",
             ] {
                 let _ = storage.remove_item(&format!("{}{name}", self.prefix));
             }

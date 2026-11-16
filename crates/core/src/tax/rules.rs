@@ -1403,6 +1403,60 @@ impl Rule for DaysOff {
     }
 }
 
+/// Курс ЦБ какого дня берёт закон для суммы в валюте (`tax::cba`, задача
+/// 43): с 2026-07-01 — опубликованный ЦБ в рабочий день, предыдущий дню
+/// поставки (НК, ст. 16, ч. 1, п. 2, ч. 2, п. 1 в редакции ՀՕ-234-Ն).
+/// Подсказку у поля курса окно даёт только по этой записи. Раньше закон брал
+/// курс, опубликованный до 16:00 дня расчётного документа (ч. 1, п. 2 и 4,
+/// ч. 2 в прежней редакции, arlis 226064), а час публикации в данных ЦБ не
+/// записан — только день (Armenpress сообщает курс дня «сегодня» в 17:24
+/// 2026-03-10 и в 17:27 2026-02-13, то есть он опубликован не позже; сверено
+/// 2026-11-16), и записи до неё нет.
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RateDay {
+    pub day: RateDayKind,
+    pub from: Date,
+    /// Ключ обязателен, как у [`Exclusion::until`].
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub until: Option<Date>,
+    pub source: Source,
+}
+
+/// Какой день публикации курса берёт закон. Расширяется, а смысл
+/// существующих вариантов не меняется; `match` — без `_`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RateDayKind {
+    /// Опубликованный ЦБ в рабочий день, предыдущий дню поставки; рабочие
+    /// дни — те же, что у переноса сроков (`deadline_shift`, `holidays`,
+    /// `days_off`).
+    PreviousWorkingDay,
+}
+
+impl Rule for RateDay {
+    fn period(&self) -> Period {
+        Period {
+            from: self.from,
+            until: self.until,
+        }
+    }
+
+    fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// Правило одно на всех: две записи — всегда об одном.
+    fn same_subject(&self, _: &Self) -> bool {
+        true
+    }
+
+    /// Вид дня программа знает весь: иначе запись не прочиталась бы.
+    fn usable(&self) -> bool {
+        true
+    }
+}
+
 /// Правила страны — файл целиком.
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1432,6 +1486,7 @@ pub struct Rules {
     deadline_shift: Vec<DeadlineShift>,
     holidays: Vec<Holidays>,
     days_off: Vec<DaysOff>,
+    rate_day: Vec<RateDay>,
 }
 
 /// Какая запись: список файла и номер в нём, с нуля.
@@ -1492,6 +1547,7 @@ impl Rules {
         check("deadline_shift", &rules.deadline_shift)?;
         check("holidays", &rules.holidays)?;
         check("days_off", &rules.days_off)?;
+        check("rate_day", &rules.rate_day)?;
         Ok(rules)
     }
 
@@ -1559,6 +1615,7 @@ impl Rules {
             deadline_shift,
             holidays,
             days_off,
+            rate_day,
         } = self;
         let mut all = Vec::new();
         all.extend(of(turnover_exclusions));
@@ -1585,6 +1642,7 @@ impl Rules {
         all.extend(of(deadline_shift));
         all.extend(of(holidays));
         all.extend(of(days_off));
+        all.extend(of(rate_day));
         all
     }
 
@@ -1709,6 +1767,11 @@ impl Rules {
     /// Решения правительства о нерабочих и рабочих днях.
     pub fn days_off(&self) -> &[DaysOff] {
         &self.days_off
+    }
+
+    /// Курс ЦБ какого дня берёт закон (задача 43).
+    pub fn rate_day(&self) -> &[RateDay] {
+        &self.rate_day
     }
 }
 
