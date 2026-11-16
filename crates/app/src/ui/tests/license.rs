@@ -70,7 +70,7 @@ fn pro_text(tin: &str, until: Date, seats: u8) -> String {
 }
 
 /// Пробный период устройства начался в `start`.
-fn trial_from(start: Date) {
+pub(super) fn trial_from(start: Date) {
     Device::new().set_trial_start(start);
 }
 
@@ -79,7 +79,7 @@ fn trial_from(start: Date) {
 /// каким его нашла часть и о конце
 /// какого сказано окном (задача 92), — и что сказано о конце пробного
 /// периода (задача 93).
-fn forget_trial() {
+pub(super) fn forget_trial() {
     if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
         for name in [
             "kvartik.trial",
@@ -1218,6 +1218,48 @@ async fn a_known_pro_key_brings_the_office_in() {
     drop(mounted);
     host.remove();
     set_hash("");
+    forget_trial();
+    forget_office_bases().await;
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Сводка конторы (задача 38, этап 5) открыта и после конца пробного периода,
+/// пока идёт ключ «Pro» (решение человека 2026-11-05): у обоих ИП списка — свои
+/// строки, а слов «открыта в пробный период и с ключом» нет. У второго ИП база
+/// пуста — «данных пока нет», а не налог в 0 ֏.
+#[wasm_bindgen_test]
+async fn the_summary_opens_with_a_pro_key() {
+    base_with_draft().await;
+    forget_office_bases().await;
+    let lang = Lang::Ru;
+    let device = Device::new();
+    device.set_ui_lang(lang);
+    let (today, now) = (clock::today().expect("часы с датой"), clock::now());
+    trial_from(today.add_days(-100).expect("дата"));
+    let until = today.add_days(365).expect("дата");
+    let other = Ip::new(today, now);
+    office_with_pro(&[&Ip::first(None, today, now), &other], &pro_text("07654321", until, 30)).await;
+    device.set_base(crate::store::DB_NAME);
+    let (host, mounted) = mount_at("#/office");
+    let mut wrong = Vec::new();
+    let rows = || {
+        host.query_selector_all("#office .office-summary > li")
+            .map(|rows| rows.length())
+            .unwrap_or(0)
+    };
+    if !wait_until(|| rows() == 2).await {
+        wrong.push(format!("в сводке не два ИП: {}", super::section_text(&host, "office")));
+    }
+    if super::section_text(&host, "office").contains(t(lang, Key::OfficeSummaryLocked)) {
+        wrong.push("под ключом «Pro» — «сводка в пробный период и с ключом»".to_owned());
+    }
+    if !super::section_text(&host, "office").contains(t(lang, Key::OfficeSummaryEmpty)) {
+        wrong.push(format!("у ИП с пустой базой — не «данных пока нет»: {}", super::section_text(&host, "office")));
+    }
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    crate::store::delete_database(other.base()).await;
     forget_trial();
     forget_office_bases().await;
     assert!(wrong.is_empty(), "{wrong:#?}");

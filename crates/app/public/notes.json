@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.136",
+      "date": "2026-11-16",
+      "hy": [
+        "«ԱՁ-ները ծրագրում» էկրանին այժմ ամփոփում կա. յուրաքանչյուր ԱՁ-ի մոտակա ժամկետը, նախորդ եռամսյակի հարկը կամ «հաշվարկը ներկայացված է», և տարեկան վճարները։ Այն բաց է փորձաշրջանում և «Pro» բանալիով։"
+      ],
+      "ru": [
+        "На экране «ИП в программе» — сводка: у каждого ИП ближайший срок, налог прошлого квартала или «расчёт подан» и годовые платежи. Она открыта в пробный период и с ключом «Pro»."
+      ],
+      "en": [
+        "The Entrepreneurs in the app screen now has a summary: each entrepreneur's nearest deadline, last quarter's tax or “return filed”, and annual payments. It's open during the trial and with a “Pro” key."
+      ]
+    },
+    {
       "version": "0.0.135",
       "date": "2026-11-16",
       "hy": [
@@ -266,19 +279,6 @@
       ],
       "en": [
         "While the app is loading, you now see the Kvartik name instead of a blank page. The app itself opens as fast as before."
-      ]
-    },
-    {
-      "version": "0.0.116",
-      "date": "2026-11-11",
-      "hy": [
-        "Tab ստեղնով առաջին հղումն այժմ «Անցնել բովանդակությանը» է. այն տանում է բաց էկրանին՝ առանց ընտրացանկի տասը կետերի։"
-      ],
-      "ru": [
-        "Первая ссылка клавишей Tab теперь «К содержимому»: она ведёт к открытому экрану мимо десяти пунктов меню."
-      ],
-      "en": [
-        "The first link you reach with the Tab key is now “Skip to content”: it takes you to the open screen past the ten menu items."
       ]
     }
   ]

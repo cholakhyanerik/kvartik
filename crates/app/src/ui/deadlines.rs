@@ -53,7 +53,7 @@ pub fn DeadlinesScreen(ctx: tax::Ctx, router: Router) -> impl IntoView {
 }
 
 /// Насколько близок срок — словами.
-fn when(lang: Lang, when: When, day: Date) -> String {
+pub(super) fn when(lang: Lang, when: When, day: Date) -> String {
     match when {
         When::Overdue => fill(t(lang, Key::RemindOverdue), &[&i18n::date(lang, day)]),
         When::Today => t(lang, Key::RemindToday).to_owned(),

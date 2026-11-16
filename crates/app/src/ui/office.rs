@@ -3,7 +3,9 @@
 //! (`store/office.rs`). Там же — ключи «Pro» (с 0.0.134): ключ открывает первых
 //! N живых ИП списка по дню добавления (`license::seat`), и экран списка
 //! называет тех, кому места не хватило. Введённый ключ «Pro» заводит контору,
-//! если её ещё не было ([`Office::enter_pro`]).
+//! если её ещё не было ([`Office::enter_pro`]). На том же экране — сводка
+//! конторы (этап 5, [`Summary`]): у каждого ИП ближайший срок, прошлый квартал
+//! и годовые платежи.
 //!
 //! Другой ИП открывается перезагрузкой страницы, а не заменой данных на
 //! месте: `Base::replacements` не сбрасывает состояние экранов и запущенные
@@ -27,9 +29,18 @@ use std::sync::Arc;
 
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
 use kvartik_core::license::{self, MAX_KEYS, OfficeLicense};
+use kvartik_core::model::date::Date;
+use kvartik_core::model::document::Document;
+use kvartik_core::model::ledger::Operation;
 use kvartik_core::model::office::{self, Ip, MAX_IPS};
 use kvartik_core::model::profile::Profile;
 use kvartik_core::model::record::{RecordId, Timestamp};
+use kvartik_core::tax::closing::Closing;
+use kvartik_core::tax::deadlines::{self, When};
+use kvartik_core::tax::opening::Opening;
+use kvartik_core::tax::summary::{self, Next, Previous, Yearly};
+use kvartik_core::tax::turnover::Books;
+use leptos::ev;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -45,6 +56,7 @@ use super::profile::{Profiles, name_for};
 use super::route::{Router, Screen};
 use super::split::{Task, screen, split};
 use super::storage::error_key;
+use super::tax::drams;
 use super::{Base, tr};
 
 /// Что окно знает о конторе.
@@ -787,6 +799,17 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
         );
         Some(view! { <p class="hint">{words}</p> })
     };
+    // Сводка (этап 5) — в пробный период устройства и пока идёт ключ «Pro»
+    // (решение человека 2026-11-05). Пробный период — тот, что окно посчитало
+    // при открытии (`Licenses::start`): с первого запуска на устройстве или
+    // с первого дня данных, который оно помнит.
+    let trial_last = {
+        let device = Device::new();
+        license::trial_start(device.trial_start(), device.trial_data()).and_then(license::trial_last)
+    };
+    let summary_open = Signal::derive(move || {
+        today.is_some_and(|today| trial_last.is_some_and(|last| today <= last)) || pro_term().is_some()
+    });
     view! {
         <p>{tr(lang, Key::OfficeAbout)}</p>
         {unreadable}
@@ -808,6 +831,214 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
             };
             keys.iter().map(|&key| t(lang, key)).collect::<Vec<_>>().join(" ")
         }}</p>
+        <Summary lang office base today open=summary_open />
         {removed}
     }
+}
+
+/// Сводка конторы (этап 5): у каждого живого ИП — ближайший срок, прошлый
+/// квартал и годовые платежи года ближайшего срока строкой ядра
+/// (`tax::summary`), то есть теми же расчётами, что карточки главного экрана,
+/// а итога по всем нет: каждый ИП платит своё. Только когда ИП больше одного
+/// (одному всё это говорят карточки), в пробный период устройства и пока идёт
+/// ключ «Pro» (`open`; решение человека 2026-11-05).
+///
+/// Базы читаются при каждом показе экрана и когда изменился список живых ИП:
+/// пока экран был спрятан, в открытом ИП могли закрыть квартал, а в другой
+/// вкладке — внести запись другому ИП. О показе часть узнаёт сама, по `hashchange`,
+/// а не роутером: он в `Ctx` экрана стоил бы байтов главному wasm (Правило 1).
+/// Базы — по одной, и каждое чтение IndexedDB отдаёт управление странице:
+/// долгой работы без паузы нет и у тридцати ИП.
+#[component]
+fn Summary(lang: ReadSignal<Lang>, office: Office, base: Base, today: Option<Date>, open: Signal<bool>) -> impl IntoView {
+    let shown = RwSignal::new(0_u32);
+    let listener = window_event_listener(ev::hashchange, move |_| {
+        if platform::hash() == Screen::Office.href() {
+            shown.update(|count| *count = count.wrapping_add(1));
+        }
+    });
+    on_cleanup(move || listener.remove());
+    // ИП и его строка; `None` — сводка ещё читается.
+    let rows = RwSignal::new(None::<Vec<(RecordId, Summed)>>);
+    // Живые ИП и их базы — по значению: список перечитывают и тогда, когда
+    // в нём ничего не изменилось (экран при показе, ввод ключа «Pro»), и
+    // сводка читала бы все базы заново.
+    let alive = Memo::new(move |_| {
+        office.ips.with(|ips| {
+            office::alive(ips)
+                .into_iter()
+                .map(|ip| (ip.id(), ip.base().to_owned()))
+                .collect::<Vec<_>>()
+        })
+    });
+    // Чтение, начатое раньше, бросает работу, когда началось новое.
+    let run = StoredValue::new(0_u32);
+    Effect::new(move |_| {
+        shown.track();
+        let alive = alive.get();
+        let Some(today) = today.filter(|_| open.get() && office.chosen.get() && alive.len() > 1) else {
+            return;
+        };
+        run.update_value(|count| *count = count.wrapping_add(1));
+        let mine = run.get_value();
+        let current = office.current.get_untracked();
+        // В первый раз строки встают по одной, по мере чтения: у тридцати
+        // ИП ждать всех — секунды пустого экрана. Потом прежние строки стоят,
+        // пока не прочитаны все новые: без мигания.
+        let growing = rows.with_untracked(Option::is_none);
+        spawn_local(async move {
+            let mut found = Vec::with_capacity(alive.len());
+            for (id, name) in alive {
+                let row = row_of(&name, &current, base, today).await;
+                if run.get_value() != mine {
+                    return;
+                }
+                found.push((id, row));
+                if growing {
+                    rows.set(Some(found.clone()));
+                }
+            }
+            if !growing {
+                rows.set(Some(found));
+            }
+        });
+    });
+    move || {
+        office.several().then(|| {
+            let lang = lang.get();
+            let body = if !open.get() {
+                view! { <p class="hint">{t(lang, Key::OfficeSummaryLocked)}</p> }.into_any()
+            } else if let Some(found) = rows.get() {
+                let items = found
+                    .into_iter()
+                    .map(|(id, row)| {
+                        let named = office
+                            .ips
+                            .with(|ips| ips.iter().find(|ip| ip.id() == id).map(|ip| name(ip, lang)))
+                            .unwrap_or_default();
+                        let row = match row {
+                            Ok(Some(row)) => lines(lang, row).into_any(),
+                            Ok(None) => view! { <span class="entry-meta">{t(lang, Key::OfficeSummaryEmpty)}</span> }.into_any(),
+                            Err(_) => view! { <span class="entry-meta">{t(lang, Key::OfficeSummaryFailed)}</span> }.into_any(),
+                        };
+                        view! {
+                            <li class="entry">
+                                <span class="entry-main">
+                                    <span class="entry-title">{named}</span>
+                                    {row}
+                                </span>
+                            </li>
+                        }
+                    })
+                    .collect_view();
+                view! { <ul class="list office-summary">{items}</ul> }.into_any()
+            } else {
+                view! { <p class="hint">{t(lang, Key::PartLoading)}</p> }.into_any()
+            };
+            view! {
+                <h2>{t(lang, Key::OfficeSummaryTitle)}</h2>
+                <p class="hint">{t(lang, Key::OfficeSummaryAbout)}</p>
+                {body}
+            }
+        })
+    }
+}
+
+/// Что сводка знает об ИП: строку ядра; `Ok(None)` — в его базе нет ни одной
+/// записи: ИП только что завели, и без профиля и книги сроков и налога не
+/// узнать — «к уплате 0 ֏» и «срок прошёл» были бы неправдой, как и на главном
+/// экране, где у пустой базы карточек нет; `Err` — база не открылась или не
+/// прочиталась.
+type Summed = Result<Option<summary::Row>, StoreError>;
+
+/// Строка сводки ИП с базой `name` в день `today`: открытого — по базе окна,
+/// остальных — открыв их базу на время чтения ([`Summed`]). Книга — как её
+/// собирает окно для налога (`Sources` в `ui/tax.rs`): нечитаемые документы
+/// и записи книги делают расчёт неполным.
+async fn row_of(name: &str, current: &str, base: Base, today: Date) -> Summed {
+    let store = match base.get().filter(|_| name == current) {
+        Some(store) => store,
+        None => Rc::new(Store::open_base(name, |_| {}).await?),
+    };
+    let tx = store.read()?;
+    if tx.is_empty().await? {
+        return Ok(None);
+    }
+    let documents = tx.list::<Document>().await?;
+    let operations = tx.list::<Operation>().await?;
+    let profile = Profile::current(tx.list::<Profile>().await?.records);
+    let closings = tx.list::<Closing>().await?.records;
+    let openings = tx.list::<Opening>().await?.records;
+    let books = Books {
+        documents: &documents.records,
+        operations: &operations.records,
+        profile: profile.as_ref().map(Profile::data),
+        closings: &closings,
+        openings: &openings,
+        unreadable: documents.unreadable + operations.unreadable,
+    };
+    Ok(Some(summary::row(books, today)))
+}
+
+/// Строки сводки одного ИП — словами карточек главного экрана: ближайший срок
+/// — как напоминание о сроках, прошлый квартал — как карточка налога, годовые
+/// платежи — как их карточка. Чего нет, той строки нет.
+fn lines(lang: Lang, row: summary::Row) -> impl IntoView {
+    let next = row.next.map(|Next { deadline, when }| {
+        // Срок прошёл — словами и цветом напоминания: цвет один ничего не
+        // говорит (Правило 4).
+        let overdue = when == When::Overdue;
+        view! {
+            <span class="entry-meta" class:due=overdue>
+                <span>{super::deadlines::when(lang, when, deadline.day)}</span>
+                <span>{deadlines::what(lang, deadline.kind)}</span>
+            </span>
+        }
+    });
+    let previous = row.previous.map(|previous| {
+        let (quarter, words) = match previous {
+            Previous::Filed { quarter, tax } => (quarter, vec![t(lang, Key::DeadlineDone).to_owned(), drams(lang, tax)]),
+            Previous::ToPay {
+                quarter,
+                tax,
+                complete,
+                due,
+            } => {
+                let mut words = vec![fill(t(lang, Key::TaxToPayBy), &[&i18n::date(lang, due.day)]), drams(lang, tax)];
+                if !complete {
+                    words.push(t(lang, Key::AnnualPartialShort).to_owned());
+                }
+                (quarter, words)
+            }
+            Previous::Left { quarter, from, micro } => {
+                let key = if micro { Key::TaxLeftMicroShort } else { Key::TaxLeftShort };
+                (quarter, vec![fill(t(lang, key), &[&i18n::date(lang, from)])])
+            }
+        };
+        view! {
+            <span class="entry-meta">
+                <span>{i18n::quarter(lang, quarter)}</span>
+                {spans(words)}
+            </span>
+        }
+    });
+    let annual = row.annual.map(|Yearly { year, total }| {
+        let mut words = vec![fill(t(lang, Key::AnnualFor), &[&year.to_string()])];
+        words.extend(total.sum.map(|sum| drams(lang, sum)));
+        words.extend(
+            total
+                .due
+                .map(|due| fill(t(lang, Key::AnnualDue), &[&i18n::date(lang, deadlines::last_day(due))])),
+        );
+        if !total.complete {
+            words.push(t(lang, Key::AnnualPartialShort).to_owned());
+        }
+        view! { <span class="entry-meta">{spans(words)}</span> }
+    });
+    (next, previous, annual)
+}
+
+/// Слова — частями строки, через точку (`.entry-meta` в `base.css`).
+fn spans(words: Vec<String>) -> impl IntoView {
+    words.into_iter().map(|words| view! { <span>{words}</span> }).collect_view()
 }

@@ -1,15 +1,23 @@
 //! Браузерные тесты нескольких ИП (задача 38, этапы 2–3): список конторы,
 //! добавление и переход к другому ИП, имя открытого над экранами, отказ
-//! перейти, когда начато, «убрать» и «вернуть». Перезагрузку окна тесты
-//! считают (`platform::RELOADS`): настоящая оборвала бы прогон.
+//! перейти, когда начато, «убрать» и «вернуть»; сводка конторы (этап 5).
+//! Перезагрузку окна тесты считают (`platform::RELOADS`): настоящая оборвала
+//! бы прогон.
 
-use kvartik_core::i18n::{Key, Lang, fill, t};
+use kvartik_core::i18n::{self, Key, Lang, fill, t};
+use kvartik_core::model::activity::ActivityCode;
+use kvartik_core::model::date::{Date, Quarter};
+use kvartik_core::model::ledger::{Flow, Operation, OperationData};
+use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::model::office::{FIRST_BASE, Ip};
 use kvartik_core::model::profile::{Profile, ProfileData};
 use kvartik_core::model::text::Line;
+use kvartik_core::tax::closing::Closing;
+use kvartik_core::tax::turnover::{self, Books};
 use wasm_bindgen_test::wasm_bindgen_test;
 use web_sys::HtmlElement;
 
+use super::documents::wait_until;
 use super::{button, mount_at, section_text, sleep, wait_for};
 use crate::platform::{RELOADS, clock};
 use crate::store::device::Device;
@@ -301,4 +309,150 @@ async fn the_list_shown_with_the_page_names_the_chosen_ie() {
     delete_database(OFFICE_DB).await;
     forget_office();
     assert!(wrong.is_empty(), "список вместе со страницей: {wrong:#?}");
+}
+
+/// Профиль ИП `name` с кодом услуг — налог его квартала посчитан весь.
+fn with_code(name: &str) -> Profile {
+    let mut data = named(name).data().clone();
+    data.activities = vec![ActivityCode::parse("74.10.0").expect("код")];
+    Profile::save(None, data, clock::now()).expect("годный профиль").expect("новый")
+}
+
+/// Доход в 1 000 000 ֏ первым днём квартала `quarter`.
+fn income_in(quarter: Quarter) -> Operation {
+    Operation::create(
+        OperationData {
+            flow: Flow::Income,
+            date: quarter.first_day(),
+            paid: None,
+            amount: Money::new(1_000_000, Currency::Amd),
+            rate: None,
+            text: Line::new("Дизайн сайта").expect("текст"),
+            client: None,
+            supplier: Line::default(),
+            proof: None,
+            nature: None,
+            cost: None,
+            activity: None,
+            income_kind: None,
+            attachments: Vec::new(),
+        },
+        clock::now(),
+    )
+    .expect("годная запись")
+}
+
+/// Квартал `quarter` ИП с профилем `profile` и доходом `income` — закрыт
+/// сегодня, командой ядра, как его закрыл бы экран налога.
+fn closed(profile: &Profile, income: &Operation, quarter: Quarter, today: Date) -> Closing {
+    let books = Books {
+        documents: &[],
+        operations: std::slice::from_ref(income),
+        profile: Some(profile.data()),
+        closings: &[],
+        openings: &[],
+        unreadable: 0,
+    };
+    Closing::close(&turnover::quarter(books, quarter), today, clock::now()).expect("квартал закрывается")
+}
+
+/// Записать в базу `name` эти записи — в обход окна, как другая вкладка.
+async fn put(name: &str, writes: Writes) {
+    let store = Store::open_base(name, |_| {}).await.expect("база открыта");
+    store.write().expect("транзакция").commit(writes).await.expect("записано");
+}
+
+/// Сводка конторы (задача 38, этап 5): у каждого ИП — прошлый квартал словами
+/// карточки налога: у открытого — «к уплате», у другого, закрытого, —
+/// «расчёт подан». Квартал, закрытый, пока экран спрятан, сводка показывает
+/// при следующем показе экрана: базы она перечитывает. Без пробного периода
+/// и ключа «Pro» сводки нет — вместо неё слова, когда она открыта.
+#[wasm_bindgen_test]
+async fn the_summary_names_what_each_ie_owes() {
+    delete_database(DB_NAME).await;
+    delete_database(OFFICE_DB).await;
+    forget_office();
+    super::license::forget_trial();
+    let today = clock::today().expect("сегодня");
+    let previous = today.quarter().previous().expect("прошлый квартал есть");
+    let aram = with_code("ИП Арам Петросян");
+    let anna = with_code("ИП Анна Акопян");
+    let mut first = Ip::first(Some(&aram), today, clock::now());
+    first.copy_profile(&aram, clock::now());
+    let mut second = Ip::new(today, clock::now());
+    second.copy_profile(&anna, clock::now());
+    let income = income_in(previous);
+    let anna_closed = closed(&anna, &income, previous, today);
+    let mut writes = Writes::default();
+    writes.insert(&aram);
+    writes.insert(&income);
+    put(DB_NAME, writes).await;
+    let mut writes = Writes::default();
+    writes.insert(&anna);
+    writes.insert(&income);
+    writes.insert(&anna_closed);
+    put(second.base(), writes).await;
+    seed_office(&[&first, &second]).await;
+    let device = Device::new();
+    device.set_office();
+    crate::store::office::set_tab_base(DB_NAME);
+    device.set_trial_start(today);
+    let lang = Lang::Ru;
+    device.set_ui_lang(lang);
+
+    let (host, mounted) = mount_at("#/office");
+    let mut wrong = Vec::new();
+    let summary = || section_text(&host, "office");
+    let to_pay = fill(t(lang, Key::TaxToPayBy), &[""]);
+    let to_pay = to_pay.trim_end();
+    let filed = t(lang, Key::DeadlineDone);
+    let quarter = i18n::quarter(lang, previous);
+    if !wait_until(|| {
+        let text = summary();
+        text.contains(to_pay) && text.contains(filed) && text.contains(&quarter)
+    })
+    .await
+    {
+        wrong.push(format!("нет «к уплате» у одного и «подан» у другого: {}", summary()));
+    }
+
+    // Квартал открытого ИП закрыли, пока экран спрятан: сводка — при
+    // следующем показе, а не прежняя.
+    crate::platform::set_hash("#/");
+    sleep(100).await;
+    let aram_closed = closed(&aram, &income, previous, today);
+    let mut writes = Writes::default();
+    writes.insert(&aram_closed);
+    put(DB_NAME, writes).await;
+    crate::platform::set_hash("#/office");
+    if !wait_until(|| {
+        let text = summary();
+        !text.contains(to_pay) && text.matches(filed).count() == 2
+    })
+    .await
+    {
+        wrong.push(format!("закрытый квартал открытого ИП сводка не перечитала: {}", summary()));
+    }
+    drop(mounted);
+    host.remove();
+
+    // Пробный период кончился, ключа «Pro» нет — сводки нет.
+    device.set_trial_start(today.add_days(-30).expect("дата"));
+    let (host, mounted) = mount_at("#/office");
+    let locked = t(lang, Key::OfficeSummaryLocked);
+    if !wait_until(|| section_text(&host, "office").contains(locked)).await {
+        wrong.push(format!("без пробного периода и «Pro» нет слов о сводке: {}", section_text(&host, "office")));
+    }
+    if section_text(&host, "office").contains(filed) {
+        wrong.push("без пробного периода и «Pro» сводка видна".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    delete_database(second.base()).await;
+    delete_database(OFFICE_DB).await;
+    delete_database(DB_NAME).await;
+    forget_office();
+    super::license::forget_trial();
+    assert!(wrong.is_empty(), "сводка конторы: {wrong:#?}");
 }
