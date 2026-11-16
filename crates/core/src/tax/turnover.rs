@@ -1037,8 +1037,9 @@ pub(crate) fn income_code(profile: Option<&ProfileData>, row: &Row<'_>) -> Optio
 
 /// Код, который решает режим: у дохода со своей строкой — только указанный
 /// у него самого: аренда и продажа имущества — не деятельность по единственному
-/// коду профиля (шапка модуля).
-fn regime_code(profile: Option<&ProfileData>, row: &Row<'_>) -> Option<ActivityCode> {
+/// коду профиля (шапка модуля). Им же файл для системы ՊԵԿ узнаёт, не ушёл ли
+/// документ с режима (`format::accdoc`).
+pub(crate) fn regime_code(profile: Option<&ProfileData>, row: &Row<'_>) -> Option<ActivityCode> {
     if row.income_kind.is_some() { row.activity } else { income_code(profile, row) }
 }
 

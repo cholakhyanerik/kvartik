@@ -3,6 +3,7 @@
 //! ядра — их формы проверяют свои тесты.
 
 use kvartik_core::format::Stored;
+use kvartik_core::format::accdoc;
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
 use kvartik_core::model::activity::{ActivityCode, IncomeKind};
 use kvartik_core::model::client::{Client, ClientData};
@@ -16,6 +17,7 @@ use kvartik_core::model::profile::{Profile, ProfileData};
 use kvartik_core::model::record::{RecordId, Timestamp};
 use kvartik_core::model::recurring::Recurring;
 use kvartik_core::model::text::{Line, Lines};
+use kvartik_core::model::tin::Tin;
 use js_sys::{Array, Function, Promise, Reflect, Uint8Array};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
@@ -2075,6 +2077,130 @@ fn link(host: &HtmlElement, scope: &str, text: &str) -> Option<HtmlElement> {
 async fn stored_settlement(id: RecordId) -> Option<Option<Settlement>> {
     let (documents, _) = stored().await;
     documents.iter().find(|d| d.id() == id).map(|d| d.settlement().cloned())
+}
+
+/// Файл для системы ՊԵԿ (задача 44): у выпущенного акта об услугах армянской
+/// фирме ссылка «Файл для системы ՊԵԿ (XML)» в самом нажатии получает адрес
+/// `blob:` с черновиком — вид 3, день услуги, ՀՎՀՀ сторон, итог, без вида
+/// сделки, — под именем файла акта; у акта о товарах (код профиля —
+/// торговля) ссылки нет, а слова говорят выписать его в системе самим.
+#[wasm_bindgen_test]
+async fn settlement_file_is_given_for_services() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let now = clock::now();
+    let today = clock::today().expect("часы с датой");
+    let (it, shop) = (ActivityCode::parse("62.01.0").expect("код"), ActivityCode::parse("47.91.0").expect("код"));
+    let mut data = profile();
+    data.tin = Some(Tin::parse("12345678").expect("ՀՎՀՀ"));
+    data.activities = vec![it, shop];
+    data.kinds.insert(shop, IncomeKind::Trade);
+    let saved = Profile::save(None, data.clone(), now).expect("годный профиль").expect("новый");
+    let firm = ClientData {
+        name: line("«Արարատ» ՍՊԸ"),
+        country: Some(Country::ARMENIA),
+        address: Lines::default(),
+        tin: Some(Tin::parse("07654321").expect("ՀՎՀՀ")),
+        tax_id: Line::default(),
+        currency: Some(Currency::Amd),
+        lang: Some(Lang::Am),
+        payment_days: None,
+    };
+    let client = Client::create(firm, now).expect("клиент");
+    let act = |activity: ActivityCode, before: &[Document]| {
+        let data_of = DocumentData {
+            kind: DocKind::Act,
+            client: client.id(),
+            lang: Lang::Am,
+            currency: Currency::Amd,
+            date: today,
+            service_date: today,
+            due: None,
+            items: vec![Item { text: line("Ծրագրի մշակում"), quantity_e3: 1_000, price: 500_000 }],
+            basis: None,
+            recurring: None,
+            rate: None,
+            activity: Some(activity),
+            income_kind: None,
+        };
+        Document::create(data_of, now)
+            .expect("черновик")
+            .issue(before, 0, Some(&data), Some(None), &client, now)
+            .expect("выпущен")
+    };
+    let services = act(it, &[]);
+    let goods = act(shop, std::slice::from_ref(&services));
+    let mut writes = Writes::default();
+    writes.insert(&saved);
+    writes.insert(&client);
+    writes.insert(&services);
+    writes.insert(&goods);
+    commit(writes).await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let address = Screen::Document(services.id()).href();
+    let (host, mounted) = mount_at(&address);
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::SettleFile)).await {
+        wrong.push("у акта об услугах нет ссылки на файл".to_owned());
+    }
+    match host.query_selector(".docs-detail .settlement a[download]").ok().flatten() {
+        Some(link) => {
+            let link: HtmlElement = link.unchecked_into();
+            if link.get_attribute("download") != accdoc::file_name(&services) {
+                wrong.push(format!("имя файла: {:?}", link.get_attribute("download")));
+            }
+            // Нажатие — без скачивания: свой слушатель на ссылке отменяет
+            // переход, а обработчик окна выше по дереву всё равно ставит адрес.
+            let stop = Closure::<dyn Fn(web_sys::Event)>::new(|event: web_sys::Event| event.prevent_default());
+            link.add_event_listener_with_callback("click", stop.as_ref().unchecked_ref()).expect("слушатель");
+            link.click();
+            let _ = link.remove_event_listener_with_callback("click", stop.as_ref().unchecked_ref());
+            let href = link.get_attribute("href").unwrap_or_default();
+            if href.starts_with("blob:") {
+                let text = blob_text(&href).await.unwrap_or_default();
+                for part in [
+                    "<Type>3</Type>".to_owned(),
+                    format!("<DeliveryDate>{}</DeliveryDate>", today.iso()),
+                    "<TIN>12345678</TIN>".to_owned(),
+                    "<TIN>07654321</TIN>".to_owned(),
+                    "<Total><TotalPrice>500000</TotalPrice></Total>".to_owned(),
+                ] {
+                    if !text.contains(&part) {
+                        wrong.push(format!("в файле нет {part}"));
+                    }
+                }
+                // Вид сделки выбирает человек в черновике (решение человека).
+                if text.contains("DealType") {
+                    wrong.push("в файле есть вид сделки".to_owned());
+                }
+            } else {
+                wrong.push(format!("после нажатия адрес не файла: {href}"));
+            }
+        }
+        None => wrong.push("нет ссылки a[download] в блоке расчётного документа".to_owned()),
+    }
+
+    crate::platform::set_hash(&Screen::Document(goods.id()).href());
+    if !wait_for(&host, t(lang, Key::SettleFileGoods)).await {
+        wrong.push("у акта о товарах нет слов, что файл — только для услуг".to_owned());
+    }
+    let link = host.query_selector(".docs-detail .settlement a[download]").ok().flatten();
+    if link.is_some() {
+        wrong.push("у акта о товарах есть ссылка на файл".to_owned());
+    }
+
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "файл для ՊԵԿ: {wrong:#?}");
+}
+
+/// Текст по адресу `blob:` — настоящим `fetch`.
+async fn blob_text(url: &str) -> Option<String> {
+    let window = web_sys::window()?;
+    let response: Response = window.fetch_with_str(url).await.ok()?.dyn_into().ok()?;
+    response.text().ok()?.await.ok()?.as_string()
 }
 
 /// Расчётный документ в системе ՊԵԿ (задача 23). Главный экран напоминает

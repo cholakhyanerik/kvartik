@@ -29,6 +29,7 @@
 //! ломается громко, а не стирает поле у того, кто откроет данные старой
 //! версией.
 
+pub mod accdoc;
 pub mod autobackup;
 pub mod backup;
 pub mod export;

@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.139",
+      "date": "2026-11-16",
+      "hy": [
+        "Թողարկված փաստաթղթի քարտում այժմ կա «Ֆայլ ՊԵԿ համակարգի համար (XML)»: ներբեռնեք այն ՊԵԿ համակարգում («Սևագրեր», «Ներբեռնել»), և հաշվարկային փաստաթուղթը կպահվի որպես սևագիր. այնտեղ ընտրեք գործարքի տեսակը, ստուգեք և դուրս գրեք՝ փաստաթուղթը կրկին չմուտքագրելով։"
+      ],
+      "ru": [
+        "В карточке выпущенного документа — «Файл для системы ՊԵԿ (XML)»: загрузите его в системе ՊԵԿ («Սևագրեր», «Ներբեռնել»), и расчётный документ ляжет черновиком: выберите там вид сделки, проверьте и выпишите — вводить документ второй раз не нужно."
+      ],
+      "en": [
+        "An issued document's card now has “File for the SRC system (XML)”: upload it in the SRC system (“Սևագրեր”, “Ներբեռնել”), and the settlement document becomes a draft there: choose the deal type, check it and issue it — no need to enter the document twice."
+      ]
+    },
+    {
       "version": "0.0.138",
       "date": "2026-11-16",
       "hy": [
@@ -257,22 +270,6 @@
       ],
       "en": [
         "An expense of rental or property-sale income — say, an agent's fee for renting out a flat — can now go to that income's row: choose it under “Activity” in the expense entry. It isn't deducted, and the tax screen names such expenses."
-      ]
-    },
-    {
-      "version": "0.0.119",
-      "date": "2026-11-12",
-      "hy": [
-        "Ծախսի գրառման մեջ այժմ կա «Անմիջականորեն կապված, թե իրացման և վարչական» ընտրությունը, և «Թվեր հաշվարկի համար» էկրանին անմիջականորեն կապված և իրացման ու վարչական ծախսերն իրենց դաշտերում են, ոչ թե «բաժանեք ինքներդ»։ Նախկինում գրանցված ծախսերի համար բացեք գրառումը և նշեք դա։",
-        "Անմիջականորեն կապված ծախսն ամբողջությամբ գնում է իր տեսակի հարկի տողին. եթե պրոֆիլի կոդերը հարկվում են տարբեր տողերով կամ կողքին կա վարձակալության կամ գույքի վաճառքի եկամուտ, նշեք դրա գործունեության տեսակը։"
-      ],
-      "ru": [
-        "В записи расхода теперь есть выбор «Прямой или сбытовой и административный», и на экране «Числа для расчёта» прямые расходы и сбытовые и административные стоят в своих полях, а не «разделите сами». У расходов, записанных раньше, откройте запись и отметьте это.",
-        "Прямой расход идёт в строку налога своего вида целиком: если коды в профиле облагаются по разным строкам или рядом есть доход от аренды или продажи имущества, укажите у него вид деятельности."
-      ],
-      "en": [
-        "An expense entry now asks “Direct, or selling and administrative”, and the “Numbers for the return” screen puts direct expenses and selling and administrative expenses in their own fields instead of “split it yourself”. For expenses entered earlier, open the entry and mark it.",
-        "A direct expense goes in full to its activity's tax row: if your profile's codes fall under different rows, or there is rental or property-sale income next to it, choose its activity."
       ]
     }
   ]

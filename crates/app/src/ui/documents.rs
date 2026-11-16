@@ -28,6 +28,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use kvartik_core::format::Stored;
+use kvartik_core::format::accdoc::{self, AccDocError};
 use kvartik_core::doc::image::Picture;
 use kvartik_core::i18n::{self, Key, Lang, ParseError, fill, plural, t};
 use kvartik_core::model::activity::{ActivityCode, IncomeKind};
@@ -46,7 +47,8 @@ use kvartik_core::model::record::{RecordId, Timestamp};
 use kvartik_core::model::recurring::Recurring;
 use kvartik_core::model::text::Line;
 use kvartik_core::tax::{settlement, turnover};
-use leptos::ev::SubmitEvent;
+use leptos::ev::{MouseEvent, SubmitEvent};
+use leptos::html::A;
 use leptos::prelude::*;
 
 use super::avatar::{Avatar, tone};
@@ -64,6 +66,7 @@ use super::split::{part, screen, split};
 use super::storage::error_key;
 use super::{Base, tr};
 use crate::platform::clock;
+use crate::platform::file::Download;
 use crate::store::{Store, StoreError, Tx, Write, Writes};
 
 /// Сколько документов список показывает сразу и прибавляет по «Показать
@@ -3291,6 +3294,7 @@ fn SettlementMark(
     }
     let covered = covered_by_act(ctx, &document);
     let known = document.settlement_known();
+    let for_file = document.clone();
     // Последний день — по правилу на день оказания услуги; правила нет —
     // о сроке и о правиле окно молчит, а не пугает (Правило 6).
     let due = settlement::due(document.data().service_date);
@@ -3359,6 +3363,10 @@ fn SettlementMark(
                     } else {
                         view! { <p>{tr(lang, Key::SettleUnknown)}</p> }.into_any()
                     }}
+                    // Выписан ли документ до 0.0.55, неизвестно, и второй
+                    // черновик после выписанного удвоил бы поставку (ревью
+                    // задачи 44).
+                    {known.then(|| view! { <SettlementFile ctx document=for_file.clone() /> })}
                     <TextField
                         lang
                         label=Key::SettleNumber
@@ -3376,6 +3384,78 @@ fn SettlementMark(
             }}
         </fieldset>
     })
+}
+
+/// Файл черновика расчётного документа для системы ՊԵԿ (задача 44): XML по
+/// схеме ՊԵԿ (`format::accdoc`) ссылкой, файл которой собирается в самом
+/// нажатии, как выгрузка для бухгалтера (`ui/ledger/export.rs`): ссылка
+/// получает адрес файла ещё в обработчике, и скачивание идёт от того же
+/// нажатия. Чего не хватает файлу — словами до нажатия. Профиль нужен строке
+/// налога и режиму (документ о товарах или после ухода с режима — не сюда),
+/// реквизиты — из копии на день выпуска; пока профиль не прочитан, ни ссылки,
+/// ни слов: без него строку не узнать, а ссылка молчала бы.
+#[component]
+fn SettlementFile(ctx: Ctx, document: Document) -> impl IntoView {
+    let lang = ctx.lang;
+    let profiles = ctx.profiles;
+    let id = document.id();
+    let name = accdoc::file_name(&document).unwrap_or_default();
+    let document = StoredValue::new(document);
+    let checked = Memo::new(move |_| {
+        profiles.ready().then(|| {
+            profiles.with(|profile| document.with_value(|document| accdoc::accdoc(document, profile).err()))
+        })
+    });
+    // Файл держит адрес `blob:`, пока его не сменит следующий
+    // (`platform::file::Download`).
+    let file = StoredValue::new_local(None::<Download>);
+    let node = NodeRef::<A>::new();
+    let click = move |event: MouseEvent| {
+        let made = untrack(|| {
+            profiles.with(|profile| {
+                document.with_value(|document| {
+                    let text = accdoc::accdoc(document, profile).ok()?;
+                    Download::text(&text, &accdoc::file_name(document)?)
+                })
+            })
+        });
+        match (made, node.get_untracked()) {
+            (Some(download), Some(node)) if node.set_attribute("href", download.url()).is_ok() => {
+                file.set_value(Some(download));
+            }
+            _ => event.prevent_default(),
+        }
+    };
+    move || {
+        let key = match checked.get()? {
+            None => {
+                return Some(view! {
+                    <p class="hint">{tr(lang, Key::SettleFileAbout)}</p>
+                    <a
+                        class="button secondary"
+                        node_ref=node
+                        href=Screen::Document(id).href()
+                        download=name.clone()
+                        on:click=click
+                    >
+                        {icon(Icon::Download)}
+                        <span>{tr(lang, Key::SettleFile)}</span>
+                    </a>
+                }
+                .into_any());
+            }
+            Some(AccDocError::Goods) => Key::SettleFileGoods,
+            Some(AccDocError::KindUnknown) => Key::SettleFileKind,
+            Some(AccDocError::Closed) => Key::SettleFileClosed,
+            Some(AccDocError::NoRate) => Key::SettleFileRate,
+            Some(AccDocError::OldRate) => Key::SettleFileOld,
+            Some(AccDocError::NoSellerTin | AccDocError::NoBuyerTin | AccDocError::BuyerUnknown) => Key::SettleFileTin,
+            Some(AccDocError::TooLong(_)) => Key::SettleFileLong,
+            // У выпущенного действующего документа этого не бывает.
+            Some(AccDocError::NotIssued | AccDocError::Overflow) => return None,
+        };
+        Some(view! { <p class="hint">{tr(lang, key)}</p> }.into_any())
+    }
 }
 
 /// Редкие действия с выпущенным документом — внизу карточки, под «Ещё»:

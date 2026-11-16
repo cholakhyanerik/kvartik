@@ -1837,6 +1837,47 @@ strings! {
         "Доход по этому счёту\u{A0}— по акту: расчётный документ отмечается у акта.",
         "This invoice's income comes from its act: mark the settlement document on the act.",
         "Այս հաշվի եկամուտն ակտով է. հաշվարկային փաստաթուղթը նշեք ակտում։";
+    /// Файл черновика расчётного документа для системы ՊԵԿ (`format::accdoc`,
+    /// задача 44).
+    SettleFile = "Файл для системы ՊԵԿ (XML)", "File for the SRC system (XML)", "Ֆայլ ՊԵԿ համակարգի համար (XML)";
+    /// Как загрузить файл: подраздел, «Սևագրեր», «Ներբեռնել» (руководство
+    /// e-invoicing, 5.1.3).
+    SettleFileAbout =
+        "Чтобы не вводить документ второй раз, загрузите этот файл в\u{A0}системе ՊԵԿ: документы об услугах, «Սևագրեր», «Ներբեռնել». Он ляжет черновиком: выберите там вид сделки, проверьте единицу измерения и выпишите. Файл\u{A0}— для ИП на налоге с оборота или микропредпринимательстве: перешли порог года\u{A0}— выписывайте с бухгалтером.",
+        "To avoid entering the document twice, upload this file in the SRC system: services documents, “Սևագրեր”, “Ներբեռնել”. It becomes a draft: choose the deal type there, check the unit and issue it. The file is for an IE on turnover tax or micro-entrepreneurship: if you passed the year's threshold, issue with your accountant.",
+        "Որպեսզի փաստաթուղթը երկրորդ անգամ չմուտքագրեք, ներբեռնեք այս ֆայլը ՊԵԿ համակարգում՝ ծառայությունների փաստաթղթեր, «Սևագրեր», «Ներբեռնել»։ Այն կպահվի որպես սևագիր. այնտեղ ընտրեք գործարքի տեսակը, ստուգեք չափման միավորը և դուրս գրեք։ Ֆայլը շրջանառության հարկ վճարող կամ միկրոձեռնարկատիրության սուբյեկտ ԱՁ-ի համար է. եթե գերազանցել եք տարվա շեմը, դուրս գրեք հաշվապահի հետ։";
+    SettleFileGoods =
+        "Это документ о товарах: файл программа готовит только для услуг, а документ о товарах выпишите в\u{A0}системе ՊԵԿ сами.",
+        "This document is for goods: the app prepares the file only for services, so issue a goods document in the SRC system yourself.",
+        "Սա ապրանքների փաստաթուղթ է. ֆայլը ծրագիրը պատրաստում է միայն ծառայությունների համար, իսկ ապրանքների փաստաթուղթը դուրս գրեք ՊԵԿ համակարգում ինքներդ։";
+    SettleFileRate =
+        "Для файла нужен курс ЦБ: суммы расчётного документа\u{A0}— в драмах.",
+        "The file needs the CBA rate: the settlement document's amounts are in drams.",
+        "Ֆայլի համար անհրաժեշտ է ԿԲ փոխարժեքը. հաշվարկային փաստաթղթի գումարները դրամով են։";
+    SettleFileTin =
+        "В реквизитах, с которыми выпущен документ, нет ИНН (ՀՎՀՀ) вашего ИП или покупателя из Армении, или у покупателя не указана страна: выпишите документ в\u{A0}системе ՊԵԿ сами.",
+        "The details the document was issued with lack the TIN (ՀՎՀՀ) of your IE or of the Armenian buyer, or the buyer's country: issue the document in the SRC system yourself.",
+        "Փաստաթղթի թողարկման վավերապայմաններում չկա ձեր ԱՁ-ի կամ Հայաստանի գնորդի ՀՎՀՀ-ն, կամ նշված չէ գնորդի երկիրը. փաստաթուղթը դուրս գրեք ՊԵԿ համակարգում ինքներդ։";
+    /// Строку налога документа не узнать: товар это или услуга, неизвестно
+    /// (`AccDocError::KindUnknown`).
+    SettleFileKind =
+        "Укажите у документа вид деятельности (а в профиле\u{A0}— коды): без него не узнать, услуга это или товар, а файл программа готовит только для услуг.",
+        "Set the document's activity (and the codes in your profile): without it the app can't tell a service from goods, and it prepares the file only for services.",
+        "Նշեք փաստաթղթի գործունեության տեսակը (իսկ պրոֆիլում՝ կոդերը). առանց դրա հնարավոր չէ իմանալ՝ ծառայություն է, թե ապրանք, իսկ ֆայլը ծրագիրը պատրաստում է միայն ծառայությունների համար։";
+    /// Код документа закрывает особый режим (`AccDocError::Closed`).
+    SettleFileClosed =
+        "С дня этой услуги код деятельности закрывает ваш режим: расчётный документ выпишите с\u{A0}бухгалтером.",
+        "From this service day the activity code ends your tax regime: issue the settlement document with your accountant.",
+        "Այս ծառայության օրվանից գործունեության կոդը դադարեցնում է ձեր հարկման ռեժիմը. հաշվարկային փաստաթուղթը դուրս գրեք հաշվապահի հետ։";
+    /// Услуга в валюте до 2026-07-01 (`AccDocError::OldRate`).
+    SettleFileOld =
+        "Услуга в валюте до 1\u{A0}июля 2026 года: курс расчётного документа\u{A0}— на день его выписки (НК, ст.\u{A0}16 в прежней редакции), поэтому выпишите его в\u{A0}системе ՊԵԿ сами.",
+        "A service in a foreign currency before 1\u{A0}July 2026: the settlement document's rate is the one on the day it's issued (Tax Code, Art.\u{A0}16 as it was then), so issue it in the SRC system yourself.",
+        "Արտարժույթով ծառայություն՝ մինչև 2026 թ. հուլիսի 1-ը. հաշվարկային փաստաթղթի փոխարժեքը դրա դուրսգրման օրվանն է (Հարկային օրենսգիրք, հոդված\u{A0}16՝ նախկին խմբագրությամբ), ուստի այն դուրս գրեք ՊԵԿ համակարգում ինքներդ։";
+    SettleFileLong =
+        "Текст в документе длиннее, чем принимает система ՊԵԿ (256 знаков): выпишите документ там сами.",
+        "Some text in the document is longer than the SRC system accepts (256 characters): issue the document there yourself.",
+        "Փաստաթղթի տեքստն ավելի երկար է, քան ընդունում է ՊԵԿ համակարգը (256 նիշ). փաստաթուղթը դուրս գրեք այնտեղ ինքներդ։";
     SettleSaved =
         "Отмечено, что расчётный документ выписан.",
         "The settlement document is marked as issued.",
