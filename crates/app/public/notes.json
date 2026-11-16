@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.135",
+      "date": "2026-11-16",
+      "hy": [
+        "Մեկ ԱՁ-ի բանալիներն այժմ նույնպես առավելագույնը հարյուր են, ինչպես «Pro» բանալիները. հազարավոր կեղծ բանալիներով պատճենը ծրագիրն այլևս չի վերականգնում՝ դրանց ստորագրությունների ստուգումն էջը կդանդաղեցներ։"
+      ],
+      "ru": [
+        "Ключей у одного ИП теперь не больше ста, как и ключей «Pro»: копию с тысячами поддельных ключей программа не кладёт — проверка их подписей держала бы страницу."
+      ],
+      "en": [
+        "Like Pro keys, an entrepreneur's keys are now capped at a hundred: the app won't restore a backup with thousands of fake keys, as checking their signatures would freeze the page."
+      ]
+    },
+    {
       "version": "0.0.134",
       "date": "2026-11-16",
       "hy": [
@@ -266,19 +279,6 @@
       ],
       "en": [
         "The first link you reach with the Tab key is now “Skip to content”: it takes you to the open screen past the ten menu items."
-      ]
-    },
-    {
-      "version": "0.0.115",
-      "date": "2026-11-11",
-      "hy": [
-        "Ծրագրում ոչինչ տեսանելի չի փոխվել. նկար չհանդիսացող ֆայլի մասին դիտարկիչի վահանակում այժմ նախազգուշացում է, ոչ թե սխալ։"
-      ],
-      "ru": [
-        "В программе ничего заметного не изменилось: о файле, который только назвался картинкой, консоль браузера теперь пишет предупреждение, а не ошибку."
-      ],
-      "en": [
-        "Nothing visible has changed in the app: for a file that only pretends to be an image, the browser console now shows a warning instead of an error."
       ]
     }
   ]

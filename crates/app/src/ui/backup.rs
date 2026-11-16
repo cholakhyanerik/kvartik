@@ -756,9 +756,10 @@ impl From<Failure> for Problem {
             Failure::File(error) => error.into(),
             Failure::TooLarge => Self::Oversized,
             Failure::TooManyIps(_) => Self::TooManyIps,
-            // Больше `license::MAX_KEYS` записей ключей «Pro» программа не
-            // пишет — значит, и файл не её (ревью задачи 38). Своих слов нет:
-            // экран копии — в главном wasm, а случай — чужой файл.
+            // Больше `license::MAX_KEYS` записей ключей — «Pro» в конторе или
+            // ключей одного ИП — программа не пишет (с 0.0.135), значит, и файл
+            // не её (ревью задачи 38). Своих слов нет: экран копии — в главном
+            // wasm, а случай — чужой файл.
             Failure::TooManyKeys => Self::Say(Key::BackupNotOurs),
         }
     }

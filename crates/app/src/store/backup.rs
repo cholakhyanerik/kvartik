@@ -18,12 +18,12 @@
 
 use kvartik_core::format::FormatError;
 use kvartik_core::format::backup::{
-    self, BackupError, Entry, Header, IV_BYTES, KINDS, Kind, Lock, MAX_FILE_BYTES, OFFICE_KINDS, Owner,
+    self, BackupError, Entry, Header, IV_BYTES, KINDS, Kind, Lock, MAX_FILE_BYTES, Merge, OFFICE_KINDS, Owner,
     Relation, Sealed,
 };
 use kvartik_core::format::Stored;
 use kvartik_core::format::office::{self as route, RouteError};
-use kvartik_core::license::{MAX_KEYS, OfficeLicense};
+use kvartik_core::license::{License, MAX_KEYS, OfficeLicense};
 use kvartik_core::model::date::Date;
 use kvartik_core::model::office::{Ip, MAX_IPS};
 use kvartik_core::model::record::Timestamp;
@@ -47,8 +47,8 @@ pub enum Failure {
     TooLarge,
     /// С копией ИП в программе стало бы больше `MAX_IPS`: столько.
     TooManyIps(usize),
-    /// С копией записей ключей «Pro» в конторе стало бы больше
-    /// `license::MAX_KEYS` (ревью задачи 38): такую программа не кладёт.
+    /// С копией записей ключей — «Pro» в конторе или в базе ИП — стало бы
+    /// больше `license::MAX_KEYS` (ревью задачи 38): такую программа не кладёт.
     TooManyKeys,
 }
 
@@ -243,6 +243,7 @@ pub async fn restore(
         return Ok(Merged::Other { ours, theirs });
     }
     let merge = backup::merge(kinds, entries, dumped.iter().map(Dumped::raw)).map_err(newer)?;
+    keys_fit(&dumped, &merge, License::KIND)?;
     let mut writes = Writes::default();
     for entry in merge.writes() {
         writes.restore(entry);
@@ -253,6 +254,20 @@ pub async fn restore(
         updated: merge.updated(),
         unchanged: merge.unchanged(),
     }))
+}
+
+/// Записей ключей вида `kind` после слияния `merge` с базой `dumped` — не
+/// больше `license::MAX_KEYS` (ревью задачи 38): иначе отказ, и не пишется
+/// ничего — транзакция без записи кончается сама. Копия без новых записей
+/// ключей проходит и там, где их уже больше: столько могло лечь до 0.0.135,
+/// и своя копия такой базы не открылась бы никогда, а хуже от неё не станет.
+fn keys_fit(dumped: &[Dumped], merge: &Merge<'_>, kind: &str) -> Result<(), Failure> {
+    let before = dumped.iter().filter(|record| record.raw().kind == kind).count();
+    let after = backup::count_after(kind, dumped.iter().map(Dumped::raw), merge);
+    if after > MAX_KEYS && after > before {
+        return Err(Failure::TooManyKeys);
+    }
+    Ok(())
 }
 
 /// Что сделало восстановление копии всех ИП — и когда легло не всё.
@@ -304,15 +319,9 @@ pub async fn restore_all(
     let tx = office_store.write()?;
     let dumped = tx.dump().await?;
     let keys = backup::merge(OFFICE_KINDS, &route.keys, dumped.iter().map(Dumped::raw)).map_err(newer)?;
-    // Записей ключей с копией стало бы больше предела — и вместе с прежними
-    // (`license::MAX_KEYS`): не писать ничего, транзакция кончится сама.
-    let stored_keys = dumped
-        .iter()
-        .filter(|record| record.raw().kind == OfficeLicense::KIND)
-        .count();
-    if stored_keys + keys.added() > MAX_KEYS {
-        return Err(Failure::TooManyKeys);
-    }
+    // Записей ключей с копией стало бы больше предела — и вместе с прежними:
+    // не писать ничего.
+    keys_fit(&dumped, &keys, OfficeLicense::KIND)?;
     let mut writes = Writes::default();
     if let Some(first) = &first {
         writes.insert(first);
@@ -401,6 +410,7 @@ async fn merge_into(store: &Store, entries: &[Entry]) -> Result<Restored, Failur
     let tx = store.write()?;
     let dumped = tx.dump().await?;
     let merge = backup::merge(KINDS, entries, dumped.iter().map(Dumped::raw)).map_err(newer)?;
+    keys_fit(&dumped, &merge, License::KIND)?;
     let mut writes = Writes::default();
     for entry in merge.writes() {
         writes.restore(entry);

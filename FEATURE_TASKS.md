@@ -1211,14 +1211,14 @@ PDF: «точные официальные числа не проверены �
 - **README:** да
 - **Слои и файлы:** сделанное в 0.0.85 и 0.0.87 — контора
   `crates/core/src/model/office.rs`, маршрут копии всех ИП
-  `crates/core/src/format/office.rs:103` (`route`), `:227` (`ips`), `:237`
-  (`listed`), `:256` (`profile`); хранилище `crates/app/src/store/office.rs`,
-  `store/backup.rs:112` (`make_all`), `:289` (`restore_all`), `:370`
+  `crates/core/src/format/office.rs:105` (`route`), `:237` (`ips`), `:247`
+  (`listed`), `:266` (`profile`); хранилище `crates/app/src/store/office.rs`,
+  `store/backup.rs:112` (`make_all`), `:304` (`restore_all`), `:379`
   (`restore_new`); окно `crates/app/src/ui/office.rs:482` (часть конторы),
-  `:514` (полоса), `:587` (экран списка), `ui/backup.rs:894` (копия для
-  клиента), `:1744` (`make_file`), `:2234` (`restore_full`). Сделанное
-  в 0.0.134 — ключ «Pro»: `crates/core/src/license.rs:235` (`Key`), `:571`
-  (`MAX_KEYS`), `:577` (`pro_seats`), `:600` (`seat`), `:818`
+  `:514` (полоса), `:587` (экран списка), `ui/backup.rs:895` (копия для
+  клиента), `:1745` (`make_file`), `:2235` (`restore_full`). Сделанное
+  в 0.0.134 — ключ «Pro»: `crates/core/src/license.rs:235` (`Key`), `:572`
+  (`MAX_KEYS`), `:578` (`pro_seats`), `:601` (`seat`), `:819`
   (`OfficeLicense`); `crates/keygen/src/main.rs:242` (`seats`), `:418`
   (`renewal`), `:546` (`plan_column`); окно `ui/license.rs:434`
   (`pro_signal`), `:496` (`access`), `ui/office.rs:225` (`pro_keys`), `:247`

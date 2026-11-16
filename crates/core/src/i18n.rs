@@ -3104,6 +3104,11 @@ strings! {
         "Ключей «Pro» в программе уже {}\u{A0}— больше не бывает.",
         "The app already holds {} “Pro” keys, the most it can.",
         "Ծրագրում արդեն {} «Pro» բանալի կա՝ ավելին չի լինում։";
+    /// Шаблон: предел записей ключей у одного ИП (`license::MAX_KEYS`).
+    LicenseKeysFull =
+        "У этого ИП ключей уже {}\u{A0}— больше не бывает.",
+        "This entrepreneur already has {} keys, the most there can be.",
+        "Այս ԱՁ-ն արդեն {} բանալի ունի՝ ավելին չի լինում։";
     /// Тарифы (PDF, «Деньги»): имена, а не перевод.
     PlanStandard = "Стандарт", "Standard", "Ստանդարտ";
     PlanPro = "Pro", "Pro", "Pro";

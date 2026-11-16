@@ -1255,3 +1255,40 @@ async fn an_empty_base_with_a_pro_seat_opens_home() {
     forget_office_bases().await;
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
+
+/// У ИП уже `MAX_KEYS` записей ключей — новый ключ не вводится, а окно
+/// говорит словами, сколько их и что больше не бывает (ревью задачи 38).
+#[wasm_bindgen_test]
+async fn a_key_over_the_limit_is_refused() {
+    base_with_draft().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let today = clock::today().expect("часы с датой");
+    trial_from(today.add_days(-100).expect("дата"));
+    let mut writes = Writes::default();
+    for n in 0..license::MAX_KEYS {
+        let until = today.add_days(i32::try_from(n).expect("число") + 1).expect("дата");
+        let tin = Tin::parse("07654321").expect("годный ՀՎՀՀ");
+        let key = license::Key::signed(tin, Plan::Standard, today, until, None, [0; 64]).expect("ключ");
+        writes.insert(&License::enter(key, &[], clock::now()).expect("ключ"));
+    }
+    commit(writes).await;
+    let (host, mounted) = mount_at("#/license");
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::LicenseClosedNow)).await {
+        wrong.push("экран лицензии не открылся".to_owned());
+    }
+    let full = fill(t(lang, Key::LicenseKeysFull), &[&i18n::integer(lang, license::MAX_KEYS as i64)]);
+    let good = key_text(SEED, TIN, today.add_days(365).expect("дата"));
+    if !enter_key(&host, lang, &good) || !wait_for(&host, &full).await {
+        wrong.push(format!("нет «{full}»: «{}»", license_text(&host)));
+    }
+    if license_text(&host).contains(t(lang, Key::LicenseEntered)) {
+        wrong.push("ключ сверх предела введён".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_trial();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}

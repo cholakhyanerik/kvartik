@@ -2480,6 +2480,35 @@ fn full_backup_structure_is_checked() {
     assert!(wrong.is_empty(), "устройство копии всех ИП: {wrong:#?}");
 }
 
+/// Сколько записей вида станет после слияния: прежние — и удалённые,
+/// и нечитаемые — и новые из копии; запись, которую копия заменит, — одна,
+/// а не две (ревью задачи 38: по этому числу окно держит предел ключей).
+#[test]
+fn count_after_counts_old_and_new_once() {
+    let other = "6e1d3f8a-9b52-4f4c-8d7e-3c8b2a1f0e45";
+    let third = "7f2e4a9b-0c63-4a5d-9e8f-4d9c3b2a1f56";
+    let newer = STORED_NOTE.replace("1760000000000", "1760000009999");
+    let fresh = STORED_NOTE.replace(NOTE_ID, third);
+    let existing = [
+        raw("note", NOTE_ID, STORED_NOTE),
+        Raw {
+            kind: "note",
+            id: other,
+            text: None,
+        },
+        raw("tag", TAG_ID, STORED_TAG),
+    ];
+    let incoming_text = [
+        raw("note", NOTE_ID, &newer),
+        raw("note", third, &fresh),
+    ];
+    let incoming = collect(KINDS_UNDER_TEST, incoming_text).expect("собрано").entries;
+    let merged = merge(KINDS_UNDER_TEST, &incoming, existing).expect("слито");
+    assert_eq!(merged.writes().len(), 2, "заменённая и новая");
+    assert_eq!(count_after("note", existing, &merged), 3);
+    assert_eq!(count_after("tag", existing, &merged), 1);
+}
+
 /// Ключ «Pro» в копии всех ИП (задача 38) — запись конторы: без метки базы
 /// он читается, с меткой — порча, как и ИП списка с меткой; а рядом с ним
 /// записи баз — только с меткой: копия с ключом — копия всех ИП.

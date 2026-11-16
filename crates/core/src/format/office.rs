@@ -35,8 +35,10 @@
 //! они идут в базу конторы и сливаются с ней, как любые записи, по
 //! идентификатору ([`Route::keys`]), и метка базы, если она у них есть, ничего
 //! не значит. Ни в одну базу ИП они не ложатся: из неё ключ ушёл бы с копией
-//! одного ИП к клиенту. Больше `license::MAX_KEYS` их в копии не бывает —
-//! такую маршрут не кладёт ([`RouteError::TooManyKeys`]).
+//! одного ИП к клиенту. Больше `license::MAX_KEYS` их в копии не бывает,
+//! как и ключей «Стандарт» у одного ИП копии (с 0.0.135), — такую маршрут не
+//! кладёт ([`RouteError::TooManyKeys`]), до первой записи. А сколько ключей
+//! станет вместе с ключами базы, окно сверяет в транзакции этой базы.
 //!
 //! Копия одного ИП маршрута не знает: её окно кладёт в открытую базу. Но
 //! если это копия ИП, который в списке есть, а открыт другой, окно говорит
@@ -46,7 +48,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::backup::Entry;
 use super::{FORMAT_VERSION, FormatError, Stored, decode_record};
-use crate::license::{MAX_KEYS, OfficeLicense};
+use crate::license::{License, MAX_KEYS, OfficeLicense};
 use crate::model::office::{self, Ip, MAX_IPS};
 use crate::model::profile::Profile;
 use crate::model::record::RecordId;
@@ -84,9 +86,9 @@ pub enum RouteError {
     /// С копией ИП в программе стало бы больше [`MAX_IPS`]: столько
     /// вышло бы.
     TooMany(usize),
-    /// В копии записей ключей «Pro» больше `license::MAX_KEYS`: столько.
-    /// Программа такую не пишет, а проверка подписи каждого держала бы
-    /// страницу (ревью задачи 38).
+    /// В копии записей ключей «Pro» — или ключей одного ИП — больше
+    /// `license::MAX_KEYS`: столько. Программа такую не пишет, а проверка
+    /// подписи каждого держала бы страницу (ревью задачи 38).
     TooManyKeys(usize),
 }
 
@@ -193,6 +195,14 @@ pub fn route(incoming: Vec<Entry>, local: &[Ip], spare: Option<&str>) -> Result<
     }
     for landing in &mut bases {
         landing.entries = latest(std::mem::take(&mut landing.entries));
+        let keys = landing
+            .entries
+            .iter()
+            .filter(|entry| entry.kind() == License::KIND)
+            .count();
+        if keys > MAX_KEYS {
+            return Err(RouteError::TooManyKeys(keys));
+        }
     }
     let keys = latest(keys);
     if keys.len() > MAX_KEYS {

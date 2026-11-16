@@ -896,6 +896,8 @@ enum Said {
     EnteredPro { seats: u8 },
     /// Ключей «Pro» в конторе уже `license::MAX_KEYS` — больше не бывает.
     ProFull,
+    /// Ключей у этого ИП уже `license::MAX_KEYS` — больше не бывает.
+    KeysFull,
     /// Этот ключ уже введён.
     Known,
     /// Не ключ, ключ новее программы или подпись не сходится.
@@ -968,7 +970,7 @@ pub(super) fn LicensePage(ctx: tax::Ctx) -> impl IntoView {
             let entered = enter(&store, key.clone()).await;
             busy.set(false);
             said.set(Some(match entered {
-                Ok(Some(license)) => {
+                Ok(KeyEntry::New(license)) => {
                     licenses.put(license);
                     typed.set(String::new());
                     let profile_tin = profile_tin.get_untracked();
@@ -979,10 +981,11 @@ pub(super) fn LicensePage(ctx: tax::Ctx) -> impl IntoView {
                 }
                 // Ключ уже в базе, а окно его, может быть, не прочитало —
                 // показать то, что в базе.
-                Ok(None) => {
+                Ok(KeyEntry::Known) => {
                     licenses.load(&store).await;
                     Said::Known
                 }
+                Ok(KeyEntry::Full) => Said::KeysFull,
                 Err(error) => Said::Failed(error),
             }));
         });
@@ -1194,13 +1197,8 @@ fn Said(lang: ReadSignal<Lang>, said: Said) -> impl IntoView {
             }}</p>
         }
         .into_any(),
-        Said::ProFull => view! {
-            <p role="alert">{move || {
-                let lang = lang.get();
-                fill(t(lang, Key::LicenseProFull), &[&i18n::integer(lang, MAX_KEYS as i64)])
-            }}</p>
-        }
-        .into_any(),
+        Said::ProFull => full_words(lang, Key::LicenseProFull).into_any(),
+        Said::KeysFull => full_words(lang, Key::LicenseKeysFull).into_any(),
         Said::Known => view! { <p role="status">{tr(lang, Key::LicenseKnown)}</p> }.into_any(),
         Said::Refused(error) => {
             let key = match error {
@@ -1316,18 +1314,43 @@ fn KeyCopy(lang: ReadSignal<Lang>, text: String) -> impl IntoView {
     }
 }
 
+/// Слова о пределе записей ключей `license::MAX_KEYS` — шаблоном `words`.
+fn full_words(lang: ReadSignal<Lang>, words: Key) -> impl IntoView {
+    view! {
+        <p role="alert">{move || {
+            let lang = lang.get();
+            fill(t(lang, words), &[&i18n::integer(lang, MAX_KEYS as i64)])
+        }}</p>
+    }
+}
+
 /// Ввести ключ — одной транзакцией: прочитать введённые, записать новый
 /// (команда ядра `License::enter`). `None` — этот ключ уже введён.
-async fn enter(store: &Store, key: license::Key) -> Result<Option<License>, StoreError> {
+async fn enter(store: &Store, key: license::Key) -> Result<KeyEntry, StoreError> {
     let tx = store.write()?;
     let entered = tx.list::<License>().await?;
+    // Записей ключей больше `MAX_KEYS` не бывает (ревью задачи 38):
+    // транзакция без записи кончается сама.
+    if entered.records.len() >= MAX_KEYS {
+        return Ok(KeyEntry::Full);
+    }
     let Some(license) = License::enter(key, &entered.records, clock::now()) else {
-        return Ok(None);
+        return Ok(KeyEntry::Known);
     };
     let mut writes = Writes::default();
     writes.insert(&license);
     tx.commit(writes).await?;
-    Ok(Some(license))
+    Ok(KeyEntry::New(license))
+}
+
+/// Чем кончился ввод ключа в базу ИП ([`enter`]).
+enum KeyEntry {
+    /// Записан.
+    New(License),
+    /// Этот ключ уже введён.
+    Known,
+    /// Записей ключей у ИП уже `license::MAX_KEYS`: больше не бывает.
+    Full,
 }
 
 /// Слова о запертом выпуске — в форме документа вместо «Выпустить»: срок,

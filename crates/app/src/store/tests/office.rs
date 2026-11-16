@@ -14,7 +14,9 @@ use kvartik_core::model::tin::Tin;
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::platform::{clock, crypto};
-use crate::store::backup::{Failure, Made, Sealing, make, make_all, restore_all, restore_new, unlock};
+use crate::store::backup::{
+    Failure, Made, Merged, OtherIe, Sealing, make, make_all, restore, restore_all, restore_new, unlock,
+};
 use crate::store::StoreError;
 use crate::store::office::{OFFICE_DB, keys as office_keys, list};
 use crate::store::{DB_NAME, Store, Writes, delete_database};
@@ -286,6 +288,78 @@ async fn a_broken_pro_key_does_not_stop_the_backup_of_all_ies() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
+/// Записи ключей «Стандарт» из копии в базу ИП — тоже не сверх `MAX_KEYS`:
+/// копию одного ИП, с которой их стало бы больше, восстановление не кладёт,
+/// а ровно до предела — кладёт (ревью задачи 38: эта дыра была с 0.0.60, и
+/// тысячи поддельных ключей на ՀՎՀՀ из счетов человека держали бы страницу).
+#[wasm_bindgen_test]
+async fn base_keys_over_the_limit_are_not_restored() {
+    delete_database(DB_NAME).await;
+    let today = clock::today().expect("сегодня");
+    let standard = |n: usize| {
+        let tin = Tin::parse("00054321").expect("годный ՀՎՀՀ");
+        let until = today.add_days(i32::try_from(n).expect("число") + 1).expect("дата");
+        let key = license::Key::signed(tin, Plan::Standard, today, until, None, [0; 64]).expect("ключ");
+        License::enter(key, &[], clock::now()).expect("ключ")
+    };
+    let open = Store::open_base(DB_NAME, |_| {}).await.expect("база открыта");
+    let kept = standard(0);
+    let mut writes = Writes::default();
+    writes.insert(&kept);
+    for n in 1..MAX_KEYS - 1 {
+        writes.insert(&standard(n));
+    }
+    open.write().expect("транзакция").commit(writes).await.expect("записано");
+    let entries = |licenses: &[License]| {
+        let records: Vec<(String, String)> = licenses
+            .iter()
+            .map(|license| (license.id().to_string(), kvartik_core::format::encode(license)))
+            .collect();
+        let raws = records.iter().map(|(id, text)| kvartik_core::format::backup::Raw {
+            kind: License::KIND,
+            id,
+            text: Some(text),
+        });
+        kvartik_core::format::backup::collect(KINDS, raws).expect("собрано").entries().to_vec()
+    };
+    let copy = |from: usize, count: usize| entries(&(from..from + count).map(&standard).collect::<Vec<_>>());
+    let count = || async { open.read().expect("чтение").list::<License>().await.expect("ключи").records.len() };
+    let mut wrong = Vec::new();
+    match restore(&open, KINDS, &copy(1_000, 2), OtherIe::Merge).await {
+        Err(Failure::TooManyKeys) => {}
+        other => wrong.push(format!("сверх предела: {other:?}")),
+    }
+    if count().await != MAX_KEYS - 1 {
+        wrong.push("сверх предела что-то легло".to_owned());
+    }
+    match restore(&open, KINDS, &copy(2_000, 1), OtherIe::Merge).await {
+        Ok(Merged::Done(done)) if done.added == 1 => {}
+        other => wrong.push(format!("ровно предел: {other:?}")),
+    }
+    if count().await != MAX_KEYS {
+        wrong.push("ровно до предела ключ не лёг".to_owned());
+    }
+    // Ключей больше предела, как могло лечь до 0.0.135: копия без новых
+    // ключей — своя копия такой базы — кладётся, а с новым ключом — нет.
+    let mut writes = Writes::default();
+    writes.insert(&standard(3_000));
+    open.write().expect("транзакция").commit(writes).await.expect("записано");
+    match restore(&open, KINDS, &entries(std::slice::from_ref(&kept)), OtherIe::Merge).await {
+        Ok(Merged::Done(_)) => {}
+        other => wrong.push(format!("без новых ключей сверх предела: {other:?}")),
+    }
+    match restore(&open, KINDS, &copy(4_000, 1), OtherIe::Merge).await {
+        Err(Failure::TooManyKeys) => {}
+        other => wrong.push(format!("новый ключ сверх предела: {other:?}")),
+    }
+    if count().await != MAX_KEYS + 1 {
+        wrong.push("сверх предела ключей стало больше".to_owned());
+    }
+    drop(open);
+    delete_database(DB_NAME).await;
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// Копию, с которой записей ключей «Pro» в конторе стало бы больше
 /// `MAX_KEYS`, восстановление не кладёт — ни ключей, ни списка, — а ровно до
 /// предела кладёт (ревью задачи 38: тысячи поддельных ключей держали бы
@@ -396,4 +470,39 @@ async fn a_backup_of_one_ie_lands_as_a_new_ie() {
     delete_database(new.base()).await;
     delete_database(OFFICE_DB).await;
     assert!(wrong.is_empty(), "копия одного ИП новым ИП: {wrong:#?}");
+}
+
+/// Копию одного ИП с ключами сверх `MAX_KEYS` новым ИП восстановление не
+/// кладёт — ни записей, ни ИП в списке (ревью задачи 38).
+#[wasm_bindgen_test]
+async fn keys_over_the_limit_do_not_land_as_a_new_ie() {
+    delete_database(OFFICE_DB).await;
+    let (today, now) = (clock::today().expect("сегодня"), clock::now());
+    let records: Vec<(String, String)> = (0..=MAX_KEYS)
+        .map(|n| {
+            let tin = Tin::parse("00054321").expect("годный ՀՎՀՀ");
+            let until = today.add_days(i32::try_from(n).expect("число") + 1).expect("дата");
+            let key = license::Key::signed(tin, Plan::Standard, today, until, None, [0; 64]).expect("ключ");
+            let license = License::enter(key, &[], now).expect("ключ");
+            (license.id().to_string(), kvartik_core::format::encode(&license))
+        })
+        .collect();
+    let raws = records.iter().map(|(id, text)| kvartik_core::format::backup::Raw {
+        kind: License::KIND,
+        id,
+        text: Some(text),
+    });
+    let entries = kvartik_core::format::backup::collect(KINDS, raws).expect("собрано").entries().to_vec();
+    let office = Store::open_office(|_| {}).await.expect("контора открыта");
+    let mut wrong = Vec::new();
+    match restore_new(&office, &entries, None, today, now).await {
+        Err(Failure::TooManyKeys) => {}
+        other => wrong.push(format!("сверх предела: {other:?}")),
+    }
+    if !list(&office).await.expect("список").records.is_empty() {
+        wrong.push("в списке новый ИП".to_owned());
+    }
+    drop(office);
+    delete_database(OFFICE_DB).await;
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }

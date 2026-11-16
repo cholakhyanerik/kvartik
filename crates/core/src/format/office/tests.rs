@@ -338,11 +338,44 @@ fn too_many_pro_keys_are_refused() {
         incoming
     };
     assert!(matches!(
-        route(backup(crate::license::MAX_KEYS + 1, ), &[], None),
+        route(backup(crate::license::MAX_KEYS + 1), &[], None),
         Err(RouteError::TooManyKeys(count)) if count == crate::license::MAX_KEYS + 1
     ));
     let fits = route(backup(crate::license::MAX_KEYS), &[], None).expect("ровно предел ложится");
     assert_eq!(fits.keys.len(), crate::license::MAX_KEYS);
+}
+
+/// Ключей «Стандарт» одного ИП сверх `MAX_KEYS` маршрут тоже не кладёт — до
+/// первой записи, а не когда список и прежние базы уже легли: повтор упал бы
+/// так же (ревью задачи 38), — а ровно `MAX_KEYS` кладёт.
+#[test]
+fn too_many_keys_of_one_ie_are_refused() {
+    let aram = profile("IE Aram Petrosyan", Some("12345678"), 1_000);
+    let ip = ip_of(Some(&aram), 2_000);
+    let issued = Date::new(2026, 11, 1).expect("дата");
+    let backup = |count: usize| {
+        let mut incoming = full_backup(&[(&ip, &aram)]);
+        for n in 0..count {
+            let until = issued.add_days(i32::try_from(n).expect("число")).expect("дата");
+            let tin = Tin::parse("12345678").expect("годный ՀՎՀՀ");
+            let key = crate::license::Key::signed(tin, crate::license::Plan::Standard, issued, until, None, [0; 64])
+                .expect("ключ");
+            let license = License::enter(key, &[], at(3_000)).expect("ключ");
+            incoming.push(entry(KINDS, &license).in_base(ip.id()));
+        }
+        incoming
+    };
+    assert!(matches!(
+        route(backup(crate::license::MAX_KEYS + 1), &[], None),
+        Err(RouteError::TooManyKeys(count)) if count == crate::license::MAX_KEYS + 1
+    ));
+    let fits = route(backup(crate::license::MAX_KEYS), &[], None).expect("ровно предел ложится");
+    let keys = fits.bases[0]
+        .entries
+        .iter()
+        .filter(|entry| entry.kind() == License::KIND)
+        .count();
+    assert_eq!(keys, crate::license::MAX_KEYS);
 }
 
 /// Копию одного ИП узнают в списке по профилю и по ՀՎՀՀ; чужой ИП — `None`.

@@ -1186,6 +1186,23 @@ pub fn merge<'a, 'b>(
     Ok(merge)
 }
 
+/// Сколько записей вида `kind` станет в базе после слияния `merge` с её
+/// записями `existing` — и удалённых, и нечитаемых: для пределов накопителей,
+/// которые копия могла бы переполнить (`license::MAX_KEYS`, Правило 1).
+pub fn count_after<'b>(kind: &str, existing: impl IntoIterator<Item = Raw<'b>>, merge: &Merge<'_>) -> usize {
+    let ids: BTreeSet<&str> = existing
+        .into_iter()
+        .filter(|raw| raw.kind == kind)
+        .map(|raw| raw.id)
+        .collect();
+    let added = merge
+        .writes()
+        .iter()
+        .filter(|entry| entry.kind == kind && !ids.contains(entry.meta.id().to_string().as_str()))
+        .count();
+    ids.len() + added
+}
+
 /// Чей ИП в копии или в базе — чтобы показать человеку, что с чем он
 /// сливает: имя и ՀՎՀՀ живого профиля, изменённого последним, — того, с
 /// которым работает окно (`Profile::current`).
