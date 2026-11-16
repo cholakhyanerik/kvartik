@@ -18,10 +18,17 @@
 //! того же журнала сама ([`renewal`]). Глазами по журналу ошибка на день —
 //! подарок покупателю или его потерянный день.
 //!
+//! Ключ «Pro» (задача 38) — версии 2, с числом мест: столько ИП конторы он
+//! открывает. Число ставит автор флагом `--seats`, а без флага — у продления
+//! столько, сколько у продлённого ключа «Pro», иначе `license::PRO_SEATS`
+//! (решение человека 2026-11-05). «Стандарт» мест не знает и выпускается
+//! версией 1, как раньше.
+//!
 //! ```text
 //! kvartik-keygen pair <путь закрытого ключа>
 //! kvartik-keygen issue --tin 00054321 --plan standard --until 2027-10-10 [--key <путь закрытого ключа>]
 //! kvartik-keygen issue --tin 00054321 --plan standard --renew [--key <путь закрытого ключа>]
+//! kvartik-keygen issue --tin 00054321 --plan pro --seats 30 --until 2027-10-10 [--key <путь закрытого ключа>]
 //! ```
 
 use std::fs::{self, OpenOptions};
@@ -31,8 +38,9 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ed25519_dalek::{Signer, SigningKey};
-use kvartik_core::license::{self, Key, PUBLIC_KEY_BYTES, Plan};
+use kvartik_core::license::{self, Key, PRO_SEATS, PUBLIC_KEY_BYTES, Plan};
 use kvartik_core::model::date::Date;
+use kvartik_core::model::office::MAX_IPS;
 use kvartik_core::model::tin::Tin;
 
 /// Папка закрытого ключа и журнала в домашнем каталоге автора. Любой путь
@@ -54,7 +62,7 @@ const HEADER: &str = "выпущен\tՀՎՀՀ\tтариф\tпоследний �
 
 /// Флаги `issue` со значением — в этом порядке их раскладывает
 /// [`Order::parse`].
-const FLAGS: [&str; 4] = ["--tin", "--plan", "--until", "--key"];
+const FLAGS: [&str; 5] = ["--tin", "--plan", "--until", "--key", "--seats"];
 
 /// Флаг `issue` без значения — продление по журналу вместо `--until`.
 const RENEW: &str = "--renew";
@@ -72,9 +80,10 @@ const EPOCH: Date = Date::new(1970, 1, 1).expect("1 января 1970 года �
 
 const USAGE: &str = "использование:
   kvartik-keygen pair <путь закрытого ключа вне репозитория>
-  kvartik-keygen issue --tin <ՀՎՀՀ> --plan standard|pro --until <ГГГГ-ММ-ДД> [--key <путь закрытого ключа>]
-  kvartik-keygen issue --tin <ՀՎՀՀ> --plan standard|pro --renew [--key <путь закрытого ключа>]
---renew — продление заранее (условия, п. 4.1): последний день — год после последнего дня самого долгого ключа на этот ՀՎՀՀ в журнале, пока тот ещё идёт
+  kvartik-keygen issue --tin <ՀՎՀՀ> --plan standard|pro [--seats <N>] --until <ГГГГ-ММ-ДД> [--key <путь закрытого ключа>]
+  kvartik-keygen issue --tin <ՀՎՀՀ> --plan standard|pro [--seats <N>] --renew [--key <путь закрытого ключа>]
+--renew — продление заранее (условия, п. 4.1): последний день — год после последнего дня самого долгого ключа того же тарифа на этот ՀՎՀՀ в журнале, пока тот ещё идёт
+--seats — только у pro: сколько ИП конторы открывает ключ, от 1 до 100; без него — сколько у продлённого ключа pro, иначе 30
 закрытый ключ issue по умолчанию — license.key в папке kvartik-license домашнего каталога";
 
 fn main() -> ExitCode {
@@ -142,6 +151,9 @@ struct Order {
     tin: Tin,
     plan: Plan,
     until: Until,
+    /// Число мест ключа «Pro», названное флагом `--seats`; `None` — не
+    /// названо ([`seats`]).
+    seats: Option<u8>,
     /// Закрытый ключ; `None` — [`SECRET`] в [`FOLDER`] домашнего каталога.
     key: Option<PathBuf>,
 }
@@ -182,7 +194,7 @@ impl Order {
             }
         }
         let missing = || format!("нужны --tin, --plan и --until или {RENEW}\n{USAGE}");
-        let [Some(tin), Some(plan), until, key] = values else {
+        let [Some(tin), Some(plan), until, key, seats] = values else {
             return Err(missing());
         };
         let tin = Tin::parse(tin).map_err(|_| format!("--tin {tin}: ՀՎՀՀ — восемь цифр"))?;
@@ -190,6 +202,18 @@ impl Order {
             "standard" => Plan::Standard,
             "pro" => Plan::Pro,
             _ => return Err(format!("--plan {plan}: тариф — standard или pro")),
+        };
+        let seats = match (seats, plan) {
+            (None, _) => None,
+            (Some(seats), Plan::Standard) => {
+                return Err(format!("--seats {seats}: места — только у pro, «Стандарт» открывает ИП своего ՀՎՀՀ"));
+            }
+            (Some(text), Plan::Pro) => Some(
+                text.parse::<u8>()
+                    .ok()
+                    .filter(|&seats| seats > 0 && usize::from(seats) <= MAX_IPS)
+                    .ok_or_else(|| format!("--seats {text}: мест — от 1 до {MAX_IPS}, столько ИП бывает в программе"))?,
+            ),
         };
         let until = match (until, renew) {
             (Some(until), false) => Until::Day(Date::from_iso(until).ok_or_else(|| {
@@ -205,8 +229,23 @@ impl Order {
             tin,
             plan,
             until,
+            seats,
             key: key.map(PathBuf::from),
         })
+    }
+}
+
+/// Число мест ключа по заказу `order`: у «Стандарта» — нет; у «Pro» —
+/// названное `--seats`, а нет — сколько у продлённого им ключа «Pro»
+/// `renewed`: забытый флаг иначе отнял бы у покупателя места; иначе —
+/// [`PRO_SEATS`].
+fn seats(order: &Order, renewed: Option<&Key>) -> Option<u8> {
+    match order.plan {
+        Plan::Standard => None,
+        Plan::Pro => order
+            .seats
+            .or_else(|| renewed.and_then(Key::seats))
+            .or(Some(PRO_SEATS)),
     }
 }
 
@@ -227,7 +266,7 @@ fn issue_command(flags: &[String]) -> Result<(), String> {
         println!(
             "Продлён ключ на ՀՎՀՀ {}, тариф {}, выпущенный {}, с последним днём {}: новый считается со дня после него, по {} — {} дн. (условия, п. 4.1).",
             renewed.tin().as_str(),
-            plan_word(renewed.plan()),
+            plan_column(&renewed),
             renewed.issued().iso(),
             renewed.until().iso(),
             key.until().iso(),
@@ -238,11 +277,14 @@ fn issue_command(flags: &[String]) -> Result<(), String> {
     println!(
         "Ключ на ՀՎՀՀ {}, тариф {}, выпущен {}, последний день — {} ({} дн.):",
         key.tin().as_str(),
-        plan_word(key.plan()),
+        plan_column(&key),
         key.issued().iso(),
         key.until().iso(),
         key.until().days_since(key.issued()) + 1,
     );
+    if let Some(seats) = key.seats() {
+        println!("Мест: {seats} — столько ИП конторы по дню добавления открывает ключ.");
+    }
     println!();
     println!("{}", key.text());
     println!();
@@ -268,11 +310,12 @@ fn issue(order: &Order, secret: &Path, public: &[u8; PUBLIC_KEY_BYTES], today: D
     let (until, renewed) = match order.until {
         Until::Day(until) => (until, None),
         Until::Renew => {
-            let (renewed, until) = renewal(&journal, &order.tin, public, today)?;
+            let (renewed, until) = renewal(&journal, &order.tin, order.plan, public, today)?;
             (until, Some(renewed))
         }
     };
-    let key = sign(&signing, public, &order.tin, order.plan, today, until)?;
+    let seats = seats(order, renewed.as_ref());
+    let key = sign(&signing, public, &order.tin, order.plan, today, until, seats)?;
     record(&journal, &key)?;
     Ok(Issued { key, renewed })
 }
@@ -317,8 +360,8 @@ fn seed(text: &[u8]) -> Option<[u8; ed25519_dalek::SECRET_KEY_LENGTH]> {
     Some(seed)
 }
 
-/// Ключ на `tin` с тарифом `plan`, днём выпуска `issued` и последним днём
-/// `until`, подписанный `signing`.
+/// Ключ на `tin` с тарифом `plan`, днём выпуска `issued`, последним днём
+/// `until` и числом мест `seats` (у «Pro» — версия 2), подписанный `signing`.
 ///
 /// Закрытый ключ не от пары `public` — отказ: подписанный им ключ окно
 /// назвало бы подделкой. Подписанный проверяется так же, как его проверит
@@ -331,6 +374,7 @@ fn sign(
     plan: Plan,
     issued: Date,
     until: Date,
+    seats: Option<u8>,
 ) -> Result<Key, String> {
     let own = signing.verifying_key().to_bytes();
     if own != *public {
@@ -340,22 +384,32 @@ fn sign(
             hex(public)
         ));
     }
-    let message = Key::message(tin, plan, issued, until);
+    let message = Key::message(tin, plan, issued, until, seats);
     let signature = signing.sign(&message).to_bytes();
-    let key = Key::signed(tin.clone(), plan, issued, until, signature)
-        .map_err(|_| format!("последний день срока {} раньше дня выпуска {}", until.iso(), issued.iso()))?;
+    let key = Key::signed(tin.clone(), plan, issued, until, seats, signature).map_err(|_| {
+        if issued > until {
+            format!("последний день срока {} раньше дня выпуска {}", until.iso(), issued.iso())
+        } else {
+            format!("мест {seats:?} у тарифа {}: так ключ не пишется", plan_word(plan))
+        }
+    })?;
     match Key::read(&key.text(), public) {
         Ok(read) if read == key => Ok(key),
         _ => Err("выпущенный ключ не прошёл проверку окна — не отправляйте его".to_owned()),
     }
 }
 
-/// Продление (`--renew`; условия, п. 4.1): самый долгий ключ на `tin`
-/// в журнале `path` и последний день ключа, который его продлевает, —
+/// Продление (`--renew`; условия, п. 4.1): самый долгий ключ тарифа `plan`
+/// на `tin` в журнале `path` и последний день ключа, который его продлевает, —
 /// [`year_after`] его последнего дня. Продлевается только идущий ключ: срок
 /// ключа, оплаченного после конца действующего, — со дня выдачи, и его
 /// называет `--until`. Поэтому кончившийся раньше `today` ключ — отказ,
 /// как и ՀՎՀՀ без ключей, и журнал при отказе не меняется.
+///
+/// Тариф — тот же, что у заказа (задача 38): «Pro» конторы и «Стандарт» ИП
+/// открывают разное, и у бухгалтера с ключом «Стандарт» своего ИП и ключом
+/// «Pro» на тот же ՀՎՀՀ продление одного не должно считаться от другого.
+/// О продлении «Pro» условия молчат: их пункт 4.1 написан для «Стандарта».
 ///
 /// Журнала нет — отказ своими словами, а не «ключей нет»: рядом с копией
 /// закрытого ключа, которую `pair` велит хранить вне машины, журнала
@@ -364,6 +418,7 @@ fn sign(
 fn renewal(
     path: &Path,
     tin: &Tin,
+    plan: Plan,
     public: &[u8; PUBLIC_KEY_BYTES],
     today: Date,
 ) -> Result<(Key, Date), String> {
@@ -380,11 +435,20 @@ fn renewal(
     };
     let keys = journal(&text, public)
         .map_err(|problem| format!("журнал {}: {problem} — поправьте её или назовите --until", path.display()))?;
-    let Some(last) = keys.into_iter().filter(|key| key.tin() == tin).max_by_key(Key::until) else {
+    let on_tin: Vec<Key> = keys.into_iter().filter(|key| key.tin() == tin).collect();
+    if on_tin.is_empty() {
         return Err(format!(
             "в журнале {} ключей на ՀՎՀՀ {} нет: срок нового ключа — со дня выдачи, назовите --until",
             path.display(),
             tin.as_str()
+        ));
+    }
+    let Some(last) = on_tin.into_iter().filter(|key| key.plan() == plan).max_by_key(Key::until) else {
+        return Err(format!(
+            "в журнале {} на ՀՎՀՀ {} нет ключей тарифа {}: продлевается ключ того же тарифа, а новый — со дня выдачи, назовите --until",
+            path.display(),
+            tin.as_str(),
+            plan_word(plan)
         ));
     };
     let until = year_after(last.until())
@@ -469,10 +533,21 @@ fn line(key: &Key) -> String {
         "{}\t{}\t{}\t{}\t{}\n",
         key.issued().iso(),
         key.tin().as_str(),
-        plan_word(key.plan()),
+        plan_column(key),
         key.until().iso(),
         key.text()
     )
+}
+
+/// Тариф в журнале: словом флага `--plan`, а у «Pro» версии 2 — и с числом
+/// мест: `pro:30`. Столбца для мест нет: журнал с новым столбцом не прочли бы
+/// строки, выпущенные раньше, — первая строка журнала у них прежняя. У «Pro»
+/// версии 1 мест в ключе нет, и строка у него та же, что раньше.
+fn plan_column(key: &Key) -> String {
+    match (key.plan(), key.version(), key.seats()) {
+        (Plan::Pro, 2, Some(seats)) => format!("{}:{seats}", plan_word(Plan::Pro)),
+        (plan, ..) => plan_word(plan).to_owned(),
+    }
 }
 
 /// Тариф — словом флага `--plan`.
@@ -576,13 +651,14 @@ mod tests {
     /// значения, без нужного, оба срока сразу и негодное значение — отказ.
     #[test]
     fn order_reads_flags() {
-        let full = Order::parse(&args("--until 2027-10-10 --key D:/flash/seed.txt --plan pro --tin 00054321"));
+        let full = Order::parse(&args("--until 2027-10-10 --key D:/flash/seed.txt --plan pro --seats 12 --tin 00054321"));
         assert_eq!(
             full,
             Ok(Order {
                 tin: tin("00054321"),
                 plan: Plan::Pro,
                 until: Until::Day(day("2027-10-10")),
+                seats: Some(12),
                 key: Some(PathBuf::from("D:/flash/seed.txt")),
             })
         );
@@ -592,6 +668,7 @@ mod tests {
                 tin: tin("00054321"),
                 plan: Plan::Standard,
                 until: Until::Day(day("2027-10-10")),
+                seats: None,
                 key: None,
             })
         );
@@ -601,9 +678,15 @@ mod tests {
                 tin: tin("00054321"),
                 plan: Plan::Standard,
                 until: Until::Renew,
+                seats: None,
                 key: Some(PathBuf::from("D:/flash/seed.txt")),
             })
         );
+        assert_eq!(
+            Order::parse(&args(&format!("--tin 00054321 --plan pro --seats {MAX_IPS} --renew"))).map(|order| order.seats),
+            Ok(Some(100))
+        );
+        assert!(USAGE.contains(&format!("от 1 до {MAX_IPS}")), "в подсказке — не тот предел мест");
         let mut accepted = Vec::new();
         for line in [
             "--tin 00054321 --plan standard",
@@ -618,6 +701,13 @@ mod tests {
             "--renew --tin 00054321 --plan standard --renew",
             "--tin 00054321 --plan standard --renew 2027-10-10",
             "--tin 00054321 --renew",
+            "--tin 00054321 --plan standard --seats 5 --until 2027-10-10",
+            "--tin 00054321 --plan pro --seats 0 --until 2027-10-10",
+            "--tin 00054321 --plan pro --seats 101 --until 2027-10-10",
+            "--tin 00054321 --plan pro --seats 300 --until 2027-10-10",
+            "--tin 00054321 --plan pro --seats тридцать --until 2027-10-10",
+            "--tin 00054321 --plan pro --seats 30 --seats 30 --until 2027-10-10",
+            "--tin 00054321 --plan pro --until 2027-10-10 --seats",
         ] {
             if Order::parse(&args(line)).is_ok() {
                 accepted.push(line);
@@ -633,13 +723,16 @@ mod tests {
     #[test]
     fn signs_only_with_the_pair_of_the_build() {
         let (owner, issued, until) = (tin("00054321"), day("2026-10-27"), day("2027-10-10"));
-        let key = sign(&signer(), &public(), &owner, Plan::Standard, issued, until).expect("своя пара");
+        let key = sign(&signer(), &public(), &owner, Plan::Standard, issued, until, None).expect("своя пара");
         assert_eq!(Key::read(&key.text(), &public()), Ok(key.clone()));
         assert_eq!(
-            (key.tin().as_str(), key.plan(), key.issued(), key.until()),
-            ("00054321", Plan::Standard, issued, until)
+            (key.tin().as_str(), key.plan(), key.issued(), key.until(), key.version()),
+            ("00054321", Plan::Standard, issued, until, 1)
         );
-        let other = sign(&signer(), &license::PUBLIC_KEY, &owner, Plan::Standard, issued, until);
+        let pro = sign(&signer(), &public(), &owner, Plan::Pro, issued, until, Some(12)).expect("своя пара");
+        assert_eq!(Key::read(&pro.text(), &public()), Ok(pro.clone()));
+        assert_eq!((pro.plan(), pro.seats(), pro.version()), (Plan::Pro, Some(12), 2));
+        let other = sign(&signer(), &license::PUBLIC_KEY, &owner, Plan::Standard, issued, until, None);
         assert!(
             other.as_ref().is_err_and(|error| error.contains("не от этой сборки")),
             "чужая пара: {other:?}"
@@ -651,9 +744,11 @@ mod tests {
     #[test]
     fn until_is_not_before_issue() {
         let (owner, issued) = (tin("00054321"), day("2026-10-27"));
-        assert!(sign(&signer(), &public(), &owner, Plan::Standard, issued, issued).is_ok());
-        let late = sign(&signer(), &public(), &owner, Plan::Standard, issued, day("2026-10-26"));
+        assert!(sign(&signer(), &public(), &owner, Plan::Standard, issued, issued, None).is_ok());
+        let late = sign(&signer(), &public(), &owner, Plan::Standard, issued, day("2026-10-26"), None);
         assert!(late.as_ref().is_err_and(|error| error.contains("раньше дня выпуска")), "{late:?}");
+        let seated = sign(&signer(), &public(), &owner, Plan::Standard, issued, issued, Some(5));
+        assert!(seated.as_ref().is_err_and(|error| error.contains("так ключ не пишется")), "{seated:?}");
     }
 
     /// Семя читается так, как его пишет `pair`: 64 знака и перевод строки —
@@ -698,7 +793,8 @@ mod tests {
 
     /// Выпуск — по файлу, который пишет `pair`: журнал рядом с ним
     /// начинается заголовками, каждый ключ — строкой в конец, а ключ чужой
-    /// пары в журнал не ложится.
+    /// пары в журнал не ложится. «Pro» без `--seats` — на `PRO_SEATS` мест,
+    /// версией 2, и в журнале — с числом мест.
     #[test]
     fn issue_keeps_the_journal_next_to_the_secret() {
         let (folder, secret) = folder("journal");
@@ -716,16 +812,86 @@ mod tests {
 
         let (first, second) = (first.expect("своя пара").key, second.expect("своя пара").key);
         assert!(other.is_err(), "ключ чужой пары: {other:?}");
+        assert_eq!((second.version(), second.seats()), (2, Some(PRO_SEATS)));
         assert_eq!(
             journal.expect("журнал"),
             format!(
                 "выпущен\tՀՎՀՀ\tтариф\tпоследний день\tключ\n\
                  2026-10-27\t00054321\tstandard\t2027-10-10\t{}\n\
-                 2026-10-27\t00054321\tpro\t2027-12-31\t{}\n",
+                 2026-10-27\t00054321\tpro:30\t2027-12-31\t{}\n",
                 first.text(),
                 second.text()
             )
         );
+    }
+
+    /// Продлевается ключ того же тарифа: «Pro» — от самого долгого «Pro» на
+    /// этот ՀՎՀՀ, а не от «Стандарта», который дольше, и с его числом мест,
+    /// пока `--seats` не назовёт другого. «Стандарт» без своих ключей не
+    /// продлевается от «Pro» — отказ, а журнал не тронут.
+    #[test]
+    fn renew_keeps_the_plan_and_its_seats() {
+        let (folder, secret) = folder("plan");
+        let pro = |until: &str, seats: Option<u8>| Order {
+            plan: Plan::Pro,
+            seats,
+            ..order(until)
+        };
+        let standard = issue(&order("2028-06-30"), &secret, &public(), day("2026-11-01"));
+        let wide = issue(&pro("2027-06-30", Some(50)), &secret, &public(), day("2026-11-01"));
+        let renewed = issue(
+            &Order { plan: Plan::Pro, ..renew("00054321") },
+            &secret,
+            &public(),
+            day("2027-06-01"),
+        );
+        let named = issue(
+            &Order {
+                plan: Plan::Pro,
+                seats: Some(40),
+                ..renew("00054321")
+            },
+            &secret,
+            &public(),
+            day("2027-06-02"),
+        );
+        let other = issue(&renew("07654321"), &secret, &public(), day("2027-06-02"));
+        let journal = fs::read_to_string(folder.join(JOURNAL)).unwrap_or_default();
+        let _ = fs::remove_dir_all(&folder);
+
+        assert!(standard.is_ok() && wide.is_ok(), "{standard:?} {wide:?}");
+        let mut wrong = Vec::new();
+        match &renewed {
+            Ok(Issued { key, renewed: Some(old) })
+                if old.seats() == Some(50) && key.seats() == Some(50) && key.until() == day("2028-06-30") => {}
+            got => wrong.push(format!("продление «Pro»: {got:?}")),
+        }
+        match &named {
+            // Самый долгий «Pro» — уже продлённый, до 2028-06-30.
+            Ok(Issued { key, renewed: Some(old) })
+                if old.until() == day("2028-06-30") && key.seats() == Some(40) && key.until() == day("2029-06-30") => {}
+            got => wrong.push(format!("продление «Pro» с --seats: {got:?}")),
+        }
+        match &other {
+            Err(error) if error.contains("ключей на ՀՎՀՀ 07654321 нет") => {}
+            got => wrong.push(format!("другой ՀՎՀՀ: {got:?}")),
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+        assert_eq!(journal.lines().count(), 5, "{journal}");
+
+        // Только «Pro» на ՀՎՀՀ — «Стандарт» от него не продлевается.
+        let (folder, secret) = self::folder("plan-refuse");
+        let first = issue(&pro("2027-06-30", None), &secret, &public(), day("2026-11-01"));
+        let before = fs::read_to_string(folder.join(JOURNAL)).unwrap_or_default();
+        let refused = issue(&renew("00054321"), &secret, &public(), day("2027-06-01"));
+        let after = fs::read_to_string(folder.join(JOURNAL)).unwrap_or_default();
+        let _ = fs::remove_dir_all(&folder);
+        assert!(first.is_ok(), "{first:?}");
+        assert!(
+            refused.as_ref().is_err_and(|error| error.contains("нет ключей тарифа standard")),
+            "{refused:?}"
+        );
+        assert_eq!(after, before, "журнал тронут отказом");
     }
 
     /// Продление — последний день плюс год: в году продления 365 дней, а 366
@@ -877,7 +1043,7 @@ mod tests {
     #[test]
     fn journal_reads_only_what_issue_writes() {
         let owner = tin("00054321");
-        let key = sign(&signer(), &public(), &owner, Plan::Standard, day("2026-11-09"), day("2027-11-08"))
+        let key = sign(&signer(), &public(), &owner, Plan::Standard, day("2026-11-09"), day("2027-11-08"), None)
             .expect("своя пара");
         let stranger = SigningKey::from_bytes(&[9; 32]);
         let foreign = sign(
@@ -887,10 +1053,20 @@ mod tests {
             Plan::Standard,
             day("2026-11-09"),
             day("2028-11-08"),
+            None,
         )
         .expect("пара другого");
         let row = line(&key);
         assert_eq!(journal(&format!("{HEADER}{row}"), &public()), Ok(vec![key.clone()]));
+        // «Pro» версии 2 — с числом мест в столбце тарифа, версии 1 — без.
+        let pro = sign(&signer(), &public(), &owner, Plan::Pro, day("2026-11-09"), day("2027-11-08"), Some(30))
+            .expect("своя пара");
+        let pro_row = line(&pro);
+        assert!(pro_row.contains("\tpro:30\t"), "{pro_row}");
+        assert_eq!(journal(&format!("{HEADER}{row}{pro_row}"), &public()), Ok(vec![key.clone(), pro.clone()]));
+        if journal(&format!("{HEADER}{}", pro_row.replacen("\tpro:30\t", "\tpro:31\t", 1)), &public()).is_ok() {
+            panic!("принята строка «Pro» с другим числом мест");
+        }
         let notepad = format!("\u{FEFF}{HEADER}\n{row}").replace('\n', "\r\n");
         assert_eq!(journal(&notepad, &public()), Ok(vec![key.clone()]));
         let spaces = format!("{HEADER}\n{row}").replace('\n', " \n");

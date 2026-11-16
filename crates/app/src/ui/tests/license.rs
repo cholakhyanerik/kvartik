@@ -10,8 +10,9 @@
 use ed25519_dalek::{Signer, SigningKey};
 use kvartik_core::format::Stored;
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
-use kvartik_core::license::{self, License, Plan};
+use kvartik_core::license::{self, License, OfficeLicense, Plan};
 use kvartik_core::model::activity::ActivityCode;
+use kvartik_core::model::office::Ip;
 use kvartik_core::model::client::Client;
 use kvartik_core::model::date::Date;
 use kvartik_core::model::document::Document;
@@ -49,10 +50,22 @@ pub(in crate::ui) fn signer() -> SigningKey {
 fn key_text(seed: [u8; 32], tin: &str, until: Date) -> String {
     let tin = Tin::parse(tin).expect("годный ՀՎՀՀ");
     let issued = clock::today().expect("часы с датой");
-    let message = license::Key::message(&tin, Plan::Standard, issued, until);
+    let message = license::Key::message(&tin, Plan::Standard, issued, until, None);
     let signature = SigningKey::from_bytes(&seed).sign(&message).to_bytes();
-    license::Key::signed(tin, Plan::Standard, issued, until, signature)
+    license::Key::signed(tin, Plan::Standard, issued, until, None, signature)
         .expect("срок не раньше выпуска")
+        .text()
+}
+
+/// Ключ «Pro» на `seats` мест на `tin` до `until`, подписанный парой проб, —
+/// так его записал бы `kvartik-keygen` (задача 38).
+fn pro_text(tin: &str, until: Date, seats: u8) -> String {
+    let tin = Tin::parse(tin).expect("годный ՀՎՀՀ");
+    let issued = clock::today().expect("часы с датой");
+    let message = license::Key::message(&tin, Plan::Pro, issued, until, Some(seats));
+    let signature = signer().sign(&message).to_bytes();
+    license::Key::signed(tin, Plan::Pro, issued, until, Some(seats), signature)
+        .expect("годный ключ Pro")
         .text()
 }
 
@@ -74,6 +87,7 @@ fn forget_trial() {
             "kvartik.license",
             "kvartik.license_told",
             "kvartik.trial_told",
+            "kvartik.pro_told",
         ] {
             let _ = storage.remove_item(name);
         }
@@ -110,10 +124,15 @@ fn days(lang: Lang, n: i32) -> String {
 /// Срок ключа «Стандарт» до `until` словами экрана лицензии — со днями,
 /// которые остались, считая сегодня.
 fn key_until(lang: Lang, until: Date) -> String {
+    plan_until(lang, Key::PlanStandard, until)
+}
+
+/// Срок ключа тарифа `plan` до `until` словами экрана лицензии.
+fn plan_until(lang: Lang, plan: Key, until: Date) -> String {
     let today = clock::today().expect("часы с датой");
     fill(
         t(lang, Key::LicenseKeyUntil),
-        &[t(lang, Key::PlanStandard), &i18n::date(lang, until), &days(lang, until.days_since(today) + 1)],
+        &[t(lang, plan), &i18n::date(lang, until), &days(lang, until.days_since(today) + 1)],
     )
 }
 
@@ -968,5 +987,271 @@ async fn a_trial_ending_within_a_week_asks_once() {
     host.remove();
     set_hash("");
     forget_trial();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Ввести строку `text` в поле ключа и нажать «Ввести ключ».
+fn enter_key(host: &HtmlElement, lang: Lang, text: &str) -> bool {
+    match host.query_selector("#license textarea").ok().flatten() {
+        Some(area) => {
+            type_into(&area.unchecked_into::<HtmlInputElement>(), text);
+            button(host, &[t(lang, Key::LicenseEnter)]).map(|button| button.click()).is_some()
+        }
+        None => false,
+    }
+}
+
+/// Убрать за тестом конторы всё, что он оставил: метку устройства, базы ИП
+/// списка и саму контору, — иначе следующие тесты открыли бы не ту базу.
+async fn forget_office_bases() {
+    if let Ok(office) = Store::open_office(|_| {}).await
+        && let Ok(listed) = crate::store::office::list(&office).await
+    {
+        drop(office);
+        for ip in listed.records.iter().filter(|ip| ip.base() != crate::store::DB_NAME) {
+            crate::store::delete_database(ip.base()).await;
+        }
+    }
+    crate::store::delete_database(crate::store::office::OFFICE_DB).await;
+    super::office::forget_office();
+}
+
+/// Ключ «Pro» (задача 38) — на ՀՎՀՀ бухгалтера, не профиля, — ложится не
+/// в базу ИП, а в контору: её ещё нет, и она заводится с открытым ИП в списке,
+/// а устройство помнит, что ведёт контору. Окно говорит о местах, а не
+/// «ключ на другой ИНН», срок — «Pro», выпуск снова открыт, а в списке
+/// введённых у ключа — число мест. Повтор — «уже введён».
+#[wasm_bindgen_test]
+async fn a_pro_key_goes_to_the_office() {
+    base_with_draft().await;
+    forget_office_bases().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let today = clock::today().expect("часы с датой");
+    trial_from(today.add_days(-100).expect("дата"));
+    let until = today.add_days(365).expect("дата");
+
+    let (host, mounted) = mount_at("#/license");
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::LicenseClosedNow)).await {
+        wrong.push("экран лицензии не открылся запертым".to_owned());
+    }
+    let pro = pro_text("07654321", until, 3);
+    let entered = fill(t(lang, Key::LicenseProEntered), &["3", t(lang, Key::OfficeTitle)]);
+    if !enter_key(&host, lang, &pro) || !wait_for(&host, &entered).await {
+        wrong.push(format!("ключ Pro не введён: «{}»", license_text(&host)));
+    }
+    if !wait_for(&host, &plan_until(lang, Key::PlanPro, until)).await {
+        wrong.push("срок — не ключа Pro".to_owned());
+    }
+    let screen = license_text(&host);
+    let mismatch = fill(t(lang, Key::LicenseOtherTin), &["07654321", TIN]);
+    for (what, found) in [
+        ("«ключ на другой ИНН»", screen.contains(&mismatch)),
+        ("«не тот ИНН»", screen.contains(t(lang, Key::LicenseNotProfileTin))),
+        ("«сейчас закрыто»", screen.contains(t(lang, Key::LicenseClosedNow))),
+    ] {
+        if found {
+            wrong.push(format!("у ключа Pro — {what}"));
+        }
+    }
+    for fact in [fill(t(lang, Key::LicenseSeats), &["3"]), t(lang, Key::LicenseForOffice).to_owned()] {
+        if !screen.contains(&fact) {
+            wrong.push(format!("у введённого ключа Pro нет «{fact}»"));
+        }
+    }
+    if !enter_key(&host, lang, &pro) || !wait_for(&host, t(lang, Key::LicenseKnown)).await {
+        wrong.push("повтор ключа Pro не сказан".to_owned());
+    }
+
+    let office = Store::open_office(|_| {}).await.expect("контора открыта");
+    let ips = crate::store::office::list(&office).await.expect("список читается");
+    let keys = crate::store::office::keys(&office).await.expect("ключи читаются");
+    drop(office);
+    let bases: Vec<&str> = ips.records.iter().map(Ip::base).collect();
+    if keys.records.len() != 1 || bases != [crate::store::DB_NAME] {
+        wrong.push(format!("в конторе ключей {}, а ИП {bases:?}", keys.records.len()));
+    }
+    if !Device::new().office() {
+        wrong.push("устройство не помнит контору".to_owned());
+    }
+    let store = Store::open(|_| {}).await.expect("база открыта");
+    let in_base = store.read().expect("чтение").list::<License>().await.expect("ключи").records.len();
+    drop(store);
+    if in_base != 0 {
+        wrong.push(format!("ключ Pro лёг в базу ИП: записей ключей {in_base}"));
+    }
+
+    if !open_draft(&host).await {
+        wrong.push("в списке нет черновика".to_owned());
+    }
+    if !wait_for(&host, t(lang, Key::DocIssueHint)).await || button(&host, &[t(lang, Key::DocIssue)]).is_none() {
+        wrong.push("с ключом Pro «Выпустить» не вернулось".to_owned());
+    }
+
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_trial();
+    forget_office_bases().await;
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Ключ «Pro» открывает первых ИП списка по дню добавления: на одно место
+/// у открытого ИП, добавленного позже другого, места нет — экран лицензии
+/// так и говорит, выпуск заперт, а экран ИП называет его «без места».
+/// Убрали из списка того, кто раньше, — место освободилось, и срок — «Pro».
+#[wasm_bindgen_test]
+async fn a_pro_key_opens_only_its_seats() {
+    base_with_draft().await;
+    forget_office_bases().await;
+    let lang = Lang::Ru;
+    let device = Device::new();
+    device.set_ui_lang(lang);
+    let (today, now) = (clock::today().expect("часы с датой"), clock::now());
+    trial_from(today.add_days(-100).expect("дата"));
+    let until = today.add_days(365).expect("дата");
+    let earlier = Ip::new(today.add_days(-2).expect("дата"), now);
+    let open = Ip::first(None, today, now);
+    let key = license::Key::read(&pro_text("07654321", until, 1), &signer().verifying_key().to_bytes())
+        .expect("ключ пары проб");
+    let pro = OfficeLicense::enter(key, &[], now).expect("ключ Pro");
+    let office = Store::open_office(|_| {}).await.expect("контора открыта");
+    let mut writes = Writes::default();
+    writes.insert(&earlier);
+    writes.insert(&open);
+    writes.insert(&pro);
+    office.write().expect("транзакция").commit(writes).await.expect("записано");
+    drop(office);
+    device.set_office();
+    device.set_base(crate::store::DB_NAME);
+
+    let (host, mounted) = mount_at("#/license");
+    let mut wrong = Vec::new();
+    let no_seat = t(lang, Key::LicenseProNoSeat).to_owned();
+    if !wait_for(&host, &no_seat).await {
+        wrong.push(format!("нет слов, что места нет: «{}»", license_text(&host)));
+    }
+    if !license_text(&host).contains(t(lang, Key::LicenseClosedNow)) {
+        wrong.push("без места выпуск не заперт".to_owned());
+    }
+
+    set_hash("#/office");
+    let nameless = t(lang, Key::OfficeNameless);
+    if !wait_for(&host, t(lang, Key::OfficeNoSeat)).await {
+        wrong.push("экран ИП не назвал открытого «без места»".to_owned());
+    }
+    let pro_line = fill(t(lang, Key::OfficePro), &[&i18n::date(lang, until), "1"]);
+    if !super::section_text(&host, "office").contains(&pro_line) {
+        wrong.push(format!("на экране ИП нет «{pro_line}»"));
+    }
+    // Пока идёт ключ «Pro», «ключ у каждого ИП свой» на экране ИП неправда.
+    if super::section_text(&host, "office").contains(t(lang, Key::OfficeKeyEach)) {
+        wrong.push("под ключом Pro — «ключ у каждого ИП свой»".to_owned());
+    }
+    match super::office::wait_row_button(&host, nameless, t(lang, Key::OfficeRemove)).await {
+        Some(remove) => remove.click(),
+        None => wrong.push("у раннего ИП нет «Убрать из списка»".to_owned()),
+    }
+    let freed = wait_until(|| !super::section_text(&host, "office").contains(t(lang, Key::OfficeNoSeat))).await;
+    if !freed {
+        wrong.push("убранный ранний ИП не освободил место".to_owned());
+    }
+
+    set_hash("#/license");
+    if !wait_for(&host, &plan_until(lang, Key::PlanPro, until)).await {
+        wrong.push("с освободившимся местом срок — не «Pro»".to_owned());
+    }
+    if license_text(&host).contains(&no_seat) {
+        wrong.push("место освободилось, а слова о нём остались".to_owned());
+    }
+
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_trial();
+    forget_office_bases().await;
+    crate::store::delete_database(earlier.base()).await;
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Записать в контору список и ключ «Pro» в обход окна — так их оставила
+/// бы другая вкладка — и метку устройства.
+async fn office_with_pro(ips: &[&Ip], key: &str) {
+    let key = license::Key::read(key, &signer().verifying_key().to_bytes()).expect("ключ пары проб");
+    let pro = OfficeLicense::enter(key, &[], clock::now()).expect("ключ Pro");
+    let office = Store::open_office(|_| {}).await.expect("контора открыта");
+    let mut writes = Writes::default();
+    for ip in ips {
+        writes.insert(*ip);
+    }
+    writes.insert(&pro);
+    office.write().expect("транзакция").commit(writes).await.expect("записано");
+    Device::new().set_office();
+}
+
+/// Ключ «Pro» ввели в другой вкладке, а эта контору не читала: тот же ключ
+/// здесь — «уже введён», и окно перечитывает контору, а не остаётся запертым
+/// до перезагрузки (ревью задачи 38).
+#[wasm_bindgen_test]
+async fn a_known_pro_key_brings_the_office_in() {
+    base_with_draft().await;
+    forget_office_bases().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let today = clock::today().expect("часы с датой");
+    trial_from(today.add_days(-100).expect("дата"));
+    let until = today.add_days(365).expect("дата");
+    let (host, mounted) = mount_at("#/license");
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::LicenseClosedNow)).await {
+        wrong.push("экран лицензии не открылся запертым".to_owned());
+    }
+    let pro = pro_text("07654321", until, 3);
+    office_with_pro(&[&Ip::first(None, today, clock::now())], &pro).await;
+    if !enter_key(&host, lang, &pro) || !wait_for(&host, t(lang, Key::LicenseKnown)).await {
+        wrong.push("тот же ключ Pro — не «уже введён»".to_owned());
+    }
+    if !wait_for(&host, &plan_until(lang, Key::PlanPro, until)).await {
+        wrong.push(format!("после «уже введён» срок — не «Pro»: «{}»", license_text(&host)));
+    }
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_trial();
+    forget_office_bases().await;
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Пустая база ИП с местом в ключе «Pro», запуск после конца пробного
+/// периода: срок — ключа «Pro», и окно остаётся на главном, а не уводит на
+/// экран лицензии с «пробный период кончился» (ревью задачи 38: срок пустой
+/// базы считался пробным периодом, пока его не пересчитает часть).
+#[wasm_bindgen_test]
+async fn an_empty_base_with_a_pro_seat_opens_home() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    forget_office_bases().await;
+    let lang = Lang::Ru;
+    let device = Device::new();
+    device.set_ui_lang(lang);
+    let today = clock::today().expect("часы с датой");
+    trial_from(today.add_days(-100).expect("дата"));
+    let until = today.add_days(365).expect("дата");
+    office_with_pro(&[&Ip::first(None, today, clock::now())], &pro_text("07654321", until, 1)).await;
+    device.set_base(crate::store::DB_NAME);
+    let (host, mounted) = launch_at("#/");
+    let mut wrong = Vec::new();
+    let chip = fill(t(lang, Key::LicenseChipKey), &[&days(lang, until.days_since(today) + 1)]);
+    if let Err(seen) = wait_chip(&host, "nav", &chip).await {
+        wrong.push(format!("метка «{seen}», а не «{chip}»"));
+    }
+    if shown_screens(&host) != ["home"] {
+        wrong.push(format!("запуск увёл с главного: {:?}", shown_screens(&host)));
+    }
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_trial();
+    forget_office_bases().await;
     assert!(wrong.is_empty(), "{wrong:#?}");
 }

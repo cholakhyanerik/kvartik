@@ -3083,6 +3083,27 @@ strings! {
     LicenseLastDay = "до {} включительно", "until {} inclusive", "մինչև {} ներառյալ";
     LicenseNotSigned = "подпись не сходится", "signature doesn't match", "ստորագրությունը չի համապատասխանում";
     LicenseNotProfileTin = "не тот ИНН, что в профиле", "not the TIN in the profile", "պրոֆիլի ՀՎՀՀ-ն չէ";
+    /// Ключ «Pro» конторы (задача 38). Шаблон: число мест.
+    LicenseSeats = "мест: {}", "seats: {}", "տեղեր՝ {}";
+    /// У ключа «Pro» в списке введённых: ИНН профиля ему не нужен.
+    LicenseForOffice = "для ИП в программе", "for the entrepreneurs in the app", "ծրագրի ԱՁ-ների համար";
+    /// Шаблоны: число мест ключа и имя экрана списка (`OfficeTitle`). Число —
+    /// подписью «мест: N», а дальше — без согласования с ним: «первых 1 ИП»
+    /// или «их» при одном месте были бы не по-русски.
+    LicenseProEntered =
+        "Ключ «Pro» введён, мест в нём: {}. Места достаются ИП списка «{}» в том порядке, в каком их добавили.",
+        "“Pro” key entered, seats: {}. Seats go to the entrepreneurs on the “{}” list in the order they were added.",
+        "«Pro» բանալին մուտքագրված է, տեղեր՝ {}։ Տեղերը տրվում են «{}» ցանկի ԱՁ-ներին՝ ըստ ավելացման հերթականության։";
+    /// Места не хватило — без числа мест: его называет строка ключа ниже.
+    LicenseProNoSeat =
+        "Этому ИП места в ключе «Pro» не хватило: места достаются ИП в том порядке, в каком их добавили. Уберите из списка ИП, которых больше не ведёте,\u{A0}— место освободится.",
+        "This entrepreneur didn't get a seat in the “Pro” key: seats go to entrepreneurs in the order they were added. Remove from the list the ones you no longer serve, and a seat will free up.",
+        "Այս ԱՁ-ին «Pro» բանալում տեղ չհասավ. տեղերը տրվում են ԱՁ-ներին՝ ըստ ավելացման հերթականության։ Հեռացրեք ցանկից այն ԱՁ-ներին, որոնց այլևս չեք սպասարկում, և տեղ կազատվի։";
+    /// Шаблон: предел записей ключей «Pro» (`license::MAX_KEYS`).
+    LicenseProFull =
+        "Ключей «Pro» в программе уже {}\u{A0}— больше не бывает.",
+        "The app already holds {} “Pro” keys, the most it can.",
+        "Ծրագրում արդեն {} «Pro» բանալի կա՝ ավելին չի լինում։";
     /// Тарифы (PDF, «Деньги»): имена, а не перевод.
     PlanStandard = "Стандарт", "Standard", "Ստանդարտ";
     PlanPro = "Pro", "Pro", "Pro";
@@ -3244,6 +3265,15 @@ strings! {
         "Ключ лицензии у каждого ИП свой\u{A0}— на его ИНН (ՀՎՀՀ).",
         "Each entrepreneur needs their own license key, issued to their TIN (ՀՎՀՀ).",
         "Յուրաքանչյուր ԱՁ-ի լիցենզիայի բանալին իրենն է՝ տրված նրա ՀՎՀՀ-ին։";
+    /// Идущий ключ «Pro» конторы (задача 38). Шаблоны: последний день и число
+    /// мест.
+    OfficePro =
+        "Ключ «Pro» до {} включительно, мест: {}. Места достаются ИП списка в том порядке, в каком их добавили.",
+        "“Pro” key until {} inclusive, seats: {}. Seats go to the entrepreneurs on the list in the order they were added.",
+        "«Pro» բանալին՝ մինչև {} ներառյալ, տեղեր՝ {}։ Տեղերը տրվում են ցանկի ԱՁ-ներին՝ ըստ ավելացման հերթականության։";
+    /// У ИП, которому места в ключе «Pro» не хватило, — словом, а не только
+    /// цветом (Правило 4).
+    OfficeNoSeat = "без места в ключе «Pro»", "no seat in the “Pro” key", "«Pro» բանալում տեղ չունի";
     OfficeRemove = "Убрать из списка", "Remove from the list", "Հեռացնել ցանկից";
     /// Убранный ИП не стирается (решение 2026-11-05, предложение агента).
     OfficeRemovedTitle = "Убранные из списка", "Removed from the list", "Ցանկից հեռացվածներ";

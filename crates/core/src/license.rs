@@ -16,8 +16,9 @@
 //!
 //! # Что запирает конец срока
 //!
-//! Решение человека 2026-10-27: без срока — пробного периода или ключа на
-//! ՀՎՀՀ профиля — нельзя выпустить новый счёт или акт ([`Access::issue`])
+//! Решение человека 2026-10-27: без срока — пробного периода, ключа на
+//! ՀՎՀՀ профиля или места в ключе «Pro» конторы — нельзя выпустить новый
+//! счёт или акт ([`Access::issue`])
 //! и открыть числа для расчёта ([`Access::report`]). Всё остальное работает
 //! всегда: данные, черновики, книга, налог на экране, оплаты,
 //! аннулирование, PDF выпущенных документов, копия. Годовое продление
@@ -53,8 +54,20 @@
 //! | 10–13 | последний день срока, так же |
 //! | 14–77 | подпись Ed25519 над [`DOMAIN`] и байтами 0–13 |
 //!
+//! Байты версии 2 (с 0.0.134) — ключ «Pro» с числом мест (задача 38):
+//!
+//! | байты | что |
+//! |---|---|
+//! | 0 | версия ключа — 2 |
+//! | 1–13 | как у версии 1; тариф — только 2, «Pro» |
+//! | 14 | число мест: сколько ИП конторы открывает ключ, от 1 |
+//! | 15–78 | подпись Ed25519 над [`DOMAIN`] и байтами 0–14 |
+//!
 //! Новый тариф или поле — новая версия ключа: прежняя программа скажет
 //! «ключ для новой версии», а не «ключ испорчен» ([`KeyError::Newer`]).
+//! «Стандарт» по-прежнему выпускается версией 1: его читают и программы до
+//! 0.0.134. У ключа «Pro» версии 1 числа мест нет, и мест у него
+//! [`PRO_SEATS`].
 //!
 //! Записью — base32 (RFC 4648, без `=`) группами по пять знаков через
 //! дефис: ключ приходит в мессенджере или письме, а у base32 только
@@ -64,6 +77,17 @@
 //!
 //! В данных — `{"meta":{…},"key":"AEAAA-…"}`: ключ той же записью, какой
 //! его выдал автор.
+//!
+//! # Ключ Pro
+//!
+//! Бухгалтеру со многими ИП (задача 38, решение человека 2026-11-05): ключ
+//! «Pro» лежит не в базе ИП, а в базе конторы ([`OfficeLicense`]), и в копию
+//! одного ИП не попадает по построению. Он открывает первых N живых ИП списка
+//! конторы по дню добавления, где N — число мест ключа ([`seat`]). ՀՎՀՀ у
+//! него — бухгалтера, и с ՀՎՀՀ профиля ИП он не сверяется: ՀՎՀՀ бухгалтера
+//! нет в счетах его клиентов, и привязка ни от чего не защищала бы — это
+//! принятый риск (Правило 13). Ключ «Pro» в базе ИП — его могли ввести до
+//! 0.0.134 — открывает, как и раньше, только ИП своего ՀՎՀՀ.
 //!
 //! # Срок на виду
 //!
@@ -120,17 +144,24 @@ pub const SOON_DAYS: i32 = 7;
 /// что автор подпишет той же парой.
 pub const DOMAIN: &[u8] = b"Kvartik license key\n";
 
-/// Версия ключа, которую пишет и понимает эта программа.
-const VERSION: u8 = 1;
+/// Самая новая версия ключа, которую понимает эта программа: 1 — «Стандарт»
+/// и «Pro» без числа мест, 2 — «Pro» с числом мест (шапка модуля).
+const VERSION: u8 = 2;
 
-/// Полей ключа в байтах — до подписи.
-const FIELDS: usize = 14;
+/// Полей ключа версии 1 в байтах — до подписи.
+const FIELDS_V1: usize = 14;
+
+/// Полей ключа версии 2: ещё байт числа мест.
+const FIELDS_V2: usize = FIELDS_V1 + 1;
 
 /// Подписи в байтах.
 const SIGNATURE: usize = ed25519_dalek::SIGNATURE_LENGTH;
 
-/// Ключ в байтах.
-const BYTES: usize = FIELDS + SIGNATURE;
+/// Мест у ключа «Pro», если автор не назвал другого числа: «Pro» —
+/// бухгалтеру до 30 ИП (PDF, «Деньги»; решение человека 2026-11-05, число
+/// ставит автор при выпуске). Столько же — у ключа «Pro» версии 1: в нём числа
+/// мест нет (предложение агента 2026-11-05).
+pub const PRO_SEATS: u8 = 30;
 
 /// Знаков base32 в группе записи.
 const GROUP: usize = 5;
@@ -145,8 +176,8 @@ const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 /// Самый большой ՀՎՀՀ — восемь девяток.
 const MAX_TIN: u32 = 99_999_999;
 
-/// Тариф (PDF, «Деньги»): «Стандарт» — один ИП, «Pro» — бухгалтеру со
-/// многими (задача 38). Сейчас оба открывают одно и то же.
+/// Тариф (PDF, «Деньги»): «Стандарт» — один ИП, ИП своего ՀՎՀՀ, «Pro» —
+/// бухгалтеру со многими: в конторе он открывает места ([`seat`], задача 38).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Plan {
     Standard,
@@ -206,28 +237,39 @@ pub struct Key {
     plan: Plan,
     issued: Date,
     until: Date,
+    /// Число мест — у ключа версии 2, а она бывает только у «Pro»; у версии 1
+    /// его в байтах нет ([`Key::seats`]).
+    seats: Option<u8>,
     signature: [u8; SIGNATURE],
 }
 
 impl Key {
-    /// Байты, которые подписывает автор: [`DOMAIN`] и поля ключа. Зовёт
+    /// Байты, которые подписывает автор: [`DOMAIN`] и поля ключа; `seats` —
+    /// число мест ключа «Pro» версии 2, `None` — ключ версии 1. Зовёт
     /// `kvartik-keygen`, а проверка — [`Key::verify`].
-    pub fn message(tin: &Tin, plan: Plan, issued: Date, until: Date) -> Vec<u8> {
+    pub fn message(tin: &Tin, plan: Plan, issued: Date, until: Date, seats: Option<u8>) -> Vec<u8> {
         let mut message = DOMAIN.to_vec();
-        message.extend_from_slice(&fields(tin, plan, issued, until));
+        message.extend_from_slice(&fields(tin, plan, issued, until, seats));
         message
     }
 
     /// Ключ из полей и подписи автора — для `kvartik-keygen`. Подпись здесь
-    /// не проверяется. Срок, кончившийся раньше выпуска, — не ключ.
+    /// не проверяется. Срок, кончившийся раньше выпуска, — не ключ, как
+    /// и «Стандарт» с числом мест и «Pro» на ноль мест: так автор не пишет.
     pub fn signed(
         tin: Tin,
         plan: Plan,
         issued: Date,
         until: Date,
+        seats: Option<u8>,
         signature: [u8; SIGNATURE],
     ) -> Result<Self, KeyError> {
-        if issued > until {
+        let seats_fit = match (plan, seats) {
+            (_, None) => true,
+            (Plan::Pro, Some(seats)) => seats > 0,
+            (Plan::Standard, Some(_)) => false,
+        };
+        if issued > until || !seats_fit {
             return Err(KeyError::Malformed);
         }
         Ok(Self {
@@ -235,6 +277,7 @@ impl Key {
             plan,
             issued,
             until,
+            seats,
             signature,
         })
     }
@@ -246,12 +289,15 @@ impl Key {
             return Err(KeyError::Malformed);
         }
         let bytes = unbase32(text).ok_or(KeyError::Malformed)?;
-        match bytes.first() {
+        let fields = match bytes.first() {
             Some(&version) if version > VERSION => return Err(KeyError::Newer),
-            Some(&VERSION) => {}
+            Some(1) => FIELDS_V1,
+            Some(2) => FIELDS_V2,
             _ => return Err(KeyError::Malformed),
+        };
+        if bytes.len() != fields + SIGNATURE {
+            return Err(KeyError::Malformed);
         }
-        let bytes: &[u8; BYTES] = bytes.as_slice().try_into().map_err(|_| KeyError::Malformed)?;
         let tin = u32::from_be_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]);
         let tin = (tin <= MAX_TIN)
             .then(|| Tin::parse(&format!("{tin:08}")).ok())
@@ -263,9 +309,10 @@ impl Key {
             Date::new(year, bytes[at + 2], bytes[at + 3]).ok_or(KeyError::Malformed)
         };
         let (issued, until) = (day(6)?, day(10)?);
+        let seats = (fields == FIELDS_V2).then(|| bytes[FIELDS_V1]);
         let mut signature = [0; SIGNATURE];
-        signature.copy_from_slice(&bytes[FIELDS..]);
-        Self::signed(tin, plan, issued, until, signature)
+        signature.copy_from_slice(&bytes[fields..]);
+        Self::signed(tin, plan, issued, until, seats, signature)
     }
 
     /// Ключ, который ввёл человек: запись и подпись открытым ключом
@@ -286,7 +333,7 @@ impl Key {
         let Ok(public) = VerifyingKey::from_bytes(public) else {
             return false;
         };
-        let message = Self::message(&self.tin, self.plan, self.issued, self.until);
+        let message = Self::message(&self.tin, self.plan, self.issued, self.until, self.seats);
         public
             .verify_strict(&message, &Signature::from_bytes(&self.signature))
             .is_ok()
@@ -294,7 +341,7 @@ impl Key {
 
     /// Запись ключа: base32 группами по пять знаков через дефис.
     pub fn text(&self) -> String {
-        let mut bytes = fields(&self.tin, self.plan, self.issued, self.until).to_vec();
+        let mut bytes = fields(&self.tin, self.plan, self.issued, self.until, self.seats);
         bytes.extend_from_slice(&self.signature);
         let plain = base32(&bytes);
         let mut text = String::with_capacity(plain.len() + plain.len() / GROUP);
@@ -326,6 +373,23 @@ impl Key {
     pub const fn until(&self) -> Date {
         self.until
     }
+
+    /// Версия ключа — 1 или 2 (шапка модуля): по ней журнал выпуска пишет,
+    /// названо ли в ключе число мест.
+    pub const fn version(&self) -> u8 {
+        if self.seats.is_some() { 2 } else { 1 }
+    }
+
+    /// Сколько ИП конторы открывает ключ «Pro» ([`seat`]); у «Стандарта» —
+    /// `None`: он открывает ИП своего ՀՎՀՀ. У «Pro» версии 1 числа мест нет —
+    /// у него [`PRO_SEATS`].
+    pub const fn seats(&self) -> Option<u8> {
+        match (self.plan, self.seats) {
+            (Plan::Standard, _) => None,
+            (Plan::Pro, Some(seats)) => Some(seats),
+            (Plan::Pro, None) => Some(PRO_SEATS),
+        }
+    }
 }
 
 /// В данных ключ — его запись, как её выдал автор.
@@ -350,22 +414,24 @@ impl<'de> Deserialize<'de> for Key {
     }
 }
 
-/// Поля ключа в байтах — таблица в шапке модуля.
-fn fields(tin: &Tin, plan: Plan, issued: Date, until: Date) -> [u8; FIELDS] {
+/// Поля ключа в байтах — таблицы в шапке модуля: с числом мест — версия 2,
+/// без него — 1.
+fn fields(tin: &Tin, plan: Plan, issued: Date, until: Date, seats: Option<u8>) -> Vec<u8> {
     // `Tin` — восемь цифр ASCII: число не больше `MAX_TIN`.
     let number = tin
         .as_str()
         .bytes()
         .fold(0_u32, |number, digit| number * 10 + u32::from(digit - b'0'));
-    let mut bytes = [0; FIELDS];
-    bytes[0] = VERSION;
-    bytes[1..5].copy_from_slice(&number.to_be_bytes());
-    bytes[5] = plan.byte();
-    for (at, day) in [(6, issued), (10, until)] {
-        bytes[at..at + 2].copy_from_slice(&day.year().to_be_bytes());
-        bytes[at + 2] = day.month();
-        bytes[at + 3] = day.day();
+    let mut bytes = Vec::with_capacity(FIELDS_V2 + SIGNATURE);
+    bytes.push(if seats.is_some() { 2 } else { 1 });
+    bytes.extend_from_slice(&number.to_be_bytes());
+    bytes.push(plan.byte());
+    for day in [issued, until] {
+        bytes.extend_from_slice(&day.year().to_be_bytes());
+        bytes.push(day.month());
+        bytes.push(day.day());
     }
+    bytes.extend(seats);
     bytes
 }
 
@@ -478,7 +544,8 @@ pub fn moments(meta: &RecordMeta) -> impl Iterator<Item = Timestamp> {
 pub enum Term {
     /// Пробный период до этого дня включительно.
     Trial { last: Date },
-    /// Ключ на ՀՎՀՀ профиля до этого дня включительно.
+    /// Ключ на ՀՎՀՀ профиля или место в ключе «Pro» конторы до этого дня
+    /// включительно.
     Key { plan: Plan, last: Date },
 }
 
@@ -494,15 +561,61 @@ impl Term {
 /// Ключ, который открывает срок: тариф и последний день.
 pub type Paid = (Plan, Date);
 
-/// Что открыто: самый долгий из сроков — пробного периода и ключей на
-/// ՀՎՀՀ профиля с верной подписью. Ключ на другой ՀՎՀՀ не открывает ничего,
-/// как и ключ без ՀՎՀՀ в профиле: ключ выдан на ИП, а не на устройство.
+/// Больше записей ключей «Pro» в конторе не бывает (Правило 1, «Накопители
+/// ограничены»): ключ — год, и сто — век продлений. Подпись каждого ключа окно
+/// проверяет при расчёте срока, и тысячи поддельных из чужого файла копии
+/// держали бы страницу секундами на каждом сохранении, а убрать запись ключа
+/// нечем (ревью задачи 38). Поэтому копию, с которой ключей стало бы больше,
+/// программа не кладёт (`format::office::route`, `restore_all` окна), а ключ
+/// сверх предела не вводит.
+pub const MAX_KEYS: usize = 100;
+
+/// Места ключей «Pro» `keys` с верной подписью `public` — число мест
+/// и последний день каждого — для [`seat`]. Подпись каждого ключа проверяется
+/// один раз за расчёт, а один и тот же ключ в двух записях — один раз вовсе:
+/// места по готовому списку считаются без неё (ревью задачи 38).
+pub fn pro_seats<'a>(public: &[u8; PUBLIC_KEY_BYTES], keys: impl IntoIterator<Item = &'a Key>) -> Vec<(u8, Date)> {
+    let mut seen: Vec<&Key> = Vec::new();
+    let mut seats = Vec::new();
+    for key in keys {
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
+        if let Some(count) = key.seats()
+            && key.verify(public)
+        {
+            seats.push((count, key.until));
+        }
+    }
+    seats
+}
+
+/// Ключ «Pro» конторы, который открывает ИП на месте `place` — его номере
+/// среди живых ИП списка в порядке добавления, с нуля
+/// (`model::office::place`): самый долгий из ключей `seats` ([`pro_seats`]),
+/// у которого мест больше `place`, — и кончившийся, как у [`Access::new`].
+/// ՀՎՀՀ ключа не сверяется (шапка модуля, «Ключ Pro»). `None` — ИП нет среди
+/// живых или ключа с местом для него нет.
+pub fn seat(seats: &[(u8, Date)], place: Option<usize>) -> Option<Paid> {
+    let place = place?;
+    seats
+        .iter()
+        .filter(|&&(count, _)| place < usize::from(count))
+        .map(|&(_, last)| (Plan::Pro, last))
+        .max_by_key(|&(_, last)| last)
+}
+
+/// Что открыто: самый долгий из сроков — пробного периода, ключей на ՀՎՀՀ
+/// профиля с верной подписью и места в ключе «Pro» конторы
+/// ([`Access::with_seat`]). Ключ на другой ՀՎՀՀ не открывает ничего, как
+/// и ключ без ՀՎՀՀ в профиле: ключ выдан на ИП, а не на устройство.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Access {
     /// Последний день пробного периода.
     trial: Option<Date>,
-    /// Самый долгий ключ с верной подписью на ՀՎՀՀ профиля — и кончившийся:
-    /// его помнит устройство ([`remember`]).
+    /// Самый долгий ключ с верной подписью на ՀՎՀՀ профиля или место в ключе
+    /// «Pro» — и кончившийся: его помнит устройство ([`remember`]).
     key: Option<Paid>,
 }
 
@@ -522,6 +635,18 @@ impl Access {
             .map(|key| (key.plan, key.until))
             .max_by_key(|&(_, last)| last);
         Self::known(trial.and_then(trial_last), key)
+    }
+
+    /// Тот же доступ и место в ключе «Pro» конторы `seat` ([`seat`]): ключ —
+    /// самый долгий из своего на ՀՎՀՀ профиля и места, при равном последнем
+    /// дне — свой.
+    #[must_use]
+    pub fn with_seat(self, seat: Option<Paid>) -> Self {
+        let key = match (self.key, seat) {
+            (Some(own), Some(pro)) if pro.1 > own.1 => Some(pro),
+            (own, pro) => own.or(pro),
+        };
+        Self { key, ..self }
     }
 
     /// Доступ по срокам, которые уже известны: последнему дню пробного
@@ -662,6 +787,63 @@ impl License {
 
     /// Ключи живых записей.
     pub fn keys(licenses: &[License]) -> impl Iterator<Item = &Key> {
+        licenses
+            .iter()
+            .filter(|license| !license.is_deleted())
+            .map(|license| &license.key)
+    }
+
+    /// Постоянный идентификатор.
+    pub const fn id(&self) -> RecordId {
+        self.meta.id()
+    }
+
+    /// Ключ.
+    pub const fn key(&self) -> &Key {
+        &self.key
+    }
+
+    /// Убрана ли запись.
+    pub const fn is_deleted(&self) -> bool {
+        self.meta.is_deleted()
+    }
+}
+
+/// Ключ «Pro», введённый в конторе (задача 38, шапка модуля, «Ключ Pro»), —
+/// запись базы конторы: в данных так же, как [`License`], но своим видом,
+/// и в базу ИП не идёт никогда. Так в копию одного ИП, отданную клиенту, он
+/// не попадёт, а ключ «Стандарт» не ляжет в контору.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OfficeLicense {
+    meta: RecordMeta,
+    key: Key,
+}
+
+impl Stored for OfficeLicense {
+    const KIND: &'static str = "office_license";
+
+    fn meta(&self) -> &RecordMeta {
+        &self.meta
+    }
+}
+
+impl OfficeLicense {
+    /// Команда «ввести ключ Pro» — проверенный `Key::read`. `None` — этот
+    /// ключ уже введён или это не «Pro»: «Стандарт» конторе ничего не открыл
+    /// бы, его место — в базе своего ИП ([`License::enter`]).
+    pub fn enter(key: Key, entered: &[OfficeLicense], now: Timestamp) -> Option<Self> {
+        let known = entered
+            .iter()
+            .any(|license| !license.is_deleted() && license.key == key);
+        (key.plan == Plan::Pro && !known).then(|| Self {
+            meta: RecordMeta::new(now),
+            key,
+        })
+    }
+
+    /// Ключи живых записей.
+    pub fn keys(licenses: &[OfficeLicense]) -> impl Iterator<Item = &Key> {
         licenses
             .iter()
             .filter(|license| !license.is_deleted())

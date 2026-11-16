@@ -31,6 +31,13 @@
 //! изменённая позже, как при любом слиянии ([`latest`]): иначе победила бы
 //! последняя в файле (ревью 2026-11-06).
 //!
+//! Ключи «Pro» копии (`license::OfficeLicense`) — записи конторы, а не ИП:
+//! они идут в базу конторы и сливаются с ней, как любые записи, по
+//! идентификатору ([`Route::keys`]), и метка базы, если она у них есть, ничего
+//! не значит. Ни в одну базу ИП они не ложатся: из неё ключ ушёл бы с копией
+//! одного ИП к клиенту. Больше `license::MAX_KEYS` их в копии не бывает —
+//! такую маршрут не кладёт ([`RouteError::TooManyKeys`]).
+//!
 //! Копия одного ИП маршрута не знает: её окно кладёт в открытую базу. Но
 //! если это копия ИП, который в списке есть, а открыт другой, окно говорит
 //! об этом, а не заводит ИП второй раз ([`listed`]).
@@ -39,6 +46,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::backup::Entry;
 use super::{FORMAT_VERSION, FormatError, Stored, decode_record};
+use crate::license::{MAX_KEYS, OfficeLicense};
 use crate::model::office::{self, Ip, MAX_IPS};
 use crate::model::profile::Profile;
 use crate::model::record::RecordId;
@@ -60,6 +68,9 @@ pub struct Route {
     /// Записи списка конторы, которые лягут: новые ИП и записи, изменённые
     /// в копии позже.
     pub office: Vec<Ip>,
+    /// Ключи «Pro» копии — без меток, по одной версии каждой записи: окно
+    /// сливает их с базой конторы (шапка модуля).
+    pub keys: Vec<Entry>,
     /// Базы и их записи — по одной транзакции на базу.
     pub bases: Vec<Landing>,
 }
@@ -73,6 +84,10 @@ pub enum RouteError {
     /// С копией ИП в программе стало бы больше [`MAX_IPS`]: столько
     /// вышло бы.
     TooMany(usize),
+    /// В копии записей ключей «Pro» больше `license::MAX_KEYS`: столько.
+    /// Программа такую не пишет, а проверка подписи каждого держала бы
+    /// страницу (ревью задачи 38).
+    TooManyKeys(usize),
 }
 
 impl From<FormatError> for RouteError {
@@ -87,10 +102,13 @@ impl From<FormatError> for RouteError {
 /// метки базы и записи конторы в базы не идут.
 pub fn route(incoming: Vec<Entry>, local: &[Ip], spare: Option<&str>) -> Result<Route, RouteError> {
     let mut ips = Vec::new();
+    let mut keys = Vec::new();
     let mut entries = Vec::new();
     for entry in incoming {
         if entry.kind() == Ip::KIND {
             ips.push(decode_record::<Ip>(FORMAT_VERSION, entry.record())?);
+        } else if entry.kind() == OfficeLicense::KIND {
+            keys.push(entry.untagged());
         } else {
             entries.push(entry);
         }
@@ -176,7 +194,11 @@ pub fn route(incoming: Vec<Entry>, local: &[Ip], spare: Option<&str>) -> Result<
     for landing in &mut bases {
         landing.entries = latest(std::mem::take(&mut landing.entries));
     }
-    Ok(Route { office, bases })
+    let keys = latest(keys);
+    if keys.len() > MAX_KEYS {
+        return Err(RouteError::TooManyKeys(keys.len()));
+    }
+    Ok(Route { office, keys, bases })
 }
 
 /// Одна запись — одна: из версий одной записи (вид и идентификатор) в одной

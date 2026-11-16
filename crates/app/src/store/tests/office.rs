@@ -2,15 +2,21 @@
 //! на каждого ИП и базой конторы, настоящий WebCrypto. Маршрут ИП по базам
 //! проверяет ядро (`format::office`); здесь — путь от баз до файла и обратно.
 
-use kvartik_core::format::backup::{FILE_KINDS, Header, KDF_ITERATIONS, KINDS, SALT_BYTES, is_full, open as open_file};
+use kvartik_core::format::Stored;
+use kvartik_core::format::backup::{
+    Entry, FILE_KINDS, Header, KDF_ITERATIONS, KINDS, SALT_BYTES, is_full, open as open_file,
+};
+use kvartik_core::license::{self, License, MAX_KEYS, OfficeLicense, Plan};
 use kvartik_core::model::office::{FIRST_BASE, Ip};
 use kvartik_core::model::profile::{Profile, ProfileData};
 use kvartik_core::model::text::Line;
+use kvartik_core::model::tin::Tin;
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::platform::{clock, crypto};
-use crate::store::backup::{Made, Sealing, make, make_all, restore_all, restore_new, unlock};
-use crate::store::office::{OFFICE_DB, list};
+use crate::store::backup::{Failure, Made, Sealing, make, make_all, restore_all, restore_new, unlock};
+use crate::store::StoreError;
+use crate::store::office::{OFFICE_DB, keys as office_keys, list};
 use crate::store::{DB_NAME, Store, Writes, delete_database};
 
 const PASSWORD: &str = "Երևան կопия всех ИП 2026";
@@ -144,6 +150,212 @@ async fn a_backup_of_all_ies_lands_in_each_base() {
     }
     delete_database(OFFICE_DB).await;
     assert!(wrong.is_empty(), "копия всех ИП: {wrong:#?}");
+}
+
+/// Записи файла копии `made` — расшифрованные.
+async fn entries_of(made: &Made) -> Vec<Entry> {
+    let file = open_file(&made.file).expect("файл открывается");
+    let (entries, _) = unlock(FILE_KINDS, &file, &crypto::normalize(PASSWORD)).await.expect("расшифрована");
+    entries
+}
+
+/// Ключ «Pro» конторы (задача 38) — в копии всех ИП и только в ней: копия
+/// одного ИП его не несёт. На свежем устройстве он ложится в контору, а не
+/// в базу ИП, и повтор его не множит.
+#[wasm_bindgen_test]
+async fn a_pro_key_travels_only_with_the_backup_of_all_ies() {
+    delete_database(OFFICE_DB).await;
+    delete_database(DB_NAME).await;
+    let (today, now) = (clock::today().expect("сегодня"), clock::now());
+    let aram = named("IE Aram");
+    let first = Ip::first(Some(&aram), today, now);
+    let tin = Tin::parse("07654321").expect("годный ՀՎՀՀ");
+    let until = today.add_days(365).expect("дата");
+    let key = license::Key::signed(tin, Plan::Pro, today, until, Some(30), [0; 64]).expect("ключ Pro");
+    let pro = OfficeLicense::enter(key, &[], now).expect("ключ Pro");
+    let open = Store::open_base(DB_NAME, |_| {}).await.expect("база открыта");
+    write(&open, &aram).await;
+    let office = Store::open_office(|_| {}).await.expect("контора открыта");
+    let mut writes = Writes::default();
+    writes.insert(&first);
+    writes.insert(&pro);
+    office.write().expect("транзакция").commit(writes).await.expect("записано");
+    let salt = crypto::random(SALT_BYTES).expect("соль");
+    let all = sealed(&salt, Some((&open, DB_NAME, &office)), None).await;
+    let single = sealed(&salt, None, Some(&open)).await;
+    let mut wrong = Vec::new();
+    if (all.records, single.records) != (3, 1) {
+        wrong.push(format!("в копии всех ИП {} записей, в копии одного — {}", all.records, single.records));
+    }
+    let single_entries = entries_of(&single).await;
+    if single_entries.iter().any(|entry| entry.kind() == OfficeLicense::KIND) || is_full(&single_entries) {
+        wrong.push("ключ Pro — в копии одного ИП".to_owned());
+    }
+    let entries = entries_of(&all).await;
+    if !entries.iter().any(|entry| entry.kind() == OfficeLicense::KIND && entry.base().is_none()) {
+        wrong.push("в копии всех ИП нет ключа Pro без метки базы".to_owned());
+    }
+
+    // Свежее устройство.
+    drop((open, office));
+    delete_database(DB_NAME).await;
+    delete_database(OFFICE_DB).await;
+    let open = Store::open_base(DB_NAME, |_| {}).await.expect("база открыта");
+    let office = Store::open_office(|_| {}).await.expect("контора открыта");
+    let done = restore_all(&open, DB_NAME, &office, entries.clone(), None, Some(DB_NAME))
+        .await
+        .expect("легла");
+    if (done.restored.added, done.failed.is_none()) != (2, true) {
+        wrong.push(format!("легло {} записей, сбой: {:?}", done.restored.added, done.failed));
+    }
+    let keys = || async {
+        let keys = office_keys(&office).await.expect("контора читается");
+        keys.records.into_iter().map(|license| license.id()).collect::<Vec<_>>()
+    };
+    if keys().await != [pro.id()] {
+        wrong.push(format!("в конторе ключи {:?}, а не ключ копии", keys().await));
+    }
+    let in_base = open.read().expect("чтение").list::<License>().await.expect("ключи").records.len();
+    let others = open.read().expect("чтение").list::<OfficeLicense>().await.expect("записи").records.len();
+    if (in_base, others) != (0, 0) {
+        wrong.push(format!("в базе ИП ключей {in_base} и записей конторы {others}"));
+    }
+    let again = restore_all(&open, DB_NAME, &office, entries, None, None).await.expect("повтор");
+    if again.restored.added + again.restored.updated != 0 || keys().await.len() != 1 {
+        wrong.push(format!("повтор что-то записал: {:?}", again.restored));
+    }
+    drop((open, office));
+    delete_database(OFFICE_DB).await;
+    delete_database(DB_NAME).await;
+    assert!(wrong.is_empty(), "ключ Pro в копии: {wrong:#?}");
+}
+
+/// Запись ключа «Pro» под этим идентификатором — испорченная: не JSON.
+async fn spoil_key(office: &Store, id: &str) {
+    let key: wasm_bindgen::JsValue = js_sys::Array::of2(&OfficeLicense::KIND.into(), &id.into()).into();
+    crate::store::tests::put_raw(office, &key, "не JSON").await;
+}
+
+/// Ключ «Pro» с последним днём `until`, подписью из нулей.
+fn pro_key(until: kvartik_core::model::date::Date) -> OfficeLicense {
+    let today = clock::today().expect("сегодня");
+    let tin = Tin::parse("07654321").expect("годный ՀՎՀՀ");
+    let key = license::Key::signed(tin, Plan::Pro, today, until, Some(30), [0; 64]).expect("ключ Pro");
+    OfficeLicense::enter(key, &[], clock::now()).expect("ключ Pro")
+}
+
+/// Нечитаемая запись ключа «Pro» копию всех ИП не останавливает — её только
+/// нет в копии, и окно называет число, — а нечитаемая запись ИП
+/// останавливает: база этого ИП выпала бы из копии молча (ревью задачи 38).
+#[wasm_bindgen_test]
+async fn a_broken_pro_key_does_not_stop_the_backup_of_all_ies() {
+    delete_database(OFFICE_DB).await;
+    delete_database(DB_NAME).await;
+    let (today, now) = (clock::today().expect("сегодня"), clock::now());
+    let aram = named("IE Aram");
+    let open = Store::open_base(DB_NAME, |_| {}).await.expect("база открыта");
+    write(&open, &aram).await;
+    let office = Store::open_office(|_| {}).await.expect("контора открыта");
+    let mut writes = Writes::default();
+    writes.insert(&Ip::first(Some(&aram), today, now));
+    office.write().expect("транзакция").commit(writes).await.expect("записано");
+    spoil_key(&office, "6e1d3f8a-9b52-4f4c-8d7e-3c8b2a1f0e45").await;
+    let salt = crypto::random(SALT_BYTES).expect("соль");
+    let key = crypto::derive(&crypto::normalize(PASSWORD), &salt, KDF_ITERATIONS).await.expect("ключ");
+    let header = Header::new("0.0.134", clock::now());
+    let sealing = Sealing {
+        header: &header,
+        key: &key,
+        salt: &salt,
+        iterations: KDF_ITERATIONS,
+    };
+    let mut wrong = Vec::new();
+    match make_all(&open, DB_NAME, &office, &sealing).await {
+        Ok(made) if (made.records, made.unreadable) == (2, 1) => {}
+        other => wrong.push(format!("с испорченным ключом: {:?}", other.map(|made| (made.records, made.unreadable)))),
+    }
+    let broken_ip: wasm_bindgen::JsValue =
+        js_sys::Array::of2(&Ip::KIND.into(), &"5d0c2f7e-8a41-4e3b-9c6d-2b7a1f0e9d34".into()).into();
+    crate::store::tests::put_raw(&office, &broken_ip, "не JSON").await;
+    if !matches!(make_all(&open, DB_NAME, &office, &sealing).await, Err(Failure::Store(StoreError::Damaged))) {
+        wrong.push("испорченная запись ИП не остановила копию".to_owned());
+    }
+    drop((open, office));
+    delete_database(OFFICE_DB).await;
+    delete_database(DB_NAME).await;
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Копию, с которой записей ключей «Pro» в конторе стало бы больше
+/// `MAX_KEYS`, восстановление не кладёт — ни ключей, ни списка, — а ровно до
+/// предела кладёт (ревью задачи 38: тысячи поддельных ключей держали бы
+/// страницу).
+#[wasm_bindgen_test]
+async fn pro_keys_over_the_limit_are_not_restored() {
+    delete_database(OFFICE_DB).await;
+    delete_database(DB_NAME).await;
+    let (today, now) = (clock::today().expect("сегодня"), clock::now());
+    let aram = named("IE Aram");
+    let first = Ip::first(Some(&aram), today, now);
+    let until = |n: usize| today.add_days(i32::try_from(n).expect("число") + 1).expect("дата");
+    let open = Store::open_base(DB_NAME, |_| {}).await.expect("база открыта");
+    write(&open, &aram).await;
+    let office = Store::open_office(|_| {}).await.expect("контора открыта");
+    let mut writes = Writes::default();
+    writes.insert(&first);
+    for n in 0..MAX_KEYS - 1 {
+        writes.insert(&pro_key(until(n)));
+    }
+    office.write().expect("транзакция").commit(writes).await.expect("записано");
+    let salt = crypto::random(SALT_BYTES).expect("соль");
+    let made = sealed(&salt, Some((&open, DB_NAME, &office)), None).await;
+    // Копия без ключей — список и база, — а к ней новые ключи.
+    let bare: Vec<Entry> = entries_of(&made)
+        .await
+        .into_iter()
+        .filter(|entry| entry.kind() != OfficeLicense::KIND)
+        .collect();
+    let with_new = |from: usize, count: usize| {
+        let mut entries = bare.clone();
+        for n in from..from + count {
+            let key = pro_key(until(n));
+            let stored = kvartik_core::format::encode(&key);
+            let id = key.id().to_string();
+            let raw = kvartik_core::format::backup::Raw {
+                kind: OfficeLicense::KIND,
+                id: &id,
+                text: Some(&stored),
+            };
+            let collected = kvartik_core::format::backup::collect(kvartik_core::format::backup::OFFICE_KINDS, [raw])
+                .expect("собрано");
+            entries.extend(collected.entries().iter().cloned());
+        }
+        entries
+    };
+    let mut wrong = Vec::new();
+    let count = || async { office_keys(&office).await.expect("ключи").records.len() };
+    // В самом файле ключей больше предела — его не кладёт маршрут; а с двумя
+    // новыми к 99 здешним их стало бы 101 — не кладёт слияние.
+    for (what, entries) in [("в файле", with_new(1_000, MAX_KEYS + 1)), ("с прежними", with_new(1_000, 2))] {
+        match restore_all(&open, DB_NAME, &office, entries, None, None).await {
+            Err(Failure::TooManyKeys) => {}
+            other => wrong.push(format!("{what} сверх предела: {:?}", other.map(|done| done.restored))),
+        }
+        if count().await != MAX_KEYS - 1 {
+            wrong.push(format!("{what} сверх предела что-то легло"));
+        }
+    }
+    match restore_all(&open, DB_NAME, &office, with_new(2_000, 1), None, None).await {
+        Ok(done) if done.restored.added == 1 => {}
+        other => wrong.push(format!("ровно предел: {:?}", other.map(|done| done.restored))),
+    }
+    if count().await != MAX_KEYS {
+        wrong.push("ровно до предела ключи не легли".to_owned());
+    }
+    drop((open, office));
+    delete_database(OFFICE_DB).await;
+    delete_database(DB_NAME).await;
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
 /// Копия одного ИП ложится новым ИП: своя новая база и запись в списке;

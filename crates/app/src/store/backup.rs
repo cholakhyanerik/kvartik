@@ -21,7 +21,9 @@ use kvartik_core::format::backup::{
     self, BackupError, Entry, Header, IV_BYTES, KINDS, Kind, Lock, MAX_FILE_BYTES, OFFICE_KINDS, Owner,
     Relation, Sealed,
 };
+use kvartik_core::format::Stored;
 use kvartik_core::format::office::{self as route, RouteError};
+use kvartik_core::license::{MAX_KEYS, OfficeLicense};
 use kvartik_core::model::date::Date;
 use kvartik_core::model::office::{Ip, MAX_IPS};
 use kvartik_core::model::record::Timestamp;
@@ -45,6 +47,9 @@ pub enum Failure {
     TooLarge,
     /// С копией ИП в программе стало бы больше `MAX_IPS`: столько.
     TooManyIps(usize),
+    /// С копией записей ключей «Pro» в конторе стало бы больше
+    /// `license::MAX_KEYS` (ревью задачи 38): такую программа не кладёт.
+    TooManyKeys,
 }
 
 impl From<StoreError> for Failure {
@@ -101,17 +106,21 @@ pub async fn make(store: &Store, kinds: &[Kind], sealing: &Sealing<'_>) -> Resul
 /// добавленный между двумя чтениями, оставил бы в файле метки без своего ИП,
 /// и файл не открылся бы (ревью 2026-11-06). Запись ИП не читается — отказ:
 /// база этого ИП молча выпала бы из копии, а день копии сдвинулся бы.
+/// А нечитаемая запись ключа «Pro» копию не останавливает — её только нет
+/// в копии, как и любой нечитаемой записи: убрать её в окне нечем, и иначе
+/// у конторы не осталось бы ни одной копии (ревью задачи 38).
 pub async fn make_all(
     open: &Store,
     open_name: &str,
     office_store: &Store,
     sealing: &Sealing<'_>,
 ) -> Result<Made, Failure> {
-    let (mut entries, unreadable) = collect(office_store, OFFICE_KINDS).await?;
-    if unreadable > 0 {
+    let dumped = office_store.read()?.dump().await?;
+    let stored_ips = dumped.iter().filter(|record| record.raw().kind == Ip::KIND).count();
+    let (mut entries, mut unreadable) = collect_dumped(&dumped, OFFICE_KINDS).await?;
+    if entries.iter().filter(|entry| entry.kind() == Ip::KIND).count() != stored_ips {
         return Err(Failure::Store(StoreError::Damaged));
     }
-    let mut unreadable = 0;
     for ip in route::ips(&entries).map_err(newer)? {
         let (base, skipped) = if ip.base() == open_name {
             collect(open, KINDS).await?
@@ -128,6 +137,11 @@ pub async fn make_all(
 /// Записи базы для копии — и сколько не читается: их видно в консоли.
 async fn collect(store: &Store, kinds: &[Kind]) -> Result<(Vec<Entry>, usize), Failure> {
     let dumped = store.read()?.dump().await?;
+    collect_dumped(&dumped, kinds).await
+}
+
+/// Записи выгрузки базы для копии — и сколько не читается.
+async fn collect_dumped(dumped: &[Dumped], kinds: &[Kind]) -> Result<(Vec<Entry>, usize), Failure> {
     let collected = backup::collect_sliced(kinds, dumped.iter().map(Dumped::raw), &mut breathe)
         .await
         .map_err(newer)?;
@@ -269,7 +283,9 @@ pub struct RestoredAll {
 /// Список — первым: запись списка без данных — пустой ИП, которого видно
 /// и можно убрать, а база без записи в списке потерялась бы. Не легла база —
 /// дальше не идёт, а говорит, что уже легло ([`RestoredAll::failed`]): окно
-/// перечитывает тронутое и просит повторить.
+/// перечитывает тронутое и просит повторить. Ключи «Pro» копии (с 0.0.134)
+/// ложатся той же транзакцией, что список, — слиянием с ключами конторы по
+/// идентификатору, как любые записи.
 pub async fn restore_all(
     open: &Store,
     open_name: &str,
@@ -282,8 +298,21 @@ pub async fn restore_all(
     local.extend(first.clone());
     let route = route::route(entries, &local, spare).map_err(|error| match error {
         RouteError::TooMany(count) => Failure::TooManyIps(count),
+        RouteError::TooManyKeys(_) => Failure::TooManyKeys,
         RouteError::Format(error) => newer(error),
     })?;
+    let tx = office_store.write()?;
+    let dumped = tx.dump().await?;
+    let keys = backup::merge(OFFICE_KINDS, &route.keys, dumped.iter().map(Dumped::raw)).map_err(newer)?;
+    // Записей ключей с копией стало бы больше предела — и вместе с прежними
+    // (`license::MAX_KEYS`): не писать ничего, транзакция кончится сама.
+    let stored_keys = dumped
+        .iter()
+        .filter(|record| record.raw().kind == OfficeLicense::KIND)
+        .count();
+    if stored_keys + keys.added() > MAX_KEYS {
+        return Err(Failure::TooManyKeys);
+    }
     let mut writes = Writes::default();
     if let Some(first) = &first {
         writes.insert(first);
@@ -291,15 +320,18 @@ pub async fn restore_all(
     for ip in &route.office {
         writes.update(ip);
     }
-    office::write(office_store, writes).await?;
+    for entry in keys.writes() {
+        writes.restore(entry);
+    }
+    tx.commit(writes).await?;
     let covers_all = local
         .iter()
         .all(|ip| route.bases.iter().any(|landing| landing.base == ip.base()));
     let mut done = RestoredAll {
         restored: Restored {
-            added: 0,
-            updated: 0,
-            unchanged: 0,
+            added: keys.added(),
+            updated: keys.updated(),
+            unchanged: keys.unchanged(),
         },
         open_touched: false,
         covers_all: covers_all && route.bases.iter().any(|landing| landing.base == open_name),

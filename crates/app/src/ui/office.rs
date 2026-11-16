@@ -1,6 +1,9 @@
-//! ИП в программе (задача 38, этапы 2–3): у каждого ИП своя база IndexedDB
+//! ИП в программе (задача 38, этапы 2–4): у каждого ИП своя база IndexedDB
 //! (`model::office`), открыт один, а список ИП — в базе конторы
-//! (`store/office.rs`).
+//! (`store/office.rs`). Там же — ключи «Pro» (с 0.0.134): ключ открывает первых
+//! N живых ИП списка по дню добавления (`license::seat`), и экран списка
+//! называет тех, кому места не хватило. Введённый ключ «Pro» заводит контору,
+//! если её ещё не было ([`Office::enter_pro`]).
 //!
 //! Другой ИП открывается перезагрузкой страницы, а не заменой данных на
 //! месте: `Base::replacements` не сбрасывает состояние экранов и запущенные
@@ -23,6 +26,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
+use kvartik_core::license::{self, MAX_KEYS, OfficeLicense};
 use kvartik_core::model::office::{self, Ip, MAX_IPS};
 use kvartik_core::model::profile::Profile;
 use kvartik_core::model::record::{RecordId, Timestamp};
@@ -31,7 +35,7 @@ use leptos::task::spawn_local;
 
 use crate::platform::{self, clock};
 use crate::store::device::Device;
-use crate::store::{DB_NAME, Event, Store, StoreError, Writes, office as office_store};
+use crate::store::{DB_NAME, Event, Listed, Store, StoreError, Writes, office as office_store};
 
 use super::backup::{BackupChip, Backups};
 use super::form::Forms;
@@ -69,6 +73,17 @@ pub struct Office {
     listed: RwSignal<bool>,
     /// Запись списка — изменение данных для автокопии (задача 29).
     backups: Backups,
+}
+
+/// Чем кончился ввод ключа «Pro» ([`Office::enter_pro`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum ProEntry {
+    /// Записан.
+    Entered,
+    /// Этот ключ уже введён.
+    Known,
+    /// Записей ключей уже `license::MAX_KEYS`: больше не бывает.
+    Full,
 }
 
 /// Почему действие со списком не вышло.
@@ -184,6 +199,84 @@ impl Office {
         Ok(())
     }
 
+    /// Следить за списком: кто зовёт это в эффекте, перезапустится, когда его
+    /// перечитали или поправили, — так срок перечитывает ключи «Pro» после
+    /// восстановления копии и ввода ключа в другой вкладке (`ui/license.rs`).
+    pub(super) fn track(self) {
+        self.ips.track();
+    }
+
+    /// Место открытого ИП среди живых ИП списка (`office::place`) —
+    /// отслеживаемое; `None` — списка нет или ИП в нём нет.
+    pub(super) fn place(self) -> Option<usize> {
+        let current = self.current.get();
+        self.ips.with(|ips| office::place(ips, &current))
+    }
+
+    /// Ключи «Pro» конторы — для срока (`Licenses::load`). Конторы нет — ИП
+    /// один — и ключей нет: базу конторы без метки устройства не открывают
+    /// (`indexedDB.open` завёл бы её пустой).
+    ///
+    /// Соединение — открытое конторой, а нет его — своё, на это чтение, но не
+    /// через [`Office::open`]: тот же код открытия делили бы часть конторы
+    /// и все части, которые считают срок, и разрез переложил его — главный
+    /// wasm вырос на 1 082 байта после brotli, а кусок, нужный части конторы при
+    /// запуске, — на 5,4 КБ (замер задачи 38, 2026-11-16).
+    pub(super) async fn pro_keys(self) -> Result<Listed<OfficeLicense>, StoreError> {
+        if !Device::new().office() {
+            return Ok(Listed {
+                records: Vec::new(),
+                unreadable: 0,
+            });
+        }
+        let store = match self.store.get_value() {
+            Some(store) => store,
+            None => Rc::new(Store::open_office(|_| {}).await?),
+        };
+        office_store::keys(&store).await
+    }
+
+    /// Ввести ключ «Pro» (задача 38) — в базу конторы, одной транзакцией:
+    /// прочитать список и введённые ключи, записать новый (команда ядра
+    /// `OfficeLicense::enter`). Конторы ещё нет — ИП один, — и она заводится,
+    /// как при «Добавить ИП»: в список ложится открытый ИП с именем из
+    /// профиля, а устройство запоминает, что ведёт контору (`several_now`).
+    /// Список потом перечитан, и срок перечитывает ключи сам ([`Office::track`]):
+    /// и тогда, когда этот ключ уже ввели — в другой вкладке, — а окно его не
+    /// знало (ревью задачи 38).
+    pub(super) async fn enter_pro(self, key: license::Key, profile: Option<Arc<Profile>>) -> Result<ProEntry, StoreError> {
+        let store = self.open().await?;
+        let tx = store.write()?;
+        let listed = tx.list::<Ip>().await?.records;
+        let entered = tx.list::<OfficeLicense>().await?.records;
+        let (today, now) = (clock::today(), clock::now());
+        // Транзакция без записи кончается сама и ничего не пишет.
+        let entry = match OfficeLicense::enter(key, &entered, now) {
+            _ if entered.len() >= MAX_KEYS => {
+                drop(tx);
+                ProEntry::Full
+            }
+            Some(license) => {
+                let mut writes = Writes::default();
+                if listed.is_empty() {
+                    writes.insert(&Ip::first(profile.as_deref(), today.ok_or(StoreError::Failed)?, now));
+                }
+                writes.insert(&license);
+                tx.commit(writes).await?;
+                ProEntry::Entered
+            }
+            None => {
+                drop(tx);
+                ProEntry::Known
+            }
+        };
+        if entry != ProEntry::Full {
+            self.several_now();
+            self.read(&store).await?;
+        }
+        Ok(entry)
+    }
+
     /// Копия всех ИП — когда устройство их ведёт несколько (`Device::office`):
     /// база конторы и имя открытой базы. Список не открылся — отказ, а не
     /// копия одного открытого ИП молча: человек считал бы, что в ней все.
@@ -236,7 +329,10 @@ impl Office {
     /// Больше ли одного живого ИП — отслеживаемое: тогда окно называет
     /// открытого над каждым экраном.
     pub fn several(self) -> bool {
-        self.ips.with(|ips| office::alive(ips).len() > 1)
+        // Счёт, а не `office::alive`: порядок здесь не нужен, а сортировка
+        // списка в главном wasm — лишние байты каждого первого захода
+        // (её зовёт экран копии; замер задачи 38).
+        self.ips.with(|ips| ips.iter().filter(|ip| !ip.is_removed()).count() > 1)
     }
 
     /// Запись открытого ИП в списке; `None` — список не читали.
@@ -497,6 +593,19 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
         base,
         ..
     } = ctx;
+    // Места ключей «Pro» конторы (задача 38) — свои, с подписью, проверенной
+    // здесь, в части книги: `Licenses` в `Ctx` экрана стоили главному wasm
+    // байтов (замер задачи 38). Перечитываются, когда перечитан список: ввод
+    // ключа и восстановление копии перечитывают его.
+    let seats = RwSignal::new(Vec::<(u8, kvartik_core::model::date::Date)>::new());
+    Effect::new(move |_| {
+        office.track();
+        spawn_local(async move {
+            if let Ok(keys) = office.pro_keys().await {
+                seats.set(license::pro_seats(&super::license::author(), OfficeLicense::keys(&keys.records)));
+            }
+        });
+    });
     spawn_local(async move {
         let read = match office.open().await {
             Ok(store) => office.read(&store).await,
@@ -542,6 +651,9 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
             }
         });
     };
+    // Ключ «Pro» конторы (задача 38): места — с подписью, проверенной один
+    // раз на перерисовку (`Licenses::pro_seats`).
+    let today = clock::today();
     let rows = move || {
         // База не выбрана — какой ИП открыт, ещё не решено (`chosen`).
         if !office.chosen.get() {
@@ -551,6 +663,9 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
         let lang = lang.get();
         let ips = office.ips.get();
         let alive = office::alive(&ips);
+        // Идёт ключ «Pro» — у ИП без места в нём это сказано словами.
+        let seats = seats.get();
+        let pro = today.filter(|&today| seats.iter().any(|&(_, last)| today <= last));
         // Списка ещё нет — ИП один, тот, что открыт: его имя — из профиля.
         if alive.is_empty() {
             let named = profiles.with(|data| data.map(|data| name_for(&data.name, lang)).unwrap_or_default());
@@ -567,17 +682,22 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
         }
         alive
             .into_iter()
-            .map(|ip| {
+            .enumerate()
+            .map(|(place, ip)| {
                 let is_current = ip.base() == current;
                 let tin = ip.tin().map(|tin| fill(t(lang, Key::TinShort), &[tin.as_str()]));
                 let to = ip.base().to_owned();
                 let id = ip.id();
+                let no_seat = pro.is_some_and(|today| {
+                    license::seat(&seats, Some(place)).is_none_or(|(_, last)| last < today)
+                });
                 view! {
                     <li class="entry office-ip" class:current=is_current>
                         <span class="entry-main">
                             <span class="entry-title">{name(ip, lang)}</span>
                             {tin.map(|tin| view! { <span class="entry-meta">{tin}</span> })}
                             {is_current.then(|| view! { <span class="entry-meta">{t(lang, Key::OfficeOpenNow)}</span> })}
+                            {no_seat.then(|| view! { <span class="entry-meta">{t(lang, Key::OfficeNoSeat)}</span> })}
                         </span>
                         {(!is_current).then(|| {
                             let to = to.clone();
@@ -653,18 +773,40 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
             view! { <p role="alert">{move || fill(t(lang.get(), Key::OfficeUnreadable), &[&count.to_string()])}</p> }
         })
     };
+    // Идущий ключ «Pro» (задача 38): до какого дня и сколько в нём мест.
+    let pro_term = move || {
+        let today = today?;
+        seats.with(|seats| seats.iter().copied().filter(|&(_, last)| today <= last).max_by_key(|&(_, last)| last))
+    };
+    let pro = move || {
+        let (seats, last) = pro_term()?;
+        let lang = lang.get();
+        let words = fill(
+            t(lang, Key::OfficePro),
+            &[&i18n::date(lang, last), &i18n::integer(lang, i64::from(seats))],
+        );
+        Some(view! { <p class="hint">{words}</p> })
+    };
     view! {
         <p>{tr(lang, Key::OfficeAbout)}</p>
         {unreadable}
         <ul class="list">{rows}</ul>
+        {pro}
         {problem}
         <button type="button" disabled=move || office.busy.get() on:click=add>
             <span class="label">{tr(lang, Key::OfficeAdd)}</span>
         </button>
         // Пробный период — у устройства, а ключ — на ИНН одного ИП (задача 93).
+        // Пока идёт ключ «Pro», «ключ у каждого свой» неправда: о нём — строка
+        // выше (ревью задачи 38).
         <p class="hint">{move || {
             let lang = lang.get();
-            [Key::OfficeAddAbout, Key::OfficeTrialShared, Key::OfficeKeyEach].map(|key| t(lang, key)).join(" ")
+            let keys = if pro_term().is_some() {
+                &[Key::OfficeAddAbout, Key::OfficeTrialShared][..]
+            } else {
+                &[Key::OfficeAddAbout, Key::OfficeTrialShared, Key::OfficeKeyEach][..]
+            };
+            keys.iter().map(|&key| t(lang, key)).collect::<Vec<_>>().join(" ")
         }}</p>
         {removed}
     }

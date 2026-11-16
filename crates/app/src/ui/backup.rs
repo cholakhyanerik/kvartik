@@ -173,7 +173,7 @@ impl From<Failure> for Hitch {
         match failure {
             Failure::Store(error) => Self::Store(error),
             Failure::Crypto(CryptoError::Unavailable) => Self::NoCrypto,
-            Failure::Crypto(_) | Failure::File(_) | Failure::TooManyIps(_) => Self::Failed,
+            Failure::Crypto(_) | Failure::File(_) | Failure::TooManyIps(_) | Failure::TooManyKeys => Self::Failed,
             Failure::TooLarge => Self::TooLarge,
         }
     }
@@ -756,6 +756,10 @@ impl From<Failure> for Problem {
             Failure::File(error) => error.into(),
             Failure::TooLarge => Self::Oversized,
             Failure::TooManyIps(_) => Self::TooManyIps,
+            // Больше `license::MAX_KEYS` записей ключей «Pro» программа не
+            // пишет — значит, и файл не её (ревью задачи 38). Своих слов нет:
+            // экран копии — в главном wasm, а случай — чужой файл.
+            Failure::TooManyKeys => Self::Say(Key::BackupNotOurs),
         }
     }
 }

@@ -25,7 +25,7 @@ const SAMPLE: &str = concat!(
     r#""base":"kvartik-ip-5d0c2f7e-8a41-4e3b-9c6d-2b7a1f0e9d34","#,
     r#""profile":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","#,
     r#""name":{"hy":"ԱՁ Աննա Հակոբյան","ru":"ИП Анна Акопян","en":"IE Anna Hakobyan"},"#,
-    r#""tin":"99999990","added":"2026-11-05"}"#
+    r#""tin":"99999990","added":"2026-11-05","added_at":null}"#
 );
 
 #[test]
@@ -42,6 +42,33 @@ fn data_shape_is_pinned() {
     assert_eq!(ip.added(), day(2026, 11, 5));
     assert!(!ip.is_removed());
     assert_eq!(serde_json::to_string(&ip).ok().as_deref(), Some(SAMPLE));
+    // С 0.0.134 — момент добавления; запись до него — без поля, и читается
+    // без момента.
+    let with_moment = SAMPLE.replace(r#""added_at":null"#, r#""added_at":1762300000000"#);
+    let moment: Ip = serde_json::from_str(&with_moment).expect("образец с моментом читается");
+    assert_eq!(serde_json::to_string(&moment).ok().as_deref(), Some(with_moment.as_str()));
+    let before: Ip = serde_json::from_str(&SAMPLE.replace(r#","added_at":null"#, "")).expect("запись до 0.0.134 читается");
+    assert_eq!(before, ip);
+}
+
+/// В один день места идут по моменту добавления: тридцать ИП, добавленных
+/// подряд, встают в том же порядке, какими бы ни вышли их случайные
+/// идентификаторы, а первый ИП программы — впереди добавленных с ним в один
+/// день. Добавленный позже места у прежних не отнимает (ревью задачи 38).
+#[test]
+fn the_same_day_keeps_the_order_of_adding() {
+    let today = day(2026, 11, 16);
+    let first = Ip::first(None, today, at(1_000));
+    let added: Vec<Ip> = (0..30).map(|n| Ip::new(today, at(2_000 + n))).collect();
+    let mut ips = added.clone();
+    ips.reverse();
+    ips.push(first.clone());
+    let order: Vec<&str> = alive(&ips).iter().map(|ip| ip.base()).collect();
+    let expected: Vec<&str> = std::iter::once(first.base()).chain(added.iter().map(Ip::base)).collect();
+    assert_eq!(order, expected, "порядок одного дня");
+    let places: Vec<Option<usize>> = added.iter().map(|ip| place(&ips, ip.base())).collect();
+    let expected: Vec<Option<usize>> = (1..=30).map(Some).collect();
+    assert_eq!(places, expected, "места одного дня");
 }
 
 /// Имя базы — только своё: первая или `kvartik-ip-<id>` в той записи
@@ -173,4 +200,37 @@ fn the_tab_opens_a_live_remembered_base() {
         wrong.push(format!("живые не по дню добавления: {order:?}"));
     }
     assert!(wrong.is_empty(), "выбор базы: {wrong:#?}");
+}
+
+/// Место ИП в ключе «Pro» — его номер среди живых по дню добавления, с нуля,
+/// как бы список ни лежал в базе: убранный места не занимает, а вернувшийся —
+/// снова на своём, впереди добавленных позже. Убранного и чужого среди мест нет.
+#[test]
+fn places_follow_the_day_added() {
+    let first = Ip::first(None, day(2026, 11, 1), at(1_000));
+    let second = Ip::new(day(2026, 11, 3), at(2_000));
+    let mut early = Ip::new(day(2026, 11, 2), at(3_000));
+    early.remove(at(4_000));
+    let ips = [second.clone(), early.clone(), first.clone()];
+    let mut wrong = Vec::new();
+    for (what, base, expected) in [
+        ("первый", first.base(), Some(0)),
+        ("добавленный позже", second.base(), Some(1)),
+        ("убранный", early.base(), None),
+        ("чужой", "kvartik-ip-x", None),
+    ] {
+        if place(&ips, base) != expected {
+            wrong.push(format!("{what}: {:?}", place(&ips, base)));
+        }
+    }
+    early.bring_back(at(5_000));
+    let back = [second.clone(), early.clone(), first.clone()];
+    if (place(&back, early.base()), place(&back, second.base())) != (Some(1), Some(2)) {
+        wrong.push(format!(
+            "вернувшийся: {:?}, добавленный позже: {:?}",
+            place(&back, early.base()),
+            place(&back, second.base())
+        ));
+    }
+    assert!(wrong.is_empty(), "места: {wrong:#?}");
 }

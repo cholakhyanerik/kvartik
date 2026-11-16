@@ -91,7 +91,7 @@ use super::{
     FIRST_VERSION, FORMAT_VERSION, FormatError, Stored, base64, decode_record, split_raw, wrap,
 };
 use crate::i18n::Lang;
-use crate::license::License;
+use crate::license::{License, OfficeLicense};
 use crate::model::attachment::Attachment;
 use crate::model::client::Client;
 use crate::model::date::Date;
@@ -293,8 +293,9 @@ pub const KINDS: &[Kind] = &[
 ];
 
 /// Виды записей конторы (задача 38): то, что копия всех ИП берёт из базы
-/// конторы и кладёт обратно. В базу ИП они не идут никогда.
-pub const OFFICE_KINDS: &[Kind] = &[Kind::of::<Ip>()];
+/// конторы и кладёт обратно, — список ИП и ключи «Pro». В базу ИП они не идут
+/// никогда.
+pub const OFFICE_KINDS: &[Kind] = &[Kind::of::<Ip>(), Kind::of::<OfficeLicense>()];
 
 /// Все виды, какие бывают в файле копии: записи баз ИП и записи конторы.
 /// Файл разбирается этим списком, а где чему лежать, решает метка базы
@@ -313,6 +314,7 @@ pub const FILE_KINDS: &[Kind] = &[
     Kind::of::<Opening>(),
     Kind::of::<IssuedLogo>(),
     Kind::of::<Ip>(),
+    Kind::of::<OfficeLicense>(),
 ];
 
 fn find(kinds: &[Kind], name: &str) -> Option<Kind> {
@@ -1014,19 +1016,20 @@ where
 }
 
 /// Копия устроена как одна из двух ([`Entry::base`]): копия одного ИП — без
-/// меток базы и без записей конторы, а копия всех ИП — записи конторы без
-/// метки и все остальные с меткой своего ИП из этой же копии. Иначе — порча:
-/// запись без своего ИП некуда положить, а запись конторы в базе ИП —
-/// чужая.
+/// меток базы и без записей конторы, а копия всех ИП — записи конторы
+/// ([`OFFICE_KINDS`]: ИП списка и ключи «Pro») без метки и все остальные
+/// с меткой своего ИП из этой же копии. Иначе — порча: запись без своего ИП
+/// некуда положить, а запись конторы в базе ИП — чужая.
 fn whole(entries: &[Entry]) -> Result<(), BackupError> {
     let ips: BTreeSet<RecordId> = entries
         .iter()
         .filter(|entry| entry.kind == Ip::KIND)
         .map(|entry| entry.meta.id())
         .collect();
-    let full = !ips.is_empty() || entries.iter().any(|entry| entry.base.is_some());
+    let office = |entry: &Entry| OFFICE_KINDS.iter().any(|kind| kind.name == entry.kind);
+    let full = entries.iter().any(|entry| office(entry) || entry.base.is_some());
     for entry in entries {
-        let fits = match (entry.kind == Ip::KIND, entry.base) {
+        let fits = match (office(entry), entry.base) {
             (true, base) => base.is_none(),
             (false, Some(base)) => ips.contains(&base),
             (false, None) => !full,
@@ -1318,12 +1321,14 @@ pub fn client_file_name(tin: Option<&Tin>, today: Date) -> String {
     )
 }
 
-/// Копия всех ИП (задача 38): в ней записи конторы или записи с меткой базы.
-/// Такую окно кладёт по ИП (`format::office::route`), а не в открытую базу.
+/// Копия всех ИП (задача 38): в ней записи конторы — ИП списка или ключ
+/// «Pro» — или записи с меткой базы. Такую окно кладёт по ИП
+/// (`format::office::route`), а не в открытую базу: запись конторы в базе ИП
+/// ушла бы с копией одного ИП к клиенту.
 pub fn is_full(entries: &[Entry]) -> bool {
-    entries
-        .iter()
-        .any(|entry| entry.kind() == Ip::KIND || entry.base().is_some())
+    entries.iter().any(|entry| {
+        OFFICE_KINDS.iter().any(|kind| kind.name() == entry.kind()) || entry.base().is_some()
+    })
 }
 
 /// Пора ли напомнить о копии: данные есть, а копии нет или она сделана

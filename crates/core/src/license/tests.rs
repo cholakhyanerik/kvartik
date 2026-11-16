@@ -25,8 +25,17 @@ fn tin(text: &str) -> Tin {
 /// Ключ, подписанный парой проб, — так его подписал бы `kvartik-keygen`.
 fn key(on: &str, plan: Plan, issued: Date, until: Date) -> Key {
     let tin = tin(on);
-    let signature = signer().sign(&Key::message(&tin, plan, issued, until)).to_bytes();
-    Key::signed(tin, plan, issued, until, signature).expect("срок не раньше выпуска")
+    let signature = signer().sign(&Key::message(&tin, plan, issued, until, None)).to_bytes();
+    Key::signed(tin, plan, issued, until, None, signature).expect("срок не раньше выпуска")
+}
+
+/// Ключ «Pro» версии 2 на `seats` мест, подписанный парой проб.
+fn pro(on: &str, issued: Date, until: Date, seats: u8) -> Key {
+    let tin = tin(on);
+    let signature = signer()
+        .sign(&Key::message(&tin, Plan::Pro, issued, until, Some(seats)))
+        .to_bytes();
+    Key::signed(tin, Plan::Pro, issued, until, Some(seats), signature).expect("годный ключ Pro")
 }
 
 fn standard() -> Key {
@@ -49,12 +58,18 @@ fn the_author_key_is_a_real_point() {
 /// 2026 — 0x07EA, 2027 — 0x07EB.
 #[test]
 fn fields_follow_the_table() {
-    let message = Key::message(&tin("00054321"), Plan::Standard, day(2026, 10, 27), day(2027, 10, 31));
+    let message = Key::message(&tin("00054321"), Plan::Standard, day(2026, 10, 27), day(2027, 10, 31), None);
     let (domain, fields) = message.split_at(DOMAIN.len());
     assert_eq!(domain, b"Kvartik license key\n");
     assert_eq!(fields, [1, 0x00, 0x00, 0xD4, 0x31, 1, 0x07, 0xEA, 10, 27, 0x07, 0xEB, 10, 31]);
-    let pro = Key::message(&tin("99999999"), Plan::Pro, day(2026, 1, 1), day(2026, 1, 1));
+    let pro = Key::message(&tin("99999999"), Plan::Pro, day(2026, 1, 1), day(2026, 1, 1), None);
     assert_eq!(pro[DOMAIN.len()..], [1, 0x05, 0xF5, 0xE0, 0xFF, 2, 0x07, 0xEA, 1, 1, 0x07, 0xEA, 1, 1]);
+    // Версия 2 — те же поля и байт числа мест в конце: 30 — 0x1E.
+    let seats = Key::message(&tin("00054321"), Plan::Pro, day(2026, 10, 27), day(2027, 10, 31), Some(30));
+    assert_eq!(
+        seats[DOMAIN.len()..],
+        [2, 0x00, 0x00, 0xD4, 0x31, 2, 0x07, 0xEA, 10, 27, 0x07, 0xEB, 10, 31, 0x1E]
+    );
 }
 
 /// base32 — по образцам RFC 4648 (раздел 10), без `=`.
@@ -95,6 +110,28 @@ fn a_key_round_trips_through_its_text() {
     assert_eq!(key.plan(), Plan::Standard);
     assert_eq!(key.issued(), day(2026, 10, 27));
     assert_eq!(key.until(), day(2027, 10, 31));
+    assert_eq!(key.seats(), None);
+}
+
+/// Ключ «Pro» версии 2 — на байт длиннее: 79 байт — 127 знаков base32, 26
+/// групп, последняя из двух знаков, — и читается обратно с числом мест.
+/// У «Pro» версии 1 числа мест в байтах нет, и мест у него `PRO_SEATS`.
+#[test]
+fn a_pro_key_carries_its_seats() {
+    let key = pro("00054321", day(2026, 10, 27), day(2027, 10, 31), 12);
+    let text = key.text();
+    assert_eq!(text.len(), 152, "{text}");
+    let groups: Vec<&str> = text.split('-').collect();
+    assert_eq!((groups.len(), groups.last().map(|group| group.len())), (26, Some(2)));
+    assert_eq!(Key::read(&text, &public()), Ok(key.clone()));
+    assert_eq!((key.plan(), key.seats()), (Plan::Pro, Some(12)));
+    let old = self::key("00054321", Plan::Pro, day(2026, 10, 27), day(2027, 10, 31));
+    assert_eq!((old.text().len(), old.seats()), (149, Some(PRO_SEATS)));
+    assert_eq!(Key::read(&old.text(), &public()), Ok(old));
+    // Тот же ключ на другое число мест — другие байты, и подпись не сходится.
+    let mut more = key.clone();
+    more.seats = Some(99);
+    assert_eq!(Key::read(&more.text(), &public()), Err(KeyError::Forged));
 }
 
 /// Ключ из мессенджера или письма: строчными, без дефисов, с пробелами,
@@ -160,10 +197,22 @@ fn a_foreign_signature_is_forged() {
 fn malformed_keys_are_refused() {
     let good = {
         let key = standard();
-        let mut bytes = fields(&key.tin, key.plan, key.issued, key.until).to_vec();
+        let mut bytes = fields(&key.tin, key.plan, key.issued, key.until, None);
         bytes.extend_from_slice(&key.signature);
         bytes
     };
+    let good_pro = {
+        let key = pro("00054321", day(2026, 10, 27), day(2027, 10, 31), 30);
+        let mut bytes = fields(&key.tin, key.plan, key.issued, key.until, key.seats);
+        bytes.extend_from_slice(&key.signature);
+        bytes
+    };
+    let pro_with = |at: usize, value: u8| {
+        let mut bytes = good_pro.clone();
+        bytes[at] = value;
+        base32(&bytes)
+    };
+    let bytes_v1 = FIELDS_V1 + SIGNATURE;
     let with = |at: usize, value: u8| {
         let mut bytes = good.clone();
         bytes[at] = value;
@@ -172,12 +221,20 @@ fn malformed_keys_are_refused() {
     let mut cases = vec![
         (String::new(), KeyError::Malformed),
         ("не ключ".to_owned(), KeyError::Malformed),
-        (base32(&good[..BYTES - 1]), KeyError::Malformed),
+        (base32(&good[..bytes_v1 - 1]), KeyError::Malformed),
         (base32(&[good.as_slice(), &[0]].concat()), KeyError::Malformed),
         (with(0, 0), KeyError::Malformed),
-        (with(0, 2), KeyError::Newer),
+        // Версия 2 длиной версии 1: байта мест нет.
+        (with(0, 2), KeyError::Malformed),
+        (with(0, 3), KeyError::Newer),
         (with(0, 255), KeyError::Newer),
-        (base32(&[2]), KeyError::Newer),
+        (base32(&[3]), KeyError::Newer),
+        (base32(&[2]), KeyError::Malformed),
+        // Версия 2: «Стандарт» с местами, ноль мест, без байта и с лишним.
+        (pro_with(5, 1), KeyError::Malformed),
+        (pro_with(14, 0), KeyError::Malformed),
+        (base32(&good_pro[..good_pro.len() - 1]), KeyError::Malformed),
+        (base32(&[good_pro.as_slice(), &[0]].concat()), KeyError::Malformed),
         // ՀՎՀՀ больше восьми цифр: 0x05F5E100 — сто миллионов.
         (base32(&[&good[..1], &[0x05, 0xF5, 0xE1, 0x00], &good[5..]].concat()), KeyError::Malformed),
         (with(5, 0), KeyError::Malformed),
@@ -204,10 +261,20 @@ fn malformed_keys_are_refused() {
         }
     }
     assert!(wrong.is_empty(), "ключи: {wrong:#?}");
-    assert_eq!(
-        Key::signed(tin("00054321"), Plan::Standard, day(2027, 1, 1), day(2026, 12, 31), [0; SIGNATURE]),
-        Err(KeyError::Malformed)
-    );
+    let mut accepted = Vec::new();
+    for (plan, issued, seats) in [
+        (Plan::Standard, day(2027, 1, 1), None),
+        (Plan::Standard, day(2026, 1, 1), Some(5)),
+        (Plan::Pro, day(2026, 1, 1), Some(0)),
+    ] {
+        if Key::signed(tin("00054321"), plan, issued, day(2026, 12, 31), seats, [0; SIGNATURE]).is_ok() {
+            accepted.push(format!("{plan:?}, {issued:?}, {seats:?}"));
+        }
+    }
+    assert!(accepted.is_empty(), "приняты ключи, которых автор не пишет: {accepted:?}");
+    // Годный «Pro» той же проверкой принят: отказы выше — не всему подряд.
+    let fine = Key::signed(tin("00054321"), Plan::Pro, day(2026, 1, 1), day(2026, 12, 31), Some(1), [0; SIGNATURE]);
+    assert!(fine.is_ok(), "{fine:?}");
 }
 
 /// Пробный период — 14 дней, считая первый: начатый 27 октября кончается
@@ -544,4 +611,118 @@ fn a_key_is_entered_once() {
     let entered = [first, second];
     let keys: Vec<&Key> = License::keys(&entered).collect();
     assert_eq!(keys, [&standard(), &next]);
+}
+
+/// Ключ «Pro» конторы открывает первых N живых ИП — места с нуля, — а N-е
+/// место и дальше нет; ИП, которого нет в списке, — тоже нет. ՀՎՀՀ ключа не
+/// сверяется: ключ на ՀՎՀՀ бухгалтера открывает ИП с любым. «Стандарт»
+/// и ключ с чужой подписью мест не дают, а «Pro» версии 1 даёт 30.
+#[test]
+fn a_pro_key_opens_its_first_places() {
+    let (issued, last) = (day(2026, 11, 1), day(2027, 10, 31));
+    let two = pro("07654321", issued, last, 2);
+    let seats = pro_seats(&public(), [&two]);
+    let mut wrong = Vec::new();
+    for (place, expected) in [
+        (Some(0), Some((Plan::Pro, last))),
+        (Some(1), Some((Plan::Pro, last))),
+        (Some(2), None),
+        (None, None),
+    ] {
+        let got = seat(&seats, place);
+        if got != expected {
+            wrong.push(format!("место {place:?}: {got:?}"));
+        }
+    }
+    let other = SigningKey::from_bytes(&[9; 32]).verifying_key().to_bytes();
+    if !pro_seats(&other, [&two]).is_empty() {
+        wrong.push("чужая подпись дала места".to_owned());
+    }
+    if !pro_seats(&public(), [&standard()]).is_empty() {
+        wrong.push("«Стандарт» дал места".to_owned());
+    }
+    let old = key("07654321", Plan::Pro, issued, day(2027, 1, 31));
+    let old_seats = pro_seats(&public(), [&old]);
+    if seat(&old_seats, Some(29)) != Some((Plan::Pro, day(2027, 1, 31))) || seat(&old_seats, Some(30)).is_some() {
+        wrong.push("«Pro» версии 1 — не 30 мест".to_owned());
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Из ключей «Pro» с местом для ИП — самый долгий, и кончившийся тоже: его
+/// помнит устройство, как и ключ на ՀՎՀՀ. Ключ короче, но на больше мест,
+/// открывает дальние места до своего дня.
+#[test]
+fn the_longest_pro_key_with_a_place_counts() {
+    let issued = day(2026, 11, 1);
+    let wide = pro("07654321", issued, day(2027, 3, 31), 50);
+    let long = pro("07654321", issued, day(2027, 10, 31), 30);
+    let ended = pro("07654321", day(2025, 11, 1), day(2026, 10, 31), 30);
+    let all = pro_seats(&public(), [&wide, &long, &ended]);
+    assert_eq!(seat(&all, Some(0)), Some((Plan::Pro, day(2027, 10, 31))));
+    assert_eq!(seat(&all, Some(40)), Some((Plan::Pro, day(2027, 3, 31))));
+    assert_eq!(seat(&pro_seats(&public(), [&ended]), Some(0)), Some((Plan::Pro, day(2026, 10, 31))));
+}
+
+/// Один и тот же ключ в нескольких записях — одно место в списке, а не
+/// столько, сколько записей: подпись его проверяется один раз (ревью задачи
+/// 38, чужой файл копии с тысячей одинаковых записей).
+#[test]
+fn the_same_pro_key_counts_once() {
+    let one = pro("07654321", day(2026, 11, 1), day(2027, 10, 31), 30);
+    let other = pro("07654321", day(2026, 11, 1), day(2027, 6, 30), 30);
+    let copies = [one.clone(), one.clone(), one.clone(), other.clone(), one.clone()];
+    assert_eq!(
+        pro_seats(&public(), copies.iter()),
+        [(30, day(2027, 10, 31)), (30, day(2027, 6, 30))]
+    );
+}
+
+/// Место в ключе «Pro» и свой ключ на ՀՎՀՀ профиля — срок у самого долгого,
+/// при равном последнем дне — свой; без места доступ тот же, что был.
+#[test]
+fn a_seat_joins_the_own_key() {
+    let on = tin("00054321");
+    let start = day(2026, 10, 27);
+    let own = Access::new(&public(), [&standard()], Some(&on), Some(start));
+    let mut wrong = Vec::new();
+    for (seat, expected) in [
+        (None, Some((Plan::Standard, day(2027, 10, 31)))),
+        (Some((Plan::Pro, day(2028, 1, 31))), Some((Plan::Pro, day(2028, 1, 31)))),
+        (Some((Plan::Pro, day(2027, 10, 31))), Some((Plan::Standard, day(2027, 10, 31)))),
+        (Some((Plan::Pro, day(2027, 1, 31))), Some((Plan::Standard, day(2027, 10, 31)))),
+    ] {
+        if own.with_seat(seat).key() != expected {
+            wrong.push(format!("{seat:?}: {:?}", own.with_seat(seat).key()));
+        }
+    }
+    let trial = Access::new(&public(), [], None, Some(start));
+    let seated = trial.with_seat(Some((Plan::Pro, day(2027, 10, 31))));
+    if seated.term() != Some(Term::Key { plan: Plan::Pro, last: day(2027, 10, 31) }) {
+        wrong.push(format!("пробный период и место: {:?}", seated.term()));
+    }
+    if trial.with_seat(None) != trial {
+        wrong.push("без места доступ сменился".to_owned());
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Ключ «Pro» конторы — запись своего вида: читается обратно, тот же ключ
+/// второй раз не вводится, а «Стандарт» в контору не ложится.
+#[test]
+fn an_office_license_takes_only_pro_once() {
+    let now = Timestamp::from_unix_millis(1_790_000_000_000);
+    let new = pro("07654321", day(2026, 11, 1), day(2027, 10, 31), 30);
+    let first = OfficeLicense::enter(new.clone(), &[], now).expect("новый ключ Pro");
+    let text = encode(&first);
+    assert!(text.contains(&format!(r#""key":"{}""#, new.text())), "{text}");
+    assert_eq!(decode::<OfficeLicense>(&text), Ok(first.clone()));
+    assert_eq!(OfficeLicense::enter(new.clone(), std::slice::from_ref(&first), now), None);
+    assert_eq!(OfficeLicense::enter(standard(), &[], now), None);
+    let old = key("07654321", Plan::Pro, day(2026, 11, 1), day(2027, 1, 31));
+    let second = OfficeLicense::enter(old.clone(), std::slice::from_ref(&first), now).expect("другой ключ Pro");
+    let entered = [first, second];
+    let keys: Vec<&Key> = OfficeLicense::keys(&entered).collect();
+    assert_eq!(keys, [&new, &old]);
+    assert_eq!(OfficeLicense::KIND, "office_license");
 }

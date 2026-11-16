@@ -17,7 +17,7 @@ use crate::store::office::{OFFICE_DB, list, tab_base};
 use crate::store::{DB_NAME, Store, Writes, delete_database};
 
 /// Забыть всё, что устройство помнит о нескольких ИП.
-fn forget_office() {
+pub(super) fn forget_office() {
     let window = web_sys::window().expect("окно есть");
     if let Ok(Some(storage)) = window.local_storage() {
         for name in ["kvartik.office", "kvartik.base", "kvartik.lang"] {
@@ -68,7 +68,7 @@ async fn stored_office() -> Vec<Ip> {
 }
 
 /// Видимая кнопка с подписью `key` в строке ИП с именем `name`.
-fn row_button(host: &HtmlElement, name: &str, label: &str) -> Option<HtmlElement> {
+pub(super) fn row_button(host: &HtmlElement, name: &str, label: &str) -> Option<HtmlElement> {
     let rows = host.query_selector_all("#office li").ok()?;
     (0..rows.length())
         .filter_map(|at| rows.item(at))
@@ -79,7 +79,7 @@ fn row_button(host: &HtmlElement, name: &str, label: &str) -> Option<HtmlElement
 
 /// Подождать видимую кнопку `label` в строке ИП `name`: список — из части
 /// книги, она рисуется после показа экрана.
-async fn wait_row_button(host: &HtmlElement, name: &str, label: &str) -> Option<HtmlElement> {
+pub(super) async fn wait_row_button(host: &HtmlElement, name: &str, label: &str) -> Option<HtmlElement> {
     for _ in 0..100 {
         if let Some(found) = row_button(host, name, label) {
             return Some(found);

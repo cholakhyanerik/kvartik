@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.134",
+      "date": "2026-11-16",
+      "hy": [
+        "Մի քանի ԱՁ վարողների համար՝ «Pro» բանալի՝ տեղերի թվով. այն մուտքագրվում է «Լիցենզիա» էկրանին, պահվում է «ԱՁ-ները ծրագրում» ցանկում և բացում է ցանկի առաջին ԱՁ-ները՝ ըստ ավելացման հերթականության։"
+      ],
+      "ru": [
+        "Для тех, кто ведёт несколько ИП, — ключ «Pro» с числом мест: он вводится на экране «Лицензия», лежит в списке «ИП в программе» и открывает первых ИП списка в том порядке, в каком их добавили."
+      ],
+      "en": [
+        "For those who keep several entrepreneurs: a Pro key with a number of seats. Enter it on the License screen; it sits in the “Entrepreneurs in the app” list and opens the first entrepreneurs on the list in the order they were added."
+      ]
+    },
+    {
       "version": "0.0.133",
       "date": "2026-11-15",
       "hy": [
@@ -266,19 +279,6 @@
       ],
       "en": [
         "Nothing visible has changed in the app: for a file that only pretends to be an image, the browser console now shows a warning instead of an error."
-      ]
-    },
-    {
-      "version": "0.0.114",
-      "date": "2026-11-11",
-      "hy": [
-        "Գլխավոր էկրանին «Տեղադրում» բաժինն այժմ հարկի, ժամկետների և չվճարված հաշիվների քարտերից ներքև է։ iPhone-ում, iPad-ում և Mac-ում այն, ինչպես նախկինում, վերևում է։"
-      ],
-      "ru": [
-        "Блок «Установка» на главном экране теперь стоит ниже карточек налога, сроков и неоплаченных счетов. На iPhone, iPad и Mac он, как и раньше, сверху."
-      ],
-      "en": [
-        "The “Installing the app” block on the home screen now comes after the tax, deadline and unpaid invoice cards. On iPhone, iPad and Mac it stays at the top as before."
       ]
     }
   ]

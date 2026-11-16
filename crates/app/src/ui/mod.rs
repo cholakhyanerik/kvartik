@@ -194,9 +194,19 @@ pub fn App() -> impl IntoView {
     };
     // Пробный период — с первого запуска на устройстве (задача 25) или
     // с первого дня данных, если он раньше (задача 99); ключи читают части,
-    // которым они нужны (`ui/license.rs`). Кончился срок — запуск открывает
-    // экран лицензии (задача 92).
-    let licenses = Licenses::start(clock::today(), router, forms, welcome, program, documents, clients);
+    // которым они нужны (`ui/license.rs`), и ключ «Pro» конторы — тоже
+    // (задача 38). Кончился срок — запуск открывает экран лицензии (задача 92).
+    let around = license::Around {
+        router,
+        forms,
+        welcome,
+        program,
+        documents,
+        clients,
+        office,
+        pro: None,
+    };
+    let licenses = Licenses::start(clock::today(), around);
     let tax = tax::Ctx::new(lang, sources, base, backups, licenses, forms);
     leptos::task::spawn_local(async move {
         // Запись в базу — дело автокопии, а не состояния хранилища: сигнал

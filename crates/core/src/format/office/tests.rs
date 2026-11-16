@@ -271,6 +271,80 @@ fn one_record_of_two_ips_in_one_base_is_the_later_one() {
     assert_eq!(profiles[0].meta().modified(), at(5_000), "изменённая позже");
 }
 
+/// Ключи «Pro» копии идут в контору, а не в базу ИП — и тот, что пришёл
+/// с меткой базы: она ему ничего не значит, и в контору он ложится без неё.
+/// Из двух версий одной записи — изменённая позже.
+#[test]
+fn pro_keys_go_to_the_office() {
+    let aram = profile("IE Aram Petrosyan", Some("12345678"), 1_000);
+    let ip = ip_of(Some(&aram), 2_000);
+    let day = |month, day| Date::new(2026, month, day).expect("дата");
+    let key = |until| {
+        let tin = Tin::parse("07654321").expect("годный ՀՎՀՀ");
+        crate::license::Key::signed(tin, crate::license::Plan::Pro, day(11, 1), until, Some(30), [0; 64])
+            .expect("ключ Pro")
+    };
+    let first = OfficeLicense::enter(key(day(12, 31)), &[], at(3_000)).expect("ключ Pro");
+    let second = OfficeLicense::enter(key(day(12, 30)), &[], at(3_000)).expect("ключ Pro");
+    // Та же запись, изменённая позже, — в файле раньше прежней.
+    let later: OfficeLicense =
+        crate::format::decode(&encode(&first).replace(r#""modified":3000"#, r#""modified":4000"#)).expect("читается");
+    let mut incoming = full_backup(&[(&ip, &aram)]);
+    incoming.push(entry(OFFICE_KINDS, &later));
+    incoming.push(entry(OFFICE_KINDS, &first));
+    incoming.push(entry(OFFICE_KINDS, &second).in_base(ip.id()));
+    let routed = route(incoming, &[], None).expect("маршрут");
+    let mut wrong = Vec::new();
+    let keys: Vec<(RecordId, Timestamp, Option<RecordId>)> = routed
+        .keys
+        .iter()
+        .map(|entry| (entry.meta().id(), entry.meta().modified(), entry.base()))
+        .collect();
+    if keys != [(first.id(), at(4_000), None), (second.id(), at(3_000), None)] {
+        wrong.push(format!("ключи конторы: {keys:?}"));
+    }
+    let in_bases: Vec<&str> = routed
+        .bases
+        .iter()
+        .flat_map(|landing| landing.entries.iter().map(Entry::kind))
+        .filter(|kind| *kind == OfficeLicense::KIND)
+        .collect();
+    if !in_bases.is_empty() {
+        wrong.push(format!("ключ Pro в базе ИП: {in_bases:?}"));
+    }
+    if landed(&routed, &aram).is_none() {
+        wrong.push("профиль ИП не лёг".to_owned());
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Копию с ключами «Pro» сверх `MAX_KEYS` маршрут не кладёт — их проверка
+/// держала бы страницу (ревью задачи 38), — а ровно `MAX_KEYS` кладёт.
+#[test]
+fn too_many_pro_keys_are_refused() {
+    let aram = profile("IE Aram Petrosyan", Some("12345678"), 1_000);
+    let ip = ip_of(Some(&aram), 2_000);
+    let issued = Date::new(2026, 11, 1).expect("дата");
+    let backup = |count: usize| {
+        let mut incoming = full_backup(&[(&ip, &aram)]);
+        for n in 0..count {
+            let until = issued.add_days(i32::try_from(n).expect("число")).expect("дата");
+            let tin = Tin::parse("07654321").expect("годный ՀՎՀՀ");
+            let key = crate::license::Key::signed(tin, crate::license::Plan::Pro, issued, until, Some(30), [0; 64])
+                .expect("ключ Pro");
+            let license = OfficeLicense::enter(key, &[], at(3_000)).expect("ключ Pro");
+            incoming.push(entry(OFFICE_KINDS, &license));
+        }
+        incoming
+    };
+    assert!(matches!(
+        route(backup(crate::license::MAX_KEYS + 1, ), &[], None),
+        Err(RouteError::TooManyKeys(count)) if count == crate::license::MAX_KEYS + 1
+    ));
+    let fits = route(backup(crate::license::MAX_KEYS), &[], None).expect("ровно предел ложится");
+    assert_eq!(fits.keys.len(), crate::license::MAX_KEYS);
+}
+
 /// Копию одного ИП узнают в списке по профилю и по ՀՎՀՀ; чужой ИП — `None`.
 /// Записи ИП из записей конторы — все, по порядку.
 #[test]
