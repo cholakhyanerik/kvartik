@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.140",
+      "date": "2026-11-16",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել. այս տարբերակն ուղղում է մշակման ընթացքում կատարվող ստուգումներից մեկը։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось: эта версия чинит одну из проверок, которые идут при разработке программы."
+      ],
+      "en": [
+        "Nothing changed in the app: this version fixes one of the checks run while the app is developed."
+      ]
+    },
+    {
       "version": "0.0.139",
       "date": "2026-11-16",
       "hy": [
@@ -257,19 +270,6 @@
       ],
       "en": [
         "Cafés and restaurants can now mark an expense as “Catering: goods that aren't culinary products” — bottled drinks, cigarettes, packaged sweets. Their cost isn't deductible (Tax Code, Art. 258(6)), and the app used to deduct it: open such expenses and change their “Kind of expense”."
-      ]
-    },
-    {
-      "version": "0.0.120",
-      "date": "2026-11-13",
-      "hy": [
-        "Վարձակալության կամ գույքի վաճառքի եկամտի ծախսը, օրինակ՝ բնակարանը վարձակալության տալու համար գործակալին վճարը, այժմ վերագրվում է այդ եկամտի տողին. ծախսի գրառման մեջ ընտրեք այն «Գործունեության տեսակը» դաշտում։ Այն չի նվազեցվում, իսկ հարկի էկրանը նշում է այդպիսի ծախսերը։"
-      ],
-      "ru": [
-        "Расход дохода от аренды или продажи имущества — например, агенту за сдачу квартиры — теперь относится к строке этого дохода: в записи расхода выберите её в поле «Вид деятельности». Он не вычитается, а экран налога называет такие расходы."
-      ],
-      "en": [
-        "An expense of rental or property-sale income — say, an agent's fee for renting out a flat — can now go to that income's row: choose it under “Activity” in the expense entry. It isn't deducted, and the tax screen names such expenses."
       ]
     }
   ]

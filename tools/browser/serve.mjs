@@ -28,6 +28,15 @@ import { kill, sleep, spawnTree } from "./cdp.mjs";
 export const REPO = path.resolve(import.meta.dirname, "../..");
 const WRANGLER = path.join(REPO, "tools/deploy/node_modules/wrangler/bin/wrangler.js");
 
+/// Файлы сайта, которые кладёт выкладка, а не сборка, — адрес → байты: файл
+/// курсов ЦБ (задача 43, `tools/deploy/rates.mjs`) образцом из тестов ядра.
+/// Оба сервера отдают их по умолчанию, как сайт: окно спрашивает файл курсов
+/// при каждом открытии, и без него каждый прогон skill ловил 404 в консоли
+/// и краснел (найдено глазным прогоном задачи 44).
+export const DEPLOYED = {
+  "/app/rates.json": fs.readFileSync(path.join(REPO, "crates/core/tests/rates/rates.json")),
+};
+
 const TYPES = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".wasm": "application/wasm", ".css": "text/css",
   ".ttf": "font/ttf", ".png": "image/png", ".webmanifest": "application/manifest+json", ".json": "application/json",
@@ -39,9 +48,10 @@ const TYPES = {
 };
 
 /// Свой сервер. Возвращает `{ port, stop() }`. `extra` — файлы, которых нет
-/// в сборке, адрес → байты: файл курсов ЦБ кладёт на сайт выкладка, а не
-/// сборка (задача 43), и проверка отдаёт свой образец, не трогая `dist/`.
-export function own(dist, port, { quality = 11, extra = {} } = {}) {
+/// в сборке, адрес → байты, по умолчанию — файлы выкладки (`DEPLOYED`):
+/// свой файл `dist/` важнее — копия сайта может нести другой. `dist/` он не
+/// трогает.
+export function own(dist, port, { quality = 11, extra = DEPLOYED } = {}) {
   const files = new Map();
   const walk = (dir, prefix) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -58,6 +68,7 @@ export function own(dist, port, { quality = 11, extra = {} } = {}) {
   };
   walk(dist, "");
   for (const [url, body] of Object.entries(extra)) {
+    if (files.has(url)) continue;
     const raw = Buffer.from(body);
     files.set(url, {
       raw, br: zlib.brotliCompressSync(raw, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: quality } }),
@@ -95,19 +106,28 @@ export function own(dist, port, { quality = 11, extra = {} } = {}) {
 }
 
 /// `wrangler pages dev`. Он кладёт `.wrangler/` в текущую папку — поэтому
-/// идёт из `work`, а не из рабочей копии. Возвращает `{ port, stop() }`
-/// после первого ответа 200 на `/app/`.
+/// идёт из `work`, а не из рабочей копии. Отдаёт он копию сайта в `work` —
+/// сборку и файлы выкладки (`DEPLOYED`), которых в ней нет, а `dist` не
+/// трогает; копия у каждого запуска своя: папку прежнего Windows может
+/// держать ещё после остановки.
+/// Возвращает `{ port, stop() }` после первого ответа 200 на `/app/`.
 export async function wrangler(dist, port, work) {
   if (!fs.existsSync(WRANGLER)) {
     throw new Error(`нет ${WRANGLER}: поставьте wrangler из замка — npm ci --ignore-scripts в tools/deploy`);
   }
   fs.mkdirSync(work, { recursive: true });
+  const site = fs.mkdtempSync(path.join(work, `site-${port}-`));
+  fs.cpSync(dist, site, { recursive: true });
+  for (const [url, body] of Object.entries(DEPLOYED)) {
+    const file = path.join(site, url);
+    if (!fs.existsSync(file)) fs.writeFileSync(file, body);
+  }
   const log = fs.openSync(path.join(work, `wrangler-${port}.log`), "a");
   // Под `CLAUDECODE=1` wrangler считает себя в руках агента (CLAUDE.md,
   // Правило 3) — сервер прогона так не делаем.
   const env = { ...process.env, WRANGLER_SEND_METRICS: "false" };
   delete env.CLAUDECODE;
-  const child = spawnTree(process.execPath, [WRANGLER, "pages", "dev", path.resolve(dist), "--port", String(port)],
+  const child = spawnTree(process.execPath, [WRANGLER, "pages", "dev", path.resolve(site), "--port", String(port)],
     { cwd: work, env, stdio: ["ignore", log, log] });
   const stop = async () => {
     // У wrangler дочерние workerd: TaskStop оставил бы их держать порт.
