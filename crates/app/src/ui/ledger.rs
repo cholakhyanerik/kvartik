@@ -34,6 +34,7 @@ use kvartik_core::model::record::RecordId;
 use kvartik_core::model::text::Line;
 use kvartik_core::tax::turnover;
 use leptos::ev::{Event, SubmitEvent};
+use leptos::html::Select;
 use leptos::prelude::*;
 use leptos::wasm_split::SplitLoaderError;
 use web_sys::HtmlInputElement;
@@ -799,6 +800,7 @@ const fn proof_key(proof: Proof) -> Key {
         Proof::IndividualPurchase => Key::ProofIndividualPurchase,
         Proof::Contract => Key::ProofContract,
         Proof::ForeignSupplier => Key::ProofForeignSupplier,
+        Proof::ForeignDocument => Key::ProofForeignDocument,
         Proof::BankPayment => Key::ProofBankPayment,
         Proof::None => Key::ProofNone,
     }
@@ -1323,8 +1325,15 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
     let required = Memo::new(move |_| needed.get() && form.income_kind.get().is_none());
     // Строки доходов квартала, к которым можно отнести расход (задача 95):
     // когда они есть, у расхода спрашивается вид и при одном коде (задача 70).
+    // По просьбе человека — все строки, и без такого дохода в квартале
+    // (задача 96): риелтору платят до продажи, а у ИП, который квартиру не
+    // сдаёт, поля нет — только ссылка.
+    let rows_open = RwSignal::new(false);
     let income_rows = Memo::new(move |_| {
         form.date.with(|text| Date::from_iso(text)).map_or_else(Vec::new, |day| {
+            if rows_open.get() {
+                return ctx.profiles.with(|profile| turnover::expense_rows_on_request(profile, day).to_vec());
+            }
             ctx.documents.with(|documents, _, _| {
                 ctx.operations.with(|operations, _| {
                     ctx.profiles.with(|profile| turnover::expense_rows(documents, operations, profile, day))
@@ -1369,6 +1378,17 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
             || form.activity.with(Option::is_some)
             || form.income_kind.with(Option::is_some)
     });
+    // Ссылка, открывающая строки (задача 96): у ИП с вычетом, пока в выборе
+    // не все строки и строка у записи не выбрана.
+    let rows_offered = Memo::new(move |_| {
+        !rows_open.get()
+            && form.income_kind.with(Option::is_none)
+            && form.date.with(|text| Date::from_iso(text)).is_some_and(|day| {
+                let all = ctx.profiles.with(|profile| turnover::expense_rows_on_request(profile, day));
+                income_rows.with(|rows| all.iter().any(|kind| !rows.contains(kind)))
+            })
+    });
+    let activity_select = NodeRef::<Select>::new();
     let asked = move || Asked {
         activity: needed.get_untracked(),
         cost: flow == Flow::Expense && cost_asked.get_untracked(),
@@ -1657,6 +1677,11 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
                     </select>
                 </label>
                 <p class="hint">{tr(lang, Key::ProofHint)}</p>
+                // Что годится от иностранного поставщика — когда он выбран
+                // (задача 72).
+                {move || matches!(form.proof.get(), Some(Proof::ForeignSupplier | Proof::ForeignDocument)).then(|| view! {
+                    <p class="hint">{tr(lang, Key::ProofForeignHint)}</p>
+                })}
                 {shown_problem(tried, move || {
                     form.proof.get().is_none().then(|| t(lang.get(), Key::OpProofMissing).to_owned())
                 })}
@@ -1721,7 +1746,7 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
                 {move || activity_shown.get().then(|| view! {
                     <label>
                         {tr(lang, Key::OpActivity)}
-                        <select on:change=move |event| {
+                        <select node_ref=activity_select on:change=move |event| {
                             let chosen = event_target_value(&event);
                             // Строка дохода — вместо кода, не вместе с ним
                             // (задача 95).
@@ -1778,6 +1803,20 @@ fn OpForm(ledger: Ledger, existing: Option<Operation>, flow: Flow) -> impl IntoV
                         (direct_code.get() && form.activity.get().is_none())
                             .then(|| t(lang.get(), Key::OpActivityDirect).to_owned())
                     })}
+                })}
+                // Ссылка уходит, а выбор встаёт на место или уже стоит выше:
+                // фокус — на него, после кадра, когда он в странице (задача 96).
+                {move || rows_offered.get().then(|| view! {
+                    <button type="button" class="link" on:click=move |_| {
+                        rows_open.set(true);
+                        request_animation_frame(move || {
+                            if let Some(select) = activity_select.get_untracked() {
+                                let _ = select.focus();
+                            }
+                        });
+                    }>
+                        {tr(lang, Key::OpActivityRowsOpen)}
+                    </button>
                 })}
             })}
             <fieldset class="files">
@@ -2020,6 +2059,7 @@ const fn proof_code(proof: Proof) -> &'static str {
         Proof::IndividualPurchase => "individual_purchase",
         Proof::Contract => "contract",
         Proof::ForeignSupplier => "foreign_supplier",
+        Proof::ForeignDocument => "foreign_document",
         Proof::BankPayment => "bank_payment",
         Proof::None => "none",
     }

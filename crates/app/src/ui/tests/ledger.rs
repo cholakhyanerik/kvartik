@@ -22,7 +22,7 @@ use web_sys::{
 };
 
 use super::documents::{
-    commit, forget_device, fresh_base_with_client, invoice_data, profile, row_with, wait_selector,
+    commit, forget_device, fresh_base_with_client, invoice_data, profile, row_with, wait_selector, wait_until,
 };
 use super::{button, field, mount_at, pick, select, sleep, type_into, wait_for};
 use crate::platform::{clock, set_hash};
@@ -1159,4 +1159,113 @@ async fn a_cafe_marks_goods_sold_uncooked() {
     set_hash("");
     forget_device();
     assert!(wrong.is_empty(), "товар общепита без приготовления: {wrong:#?}");
+}
+
+/// Риелтору платят до продажи квартиры (задача 96): у дизайнера с одним кодом
+/// и без такого дохода в квартале выбора вида у расхода нет, а ссылка «Это
+/// расход дохода от аренды или продажи имущества» открывает обе строки и ставит
+/// фокус на выбор; расход ложится строкой продажи. Документ иностранного
+/// поставщика (задача 72) — с подсказкой, что годится для подписок, и только
+/// пока он выбран.
+#[wasm_bindgen_test]
+async fn an_expense_of_a_sale_goes_to_its_row_before_the_sale() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let now = clock::now();
+    let today = clock::today().expect("часы с датой");
+    let mut data = profile();
+    data.activities = vec![ActivityCode::parse("74.10.0").expect("код")];
+    let saved = Profile::save(None, data, now).expect("годный профиль").expect("новый");
+    let work = Operation::create(
+        OperationData {
+            flow: Flow::Income,
+            date: today,
+            paid: None,
+            amount: amd(1_000_000),
+            rate: None,
+            text: Line::new("Дизайн упаковки").expect("текст"),
+            client: None,
+            supplier: Line::default(),
+            proof: None,
+            nature: None,
+            cost: None,
+            activity: None,
+            income_kind: None,
+            attachments: Vec::new(),
+        },
+        now,
+    )
+    .expect("годна");
+    let mut writes = Writes::default();
+    writes.insert(&saved);
+    writes.insert(&work);
+    commit(writes).await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at("#/ledger");
+    let mut wrong = Vec::new();
+    if !wait_for(&host, "Дизайн упаковки").await {
+        wrong.push("доход не виден".to_owned());
+    }
+    press(&host, t(lang, Key::LedgerAddExpense), &mut wrong);
+    let open = t(lang, Key::OpActivityRowsOpen);
+    if !wait_until(|| button(&host, &[open]).is_some()).await {
+        wrong.push("нет ссылки на строки дохода".to_owned());
+    }
+    if select(&host, t(lang, Key::OpActivity), 0).is_some() {
+        wrong.push("у одного кода без дохода со своей строкой форма сразу спросила вид".to_owned());
+    }
+    let hint = t(lang, Key::ProofForeignHint);
+    let says = |text: &str| host.text_content().unwrap_or_default().contains(text);
+    choose(&host, t(lang, Key::OpProof), "foreign_document", &mut wrong);
+    if !wait_until(|| says(hint)).await {
+        wrong.push("у документа иностранного поставщика нет подсказки".to_owned());
+    }
+    choose(&host, t(lang, Key::OpProof), "contract", &mut wrong);
+    if !wait_until(|| !says(hint)).await {
+        wrong.push("подсказка об иностранном поставщике осталась у договора".to_owned());
+    }
+    press(&host, open, &mut wrong);
+    let focused = || {
+        let active = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.active_element());
+        let list = select(&host, t(lang, Key::OpActivity), 0);
+        matches!((active, list), (Some(active), Some(list)) if active == **list)
+    };
+    if !wait_until(focused).await {
+        wrong.push("после ссылки фокус не на выборе вида".to_owned());
+    }
+    match select(&host, t(lang, Key::OpActivity), 0) {
+        Some(list) => {
+            let has = |value: &str| list.query_selector(&format!("option[value='{value}']")).ok().flatten().is_some();
+            if !has("row-5") || !has("row-9") {
+                wrong.push(format!("строки в выборе: аренда {}, продажа {}", has("row-5"), has("row-9")));
+            }
+        }
+        None => wrong.push("ссылка не открыла выбор вида".to_owned()),
+    }
+    if button(&host, &[open]).is_some() {
+        wrong.push("ссылка осталась после нажатия".to_owned());
+    }
+    fill_field(&host, t(lang, Key::OpText), "Риелтору за продажу квартиры", &mut wrong);
+    fill_field(&host, t(lang, Key::OpAmount), &i18n::amount(lang, amd(200_000)), &mut wrong);
+    choose(&host, t(lang, Key::OpActivity), "row-9", &mut wrong);
+    press(&host, t(lang, Key::ProfileSave), &mut wrong);
+    if !wait_for(&host, t(lang, Key::LedgerSaved)).await {
+        wrong.push("расход не сохранился".to_owned());
+    }
+    let (operations, _) = stored().await;
+    let got: Vec<_> = operations
+        .iter()
+        .filter(|operation| operation.data().flow == Flow::Expense)
+        .map(|operation| (operation.data().income_kind, operation.data().proof))
+        .collect();
+    if got != [(Some(IncomeKind::Assets), Some(Proof::Contract))] {
+        wrong.push(format!("записано {got:?}"));
+    }
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "расход продажи до продажи: {wrong:#?}");
 }

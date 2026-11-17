@@ -227,6 +227,7 @@ const fn proof_key(proof: Proof) -> Key {
         Proof::IndividualPurchase => Key::ProofIndividualPurchase,
         Proof::Contract => Key::ProofContract,
         Proof::ForeignSupplier => Key::ProofForeignSupplier,
+        Proof::ForeignDocument => Key::ProofForeignDocument,
         Proof::BankPayment => Key::ProofBankPayment,
         Proof::None => Key::ProofNone,
     }

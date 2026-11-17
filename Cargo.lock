@@ -913,7 +913,7 @@ checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
 
 [[package]]
 name = "kvartik-app"
-version = "0.0.140"
+version = "0.0.141"
 dependencies = [
  "console_error_panic_hook",
  "ed25519-dalek",
@@ -929,7 +929,7 @@ dependencies = [
 
 [[package]]
 name = "kvartik-calc"
-version = "0.0.140"
+version = "0.0.141"
 dependencies = [
  "js-sys",
  "kvartik-core",
@@ -940,7 +940,7 @@ dependencies = [
 
 [[package]]
 name = "kvartik-core"
-version = "0.0.140"
+version = "0.0.141"
 dependencies = [
  "ed25519-dalek",
  "miniz_oxide",
@@ -952,7 +952,7 @@ dependencies = [
 
 [[package]]
 name = "kvartik-keygen"
-version = "0.0.140"
+version = "0.0.141"
 dependencies = [
  "ed25519-dalek",
  "getrandom",
@@ -961,7 +961,7 @@ dependencies = [
 
 [[package]]
 name = "kvartik-sw"
-version = "0.0.140"
+version = "0.0.141"
 dependencies = [
  "base64",
  "kvartik-core",
@@ -1983,9 +1983,9 @@ checksum = "3a3b425286980a367278453f3b6d28cdcb134b574e5a35824a6ff5eebad50bb6"
 
 [[package]]
 name = "uuid"
-version = "1.29.2"
+version = "1.29.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bed99139f7dac9b5cfe5f17be4d66dc7079a34dee1d74bcc77217119240e267c"
+checksum = "3c14b15dffa2f4bd712103e857140aa04a4f2ff6e955c77d7eb8e53ee02a3b64"
 dependencies = [
  "getrandom",
  "js-sys",
@@ -2228,9 +2228,9 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "xxhash-rust"
-version = "0.8.20"
+version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca9dca39bbd5f73d48ffcc26a06ff0cd9637388edd6e33d732bd5f8135771fab"
+checksum = "40de123dbb523ebcc00d61ec01840ad192578afc378d859f3429caa38308fad5"
 
 [[package]]
 name = "yoke"

@@ -155,6 +155,18 @@ fn a_catering_expense_names_goods_sold_uncooked() {
     assert_eq!(serde_json::to_string(&read).ok().as_deref(), Some(sample.as_str()));
 }
 
+/// С версии формата 24 у расхода — документ иностранного поставщика со всеми
+/// данными ст. 55, ч. 13 (задача 72): в данных — `foreign_document`,
+/// записывается и читается.
+#[test]
+fn an_expense_names_a_foreign_document_with_all_details() {
+    let sample = EXPENSE.replacen(r#""proof":"settlement_invoice""#, r#""proof":"foreign_document""#, 1);
+    assert_ne!(sample, EXPENSE, "подмена не сработала");
+    let read: Operation = serde_json::from_str(&sample).expect("расход foreign_document читается");
+    assert_eq!(read.data().proof, Some(Proof::ForeignDocument));
+    assert_eq!(serde_json::to_string(&read).ok().as_deref(), Some(sample.as_str()));
+}
+
 /// С версии формата 13 у дохода — своя строка налога, если она не та, что
 /// у кода, а запись версии 12 — без поля — читается со строкой по коду
 /// и пишется уже с полем (Правило 2).

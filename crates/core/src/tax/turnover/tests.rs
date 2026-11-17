@@ -1818,6 +1818,39 @@ fn the_expense_form_offers_the_income_rows_of_the_quarter() {
     assert!(wrong.is_empty(), "строки доходов у формы расхода: {wrong:#?}");
 }
 
+/// Риелтору платят во II квартале за квартиру, проданную в III (задача 96;
+/// пример ревью задачи 95): у ИП с кодом дизайна без такого дохода в квартале
+/// форма сама строк не предлагает, а по просьбе — обе, по порядку таблицы
+/// закона; у IT и без профиля вычета нет, и отделять нечего. Отнесённый к
+/// продаже имущества, расход не вычитается и в квартале без самой продажи:
+/// дизайн 1 000 000 ֏ — налог 100 000, а общим с вычетом 6 % от 200 000 было бы
+/// 88 000.
+#[test]
+fn the_expense_form_offers_every_income_row_on_request() {
+    let on = day(2026, 6, 25);
+    let design = profile(&["74.10.0"]);
+    let it = profile(&["62.01.0"]);
+    let work = income(day(2026, 5, 10), 1_000_000, None);
+    let mut wrong = Vec::new();
+    for (name, profile, expected) in [
+        ("дизайн", Some(&design), IncomeKind::OF_INCOME.as_slice()),
+        ("IT без вычета", Some(&it), [].as_slice()),
+        ("профиля нет", None, [].as_slice()),
+    ] {
+        let got = expense_rows_on_request(profile, on);
+        if got != expected {
+            wrong.push(format!("{name}: {got:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "строки по просьбе: {wrong:#?}");
+    assert_eq!(expense_rows(&[], std::slice::from_ref(&work), Some(&design), on), Vec::new());
+    let realtor = of_income(on, 200_000, Proof::Contract, Nature::Ordinary, IncomeKind::Assets);
+    let shared = expense(on, 200_000, Proof::Contract, Nature::Ordinary, None);
+    let attributed = tax(Some(&design), &[work.clone(), realtor], &[], quarter(2026, 2));
+    assert_eq!((attributed.tax, attributed.refused.income_row), (100_000, 1));
+    assert_eq!(tax(Some(&design), &[work, shared], &[], quarter(2026, 2)).tax, 88_000);
+}
+
 /// Кафе перепродаёт напитки в бутылках (задача 94; ревью задачи 79): их
 /// начальная стоимость в вычет не идёт (НК 258(6)(2)). Общепит 5 000 000 ֏ по
 /// ставке 12 % — 600 000; напитки 1 000 000 ֏ обычным расходом — вычет 9 %

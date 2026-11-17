@@ -43,7 +43,8 @@
 //!   считается, как прежде: без вида — общий. Доход со своей строкой весит
 //!   и у ИП с одним кодом, поэтому окно говорит, что доля общих ушла на него
 //!   (`Refused::split`), а форма спрашивает вид и при одном коде и предлагает
-//!   рядом с кодами строки таких доходов квартала ([`expense_rows`]);
+//!   рядом с кодами строки таких доходов квартала ([`expense_rows`]), а по
+//!   просьбе человека — и в квартале без них ([`expense_rows_on_request`]);
 //! - прямые расходы строки (x.4.1) — целыми драмами, а сбытовые
 //!   и административные (x.4.2) — остаток x.4: форма складывает их в x.4
 //!   (приказ 299-Ն, прил. 1, п. 11). x.4 считается, как прежде, — расходы
@@ -309,7 +310,8 @@ pub fn deductible(proof: Proof, nature: Nature, on: Date) -> Result<(), Refusal>
         | Proof::CashReceipt
         | Proof::IndividualPurchase
         | Proof::Contract
-        | Proof::ForeignSupplier => {
+        | Proof::ForeignSupplier
+        | Proof::ForeignDocument => {
             if rule.proofs.contains(&proof) {
                 Ok(())
             } else {
@@ -720,10 +722,7 @@ pub fn expense_rows(
     profile: Option<&ProfileData>,
     on: Date,
 ) -> Vec<IncomeKind> {
-    let deducting = profile_kinds(profile, on)
-        .into_iter()
-        .any(|kind| rate(kind, on).is_some_and(|rule| rule.deduction.is_some()));
-    if !deducting {
+    if !deducting(profile, on) {
         return Vec::new();
     }
     let quarter = on.quarter();
@@ -733,6 +732,28 @@ pub fn expense_rows(
         .filter_map(|row| row.income_kind)
         .collect();
     earned.into_iter().collect()
+}
+
+/// Все строки доходов со своей строкой, к которым форма расхода дня `on` даёт
+/// отнести расход по просьбе человека (задача 96), — у ИП, у чьих кодов есть
+/// вычет. Расход такого дохода бывает и в квартале без самого дохода: риелтору
+/// во II квартале за квартиру, проданную в III (НК, ст. 38, ч. 2), агенту до
+/// первой платы за аренду. Он не вычитается и тогда: у строк 5 и 9 вычета нет
+/// (ст. 260, ч. 1), вычитается расход деятельности строк с вычетом (ст. 258,
+/// ч. 6, п. 1), а по долям ч. 3 ст. 260 делятся только административные
+/// и сбытовые, которые к одному виду не отнести (по закону, сверено по тексту
+/// arlis 230455 2026-11-17; так ответил человек 2026-11-17). Сразу, без
+/// просьбы, форма предлагает только строки квартала ([`expense_rows`]): у ИП,
+/// который квартиру не сдаёт, лишнего поля нет.
+pub fn expense_rows_on_request(profile: Option<&ProfileData>, on: Date) -> &'static [IncomeKind] {
+    if deducting(profile, on) { &IncomeKind::OF_INCOME } else { &[] }
+}
+
+/// Есть ли вычет у какой-нибудь строки кодов профиля на день `on`.
+fn deducting(profile: Option<&ProfileData>, on: Date) -> bool {
+    profile_kinds(profile, on)
+        .into_iter()
+        .any(|kind| rate(kind, on).is_some_and(|rule| rule.deduction.is_some()))
 }
 
 /// Спросить ли у расхода дня `on` вида `nature` с документом продавца `proof`,

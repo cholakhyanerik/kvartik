@@ -1,6 +1,25 @@
 {
   "notes": [
     {
+      "version": "0.0.141",
+      "date": "2026-11-17",
+      "hy": [
+        "Ծախսի համար նոր փաստաթուղթ՝ «Օտարերկրյա մատակարարի փաստաթուղթ՝ օրենքով պահանջվող բոլոր տվյալներով»։ Բաժանորդագրությունները, հոսթինգը, գովազդը և ծրագրերի լիցենզիաները համարվում են ՀՀ-ում մատուցված, և դրանց նվազեցման համար հաշիվն ու վճարումը բավարար չեն. ձևը դա ասում է, երբ ընտրված է օտարերկրյա մատակարարի փաստաթուղթը։",
+        "Եթե բաժանորդագրությունը գրանցել եք «Օտարերկրյա մատակարարի հաշիվ և վճարում»-ով, ստուգեք, թե ինչ փաստաթուղթ ունեք։",
+        "Վարձակալական վճարի, տոկոսի, ռոյալթիի կամ ակտիվների օտարման եկամտի ծախսը կարելի է վերագրել նրա տողին նաև այն եռամսյակում, որտեղ այդ եկամուտը չկա. ծախսի ձևում սեղմեք «Սա եկամտի ծախս է՝ վարձակալական վճար, տոկոս, ռոյալթի կամ ակտիվների օտարում»։ Այդ ծախսը չի նվազեցվում։"
+      ],
+      "ru": [
+        "У расхода — новый документ продавца «Документ иностранного поставщика со всеми данными по закону». Подписки, хостинг, реклама и лицензии на программы считаются оказанными в Армении, и счёта с платежом для их вычета мало: форма говорит это, когда выбран документ иностранного поставщика.",
+        "Если подписку вы записали «Счётом иностранного поставщика и платежом», проверьте, какой у вас документ.",
+        "Расход дохода от аренды, процентов, роялти или продажи имущества можно отнести к его строке и в квартале, где самого дохода нет: в форме расхода нажмите «Это расход дохода: аренда, проценты, роялти или продажа имущества». Такой расход не вычитается."
+      ],
+      "en": [
+        "Expenses have a new seller's document: “Foreign supplier's document with all the details the law requires”. Subscriptions, hosting, advertising and software licenses count as supplied in Armenia, and an invoice with a payment isn't enough to deduct them: the form says so when a foreign supplier's document is chosen.",
+        "If you recorded a subscription as “Foreign supplier's invoice and payment”, check which document you have.",
+        "An expense of rent, interest, royalty or asset-sale income can now go to its row even in a quarter without that income: in the expense form, press “This is an expense of income: rent, interest, royalties or a sale of assets”. Such an expense isn't deducted."
+      ]
+    },
+    {
       "version": "0.0.140",
       "date": "2026-11-16",
       "hy": [
@@ -257,19 +276,6 @@
       ],
       "en": [
         "Nothing changed in the app: this version fixes one of the checks that run before every release."
-      ]
-    },
-    {
-      "version": "0.0.121",
-      "date": "2026-11-13",
-      "hy": [
-        "Սրճարաններն ու ռեստորաններն այժմ կարող են ծախսի համար ընտրել «Հանրային սնունդ՝ խոհարարական արտադրանք չհանդիսացող ապրանք» տեսակը՝ շշալցված ըմպելիքներ, ծխախոտ, փաթեթավորված քաղցրավենիք։ Դրանց արժեքը չի նվազեցվում (Հարկային օրենսգիրք, հոդված 258, մաս 6), իսկ նախկինում ծրագիրը նվազեցնում էր այն. բացեք այդպիսի ծախսերը և փոխեք դրանց տեսակը «Ծախսի տեսակը» դաշտում։"
-      ],
-      "ru": [
-        "Кафе и ресторан теперь могут выбрать у расхода вид «Общепит: товар, не являющийся кулинарной продукцией» — напитки в бутылках, сигареты, сладости в упаковке. Их стоимость не вычитается (НК, ст. 258, ч. 6), а раньше программа её вычитала: откройте такие расходы и смените вид в поле «Что это за расход»."
-      ],
-      "en": [
-        "Cafés and restaurants can now mark an expense as “Catering: goods that aren't culinary products” — bottled drinks, cigarettes, packaged sweets. Their cost isn't deductible (Tax Code, Art. 258(6)), and the app used to deduct it: open such expenses and change their “Kind of expense”."
       ]
     }
   ]

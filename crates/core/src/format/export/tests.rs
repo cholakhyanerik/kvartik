@@ -430,6 +430,18 @@ fn goods_a_cafe_sells_uncooked_show_their_nature() {
     assert_eq!(sheet.rows[0][6], text("Общепит: товар, не являющийся кулинарной продукцией"));
 }
 
+/// Документ иностранного поставщика со всеми данными (задача 72) — в столбце
+/// документа продавца словами окна.
+#[test]
+fn a_foreign_document_shows_its_name() {
+    let text_of = EXPENSE.replacen(r#""proof":"settlement_invoice""#, r#""proof":"foreign_document""#, 1);
+    assert_ne!(text_of, EXPENSE, "подмена не сработала");
+    let expense: Operation = serde_json::from_str(&text_of).expect("расход foreign_document читается");
+    let sheet = ledger_sheet(Lang::Ru, &[], &[expense], &[], day(2026, 10, 1), day(2026, 12, 31));
+    assert_eq!(sheet.rows.len(), 1);
+    assert_eq!(sheet.rows[0][5], text("Документ иностранного поставщика со всеми данными по закону"));
+}
+
 /// Строки одного дня — по виду и номеру документа, а запись книги — за
 /// ними: по одному случайному идентификатору акт 2026-003 вставал раньше
 /// 2026-002 (полный прогон 0.0.96). Восемь документов одного дня — случайный
