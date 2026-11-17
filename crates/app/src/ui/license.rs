@@ -143,15 +143,23 @@ pub struct Around {
     pub documents: Documents,
     pub clients: Clients,
     pub office: Office,
-    /// Ключи «Pro» конторы и сколько их записей не читается — сигнал, который
-    /// заводят части ([`Licenses::pro_signal`]); главный wasm кладёт `None`.
+    /// Ключи «Pro» конторы, сколько их записей не читается и у каких ИП свой
+    /// ключ — сигнал, который заводят части ([`Licenses::pro_signal`]);
+    /// главный wasm кладёт `None`.
     /// Сигнал нового типа в главном wasm, как и поле в состоянии ключей,
     /// стоил ему сотен байт после brotli (замеры задачи 38, 2026-11-16).
     pub pro: Option<RwSignal<OfficeKeys>>,
 }
 
-/// Ключи «Pro» конторы — записи и сколько не читается.
-type OfficeKeys = (Vec<OfficeLicense>, usize);
+/// Ключи «Pro» конторы — записи и сколько не читается, — и базы ИП со своим
+/// действующим ключом: места в ключе «Pro» они не занимают (задача 103,
+/// `Office::own_keys`). Их читают, только когда ключ «Pro» есть.
+#[derive(Clone, Default)]
+pub struct OfficeKeys {
+    keys: Vec<OfficeLicense>,
+    unreadable: usize,
+    own: Vec<String>,
+}
 
 /// О конце какого срока говорит окно поверх программы: ключа (задача 92) или
 /// пробного периода (задача 93).
@@ -405,7 +413,8 @@ impl Licenses {
         self.covering.get()
     }
 
-    /// Прочитать ключи.
+    /// Прочитать ключи. Есть в конторе ключ «Pro» — ещё и у каких ИП списка
+    /// свой действующий ключ (задача 103): места они не занимают.
     async fn load(&self, store: &Store) {
         let office = self.around.get_value().office;
         let read = async {
@@ -414,10 +423,18 @@ impl Licenses {
             Ok::<_, StoreError>((base, office))
         };
         let state = match read.await {
-            Ok((base, office)) => {
+            Ok((base, keys)) => {
+                let own = match self.today {
+                    Some(today) if !keys.records.is_empty() => office.own_keys(store, &self.public, today).await,
+                    _ => Vec::new(),
+                };
                 // Ключи конторы — раньше, чем «прочитано»: срок без них был бы
                 // без места в ключе «Pro».
-                self.pro_signal().set((office.records, office.unreadable));
+                self.pro_signal().set(OfficeKeys {
+                    keys: keys.records,
+                    unreadable: keys.unreadable,
+                    own,
+                });
                 State::Ready {
                     licenses: Arc::new(base.records),
                     unreadable: base.unreadable,
@@ -435,7 +452,7 @@ impl Licenses {
         if let Some(signal) = self.around.with_value(|around| around.pro) {
             return signal;
         }
-        let make = || RwSignal::new((Vec::new(), 0));
+        let make = || RwSignal::new(OfficeKeys::default());
         let signal = match self.root.get_value() {
             Some(root) => root.with(make),
             None => make(),
@@ -448,7 +465,7 @@ impl Licenses {
     /// отслеживаемое. Подпись каждого ключа — раз на расчёт (ревью задачи 38).
     pub(super) fn pro_seats(&self) -> Vec<(u8, Date)> {
         self.pro_signal()
-            .with(|(keys, _)| license::pro_seats(&self.public, OfficeLicense::keys(keys)))
+            .with(|office| license::pro_seats(&self.public, OfficeLicense::keys(&office.keys)))
     }
 
     /// Самый долгий ключ «Pro» конторы, который идёт в день `today`: число мест
@@ -462,7 +479,7 @@ impl Licenses {
 
     /// Ключи «Pro» живых записей конторы — отслеживаемое.
     fn office_keys(&self) -> Vec<license::Key> {
-        self.pro_signal().with(|(keys, _)| OfficeLicense::keys(keys).cloned().collect())
+        self.pro_signal().with(|office| OfficeLicense::keys(&office.keys).cloned().collect())
     }
 
     /// Записанный ключ — в конец списка.
@@ -496,14 +513,51 @@ impl Licenses {
     pub(super) fn access(&self, profiles: Profiles) -> Access {
         let tin = profiles.with(|data| data.and_then(|data| data.tin.clone()));
         let trial = license::trial_start(self.trial, self.data_since(profiles));
-        let seat = license::seat(&self.pro_seats(), self.around.get_value().office.place());
-        self.state.with(|state| {
+        let seats = self.pro_seats();
+        let own = self.state.with(|state| {
             let licenses: &[License] = match state {
                 State::Ready { licenses, .. } => licenses,
                 State::Loading | State::Failed(_) => &[],
             };
-            Access::new(&self.public, License::keys(licenses), tin.as_ref(), trial).with_seat(seat)
-        })
+            Access::new(&self.public, License::keys(licenses), tin.as_ref(), trial)
+        });
+        own.with_seat(self.seat(&seats, own.key()))
+    }
+
+    /// Место открытого ИП в ключе «Pro» конторы (задача 38): ключ `seats`, у
+    /// которого мест хватает до его места в списке. ИП со своим действующим
+    /// ключом стоят в списке после остальных (задача 103, `office::place`):
+    /// у других ИП — как их прочитала часть ([`Office::own_keys`]), а у
+    /// открытого — по его ключу `key` сейчас, и введённый только что ключ
+    /// место освобождает сразу. Отслеживаемое; `None` — ключа «Pro» нет или
+    /// места не хватило.
+    fn seat(&self, seats: &[(u8, Date)], key: Option<Paid>) -> Option<Paid> {
+        if seats.is_empty() {
+            return None;
+        }
+        let office = self.around.get_value().office;
+        let current = office.current();
+        let keyed = self
+            .today
+            .zip(key)
+            .is_some_and(|(today, (_, last))| today <= last);
+        let mut own: Vec<String> = self
+            .pro_signal()
+            .with(|keys| keys.own.iter().filter(|name| **name != current).cloned().collect());
+        if keyed {
+            own.push(current);
+        }
+        license::seat(seats, office.place(&own))
+    }
+
+    /// Идёт ключ «Pro» конторы, а у открытого ИП из списка нет ни места в нём,
+    /// ни своего действующего ключа (задачи 38 и 103): об этом экран лицензии
+    /// говорит словами. `access` — срок ИП с местом ([`Licenses::access`]): его
+    /// ключ — самый долгий из своего и места. Отслеживаемое.
+    pub(super) fn pro_seat_missing(&self, access: Access, today: Date) -> bool {
+        self.pro_term(today).is_some()
+            && access.key().is_none_or(|(_, last)| last < today)
+            && self.around.get_value().office.place(&[]).is_some()
     }
 
     /// Первый день данных открытой базы (задача 99, `license::data_since`) —
@@ -557,7 +611,7 @@ impl Licenses {
             State::Ready { unreadable, .. } => *unreadable,
             State::Loading | State::Failed(_) => 0,
         });
-        base + self.pro_signal().with(|(_, unreadable)| *unreadable)
+        base + self.pro_signal().with(|office| office.unreadable)
     }
 }
 
@@ -1011,11 +1065,9 @@ pub(super) fn LicensePage(ctx: tax::Ctx) -> impl IntoView {
         }
         // Ключ «Pro» конторы идёт, а места в нём у этого ИП нет (задача 38):
         // места заняли ИП, добавленные раньше. Громко — только когда из-за
-        // этого заперт выпуск, а свой «Стандарт» у ИП места не требует.
-        if licenses.pro_term(today).is_some()
-            && license::seat(&licenses.pro_seats(), office.place()).is_none_or(|(_, last)| last < today)
-            && office.place().is_some()
-        {
+        // этого заперт выпуск. Со своим действующим ключом ИП места не нужно,
+        // и о нём ни слова (задача 103).
+        if licenses.pro_seat_missing(access, today) {
             lines.push((t(lang, Key::LicenseProNoSeat).to_owned(), !access.issue(today)));
         }
         match access.days_left(today) {

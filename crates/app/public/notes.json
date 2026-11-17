@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.143",
+      "date": "2026-11-17",
+      "hy": [
+        "«Pro» բանալին այլևս տեղ չի ծախսում այն ԱՁ-ի վրա, որն ունի իր գործող «Ստանդարտ» բանալին. տեղերը նախ ստանում են առանց բանալու ԱՁ-ները, իսկ «ԱՁ-ները ծրագրում» էկրանում այդպիսի ԱՁ-ի մոտ գրված է «սեփական բանալի»։"
+      ],
+      "ru": [
+        "Ключ «Pro» больше не тратит место на ИП, у которого свой действующий ключ «Стандарт»: места сначала получают ИП без своего ключа, а на экране «ИП в программе» у такого ИП написано «свой ключ»."
+      ],
+      "en": [
+        "A “Pro” key no longer spends a seat on an entrepreneur who has their own valid “Standard” key: entrepreneurs without a key of their own get seats first, and the “Entrepreneurs in the app” screen marks such an entrepreneur “own key”."
+      ]
+    },
+    {
       "version": "0.0.142",
       "date": "2026-11-17",
       "hy": [
@@ -257,25 +270,6 @@
       ],
       "en": [
         "Nothing changed in the app: on iPhone, the payment details and the acceptance words on the website's “Buy” page are now selected whole with a single tap."
-      ]
-    },
-    {
-      "version": "0.0.123",
-      "date": "2026-11-13",
-      "hy": [
-        "«Լիցենզիա» էկրանին՝ ինչ է տալիս բանալին և ինչն է աշխատում առանց դրա, ինչպես տեղափոխել բանալին և տվյալներն այլ սարք, և որ տվյալները սարքերի միջև ինքնուրույն չեն փոխանցվում։ Մուտքագրված բանալու մոտ՝ «Պատճենել բանալին» կոճակը։",
-        "Փորձաշրջանի ավարտից մեկ շաբաթ առաջ ծրագիրը մեկ անգամ կասի այդ մասին պատուհանով. բանալին գալիս է վճարումից հետո մեկ աշխատանքային օրվա ընթացքում, և այն ավելի լավ է գնել նախապես։",
-        "Լիցենզիայի պայմանների նոր խմբագրություն. նախորդի ավարտից առաջ վճարված բանալու ժամկետը սկսվում է նրա վերջին օրվան հաջորդող օրը, և նախորդ բանալու օրերը չեն կորչում։"
-      ],
-      "ru": [
-        "На экране «Лицензия» — что даёт ключ и что работает без него, как перенести ключ и данные на другое устройство и что данные между устройствами сами не переходят. У введённого ключа — кнопка «Скопировать ключ».",
-        "За неделю до конца пробного периода программа один раз скажет об этом окном: ключ приходит в течение рабочего дня после оплаты, и купить его лучше заранее.",
-        "Новая редакция условий лицензии: ключ, оплаченный до конца прежнего, начинается на следующий день после него — дни прежнего ключа не пропадают."
-      ],
-      "en": [
-        "The “License” screen now shows what a key gives you and what works without one, how to move the key and your data to another device, and that data doesn't move between devices on its own. An entered key has a “Copy the key” button.",
-        "A week before your trial ends, the app tells you so once, in a window: a key arrives within a business day after payment, so it's best to buy it in advance.",
-        "New edition of the license terms: a key paid for before the current one ends starts the day after it, so no days of the current key are lost."
       ]
     }
   ]

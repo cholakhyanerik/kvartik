@@ -28,13 +28,14 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
-use kvartik_core::license::{self, MAX_KEYS, OfficeLicense};
+use kvartik_core::license::{self, Access, License, MAX_KEYS, OfficeLicense, PUBLIC_KEY_BYTES};
 use kvartik_core::model::date::Date;
 use kvartik_core::model::document::Document;
 use kvartik_core::model::ledger::Operation;
 use kvartik_core::model::office::{self, Ip, MAX_IPS};
 use kvartik_core::model::profile::Profile;
 use kvartik_core::model::record::{RecordId, Timestamp};
+use kvartik_core::model::tin::Tin;
 use kvartik_core::tax::closing::Closing;
 use kvartik_core::tax::deadlines::{self, When};
 use kvartik_core::tax::opening::Opening;
@@ -218,11 +219,57 @@ impl Office {
         self.ips.track();
     }
 
-    /// Место открытого ИП среди живых ИП списка (`office::place`) —
-    /// отслеживаемое; `None` — списка нет или ИП в нём нет.
-    pub(super) fn place(self) -> Option<usize> {
+    /// Место открытого ИП среди живых ИП списка (`office::place`): `own` —
+    /// базы ИП со своим действующим ключом, они стоят после остальных
+    /// (задача 103). Отслеживаемое; `None` — списка нет или ИП в нём нет.
+    pub(super) fn place(self, own: &[String]) -> Option<usize> {
         let current = self.current.get();
-        self.ips.with(|ips| office::place(ips, &current))
+        self.ips.with(|ips| office::place(ips, &current, own))
+    }
+
+    /// Имя открытой базы — отслеживаемое.
+    pub(super) fn current(self) -> String {
+        self.current.get()
+    }
+
+    /// Базы живых ИП списка, у которых свой действующий в день `today` ключ —
+    /// с верной подписью `public` и на ՀՎՀՀ ИП из списка (задача 103): места
+    /// в ключе «Pro» они не занимают (`office::place`). Базы — по одной, как
+    /// у сводки, и каждая открыта на время чтения, а открытая окном — `open`.
+    /// База, которая не открылась или не прочиталась, — без своего ключа: место
+    /// она займёт, но лишнего не откроет никому.
+    pub(super) async fn own_keys(self, open: &Store, public: &[u8; PUBLIC_KEY_BYTES], today: Date) -> Vec<String> {
+        let current = self.current.get_untracked();
+        let alive: Vec<(String, Option<Tin>)> = self.ips.with_untracked(|ips| {
+            ips.iter()
+                .filter(|ip| !ip.is_removed())
+                .map(|ip| (ip.base().to_owned(), ip.tin().cloned()))
+                .collect()
+        });
+        let mut own = Vec::new();
+        for (name, tin) in alive {
+            let other;
+            let store = if name == current {
+                open
+            } else {
+                match Store::open_base(&name, |_| {}).await {
+                    Ok(store) => {
+                        other = store;
+                        &other
+                    }
+                    Err(_) => continue,
+                }
+            };
+            let read = async { Ok::<_, StoreError>(store.read()?.list::<License>().await?.records) };
+            let Ok(licenses) = read.await else {
+                continue;
+            };
+            let key = Access::new(public, License::keys(&licenses), tin.as_ref(), None).key();
+            if key.is_some_and(|(_, last)| today <= last) {
+                own.push(name);
+            }
+        }
+        own
     }
 
     /// Ключи «Pro» конторы — для срока (`Licenses::load`). Конторы нет — ИП
@@ -609,12 +656,21 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
     // здесь, в части книги: `Licenses` в `Ctx` экрана стоили главному wasm
     // байтов (замер задачи 38). Перечитываются, когда перечитан список: ввод
     // ключа и восстановление копии перечитывают его.
-    let seats = RwSignal::new(Vec::<(u8, kvartik_core::model::date::Date)>::new());
+    // И базы ИП со своим действующим ключом (задача 103): места они не
+    // занимают — только когда ключ «Pro» есть, иначе базы не открываются.
+    let seats = RwSignal::new(Vec::<(u8, Date)>::new());
+    let own = RwSignal::new(Vec::<String>::new());
+    let today = clock::today();
     Effect::new(move |_| {
         office.track();
         spawn_local(async move {
             if let Ok(keys) = office.pro_keys().await {
-                seats.set(license::pro_seats(&super::license::author(), OfficeLicense::keys(&keys.records)));
+                let author = super::license::author();
+                let found = license::pro_seats(&author, OfficeLicense::keys(&keys.records));
+                if let (false, Some(today), Some(store)) = (found.is_empty(), today, base.get()) {
+                    own.set(office.own_keys(&store, &author, today).await);
+                }
+                seats.set(found);
             }
         });
     });
@@ -665,7 +721,6 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
     };
     // Ключ «Pro» конторы (задача 38): места — с подписью, проверенной один
     // раз на перерисовку (`Licenses::pro_seats`).
-    let today = clock::today();
     let rows = move || {
         // База не выбрана — какой ИП открыт, ещё не решено (`chosen`).
         if !office.chosen.get() {
@@ -675,8 +730,10 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
         let lang = lang.get();
         let ips = office.ips.get();
         let alive = office::alive(&ips);
-        // Идёт ключ «Pro» — у ИП без места в нём это сказано словами.
+        // Идёт ключ «Pro» — у ИП без места в нём это сказано словами, а у ИП
+        // со своим ключом — что ключ свой: места ему не нужно (задача 103).
         let seats = seats.get();
+        let own = own.get();
         let pro = today.filter(|&today| seats.iter().any(|&(_, last)| today <= last));
         // Списка ещё нет — ИП один, тот, что открыт: его имя — из профиля.
         if alive.is_empty() {
@@ -694,21 +751,23 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
         }
         alive
             .into_iter()
-            .enumerate()
-            .map(|(place, ip)| {
+            .map(|ip| {
                 let is_current = ip.base() == current;
                 let tin = ip.tin().map(|tin| fill(t(lang, Key::TinShort), &[tin.as_str()]));
                 let to = ip.base().to_owned();
                 let id = ip.id();
-                let no_seat = pro.is_some_and(|today| {
-                    license::seat(&seats, Some(place)).is_none_or(|(_, last)| last < today)
-                });
+                let keyed = pro.is_some() && own.iter().any(|name| name == ip.base());
+                let no_seat = !keyed
+                    && pro.is_some_and(|today| {
+                        license::seat(&seats, office::place(&ips, ip.base(), &own)).is_none_or(|(_, last)| last < today)
+                    });
                 view! {
                     <li class="entry office-ip" class:current=is_current>
                         <span class="entry-main">
                             <span class="entry-title">{name(ip, lang)}</span>
                             {tin.map(|tin| view! { <span class="entry-meta">{tin}</span> })}
                             {is_current.then(|| view! { <span class="entry-meta">{t(lang, Key::OfficeOpenNow)}</span> })}
+                            {keyed.then(|| view! { <span class="entry-meta">{t(lang, Key::OfficeOwnKey)}</span> })}
                             {no_seat.then(|| view! { <span class="entry-meta">{t(lang, Key::OfficeNoSeat)}</span> })}
                         </span>
                         {(!is_current).then(|| {

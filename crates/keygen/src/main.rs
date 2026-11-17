@@ -20,15 +20,16 @@
 //!
 //! Ключ «Pro» (задача 38) — версии 2, с числом мест: столько ИП конторы он
 //! открывает. Число ставит автор флагом `--seats`, а без флага — у продления
-//! столько, сколько у продлённого ключа «Pro», иначе `license::PRO_SEATS`
-//! (решение человека 2026-11-05). «Стандарт» мест не знает и выпускается
-//! версией 1, как раньше.
+//! столько, сколько у продлённого ключа «Pro», иначе столько, сколько у тарифа
+//! на странице «Купить», — `release::PRO_SEATS`, 10 (решения человека
+//! 2026-11-05 и 2026-11-17). «Стандарт» мест не знает и выпускается версией 1,
+//! как раньше.
 //!
 //! ```text
 //! kvartik-keygen pair <путь закрытого ключа>
 //! kvartik-keygen issue --tin 00054321 --plan standard --until 2027-10-10 [--key <путь закрытого ключа>]
 //! kvartik-keygen issue --tin 00054321 --plan standard --renew [--key <путь закрытого ключа>]
-//! kvartik-keygen issue --tin 00054321 --plan pro --seats 30 --until 2027-10-10 [--key <путь закрытого ключа>]
+//! kvartik-keygen issue --tin 00054321 --plan pro --seats 10 --until 2027-10-10 [--key <путь закрытого ключа>]
 //! ```
 
 use std::fs::{self, OpenOptions};
@@ -38,7 +39,8 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ed25519_dalek::{Signer, SigningKey};
-use kvartik_core::license::{self, Key, PRO_SEATS, PUBLIC_KEY_BYTES, Plan};
+use kvartik_core::license::{self, Key, PUBLIC_KEY_BYTES, Plan};
+use kvartik_core::release::PRO_SEATS;
 use kvartik_core::model::date::Date;
 use kvartik_core::model::office::MAX_IPS;
 use kvartik_core::model::tin::Tin;
@@ -83,7 +85,7 @@ const USAGE: &str = "использование:
   kvartik-keygen issue --tin <ՀՎՀՀ> --plan standard|pro [--seats <N>] --until <ГГГГ-ММ-ДД> [--key <путь закрытого ключа>]
   kvartik-keygen issue --tin <ՀՎՀՀ> --plan standard|pro [--seats <N>] --renew [--key <путь закрытого ключа>]
 --renew — продление заранее (условия, п. 4.1): последний день — год после последнего дня самого долгого ключа того же тарифа на этот ՀՎՀՀ в журнале, пока тот ещё идёт
---seats — только у pro: сколько ИП конторы открывает ключ, от 1 до 100; без него — сколько у продлённого ключа pro, иначе 30
+--seats — только у pro: сколько ИП конторы открывает ключ, от 1 до 100; без него — сколько у продлённого ключа pro, иначе 10, как у тарифа на странице «Купить»
 закрытый ключ issue по умолчанию — license.key в папке kvartik-license домашнего каталога";
 
 fn main() -> ExitCode {
@@ -238,7 +240,7 @@ impl Order {
 /// Число мест ключа по заказу `order`: у «Стандарта» — нет; у «Pro» —
 /// названное `--seats`, а нет — сколько у продлённого им ключа «Pro»
 /// `renewed`: забытый флаг иначе отнял бы у покупателя места; иначе —
-/// [`PRO_SEATS`].
+/// [`PRO_SEATS`], сколько у тарифа на странице «Купить».
 fn seats(order: &Order, renewed: Option<&Key>) -> Option<u8> {
     match order.plan {
         Plan::Standard => None,
@@ -687,6 +689,7 @@ mod tests {
             Ok(Some(100))
         );
         assert!(USAGE.contains(&format!("от 1 до {MAX_IPS}")), "в подсказке — не тот предел мест");
+        assert!(USAGE.contains(&format!("иначе {PRO_SEATS},")), "в подсказке — не то число мест по умолчанию");
         let mut accepted = Vec::new();
         for line in [
             "--tin 00054321 --plan standard",
@@ -818,7 +821,7 @@ mod tests {
             format!(
                 "выпущен\tՀՎՀՀ\tтариф\tпоследний день\tключ\n\
                  2026-10-27\t00054321\tstandard\t2027-10-10\t{}\n\
-                 2026-10-27\t00054321\tpro:30\t2027-12-31\t{}\n",
+                 2026-10-27\t00054321\tpro:{PRO_SEATS}\t2027-12-31\t{}\n",
                 first.text(),
                 second.text()
             )

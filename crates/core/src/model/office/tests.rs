@@ -66,7 +66,7 @@ fn the_same_day_keeps_the_order_of_adding() {
     let order: Vec<&str> = alive(&ips).iter().map(|ip| ip.base()).collect();
     let expected: Vec<&str> = std::iter::once(first.base()).chain(added.iter().map(Ip::base)).collect();
     assert_eq!(order, expected, "порядок одного дня");
-    let places: Vec<Option<usize>> = added.iter().map(|ip| place(&ips, ip.base())).collect();
+    let places: Vec<Option<usize>> = added.iter().map(|ip| place(&ips, ip.base(), &[])).collect();
     let expected: Vec<Option<usize>> = (1..=30).map(Some).collect();
     assert_eq!(places, expected, "места одного дня");
 }
@@ -219,18 +219,49 @@ fn places_follow_the_day_added() {
         ("убранный", early.base(), None),
         ("чужой", "kvartik-ip-x", None),
     ] {
-        if place(&ips, base) != expected {
-            wrong.push(format!("{what}: {:?}", place(&ips, base)));
+        if place(&ips, base, &[]) != expected {
+            wrong.push(format!("{what}: {:?}", place(&ips, base, &[])));
         }
     }
     early.bring_back(at(5_000));
     let back = [second.clone(), early.clone(), first.clone()];
-    if (place(&back, early.base()), place(&back, second.base())) != (Some(1), Some(2)) {
+    if (place(&back, early.base(), &[]), place(&back, second.base(), &[])) != (Some(1), Some(2)) {
         wrong.push(format!(
             "вернувшийся: {:?}, добавленный позже: {:?}",
-            place(&back, early.base()),
-            place(&back, second.base())
+            place(&back, early.base(), &[]),
+            place(&back, second.base(), &[])
         ));
     }
     assert!(wrong.is_empty(), "места: {wrong:#?}");
+}
+
+/// ИП со своим действующим ключом места в ключе «Pro» не занимает (решение
+/// человека 2026-11-17, задача 103): сначала места получают ИП без своего
+/// ключа в порядке добавления, потом — с ключом, тоже по порядку. Убранного
+/// среди мест нет и тогда, когда у него свой ключ, а ключ, о котором список
+/// не знает, ничего не сдвигает.
+#[test]
+fn an_own_key_gives_its_seat_to_the_next() {
+    let first = Ip::first(None, day(2026, 11, 1), at(1_000));
+    let keyed = Ip::new(day(2026, 11, 2), at(2_000));
+    let third = Ip::new(day(2026, 11, 3), at(3_000));
+    let fourth = Ip::new(day(2026, 11, 4), at(4_000));
+    let mut gone = Ip::new(day(2026, 11, 5), at(5_000));
+    gone.remove(at(6_000));
+    let ips = [fourth.clone(), gone.clone(), third.clone(), keyed.clone(), first.clone()];
+    let own = [keyed.base().to_owned(), gone.base().to_owned(), "kvartik-ip-x".to_owned()];
+    let mut wrong = Vec::new();
+    for (what, base, without, with) in [
+        ("первый", first.base(), Some(0), Some(0)),
+        ("со своим ключом", keyed.base(), Some(1), Some(3)),
+        ("третий", third.base(), Some(2), Some(1)),
+        ("четвёртый", fourth.base(), Some(3), Some(2)),
+        ("убранный", gone.base(), None, None),
+    ] {
+        let got = (place(&ips, base, &[]), place(&ips, base, &own));
+        if got != (without, with) {
+            wrong.push(format!("{what}: без ключей {:?}, с ключами {:?}", got.0, got.1));
+        }
+    }
+    assert!(wrong.is_empty(), "места со своими ключами: {wrong:#?}");
 }

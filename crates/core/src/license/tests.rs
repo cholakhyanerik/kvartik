@@ -115,7 +115,7 @@ fn a_key_round_trips_through_its_text() {
 
 /// Ключ «Pro» версии 2 — на байт длиннее: 79 байт — 127 знаков base32, 26
 /// групп, последняя из двух знаков, — и читается обратно с числом мест.
-/// У «Pro» версии 1 числа мест в байтах нет, и мест у него `PRO_SEATS`.
+/// У «Pro» версии 1 числа мест в байтах нет, и мест у него `V1_PRO_SEATS`.
 #[test]
 fn a_pro_key_carries_its_seats() {
     let key = pro("00054321", day(2026, 10, 27), day(2027, 10, 31), 12);
@@ -126,7 +126,7 @@ fn a_pro_key_carries_its_seats() {
     assert_eq!(Key::read(&text, &public()), Ok(key.clone()));
     assert_eq!((key.plan(), key.seats()), (Plan::Pro, Some(12)));
     let old = self::key("00054321", Plan::Pro, day(2026, 10, 27), day(2027, 10, 31));
-    assert_eq!((old.text().len(), old.seats()), (149, Some(PRO_SEATS)));
+    assert_eq!((old.text().len(), old.seats()), (149, Some(V1_PRO_SEATS)));
     assert_eq!(Key::read(&old.text(), &public()), Ok(old));
     // Тот же ключ на другое число мест — другие байты, и подпись не сходится.
     let mut more = key.clone();

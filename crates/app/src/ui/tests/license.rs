@@ -1169,6 +1169,78 @@ async fn a_pro_key_opens_only_its_seats() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
+/// ИП со своим действующим ключом «Стандарт» места в ключе «Pro» не занимает
+/// (решение человека 2026-11-17, задача 103): ключ — на одно место, у ИП,
+/// добавленного раньше, свой ключ в его базе, и место достаётся открытому,
+/// добавленному позже. Экран лицензии о месте молчит и выпуск не запирает,
+/// срок — «Pro», а экран ИП называет раннего «свой ключ», и «без места» нет
+/// ни у кого.
+#[wasm_bindgen_test]
+async fn an_own_key_leaves_its_seat_to_the_next() {
+    base_with_draft().await;
+    forget_office_bases().await;
+    let lang = Lang::Ru;
+    let device = Device::new();
+    device.set_ui_lang(lang);
+    let (today, now) = (clock::today().expect("часы с датой"), clock::now());
+    trial_from(today.add_days(-100).expect("дата"));
+    let until = today.add_days(365).expect("дата");
+    // Ранний ИП — со своим профилем на свой ՀՎՀՀ и своим ключом в своей базе.
+    let own_tin = "07654321";
+    let mut data = profile();
+    data.tin = Some(Tin::parse(own_tin).expect("годный ՀՎՀՀ"));
+    let own_profile = Profile::save(None, data, now).expect("годный профиль").expect("новый");
+    let mut earlier = Ip::new(today.add_days(-2).expect("дата"), now);
+    earlier.copy_profile(&own_profile, now);
+    let key = license::Key::read(&key_text(SEED, own_tin, until), &signer().verifying_key().to_bytes())
+        .expect("ключ пары проб");
+    let own_key = License::enter(key, &[], now).expect("новый ключ");
+    let store = Store::open_base(earlier.base(), |_| {}).await.expect("база раннего ИП");
+    let mut writes = Writes::default();
+    writes.insert(&own_profile);
+    writes.insert(&own_key);
+    store.write().expect("транзакция").commit(writes).await.expect("записано");
+    drop(store);
+    let open = Ip::first(None, today, now);
+    office_with_pro(&[&earlier, &open], &pro_text("09876541", until, 1)).await;
+    device.set_base(crate::store::DB_NAME);
+
+    let (host, mounted) = mount_at("#/license");
+    let mut wrong = Vec::new();
+    if !wait_for(&host, &plan_until(lang, Key::PlanPro, until)).await {
+        wrong.push(format!("открытому ИП места не досталось: «{}»", license_text(&host)));
+    }
+    let screen = license_text(&host);
+    for (what, words) in [
+        ("«места не хватило»", t(lang, Key::LicenseProNoSeat)),
+        ("«сейчас закрыто»", t(lang, Key::LicenseClosedNow)),
+    ] {
+        if screen.contains(words) {
+            wrong.push(format!("на экране лицензии — {what}"));
+        }
+    }
+
+    set_hash("#/office");
+    let own_name = own_profile.data().name.ru.as_str().to_owned();
+    let row_says = |text: &str| {
+        let section = super::section_text(&host, "office");
+        section.contains(&format!("{own_name}{}", fill(t(lang, Key::TinShort), &[own_tin]))) && section.contains(text)
+    };
+    if !wait_until(|| row_says(t(lang, Key::OfficeOwnKey))).await {
+        wrong.push(format!("экран ИП не назвал раннего «свой ключ»: «{}»", super::section_text(&host, "office")));
+    }
+    if super::section_text(&host, "office").contains(t(lang, Key::OfficeNoSeat)) {
+        wrong.push("на экране ИП — «без места»".to_owned());
+    }
+
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_trial();
+    forget_office_bases().await;
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// Записать в контору список и ключ «Pro» в обход окна — так их оставила
 /// бы другая вкладка — и метку устройства.
 async fn office_with_pro(ips: &[&Ip], key: &str) {
