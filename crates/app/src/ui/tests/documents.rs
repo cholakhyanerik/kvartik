@@ -311,11 +311,23 @@ async fn invoice_flow(host: &HtmlElement, client: &Client, lang: Lang, today: Da
     // Аннулировать счёт и вернуть его. Строка списка — ссылка: карточка
     // приходит переходом по адресу, и её ждать, а не фиксированную паузу.
     open_row(&first, &mut wrong);
-    if !wait_until(|| button(host, &[t(lang, Key::DocAnnul)]).is_some()).await {
+    // Ждать карточку именно этого счёта и нажимать в ней, а не первую
+    // «Аннулировать» в странице: на занятом раннере CI переход «назад» из
+    // карточки акта обработался позже нажатия строки, кнопка нашлась ещё
+    // в карточке акта, и аннулировался акт (Chrome, 2026-11-17).
+    let annul = || {
+        let card: HtmlElement = host.query_selector(".docs-detail").ok().flatten()?.unchecked_into();
+        let heading = card.query_selector("h2.doc-heading").ok().flatten()?.text_content()?;
+        (heading.trim() == first).then(|| button(&card, &[t(lang, Key::DocAnnul)])).flatten()
+    };
+    if !wait_until(|| annul().is_some()).await {
         wrong.push("карточка выпущенного счёта не открылась из списка".to_owned());
         return wrong;
     }
-    press(t(lang, Key::DocAnnul), &mut wrong);
+    match annul() {
+        Some(button) => button.click(),
+        None => wrong.push("в карточке счёта нет «Аннулировать»".to_owned()),
+    }
     if !wait_for(host, &fill(t(lang, Key::DocAnnulledNotice), &[&first])).await {
         wrong.push("аннулирование не подтвердилось".to_owned());
         return wrong;
