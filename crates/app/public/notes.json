@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.145",
+      "date": "2026-11-17",
+      "hy": [
+        "«Կարգավորումներ» էկրանում ձեր գույնի տակ գրված է «Վերականգնել»՝ «Վերակայել»-ի փոխարեն։"
+      ],
+      "ru": [
+        "В армянском окне на экране «Настройки» под своим цветом написано «Վերականգնել» вместо «Վերակայել»: прежнее слово было калькой."
+      ],
+      "en": [
+        "In the Armenian window, the Settings screen now says “Վերականգնել” under your own color instead of “Վերակայել”: the old word was a calque."
+      ]
+    },
+    {
       "version": "0.0.144",
       "date": "2026-11-17",
       "hy": [
@@ -260,19 +273,6 @@
       "en": [
         "Micro-entrepreneurship is now a second tax regime: tick the year you filed the application for in your profile, and the app shows the year's turnover instead of turnover tax, watches the 24 million ֏ threshold and the codes the regime is closed to, and tells you if it has ended.",
         "Such a year gets its own annual payments (no profit tax, stamp duty by the year's turnover) and its own deadlines: the regime application, the annual turnover report and stamp duty."
-      ]
-    },
-    {
-      "version": "0.0.125",
-      "date": "2026-11-14",
-      "hy": [
-        "kvartik.com կայքում ընտրած լեզուն այժմ վերցնում է նաև ծրագիրը. կայքում ընտրեք English, և ծրագիրը կբացվի անգլերենով ու կհիշի այն, նույնիսկ եթե նախկինում դրանում այլ լեզու էր ընտրված։"
-      ],
-      "ru": [
-        "Язык, выбранный на сайте kvartik.com, теперь берёт и программа: выбрали на сайте English — программа откроется по-английски и запомнит его, даже если раньше в ней был выбран другой язык."
-      ],
-      "en": [
-        "The language you choose on kvartik.com now carries over to the app: pick English on the site, and the app opens in English and remembers it, even if another language was chosen in it before."
       ]
     }
   ]
