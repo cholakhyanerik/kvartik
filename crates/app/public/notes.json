@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.147",
+      "date": "2026-11-17",
+      "hy": [
+        "ԿԲ փոխարժեքի հուշման տակ՝ «Երբ օրենքը վերցնում է այլ օր». վարձակալության, բաժանորդագրությունների, տոկոսների, ապրանքների ներմուծման և արտահանման դեպքում օրենքը փոխարժեքը հաշվում է ոչ թե ձևի ամսաթվից, և բացատրությունը նշում է՝ որ օրվանից։"
+      ],
+      "ru": [
+        "Под подсказкой курса ЦБ — «Когда закон берёт другой день»: у аренды, подписок, процентов, ввоза и вывоза товаров закон считает курс не от даты в форме, и слова говорят, от какого дня."
+      ],
+      "en": [
+        "Under the CBA rate hint there's now “When the law takes another day”: for rent, subscriptions, interest and importing or exporting goods the law counts the rate from a different day than the one in the form, and the words tell you which."
+      ]
+    },
+    {
       "version": "0.0.146",
       "date": "2026-11-17",
       "hy": [
@@ -254,22 +267,6 @@
       ],
       "en": [
         "Nothing changed in the app: when renewing a key, the author no longer works out the new key's last day by hand — it's calculated from the current key's last day automatically, with no day lost or gained by mistake."
-      ]
-    },
-    {
-      "version": "0.0.127",
-      "date": "2026-11-15",
-      "hy": [
-        "Փորձաշրջանն այժմ տեղափոխվում է տվյալների հետ. նոր դիտարկիչում կամ այլ սարքում վերականգնված պատճենն իր հետ բերում է նաև արդեն անցած օրերը՝ 14 օրը հաշվվում է տվյալների առաջին օրից, եթե այն ավելի վաղ է առաջին բացումից։ «Լիցենզիա» էկրանը ցույց է տալիս, թե որ օրից է հաշվվում փորձաշրջանը։",
-        "Լիցենզիայի պայմանների նոր խմբագրություն՝ 15.11.2026. դրա մասին է 3-րդ կետը, իսկ նախորդ խմբագրությունը մնում է կայքում՝ իր հասցեով։"
-      ],
-      "ru": [
-        "Пробный период теперь едет с данными: копия, восстановленная в новом браузере или на другом устройстве, приносит с собой и прошедшие дни — 14 дней считаются с первого дня данных, если он раньше первого открытия. Экран «Лицензия» говорит, с какого дня идёт период.",
-        "Новая редакция условий лицензии от 15.11.2026 — об этом её п. 3; прежняя осталась на сайте по своему адресу."
-      ],
-      "en": [
-        "The trial now travels with your data: a backup restored in a new browser or on another device brings the days already used along with it — the 14 days count from the first day of the data if it's earlier than the first opening. The License screen says which day the trial counts from.",
-        "A new edition of the license terms, dated November 15, 2026 — section 3 covers this; the previous edition stays on the site at its own address."
       ]
     }
   ]

@@ -26,6 +26,7 @@ pub(super) use kvartik_core::tax::cba::Hint;
 use kvartik_core::tax::cba::{self, Rates};
 use leptos::prelude::*;
 
+use super::tr;
 use crate::store::device::Device;
 
 /// Как часто спрашивать сайт о курсах: раз в час, как о новой версии.
@@ -109,7 +110,10 @@ pub(super) fn hint(currency: Signal<Option<Currency>>, day: Signal<Option<Date>>
 
 /// Подсказка под полем курса: курс ЦБ, который берёт закон для дня
 /// поставки, и «Подставить», когда в поле другой; курса нет — почему.
-/// `field` — текст поля курса.
+/// Под ней, пока она есть, — раскрываются слова, когда закон берёт другой
+/// день (задача 104): подсказка считает от даты в форме, а что это за
+/// сделка — ввоз, аренда, проценты, — программа не знает. `field` — текст
+/// поля курса.
 #[component]
 pub(super) fn CbaHint(
     lang: ReadSignal<Lang>,
@@ -118,6 +122,20 @@ pub(super) fn CbaHint(
     field: RwSignal<String>,
 ) -> impl IntoView {
     let hint = hint(currency, day);
+    // Мемо, а не сама подсказка: раскрытые слова не захлопываются, пока
+    // человек меняет день, — узел пересоздаётся, только когда подсказка
+    // появилась или пропала.
+    let shown = Memo::new(move |_| hint.with(Option::is_some));
+    let other_day = move || {
+        shown.get().then(|| {
+            view! {
+                <details class="rate-day">
+                    <summary>{tr(lang, Key::RateDayAsk)}</summary>
+                    <p class="hint">{tr(lang, Key::RateDayAbout)}</p>
+                </details>
+            }
+        })
+    };
     // Курс, который подставила подсказка. Сменились день или валюта, а в
     // поле всё ещё он — он следует за подсказкой: курс нового дня, а нет
     // его — пустое поле, а не курс чужого дня или валюты, похожий на курс
@@ -141,7 +159,7 @@ pub(super) fn CbaHint(
             filled.set(now);
         }
     });
-    move || {
+    let said = move || {
         let lang = lang.get();
         let currency = currency.get()?;
         Some(match hint.get()? {
@@ -178,5 +196,9 @@ pub(super) fn CbaHint(
                     .into_any()
             }
         })
+    };
+    view! {
+        {said}
+        {other_day}
     }
 }

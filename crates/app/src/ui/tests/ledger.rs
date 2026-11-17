@@ -517,6 +517,11 @@ async fn cba_rate_is_suggested() {
     if !wait_for(&host, &said).await {
         wrong.push(format!("нет подсказки «{said}»"));
     }
+    // Под подсказкой — когда закон берёт другой день (задача 104).
+    let other_day = host.query_selector("details.rate-day").ok().flatten().and_then(|d| d.text_content());
+    if !other_day.is_some_and(|text| text.contains(t(lang, Key::RateDayAsk)) && text.contains(t(lang, Key::RateDayAbout))) {
+        wrong.push("под подсказкой нет слов, когда закон берёт другой день".to_owned());
+    }
     press(&host, t(lang, Key::CbaRateUse), &mut wrong);
     sleep(50).await;
     let rate_label = fill(t(lang, Key::OpRate), &["USD"]);
@@ -557,6 +562,13 @@ async fn cba_rate_is_suggested() {
     let typed = field(&host, &rate_label, 0).map(|input| input.value());
     if typed.as_deref() != Some("") {
         wrong.push(format!("без курса дня в поле остался курс чужого дня: {typed:?}"));
+    }
+    // До 1 июля 2026 года подсказки нет — нет и слов о другом дне: прежняя
+    // ст. 16 брала курс на день расчётного документа.
+    let june = Date::new(2026, 6, 30).expect("день");
+    fill_field(&host, t(lang, Key::DocServiceDate), &june.iso(), &mut wrong);
+    if !wait_until(|| host.query_selector("details.rate-day").ok().flatten().is_none()).await {
+        wrong.push("до 1 июля 2026 года — слова о другом дне".to_owned());
     }
     // Подставили, потом набрали свой курс руками: сменили день — свой курс
     // остаётся, а «Подставить» предлагает курс нового дня.
