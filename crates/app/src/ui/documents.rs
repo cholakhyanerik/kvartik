@@ -37,7 +37,7 @@ use kvartik_core::model::client::Client;
 use kvartik_core::model::country::Country;
 use kvartik_core::model::date::{Date, Quarter};
 use kvartik_core::model::document::{
-    DocError, DocKind, Document, DocumentData, Item, Payment, QUANTITY_DIGITS, Settlement, Status,
+    DocError, DocKind, Document, DocumentData, Item, Payment, QUANTITY_DIGITS, Settlement, SettlementKind, Status,
 };
 use kvartik_core::model::ledger;
 use kvartik_core::model::logo::{IssuedLogo, Logo};
@@ -343,6 +343,8 @@ enum Notice {
     /// Расчётный документ отмечен выписанным и отметка снята (задача 23).
     Settled,
     Unsettled,
+    /// Отмечено, что вместо него выдан чек ККМ (задача 76).
+    Receipted,
 }
 
 /// Что не вышло: хранилище или команда ядра.
@@ -1136,6 +1138,7 @@ fn NoticeLine(ctx: Ctx, busy: RwSignal<bool>, failure: RwSignal<Option<Problem>>
             Notice::Unsigned => view! { <p role="status">{tr(lang, Key::SignRemoved)}</p> }.into_any(),
             Notice::Settled => view! { <p role="status">{tr(lang, Key::SettleSaved)}</p> }.into_any(),
             Notice::Unsettled => view! { <p role="status">{tr(lang, Key::SettleRemoved)}</p> }.into_any(),
+            Notice::Receipted => view! { <p role="status">{tr(lang, Key::ReceiptSaved)}</p> }.into_any(),
             Notice::Restored => {
                 view! { <p role="status">{tr(lang, Key::DocRestoredNotice)}</p> }.into_any()
             }
@@ -2988,8 +2991,9 @@ enum Event {
     Issued,
     Paid(i64),
     Signed,
-    /// Расчётный документ выписан в системе ՊԵԿ (задача 23).
-    Settled,
+    /// Расчётный документ выписан в системе ՊԵԿ (задача 23) или выдан чек
+    /// ККМ (задача 76).
+    Settled(SettlementKind),
     Annulled,
 }
 
@@ -3010,7 +3014,7 @@ fn History(ctx: Ctx, document: Document) -> impl IntoView {
         events.push((day, 1, Event::Signed));
     }
     if let Some(settlement) = document.settlement() {
-        events.push((settlement.day, 1, Event::Settled));
+        events.push((settlement.day, 1, Event::Settled(settlement.kind)));
     }
     if let Some(day) = document.annulled() {
         events.push((day, 2, Event::Annulled));
@@ -3030,7 +3034,8 @@ fn History(ctx: Ctx, document: Document) -> impl IntoView {
                             &[&i18n::money(lang, Money::new(amount, currency))],
                         ),
                         Event::Signed => t(lang, Key::HistorySigned).to_owned(),
-                        Event::Settled => t(lang, Key::HistorySettled).to_owned(),
+                        Event::Settled(SettlementKind::System) => t(lang, Key::HistorySettled).to_owned(),
+                        Event::Settled(SettlementKind::Receipt) => t(lang, Key::HistoryReceipt).to_owned(),
                         Event::Annulled => t(lang, Key::StatusAnnulled).to_owned(),
                     }
                 };
@@ -3299,11 +3304,16 @@ fn SettlementMark(
     let known = document.settlement_known();
     let for_file = document.clone();
     let service = document.data().service_date.quarter();
+    // У покупателя ИНН (ՀՎՀՀ) — фирма или ИП, а чек вместо документа закон
+    // разрешает в рознице и при работах и услугах населению (ст. 56, ч. 2):
+    // окно напоминает условие, а кнопку не прячет — «население» закон не
+    // определяет (ревью задачи 76).
+    let firm = document.issued().is_some_and(|issued| issued.buyer().tin.is_some());
     let checked = StoredValue::new(document.clone());
     // Квартал выписки раньше квартала услуги; пока профиль читается — молчит:
     // без кодов строку налога не узнать (`settlement::early`).
-    let early = move |day: Date| {
-        profiles.with(|profile| checked.with_value(|document| settlement::early(document, profile, day)))
+    let early = move |day: Date, kind: SettlementKind| {
+        profiles.with(|profile| checked.with_value(|document| settlement::early(document, profile, day, kind)))
     };
     // Последний день — по правилу на день оказания услуги; правила нет —
     // о сроке и о правиле окно молчит, а не пугает (Правило 6).
@@ -3314,7 +3324,9 @@ fn SettlementMark(
     let tried = RwSignal::new(false);
     let filled = date.get_untracked();
     ctx.forms.hold_while(move || date.with(|day| *day != filled) || number.with(|text| !text.is_empty()));
-    let save = move |_| {
+    // Отметить расчётный документ вида `kind`: в системе ՊԵԿ или чек ККМ
+    // (задача 76) — тем же днём и номером из полей.
+    let save = move |kind: SettlementKind| {
         tried.set(true);
         let Some(day) = Date::from_iso(&date.get_untracked()) else {
             return;
@@ -3322,8 +3334,12 @@ fn SettlementMark(
         let Ok(number) = Line::new(&number.get_untracked()) else {
             return;
         };
-        act(ctx, busy, failure, id, Change::Settle(Settlement { day, number }), move |_| {
-            notice.set(Some(Notice::Settled));
+        let said = match kind {
+            SettlementKind::System => Notice::Settled,
+            SettlementKind::Receipt => Notice::Receipted,
+        };
+        act(ctx, busy, failure, id, Change::Settle(Settlement { day, number, kind }), move |_| {
+            notice.set(Some(said));
         });
     };
     let remove = move |_| {
@@ -3340,19 +3356,23 @@ fn SettlementMark(
             {move || if covered.get() {
                 view! { <p class="hint">{tr(lang, Key::SettleByAct)}</p> }.into_any()
             } else if let Some(mark) = mark.clone() {
+                let (settled, kind) = (mark.day, mark.kind);
                 let text = move || {
                     let lang = lang.get();
                     let day = i18n::date(lang, mark.day);
+                    let (plain, numbered) = match kind {
+                        SettlementKind::System => (Key::SettledOn, Key::SettledOnNumbered),
+                        SettlementKind::Receipt => (Key::ReceiptOn, Key::ReceiptOnNumbered),
+                    };
                     if mark.number.is_empty() {
-                        fill(t(lang, Key::SettledOn), &[&day])
+                        fill(t(lang, plain), &[&day])
                     } else {
-                        fill(t(lang, Key::SettledOnNumbered), &[&day, mark.number.as_str()])
+                        fill(t(lang, numbered), &[&day, mark.number.as_str()])
                     }
                 };
-                let settled = mark.day;
                 view! {
                     <p>{text}</p>
-                    {move || early(settled).map(|quarter| view! {
+                    {move || early(settled, kind).map(|quarter| view! {
                         <p class="warning">{move || early_words(lang.get(), quarter, service)}</p>
                     })}
                     {open.then(|| view! {
@@ -3391,13 +3411,25 @@ fn SettlementMark(
                     />
                     <DateField lang label=Key::SettleDate value=date tried />
                     {move || {
-                        let quarter = early(Date::from_iso(&date.get())?)?;
+                        let quarter = early(Date::from_iso(&date.get())?, SettlementKind::System)?;
                         Some(view! {
                             <p class="warning" role="alert">{move || early_words(lang.get(), quarter, service)}</p>
                         })
                     }}
-                    <button type="button" disabled=move || busy.get() on:click=save>
+                    <button type="button" disabled=move || busy.get() on:click=move |_| save(SettlementKind::System)>
                         <span class="label">{tr(lang, Key::SettleMark)}</span>
+                    </button>
+                    // Чек ККМ вместо документа в системе (задача 76): кто
+                    // покупатель, программа не знает, и решает человек.
+                    <p class="hint">{tr(lang, Key::SettleReceiptAbout)}</p>
+                    {firm.then(|| view! { <p class="hint">{tr(lang, Key::SettleReceiptFirm)}</p> })}
+                    <button
+                        type="button"
+                        class="secondary"
+                        disabled=move || busy.get()
+                        on:click=move |_| save(SettlementKind::Receipt)
+                    >
+                        <span class="label">{tr(lang, Key::SettleReceipt)}</span>
                     </button>
                 }
                 .into_any()

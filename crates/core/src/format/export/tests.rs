@@ -6,7 +6,7 @@ use crate::model::activity::ActivityCode;
 use crate::model::client::ClientData;
 use crate::model::country::Country;
 use crate::model::date::Quarter;
-use crate::model::document::{DocumentData, Item, Payment, Settlement};
+use crate::model::document::{DocumentData, Item, Payment, Settlement, SettlementKind};
 use crate::model::ledger::OperationData;
 use crate::model::money::{ExchangeRate, RateSource};
 use crate::model::profile::ProfileData;
@@ -488,16 +488,24 @@ fn documents_sheet_lists_issued_documents_of_the_period() {
     let invoice = issue(invoice_data(&client, october, october), &client, &documents)
         .add_payment(Payment { date: day(2026, 10, 15), amount: 40_000 }, at(4_000))
         .expect("оплата")
-        .set_settlement(Settlement { day: day(2026, 10, 10), number: line("A-1") }, at(5_000))
+        .set_settlement(Settlement { day: day(2026, 10, 10), number: line("A-1"), kind: SettlementKind::System }, at(5_000))
         .expect("отметка")
         .expect("отмечен");
     documents.push(invoice.clone());
     let act = issue(invoice.act_data(day(2026, 10, 12)).expect("акт по счёту"), &client, &documents)
-        .set_settlement(Settlement { day: day(2026, 10, 12), number: line("2026-77") }, at(6_000))
+        .set_settlement(Settlement { day: day(2026, 10, 12), number: line("2026-77"), kind: SettlementKind::System }, at(6_000))
         .expect("отметка")
         .expect("отмечен");
     documents.push(act);
+    // Аннулированный был отмечен чеком ККМ (задача 76): отметка в листе
+    // остаётся, с видом.
     let annulled = issue(invoice_data(&client, day(2026, 11, 1), day(2026, 11, 1)), &client, &documents)
+        .set_settlement(
+            Settlement { day: day(2026, 11, 1), number: Line::default(), kind: SettlementKind::Receipt },
+            at(6_500),
+        )
+        .expect("отметка")
+        .expect("отмечен")
         .annul(day(2026, 11, 2), at(7_000))
         .expect("выпущен")
         .expect("аннулирован");
@@ -510,7 +518,7 @@ fn documents_sheet_lists_issued_documents_of_the_period() {
     documents.reverse();
     let today = day(2026, 11, 3);
     let sheet = documents_sheet(lang, &documents, day(2026, 10, 1), day(2026, 12, 31), Some(today));
-    assert_eq!(sheet.columns.len(), 19);
+    assert_eq!(sheet.columns.len(), 20);
     let number_of = |row: &Vec<Cell>| row[1].clone();
     let numbers: Vec<Cell> = sheet.rows.iter().map(number_of).collect();
     assert_eq!(numbers, [text("2026-001"), text("2026-001"), text("2026-002")], "счёт, акт, аннулированный счёт");
@@ -531,6 +539,7 @@ fn documents_sheet_lists_issued_documents_of_the_period() {
     expect("доход счёта с актом", &first[9], Cell::Empty);
     expect("день ՊԵԿ счёта с актом", &first[17], Cell::Empty);
     expect("номер ՊԵԿ счёта с актом", &first[18], Cell::Empty);
+    expect("вид ՊԵԿ счёта с актом", &first[19], Cell::Empty);
     expect("оплачено", &first[10], number(40_000, 2));
     expect("остаток", &first[11], number(60_000, 2));
     // Срок — день счёта, и он прошёл, а оплачено не всё.
@@ -544,6 +553,7 @@ fn documents_sheet_lists_issued_documents_of_the_period() {
     expect("основание акта", &act[16], text("Invoice No.\u{A0}2026-001"));
     expect("день ՊԵԿ", &act[17], Cell::Date(day(2026, 10, 12)));
     expect("номер ՊԵԿ", &act[18], text("2026-77"));
+    expect("вид ՊԵԿ", &act[19], text("in the SRC system"));
     let annulled = &sheet.rows[2];
     expect("статус аннулированного", &annulled[13], text("Cancelled"));
     expect("день аннулирования", &annulled[15], Cell::Date(day(2026, 11, 2)));
@@ -551,6 +561,9 @@ fn documents_sheet_lists_issued_documents_of_the_period() {
     expect("курс аннулированного", &annulled[8], Cell::Empty);
     expect("доход аннулированного", &annulled[9], Cell::Empty);
     expect("сумма аннулированного", &annulled[6], number(100_000, 2));
+    expect("день чека аннулированного", &annulled[17], Cell::Date(day(2026, 11, 1)));
+    expect("номер чека аннулированного", &annulled[18], Cell::Empty);
+    expect("вид — чек ККМ", &annulled[19], text("cash register receipt"));
     assert!(wrong.is_empty(), "{wrong:#?}");
     // Часы без даты: «просрочен» не узнать, и статуса нет ни у кого.
     let unknown = documents_sheet(lang, &documents, day(2026, 10, 1), day(2026, 12, 31), None);
@@ -765,7 +778,7 @@ fn look_export() {
         .expect("оплата");
     documents.push(invoice.clone());
     let act = issue(invoice.act_data(day(2026, 10, 12)).expect("акт по счёту"), &client, &documents)
-        .set_settlement(Settlement { day: day(2026, 10, 12), number: line("2026-77") }, at(6_000))
+        .set_settlement(Settlement { day: day(2026, 10, 12), number: line("2026-77"), kind: SettlementKind::System }, at(6_000))
         .expect("отметка")
         .expect("отмечен");
     documents.push(act);

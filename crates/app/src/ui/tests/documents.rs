@@ -9,7 +9,9 @@ use kvartik_core::model::activity::{ActivityCode, IncomeKind};
 use kvartik_core::model::client::{Client, ClientData};
 use kvartik_core::model::country::Country;
 use kvartik_core::model::date::Date;
-use kvartik_core::model::document::{DocKind, Document, DocumentData, Issued, Item, Payment, Settlement, Status};
+use kvartik_core::model::document::{
+    DocKind, Document, DocumentData, Issued, Item, Payment, Settlement, SettlementKind, Status,
+};
 use kvartik_core::doc::image::Picture;
 use kvartik_core::model::logo::{self, Image, IssuedLogo, Logo};
 use kvartik_core::model::money::{Currency, Money};
@@ -2285,6 +2287,7 @@ async fn settlement_documents_are_marked_and_listed() {
     let expected = Settlement {
         day: today,
         number: line("Ա 0123456789"),
+        kind: SettlementKind::System,
     };
     if stored_settlement(late.id()).await != Some(Some(expected)) {
         wrong.push(format!("в базе отметка не та: {:?}", stored_settlement(late.id()).await));
@@ -2333,7 +2336,8 @@ async fn settlement_documents_are_marked_and_listed() {
 /// под днём выписки, пока его вводят, и у отметки — слова, что доход мог
 /// уйти в квартал подтверждения. День того же квартала и покупатель из
 /// другой страны — без них: американская фирма документ в системе ՊԵԿ не
-/// подтверждает.
+/// подтверждает. У армянской фирмы с ИНН (ՀՎՀՀ) рядом с кнопкой чека ККМ —
+/// условие освобождения (задача 76), у американской без ИНН — нет.
 #[wasm_bindgen_test]
 async fn early_settlement_is_warned() {
     let foreign = fresh_base_with_client().await;
@@ -2348,6 +2352,7 @@ async fn early_settlement_is_warned() {
         ClientData {
             name: line("«Արարատ» ՍՊԸ"),
             country: Some(Country::ARMENIA),
+            tin: Some(Tin::parse("07654321").expect("ՀՎՀՀ")),
             currency: Some(Currency::Amd),
             lang: Some(Lang::Am),
             ..acme()
@@ -2386,6 +2391,9 @@ async fn early_settlement_is_warned() {
     if !wait_for(&host, &warned).await {
         wrong.push(format!("под сегодняшним днём выписки нет «{warned}»"));
     }
+    if !said().contains(t(lang, Key::SettleReceiptFirm)) {
+        wrong.push("у фирмы с ИНН нет условия чека ККМ".to_owned());
+    }
     let fieldset = || host.query_selector(".docs-detail .settlement").ok().flatten().map(JsCast::unchecked_into::<HtmlElement>);
     let day_field = || fieldset().and_then(|box_| field(&box_, t(lang, Key::SettleDate), 0));
     match day_field() {
@@ -2419,9 +2427,82 @@ async fn early_settlement_is_warned() {
     if said().contains(&warned) {
         wrong.push("у покупателя из другой страны — слова о подтверждении".to_owned());
     }
+    if said().contains(t(lang, Key::SettleReceiptFirm)) {
+        wrong.push("у фирмы без ИНН (ՀՎՀՀ) — условие для фирмы с ним".to_owned());
+    }
     drop(mounted);
     host.remove();
     crate::platform::set_hash("");
     forget_device();
     assert!(wrong.is_empty(), "расчётный документ раньше квартала услуги: {wrong:#?}");
+}
+
+/// Чек ККМ вместо расчётного документа в системе ՊԵԿ (задача 76): у
+/// документа без отметки — слова, когда так можно, и «Отметить, что выдан чек
+/// ККМ»; нажатие кладёт в базу отметку вида «чек» с днём и номером из полей,
+/// карточка и история говорят «Выдан чек ККМ», а «Снять отметку» её снимает.
+#[wasm_bindgen_test]
+async fn receipt_marks_the_settlement() {
+    let client = fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let now = clock::now();
+    let today = clock::today().expect("часы с датой");
+    let document = Document::create(invoice_data(&client), now)
+        .expect("черновик")
+        .issue(&[], 0, Some(&profile()), Some(None), &client, now)
+        .expect("выпущен");
+    let mut writes = Writes::default();
+    writes.insert(&document);
+    commit(writes).await;
+
+    let card = format!("#/documents/{}", document.id());
+    let (host, mounted) = mount_at(&card);
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::SettleReceiptAbout)).await {
+        wrong.push("нет слов о чеке ККМ".to_owned());
+    }
+    let fieldset = || host.query_selector(".docs-detail .settlement").ok().flatten().map(JsCast::unchecked_into::<HtmlElement>);
+    match fieldset().and_then(|box_| field(&box_, t(lang, Key::SettleNumber), 0)) {
+        Some(input) => type_into(&input, "00012345"),
+        None => wrong.push("нет поля номера".to_owned()),
+    }
+    match fieldset().and_then(|box_| button(&box_, &[t(lang, Key::SettleReceipt)])) {
+        Some(receipt) => receipt.click(),
+        None => wrong.push("нет «Отметить, что выдан чек ККМ»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::ReceiptSaved)).await {
+        wrong.push("отметка чека не подтвердилась".to_owned());
+    }
+    let expected = Settlement {
+        day: today,
+        number: line("00012345"),
+        kind: SettlementKind::Receipt,
+    };
+    if stored_settlement(document.id()).await != Some(Some(expected)) {
+        wrong.push(format!("в базе отметка не та: {:?}", stored_settlement(document.id()).await));
+    }
+    let said = host.query_selector(".docs-detail").ok().flatten().and_then(|d| d.text_content()).unwrap_or_default();
+    let receipt = fill(t(lang, Key::ReceiptOnNumbered), &[&i18n::date(lang, today), "00012345"]);
+    if !said.contains(&receipt) || !said.contains(t(lang, Key::HistoryReceipt)) {
+        wrong.push(format!("в карточке нет «{receipt}» или события истории"));
+    }
+    if said.contains(t(lang, Key::HistorySettled)) {
+        wrong.push("в истории — «выписан в системе ՊԵԿ», а выдан чек".to_owned());
+    }
+    match fieldset().and_then(|box_| button(&box_, &[t(lang, Key::SignRemove)])) {
+        Some(remove) => remove.click(),
+        None => wrong.push("нет «Снять отметку»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::SettleRemoved)).await {
+        wrong.push("отметка не снялась".to_owned());
+    }
+    if stored_settlement(document.id()).await != Some(None) {
+        wrong.push(format!("после снятия в базе: {:?}", stored_settlement(document.id()).await));
+    }
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "чек ККМ: {wrong:#?}");
 }

@@ -25,7 +25,7 @@ use super::{rules, turnover};
 use crate::model::activity::IncomeKind;
 use crate::model::country::Country;
 use crate::model::date::{Date, Quarter};
-use crate::model::document::Document;
+use crate::model::document::{Document, SettlementKind};
 use crate::model::ledger::{self, Flow, Row, Source};
 use crate::model::profile::ProfileData;
 
@@ -85,11 +85,11 @@ pub fn due_count(documents: &[Document], today: Date) -> usize {
     pending(documents).iter().filter(|item| item.due_by(today)).count()
 }
 
-/// Квартал выписки, когда расчётный документ выписан днём `settled` в
-/// квартале раньше квартала услуги документа `document` (задача 77). `None`
-/// — квартал тот же или позже, покупатель из другой страны или поставка,
-/// у которой подтверждение момента не двигает. `profile` — чтобы узнать
-/// строку налога документа по кодам, как в налоге.
+/// Квартал выписки, когда расчётный документ вида `kind` выписан днём
+/// `settled` в квартале раньше квартала услуги документа `document` (задача
+/// 77). `None` — квартал тот же или позже, покупатель из другой страны, чек
+/// ККМ или поставка, у которой подтверждение момента не двигает. `profile` —
+/// чтобы узнать строку налога документа по кодам, как в налоге.
 ///
 /// Момент выполнения работы или оказания услуги — более ранний из двух (НК,
 /// ст. 40, ч. 4): окончание или передача результата (п. 1) или подтверждение
@@ -112,15 +112,25 @@ pub fn due_count(documents: &[Document], today: Date) -> usize {
 /// как у файла для системы ՊԵԿ (`format::accdoc`); строку не узнать — может
 /// быть и услугой, и окно предупреждает. Покупатель из другой страны
 /// документ в системе ՊԵԿ не подтверждает — его в ней нет; страна не
-/// указана — может быть и армянской.
-pub fn early(document: &Document, profile: Option<&ProfileData>, settled: Date) -> Option<Quarter> {
+/// указана — может быть и армянской. Чек ККМ (задача 76) покупатель в
+/// системе не подтверждает: подтверждают документ, выписанный в ней.
+pub fn early(
+    document: &Document,
+    profile: Option<&ProfileData>,
+    settled: Date,
+    kind: SettlementKind,
+) -> Option<Quarter> {
     let data = document.data();
     let quarter = settled.quarter();
     let foreign = document
         .issued()
         .and_then(|issued| issued.buyer().country)
         .is_some_and(|country| country != Country::ARMENIA);
-    if quarter >= data.service_date.quarter() || foreign {
+    let confirmed = match kind {
+        SettlementKind::System => true,
+        SettlementKind::Receipt => false,
+    };
+    if quarter >= data.service_date.quarter() || foreign || !confirmed {
         return None;
     }
     let kind = match data.income_kind {

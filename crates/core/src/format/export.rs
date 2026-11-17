@@ -38,7 +38,7 @@ use std::collections::BTreeSet;
 use crate::i18n::{self, Key, Lang, fill, t};
 use crate::model::client::Client;
 use crate::model::date::Date;
-use crate::model::document::{DocKind, Document, Number, Status};
+use crate::model::document::{DocKind, Document, Number, SettlementKind, Status};
 use crate::model::record::RecordId;
 use crate::model::ledger::{self, Cost, Flow, Nature, Operation, Proof, Source};
 use crate::model::money::{Currency, Money};
@@ -216,6 +216,14 @@ const fn kind_key(kind: DocKind) -> Key {
     match kind {
         DocKind::Invoice => Key::KindInvoice,
         DocKind::Act => Key::KindAct,
+    }
+}
+
+/// Вид расчётного документа словом: в системе ՊԵԿ или чек ККМ (задача 76).
+const fn settlement_kind_key(kind: SettlementKind) -> Key {
+    match kind {
+        SettlementKind::System => Key::ExportSettlementSystem,
+        SettlementKind::Receipt => Key::ExportSettlementReceipt,
     }
 }
 
@@ -491,6 +499,11 @@ pub fn documents_sheet(lang: Lang, documents: &[Document], from: Date, until: Da
                 data.basis.map_or(Cell::Empty, |id| Cell::text(&basis(id))),
                 Cell::date(settlement.map(|settlement| settlement.day)),
                 settlement.map_or(Cell::Empty, |settlement| Cell::text(settlement.number.as_str())),
+                // Вид — последним столбцом (задача 76): программы учёта,
+                // которые читают столбцы по месту, прежние не потеряют.
+                settlement.map_or(Cell::Empty, |settlement| {
+                    Cell::Text(t(lang, settlement_kind_key(settlement.kind)).to_owned())
+                }),
             ]
         })
         .collect();
@@ -514,6 +527,7 @@ pub fn documents_sheet(lang: Lang, documents: &[Document], from: Date, until: Da
         Key::ExportBasis,
         Key::ExportSettlementDay,
         Key::ExportSettlementNumber,
+        Key::ExportSettlementKind,
     ];
     Sheet {
         name: t(lang, Key::ExportDocumentsSheet).to_owned(),

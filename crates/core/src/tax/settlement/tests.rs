@@ -7,7 +7,7 @@ use crate::i18n::Lang;
 use crate::model::activity::ActivityCode;
 use crate::model::client::{Client, ClientData};
 use crate::model::country::Country;
-use crate::model::document::{DocKind, DocumentData, Item, Settlement};
+use crate::model::document::{DocKind, DocumentData, Item, Settlement, SettlementKind};
 use crate::model::money::Currency;
 use crate::model::profile::ProfileData;
 use crate::model::record::{RecordId, Timestamp};
@@ -89,6 +89,7 @@ fn settle(document: &Document, day: Date) -> Document {
             Settlement {
                 day,
                 number: Line::default(),
+                kind: SettlementKind::System,
             },
             at(4_000),
         )
@@ -142,9 +143,21 @@ fn pending_are_income_documents_without_a_mark() {
     // Счёт без акта — ждёт сам; услуга раньше — выше.
     let early = issue(invoice_data(&client, day(2026, 9, 15)), &client, &documents);
     documents.push(early.clone());
-    // Отмеченный не ждёт.
+    // Отмеченный не ждёт — и отмеченный чеком ККМ (задача 76).
     let marked = settle(&issue(invoice_data(&client, day(2026, 9, 1)), &client, &documents), day(2026, 9, 1));
     documents.push(marked);
+    let receipt = issue(invoice_data(&client, day(2026, 9, 4)), &client, &documents)
+        .set_settlement(
+            Settlement {
+                day: day(2026, 9, 4),
+                number: Line::default(),
+                kind: SettlementKind::Receipt,
+            },
+            at(4_000),
+        )
+        .expect("годно")
+        .expect("отмечен");
+    documents.push(receipt);
     // Аннулированный, черновик и удалённый черновик не ждут.
     let annulled = issue(invoice_data(&client, day(2026, 9, 2)), &client, &documents)
         .annul(day(2026, 10, 5), at(5_000))
@@ -229,7 +242,7 @@ fn early_settlement_is_the_earlier_quarter() {
         let mut data = invoice_data(buyer, service);
         data.income_kind = own;
         let document = issue(data, buyer, &[]);
-        let got = early(&document, Some(&profile()), settled);
+        let got = early(&document, Some(&profile()), settled, SettlementKind::System);
         if got != expected {
             wrong.push(format!("{name}: {got:?}, а не {expected:?}"));
         }
@@ -241,10 +254,14 @@ fn early_settlement_is_the_earlier_quarter() {
         ("IT по коду", &it, Some(quarter(2026, 3))),
         ("торговля по коду", &shop, None),
     ] {
-        let got = early(&document, Some(profile), day(2026, 9, 30));
+        let got = early(&document, Some(profile), day(2026, 9, 30), SettlementKind::System);
         if got != expected {
             wrong.push(format!("{name}: {got:?}, а не {expected:?}"));
         }
+    }
+    // Чек ККМ (задача 76) покупатель в системе ՊԵԿ не подтверждает.
+    if let Some(quarter) = early(&document, Some(&it), day(2026, 9, 30), SettlementKind::Receipt) {
+        wrong.push(format!("чек ККМ: {quarter:?}, а не None"));
     }
     assert!(wrong.is_empty(), "расчётный документ раньше квартала услуги: {wrong:#?}");
 }

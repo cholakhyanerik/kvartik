@@ -91,6 +91,7 @@ fn data_shape_is_pinned() {
         Some(&Settlement {
             day: day(2026, 9, 30),
             number: line("Ա12345678"),
+            kind: SettlementKind::System,
         })
     );
     assert_eq!(invoice.status(day(2026, 10, 30)), Status::Paid);
@@ -701,6 +702,7 @@ fn settlement(day: Date, number: &str) -> Settlement {
     Settlement {
         day,
         number: line(number),
+        kind: SettlementKind::System,
     }
 }
 
@@ -747,6 +749,44 @@ fn settlement_is_marked_on_an_issued_document() {
         draft.set_settlement(settlement(date, "Ա123456789"), at(3_000)),
         Err(DocError::NotIssued)
     );
+}
+
+/// Чек ККМ вместо документа в системе ՊԵԿ (задача 76) — та же отметка:
+/// документ отмечен, а в данных — `"kind":"receipt"`. У документа в системе
+/// ключа вида нет, как у отметок до версии формата 25, и такая отметка —
+/// документ в системе; переход между видами — поправка отметки.
+#[test]
+fn receipt_is_a_settlement_mark() {
+    let client = client();
+    let date = day(2026, 10, 1);
+    let document = issued(DocKind::Invoice, &client, date, &[]);
+    let receipt = Settlement {
+        day: date,
+        number: line("00012345"),
+        kind: SettlementKind::Receipt,
+    };
+    let marked = document.set_settlement(receipt.clone(), at(4_000)).expect("годно").expect("отмечен");
+    assert_eq!(marked.settlement(), Some(&receipt));
+    let text = serde_json::to_string(&marked).expect("записывается");
+    assert!(
+        text.contains(r#""settlement":{"day":"2026-10-01","number":"00012345","kind":"receipt"}"#),
+        "{text}"
+    );
+    let back: Document = serde_json::from_str(&text).expect("читается");
+    assert_eq!(back.settlement(), Some(&receipt));
+
+    let system = settlement(date, "00012345");
+    let moved = marked.set_settlement(system.clone(), at(5_000)).expect("годно").expect("поправлен");
+    let text = serde_json::to_string(&moved).expect("записывается");
+    assert!(
+        text.contains(r#""settlement":{"day":"2026-10-01","number":"00012345"}"#),
+        "у документа в системе ключа вида нет: {text}"
+    );
+    let old = text.replacen(r#""number":"00012345"}"#, r#""number":"00012345","kind":"system"}"#, 1);
+    let read: Document = serde_json::from_str(&old).expect("вид записан явно — тоже читается");
+    assert_eq!(read.settlement(), Some(&system));
+    let unknown = text.replacen(r#""number":"00012345"}"#, r#""number":"00012345","kind":"fax"}"#, 1);
+    assert!(serde_json::from_str::<Document>(&unknown).is_err(), "незнакомый вид — порча");
 }
 
 /// Тот же документ, каким его записала версия до 0.0.55: без ключа отметки.
