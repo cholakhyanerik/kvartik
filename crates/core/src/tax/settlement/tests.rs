@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::i18n::Lang;
+use crate::model::activity::ActivityCode;
 use crate::model::client::{Client, ClientData};
 use crate::model::country::Country;
 use crate::model::document::{DocKind, DocumentData, Item, Settlement};
@@ -26,9 +27,14 @@ fn line(text: &str) -> Line {
 
 /// Армянская фирма — покупатель.
 fn client() -> Client {
+    client_from(Some(Country::ARMENIA))
+}
+
+/// Покупатель из страны `country`; `None` — страна не выбрана.
+fn client_from(country: Option<Country>) -> Client {
     let data = ClientData {
         name: line("«Արարատ» ՍՊԸ"),
-        country: Some(Country::ARMENIA),
+        country,
         address: Lines::default(),
         tin: None,
         tax_id: Line::default(),
@@ -187,4 +193,58 @@ fn due_count_counts_what_has_come() {
         }
     }
     assert!(wrong.is_empty(), "пора выписать: {wrong:#?}");
+}
+
+/// Расчётный документ, выписанный в квартале раньше услуги, — окно
+/// предупреждает (задача 77): подтвердил его покупатель до окончания услуги
+/// — доход в квартале подтверждения (НК, ст. 40, ч. 4). Ожидаемые кварталы
+/// выписаны по этому правилу руками: тот же квартал, день после услуги,
+/// покупатель из другой страны, товар (ст. 38), аренда и продажа имущества
+/// — без предупреждения; страна не выбрана и строку не узнать (кодов
+/// в профиле нет) — с ним.
+#[test]
+fn early_settlement_is_the_earlier_quarter() {
+    let quarter = |year, number| Quarter::new(year, number).expect("в тесте — существующий квартал");
+    let code = |text| ActivityCode::parse(text).expect("в тесте — годный код");
+    let armenian = client();
+    let foreign = client_from(Country::from_code("US"));
+    let unknown = client_from(None);
+    let mut it = profile();
+    it.activities = vec![code("62.01.0")];
+    let mut shop = profile();
+    shop.activities = vec![code("47.91.0")];
+    shop.kinds.insert(code("47.91.0"), IncomeKind::Trade);
+    let mut wrong = Vec::new();
+    for (name, buyer, own, service, settled, expected) in [
+        ("III квартал при услуге IV", &armenian, None, day(2026, 10, 15), day(2026, 9, 30), Some(quarter(2026, 3))),
+        ("тот же квартал, раньше", &armenian, None, day(2026, 10, 15), day(2026, 10, 1), None),
+        ("в день услуги", &armenian, None, day(2026, 10, 15), day(2026, 10, 15), None),
+        ("после услуги, в другом квартале", &armenian, None, day(2026, 9, 30), day(2026, 10, 1), None),
+        ("через год", &armenian, None, day(2026, 1, 5), day(2025, 12, 31), Some(quarter(2025, 4))),
+        ("покупатель из США", &foreign, None, day(2026, 10, 15), day(2026, 9, 30), None),
+        ("страна не выбрана", &unknown, None, day(2026, 10, 15), day(2026, 9, 30), Some(quarter(2026, 3))),
+        ("аренда у самого дохода", &armenian, Some(IncomeKind::Rent), day(2026, 10, 15), day(2026, 9, 30), None),
+        ("продажа имущества", &armenian, Some(IncomeKind::Assets), day(2026, 10, 15), day(2026, 9, 30), None),
+    ] {
+        let mut data = invoice_data(buyer, service);
+        data.income_kind = own;
+        let document = issue(data, buyer, &[]);
+        let got = early(&document, Some(&profile()), settled);
+        if got != expected {
+            wrong.push(format!("{name}: {got:?}, а не {expected:?}"));
+        }
+    }
+    // Строка — по коду профиля, как в налоге: услуги IT — с предупреждением,
+    // торговля — без него.
+    let document = issue(invoice_data(&armenian, day(2026, 10, 15)), &armenian, &[]);
+    for (name, profile, expected) in [
+        ("IT по коду", &it, Some(quarter(2026, 3))),
+        ("торговля по коду", &shop, None),
+    ] {
+        let got = early(&document, Some(profile), day(2026, 9, 30));
+        if got != expected {
+            wrong.push(format!("{name}: {got:?}, а не {expected:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "расчётный документ раньше квартала услуги: {wrong:#?}");
 }

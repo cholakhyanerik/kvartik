@@ -18,12 +18,16 @@
 //! он не переносится: это момент поставки, а не срок, который кончается
 //! в какой-то день (`tax::deadlines`, «Перенос»). Выписать документ раньше
 //! закон разрешает (ст. 56, ч. 8, п. 1), и день отметки программа не
-//! ограничивает.
+//! ограничивает, а о документе, выписанном в квартале раньше услуги,
+//! предупреждает ([`early`]).
 
-use super::rules;
-use crate::model::date::Date;
+use super::{rules, turnover};
+use crate::model::activity::IncomeKind;
+use crate::model::country::Country;
+use crate::model::date::{Date, Quarter};
 use crate::model::document::Document;
-use crate::model::ledger;
+use crate::model::ledger::{self, Flow, Row, Source};
+use crate::model::profile::ProfileData;
 
 /// Последний день выписки расчётного документа по услуге, оказанной в день
 /// `service`, — по правилу, которое действует в этот день. `None` — правила
@@ -79,6 +83,73 @@ pub fn pending(documents: &[Document]) -> Vec<Pending<'_>> {
 /// главном экране.
 pub fn due_count(documents: &[Document], today: Date) -> usize {
     pending(documents).iter().filter(|item| item.due_by(today)).count()
+}
+
+/// Квартал выписки, когда расчётный документ выписан днём `settled` в
+/// квартале раньше квартала услуги документа `document` (задача 77). `None`
+/// — квартал тот же или позже, покупатель из другой страны или поставка,
+/// у которой подтверждение момента не двигает. `profile` — чтобы узнать
+/// строку налога документа по кодам, как в налоге.
+///
+/// Момент выполнения работы или оказания услуги — более ранний из двух (НК,
+/// ст. 40, ч. 4): окончание или передача результата (п. 1) или подтверждение
+/// покупателем расчётного документа исполнителя (п. 2), а выписать документ
+/// заранее закон разрешает (ст. 56, ч. 8, п. 1; по тексту arlis 230455,
+/// сверено 2026-11-17). Подтвердил покупатель документ до окончания услуги
+/// — доход в квартале подтверждения, а не услуги. Подтверждения программа не
+/// знает — его видно только в системе ՊԵԿ — и доход считает, как прежде, по
+/// дню услуги, а окно предупреждает: спрашивать день подтверждения —
+/// толкование закона, вопрос ушёл в письмо ՊԵԿ (задача 82; выбор агента —
+/// решение человека 2026-11-17). В том же квартале момент поставки двигает
+/// только курс ЦБ документа в валюте, а о нём говорят слова у поля курса.
+///
+/// Молчит окно, где правило не действует: у товара момент — передача или
+/// приёмка, подтверждения в ст. 38 нет, а документ на товар и выписывают до
+/// поставки (ст. 56, ч. 4, п. 1); ч. 4 ст. 40 — для услуг, не названных
+/// в ч. 1–3: у аренды момент — последний день отчётного периода (ч. 2),
+/// у лицензий и роялти по подписке — последний день месяца (ч. 3), а
+/// проценты — не услуга. Строка, выбранная у самого дохода, говорит сама,
+/// как у файла для системы ՊԵԿ (`format::accdoc`); строку не узнать — может
+/// быть и услугой, и окно предупреждает. Покупатель из другой страны
+/// документ в системе ՊԵԿ не подтверждает — его в ней нет; страна не
+/// указана — может быть и армянской.
+pub fn early(document: &Document, profile: Option<&ProfileData>, settled: Date) -> Option<Quarter> {
+    let data = document.data();
+    let quarter = settled.quarter();
+    let foreign = document
+        .issued()
+        .and_then(|issued| issued.buyer().country)
+        .is_some_and(|country| country != Country::ARMENIA);
+    if quarter >= data.service_date.quarter() || foreign {
+        return None;
+    }
+    let kind = match data.income_kind {
+        Some(kind) => Some(kind),
+        None => {
+            let row = Row {
+                source: Source::Document(document),
+                flow: Flow::Income,
+                date: data.service_date,
+                amount: document.total().ok()?,
+                rate: data.rate,
+                activity: data.activity,
+                income_kind: None,
+            };
+            turnover::income_kind(profile, &row)
+        }
+    };
+    let confirmed_moves = match kind {
+        Some(IncomeKind::Catering | IncomeKind::CateringOther | IncomeKind::HighTech | IncomeKind::Other) | None => true,
+        Some(
+            IncomeKind::Trade
+            | IncomeKind::Recyclables
+            | IncomeKind::Newspapers
+            | IncomeKind::Production
+            | IncomeKind::Assets
+            | IncomeKind::Rent,
+        ) => false,
+    };
+    confirmed_moves.then_some(quarter)
 }
 
 #[cfg(test)]

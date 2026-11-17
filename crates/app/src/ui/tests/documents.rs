@@ -2328,3 +2328,100 @@ async fn settlement_documents_are_marked_and_listed() {
     forget_device();
     assert!(wrong.is_empty(), "расчётный документ: {wrong:#?}");
 }
+
+/// Расчётный документ, выписанный в квартале раньше услуги (задача 77):
+/// под днём выписки, пока его вводят, и у отметки — слова, что доход мог
+/// уйти в квартал подтверждения. День того же квартала и покупатель из
+/// другой страны — без них: американская фирма документ в системе ՊԵԿ не
+/// подтверждает.
+#[wasm_bindgen_test]
+async fn early_settlement_is_warned() {
+    let foreign = fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let now = clock::now();
+    let today = clock::today().expect("часы с датой");
+    // Услуга — в первый день следующего квартала: день выписки, который
+    // форма предлагает, — сегодня, в квартале раньше.
+    let service = today.quarter().last_day().add_days(1).expect("дата есть");
+    let armenian = Client::create(
+        ClientData {
+            name: line("«Արարատ» ՍՊԸ"),
+            country: Some(Country::ARMENIA),
+            currency: Some(Currency::Amd),
+            lang: Some(Lang::Am),
+            ..acme()
+        },
+        now,
+    )
+    .expect("годный клиент");
+    let issue = |client: &Client, before: &[Document]| {
+        let data = DocumentData {
+            client: client.id(),
+            currency: client.data().currency.unwrap_or(Currency::Amd),
+            service_date: service,
+            ..invoice_data(client)
+        };
+        Document::create(data, now)
+            .expect("черновик")
+            .issue(before, 0, Some(&profile()), Some(None), client, now)
+            .expect("выпущен")
+    };
+    let local = issue(&armenian, &[]);
+    let abroad = issue(&foreign, std::slice::from_ref(&local));
+    let mut writes = Writes::default();
+    writes.insert(&armenian);
+    writes.insert(&local);
+    writes.insert(&abroad);
+    commit(writes).await;
+
+    let card = format!("#/documents/{}", local.id());
+    let (host, mounted) = mount_at(&card);
+    let mut wrong = Vec::new();
+    let warned = fill(
+        t(lang, Key::SettleEarly),
+        &[&i18n::quarter(lang, today.quarter()), &i18n::quarter(lang, service.quarter())],
+    );
+    let said = || host.query_selector(".docs-detail").ok().flatten().and_then(|d| d.text_content()).unwrap_or_default();
+    if !wait_for(&host, &warned).await {
+        wrong.push(format!("под сегодняшним днём выписки нет «{warned}»"));
+    }
+    let fieldset = || host.query_selector(".docs-detail .settlement").ok().flatten().map(JsCast::unchecked_into::<HtmlElement>);
+    let day_field = || fieldset().and_then(|box_| field(&box_, t(lang, Key::SettleDate), 0));
+    match day_field() {
+        Some(input) => type_into(&input, &service.iso()),
+        None => wrong.push("нет поля дня выписки".to_owned()),
+    }
+    if !wait_until(|| !said().contains(&warned)).await {
+        wrong.push("день того же квартала, что услуга, — а слова остались".to_owned());
+    }
+    match day_field() {
+        Some(input) => type_into(&input, &today.iso()),
+        None => wrong.push("нет поля дня выписки".to_owned()),
+    }
+    match fieldset().and_then(|box_| button(&box_, &[t(lang, Key::SettleMark)])) {
+        Some(mark) => mark.click(),
+        None => wrong.push("нет «Отметить, что выписан»".to_owned()),
+    }
+    let settled = fill(t(lang, Key::SettledOn), &[&i18n::date(lang, today)]);
+    if !wait_for(&host, &settled).await {
+        wrong.push("отметка не легла".to_owned());
+    } else if !said().contains(&warned) {
+        wrong.push(format!("у отметки нет «{warned}»"));
+    }
+
+    // Американская фирма: тот же день выписки — без слов. Профиль уже
+    // прочитан — слова выше это показали, — и молчание не от загрузки.
+    crate::platform::set_hash(&format!("#/documents/{}", abroad.id()));
+    if !wait_for(&host, t(lang, Key::SettleMark)).await {
+        wrong.push("карточка документа американской фирмы не открылась".to_owned());
+    }
+    if said().contains(&warned) {
+        wrong.push("у покупателя из другой страны — слова о подтверждении".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "расчётный документ раньше квартала услуги: {wrong:#?}");
+}

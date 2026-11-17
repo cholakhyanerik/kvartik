@@ -35,7 +35,7 @@ use kvartik_core::model::activity::{ActivityCode, IncomeKind};
 use kvartik_core::model::bank::payable_abroad;
 use kvartik_core::model::client::Client;
 use kvartik_core::model::country::Country;
-use kvartik_core::model::date::Date;
+use kvartik_core::model::date::{Date, Quarter};
 use kvartik_core::model::document::{
     DocError, DocKind, Document, DocumentData, Item, Payment, QUANTITY_DIGITS, Settlement, Status,
 };
@@ -3277,7 +3277,9 @@ fn Signature(
 /// звучал бы обвинением без оснований. У счёта с действующим актом отметка —
 /// у акта: поставка одна (`ledger::income_documents`), и здесь только слова
 /// об этом. Аннулированный показывает отметку, если она была, а действий над
-/// ним нет.
+/// ним нет. Выписан расчётный документ в квартале раньше услуги — и у
+/// отметки, и под днём, который человек вводит, — слова, что доход мог уйти
+/// в квартал подтверждения (`settlement::early`, задача 77).
 #[component]
 fn SettlementMark(
     ctx: Ctx,
@@ -3286,6 +3288,7 @@ fn SettlementMark(
     failure: RwSignal<Option<Problem>>,
 ) -> impl IntoView {
     let Ctx { lang, notice, .. } = ctx;
+    let profiles = ctx.profiles;
     let id = document.id();
     let open = document.annulled().is_none();
     let mark = document.settlement().cloned();
@@ -3295,6 +3298,13 @@ fn SettlementMark(
     let covered = covered_by_act(ctx, &document);
     let known = document.settlement_known();
     let for_file = document.clone();
+    let service = document.data().service_date.quarter();
+    let checked = StoredValue::new(document.clone());
+    // Квартал выписки раньше квартала услуги; пока профиль читается — молчит:
+    // без кодов строку налога не узнать (`settlement::early`).
+    let early = move |day: Date| {
+        profiles.with(|profile| checked.with_value(|document| settlement::early(document, profile, day)))
+    };
     // Последний день — по правилу на день оказания услуги; правила нет —
     // о сроке и о правиле окно молчит, а не пугает (Правило 6).
     let due = settlement::due(document.data().service_date);
@@ -3339,8 +3349,12 @@ fn SettlementMark(
                         fill(t(lang, Key::SettledOnNumbered), &[&day, mark.number.as_str()])
                     }
                 };
+                let settled = mark.day;
                 view! {
                     <p>{text}</p>
+                    {move || early(settled).map(|quarter| view! {
+                        <p class="warning">{move || early_words(lang.get(), quarter, service)}</p>
+                    })}
                     {open.then(|| view! {
                         <button type="button" class="secondary" disabled=move || busy.get() on:click=remove>
                             <span class="label">{tr(lang, Key::SignRemove)}</span>
@@ -3376,6 +3390,12 @@ fn SettlementMark(
                         hint=Key::SettleNumberHint
                     />
                     <DateField lang label=Key::SettleDate value=date tried />
+                    {move || {
+                        let quarter = early(Date::from_iso(&date.get())?)?;
+                        Some(view! {
+                            <p class="warning" role="alert">{move || early_words(lang.get(), quarter, service)}</p>
+                        })
+                    }}
                     <button type="button" disabled=move || busy.get() on:click=save>
                         <span class="label">{tr(lang, Key::SettleMark)}</span>
                     </button>
@@ -3384,6 +3404,12 @@ fn SettlementMark(
             }}
         </fieldset>
     })
+}
+
+/// Слова о расчётном документе, выписанном в квартале `settled` раньше
+/// квартала услуги `service` (`settlement::early`, задача 77).
+fn early_words(lang: Lang, settled: Quarter, service: Quarter) -> String {
+    fill(t(lang, Key::SettleEarly), &[&i18n::quarter(lang, settled), &i18n::quarter(lang, service)])
 }
 
 /// Файл черновика расчётного документа для системы ՊԵԿ (задача 44): XML по
