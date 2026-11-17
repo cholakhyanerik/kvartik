@@ -1294,6 +1294,9 @@ fn EnteredKeys(lang: ReadSignal<Lang>, licenses: Licenses, profile_tin: Memo<Opt
                 .map(|(key, in_office)| {
                     let signed = key.verify(&licenses.public);
                     let tin = key.tin().as_str().to_owned();
+                    // Ключ «Pro» без ИНН (подарок на пробу) — словами, а не
+                    // номером из нулей (`license::NO_TIN`).
+                    let no_tin = key.without_tin();
                     let (plan, issued, until) = (key.plan(), key.issued(), key.until());
                     let seats = key.seats().filter(|_| in_office);
                     // Ключ с чужой подписью копировать незачем: он ничего не
@@ -1312,7 +1315,11 @@ fn EnteredKeys(lang: ReadSignal<Lang>, licenses: Licenses, profile_tin: Memo<Opt
                                     // считается со дня после прежнего (условия,
                                     // п. 4.1).
                                     let mut facts = vec![
-                                        fill(t(lang, Key::TinShort), &[&tin]),
+                                        if no_tin {
+                                            t(lang, Key::LicenseKeyNoTin).to_owned()
+                                        } else {
+                                            fill(t(lang, Key::TinShort), &[&tin])
+                                        },
                                         fill(t(lang, Key::LicenseIssuedOn), &[&i18n::date(lang, issued)]),
                                         fill(t(lang, Key::LicenseLastDay), &[&i18n::date(lang, until)]),
                                     ];

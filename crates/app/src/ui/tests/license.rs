@@ -1057,13 +1057,29 @@ async fn a_pro_key_goes_to_the_office() {
     if !enter_key(&host, lang, &pro) || !wait_for(&host, t(lang, Key::LicenseKnown)).await {
         wrong.push("повтор ключа Pro не сказан".to_owned());
     }
+    // Ключ «Pro» без ИНН — подарок на пробу (`license::NO_TIN`): у него
+    // «без ИНН», а не номер из нулей, и мест — сколько в нём.
+    let gift = pro_text(license::NO_TIN, until, 100);
+    let gift_entered = fill(t(lang, Key::LicenseProEntered), &["100", t(lang, Key::OfficeTitle)]);
+    if !enter_key(&host, lang, &gift) || !wait_for(&host, &gift_entered).await {
+        wrong.push(format!("ключ Pro без ИНН не введён: «{}»", license_text(&host)));
+    }
+    let screen = license_text(&host);
+    let zeros = fill(t(lang, Key::TinShort), &[license::NO_TIN]);
+    if !screen.contains(t(lang, Key::LicenseKeyNoTin)) || screen.contains(&zeros) {
+        wrong.push(format!("у ключа без ИНН нет «{}» или есть «{zeros}»", t(lang, Key::LicenseKeyNoTin)));
+    }
+    if !screen.contains(&fill(t(lang, Key::LicenseSeats), &["100"])) {
+        wrong.push("у ключа без ИНН нет «мест: 100»".to_owned());
+    }
 
     let office = Store::open_office(|_| {}).await.expect("контора открыта");
     let ips = crate::store::office::list(&office).await.expect("список читается");
     let keys = crate::store::office::keys(&office).await.expect("ключи читаются");
     drop(office);
     let bases: Vec<&str> = ips.records.iter().map(Ip::base).collect();
-    if keys.records.len() != 1 || bases != [crate::store::DB_NAME] {
+    // Два ключа: на ИНН бухгалтера и подарочный без ИНН.
+    if keys.records.len() != 2 || bases != [crate::store::DB_NAME] {
         wrong.push(format!("в конторе ключей {}, а ИП {bases:?}", keys.records.len()));
     }
     if !Device::new().office() {

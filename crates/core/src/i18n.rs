@@ -3252,6 +3252,8 @@ strings! {
     LicenseNotProfileTin = "не тот ИНН, что в профиле", "not the TIN in the profile", "պրոֆիլի ՀՎՀՀ-ն չէ";
     /// Ключ «Pro» конторы (задача 38). Шаблон: число мест.
     LicenseSeats = "мест: {}", "seats: {}", "տեղեր՝ {}";
+    /// Ключ «Pro» выдан без ИНН — подарком на пробу (`license::NO_TIN`).
+    LicenseKeyNoTin = "без ИНН", "no TIN", "առանց ՀՎՀՀ";
     /// У ключа «Pro» в списке введённых: ИНН профиля ему не нужен.
     LicenseForOffice = "для ИП в программе", "for the entrepreneurs in the app", "ծրագրի ԱՁ-ների համար";
     /// Шаблоны: число мест ключа и имя экрана списка (`OfficeTitle`). Число —

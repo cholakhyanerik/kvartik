@@ -25,11 +25,20 @@
 //! 2026-11-05 и 2026-11-17). «Стандарт» мест не знает и выпускается версией 1,
 //! как раньше.
 //!
+//! «Pro» можно выдать без ИНН — подарком бухгалтеру на пробу, когда его ИНН
+//! неизвестен (решение человека 2026-11-18): без `--tin` у `pro` в ключе
+//! стоит [`license::NO_TIN`], восемь нулей, и окно пишет «без ИНН». Места он
+//! даёт так же: ключ «Pro» с ИНН профиля не сверяется. Назвать нули флагом
+//! нельзя, и продлить такой ключ `--renew` — тоже: ключи без ИНН в журнале
+//! друг от друга не отличить. Проданный ключ — на ИНН покупателя (условия,
+//! п. 4.1).
+//!
 //! ```text
 //! kvartik-keygen pair <путь закрытого ключа>
 //! kvartik-keygen issue --tin 00054321 --plan standard --until 2027-10-10 [--key <путь закрытого ключа>]
 //! kvartik-keygen issue --tin 00054321 --plan standard --renew [--key <путь закрытого ключа>]
 //! kvartik-keygen issue --tin 00054321 --plan pro --seats 10 --until 2027-10-10 [--key <путь закрытого ключа>]
+//! kvartik-keygen issue --plan pro --seats 100 --until 2027-11-18 [--key <путь закрытого ключа>]
 //! ```
 
 use std::fs::{self, OpenOptions};
@@ -84,6 +93,8 @@ const USAGE: &str = "использование:
   kvartik-keygen pair <путь закрытого ключа вне репозитория>
   kvartik-keygen issue --tin <ՀՎՀՀ> --plan standard|pro [--seats <N>] --until <ГГГГ-ММ-ДД> [--key <путь закрытого ключа>]
   kvartik-keygen issue --tin <ՀՎՀՀ> --plan standard|pro [--seats <N>] --renew [--key <путь закрытого ключа>]
+  kvartik-keygen issue --plan pro [--seats <N>] --until <ГГГГ-ММ-ДД> [--key <путь закрытого ключа>]
+--tin — у pro можно не называть: ключ без ИНН, подарком на пробу; продать — только на ИНН покупателя, продлить --renew — только ключ с ИНН
 --renew — продление заранее (условия, п. 4.1): последний день — год после последнего дня самого долгого ключа того же тарифа на этот ՀՎՀՀ в журнале, пока тот ещё идёт
 --seats — только у pro: сколько ИП конторы открывает ключ, от 1 до 100; без него — сколько у продлённого ключа pro, иначе 10, как у тарифа на странице «Купить»
 закрытый ключ issue по умолчанию — license.key в папке kvartik-license домашнего каталога";
@@ -196,14 +207,30 @@ impl Order {
             }
         }
         let missing = || format!("нужны --tin, --plan и --until или {RENEW}\n{USAGE}");
-        let [Some(tin), Some(plan), until, key, seats] = values else {
+        let [tin, Some(plan), until, key, seats] = values else {
             return Err(missing());
         };
-        let tin = Tin::parse(tin).map_err(|_| format!("--tin {tin}: ՀՎՀՀ — восемь цифр"))?;
         let plan = match plan {
             "standard" => Plan::Standard,
             "pro" => Plan::Pro,
             _ => return Err(format!("--plan {plan}: тариф — standard или pro")),
+        };
+        // Без ИНН — только «Pro» и только новый ключ (шапка модуля).
+        let tin = match (tin, plan) {
+            (Some(license::NO_TIN), _) => {
+                return Err(format!(
+                    "--tin {}: это пометка ключа без ИНН — не называйте --tin у pro вовсе",
+                    license::NO_TIN
+                ));
+            }
+            (Some(tin), _) => Tin::parse(tin).map_err(|_| format!("--tin {tin}: ՀՎՀՀ — восемь цифр"))?,
+            (None, Plan::Standard) => {
+                return Err("--tin: у standard ИНН обязателен — ключ открывает ИП своего ՀՎՀՀ".to_owned());
+            }
+            (None, Plan::Pro) if renew => {
+                return Err(format!("{RENEW} без --tin: ключи без ИНН в журнале не отличить, назовите ИНН"));
+            }
+            (None, Plan::Pro) => Tin::parse(license::NO_TIN).map_err(|_| "ИНН без номера не разобрался".to_owned())?,
         };
         let seats = match (seats, plan) {
             (None, _) => None,
@@ -276,9 +303,13 @@ fn issue_command(flags: &[String]) -> Result<(), String> {
         );
         println!();
     }
+    let holder = if key.without_tin() {
+        "без ИНН".to_owned()
+    } else {
+        format!("на ՀՎՀՀ {}", key.tin().as_str())
+    };
     println!(
-        "Ключ на ՀՎՀՀ {}, тариф {}, выпущен {}, последний день — {} ({} дн.):",
-        key.tin().as_str(),
+        "Ключ {holder}, тариф {}, выпущен {}, последний день — {} ({} дн.):",
         plan_column(&key),
         key.issued().iso(),
         key.until().iso(),
@@ -688,6 +719,18 @@ mod tests {
             Order::parse(&args(&format!("--tin 00054321 --plan pro --seats {MAX_IPS} --renew"))).map(|order| order.seats),
             Ok(Some(100))
         );
+        // «Pro» без ИНН — подарок на пробу: в ключе восемь нулей (решение
+        // человека 2026-11-18).
+        assert_eq!(
+            Order::parse(&args("--plan pro --seats 100 --until 2027-11-18")),
+            Ok(Order {
+                tin: tin(license::NO_TIN),
+                plan: Plan::Pro,
+                until: Until::Day(day("2027-11-18")),
+                seats: Some(100),
+                key: None,
+            })
+        );
         assert!(USAGE.contains(&format!("от 1 до {MAX_IPS}")), "в подсказке — не тот предел мест");
         assert!(USAGE.contains(&format!("иначе {PRO_SEATS},")), "в подсказке — не то число мест по умолчанию");
         let mut accepted = Vec::new();
@@ -711,6 +754,11 @@ mod tests {
             "--tin 00054321 --plan pro --seats тридцать --until 2027-10-10",
             "--tin 00054321 --plan pro --seats 30 --seats 30 --until 2027-10-10",
             "--tin 00054321 --plan pro --until 2027-10-10 --seats",
+            // Без ИНН — только новый ключ «Pro», и нули флагом не называют.
+            "--plan standard --until 2027-10-10",
+            "--plan pro --renew",
+            "--tin 00000000 --plan pro --until 2027-10-10",
+            "--tin 00000000 --plan standard --until 2027-10-10",
         ] {
             if Order::parse(&args(line)).is_ok() {
                 accepted.push(line);
