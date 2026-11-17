@@ -95,9 +95,16 @@ const ACCOUNT = RELEASE.match(/pub const ACCOUNT: &str = "(\d+)";/)?.[1];
 const PRICE = RELEASE.match(/pub const PRICE: Money = Money::new\(([\d_]+), Currency::Amd\);/)?.[1]?.replaceAll("_", "");
 if (!ACCOUNT || !PRICE) throw new Error("в crates/core/src/release.rs не нашлись ACCOUNT и PRICE");
 
-// Рабочий экран: база открыта, разделы прочитаны — встаёт поле выбора файла
-// копии (с 0.0.20; так же в skill browser-run).
-const WORKING = `return document.querySelector('input[type=file][accept=".json,application/json"]') ? true : null;`;
+// Рабочий экран: база открыта, разделы прочитаны — под экраном копии встают
+// слова о хранении на языке окна (с 0.0.142; так же в skill browser-run).
+// С 0.0.20 признаком было поле выбора файла копии, встававшее тогда же, но
+// с задачи 91 экран копии рисуется с первого показа, а слова о хранении —
+// в главном wasm и в тот же миг, что поле раньше.
+const STORED = ["hy", "ru", "en"].map((lang) => t("StorageTitle", lang));
+const WORKING = `return [...document.querySelectorAll("#backup h2")].some((h) =>
+  ${JSON.stringify(STORED)}.includes(h.textContent)) ? true : null;`;
+// Поле выбора файла копии — когда экран копии показан и база открыта.
+const BACKUP_FILE = `input[type=file][accept=".json,application/json"]`;
 const CONTROLLER = `return navigator.serviceWorker.controller ? navigator.serviceWorker.controller.scriptURL : null;`;
 const VISIBLE = (selector) =>
   `return [...document.querySelectorAll(${JSON.stringify(selector)})].some((e) => e.getClientRects().length > 0) || null;`;
@@ -910,7 +917,8 @@ async function rates(page) {
 async function restore(page) {
   const sample = samples().at(-1);
   await go(page, "#/backup");
-  await page.setFiles(`input[type=file][accept=".json,application/json"]`, [sample.file]);
+  checks.check("копия: экран копии нарисован", await page.waitFor(`return document.querySelector(${JSON.stringify(BACKUP_FILE)}) ? true : null;`));
+  await page.setFiles(BACKUP_FILE, [sample.file]);
   const submit = `[...document.querySelectorAll("form.backup button[type=submit]")].find((b) =>
     b.textContent.trim() === ${JSON.stringify(s("BackupRestore"))} && b.getClientRects().length > 0)`;
   checks.check("копия: образец открыт, спрошен пароль", await page.waitFor(`return ${submit} ? true : null;`));
@@ -928,6 +936,7 @@ async function restore(page) {
 /// с повтором или пароль устройства).
 async function backup(page, password) {
   await go(page, "#/backup");
+  await page.waitFor(`return ${BUTTON("#backup", s("BackupMake"))} ? true : null;`);
   const made = await page.eval(`const form = ${BUTTON("#backup", s("BackupMake"))}?.form;
     if (!form) return { error: "нет формы копии" };
     for (const input of form.querySelectorAll("input[type=password]")) {

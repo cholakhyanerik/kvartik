@@ -2,7 +2,12 @@
 //! восстановить из неё, напомнить, если копии давно не было.
 //!
 //! Раздел — содержимое своего экрана внутри профиля (`ui/route.rs`), а
-//! напоминание о копии — вверху остальных экранов.
+//! напоминание о копии — вверху остальных экранов. Экран — своей частью wasm
+//! с первого показа (задача 91): открывают его редко, а в главном wasm он
+//! вместе с общим кодом, который держал там только он, стоил 28 КБ после
+//! brotli — 0,19 с рабочего экрана на телефоне (замер 0.0.142,
+//! docs/measurements.md). Главному wasm остались дни копий, напоминание,
+//! метки и строка профиля ([`Backups`], [`BackupChip`], [`BackupEntry`]).
 //!
 //! Копия делается в два шага: собрать и зашифровать — потом сохранить
 //! ссылкой, которую человек нажимает сам (`platform::file::Download`), а на
@@ -47,7 +52,7 @@ use super::form::Forms;
 use super::icon::{Icon, icon};
 use super::office::Office;
 use super::route::{Router, Screen};
-use super::split::{Task, split};
+use super::split::{Task, screen, split};
 use super::storage::{Storage, error_key};
 use super::{Base, tr};
 use crate::platform::autobackup::{self as folders, FolderError, Permission, PickError};
@@ -758,8 +763,7 @@ impl From<Failure> for Problem {
             Failure::TooManyIps(_) => Self::TooManyIps,
             // Больше `license::MAX_KEYS` записей ключей — «Pro» в конторе или
             // ключей одного ИП — программа не пишет (с 0.0.135), значит, и файл
-            // не её (ревью задачи 38). Своих слов нет: экран копии — в главном
-            // wasm, а случай — чужой файл.
+            // не её (ревью задачи 38): «не копия программы» о нём верно.
             Failure::TooManyKeys => Self::Say(Key::BackupNotOurs),
         }
     }
@@ -806,9 +810,20 @@ enum Restoring {
     Failed(Problem),
 }
 
-/// Раздел на языке окна — под заголовком экрана копии. Показан, только пока
-/// хранилище открыто: без базы копии не из чего делать и некуда
-/// восстанавливать.
+/// Что нужно экрану копии из окна.
+#[derive(Clone, Copy)]
+pub(super) struct Ctx {
+    lang: ReadSignal<Lang>,
+    backups: Backups,
+    storage: RwSignal<Storage>,
+    forms: Forms,
+    router: Router,
+}
+
+/// Раздел на языке окна — под заголовком экрана копии, частью wasm с первого
+/// показа (`split::screen`, задача 91). Слова о хранении под ним — в главном
+/// wasm (`ui/storage.rs`): они говорят, сотрёт ли браузер данные сам, и тогда,
+/// когда часть не загрузилась.
 #[component]
 pub fn BackupSection(
     lang: ReadSignal<Lang>,
@@ -817,14 +832,39 @@ pub fn BackupSection(
     forms: Forms,
     router: Router,
 ) -> impl IntoView {
+    let ctx = Ctx {
+        lang,
+        backups,
+        storage,
+        forms,
+        router,
+    };
+    screen(lang, router, Screen::Backup, move || backup_screen(ctx))
+}
+
+split! {
+    /// Экран копии — своей частью wasm (`ui/split.rs`, задача 91): первому
+    /// заходу он не нужен. Сборка, разбор и восстановление копии — свои части,
+    /// как и были: сборку зовёт и автокопия из части книги, когда экрана
+    /// никто не открывал, а разбор и восстановление нужны только по выбору
+    /// файла.
+    pub(super) fn backup_screen(ctx: Ctx) -> AnyView, preload preload_screen {
+        view! { <BackupBody ctx /> }.into_any()
+    }
+}
+
+/// Содержимое экрана копии. Показано, только пока хранилище открыто: без базы
+/// копии не из чего делать и некуда восстанавливать.
+#[component]
+fn BackupBody(ctx: Ctx) -> impl IntoView {
+    let Ctx {
+        lang,
+        backups,
+        storage,
+        forms,
+        router,
+    } = ctx;
     let ready = move || matches!(storage.get(), Storage::Ready(_));
-    // Автокопия — из части книги ([`AutoView`]), как карточки налога на
-    // главном: когда экран копии впервые показан, — первому заходу она не
-    // нужна. Пока часть грузится или если не загрузилась, блока нет, а ручная
-    // копия работает и без него.
-    let seen = Memo::new(move |seen: Option<&bool>| {
-        seen.copied().unwrap_or(false) || router.shows(Screen::Backup)
-    });
     // Пока выбран файл копии — и в пустой базе, где копию делать не из чего, —
     // только восстановление: пароль файла под ним и сразу «Придумайте пароль
     // копий», «Повторите пароль» — два набора паролей подряд, и пароль копии
@@ -867,7 +907,10 @@ pub fn BackupSection(
                 }
                 .into_any()
             }}
-            {move || (seen.get() && !quiet.get()).then(|| Suspend::new(async move {
+            // Автокопия — из части книги ([`AutoView`]), как карточки налога на
+            // главном. Пока часть грузится или если не загрузилась, блока нет,
+            // а ручная копия работает и без него.
+            {move || (!quiet.get()).then(|| Suspend::new(async move {
                 super::ledger::auto_part(AutoView { lang, backups, forms }).await.ok()
             }))}
         </Show>

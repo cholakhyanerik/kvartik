@@ -54,13 +54,20 @@ const list = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
 // Имя — ради Git Bash: аргумент с `/` он переписывает путём Windows.
 const hash = (route) => route.startsWith("#") ? route : route === "home" ? "#/" : `#/${route}`;
 
-// Рабочий экран: база открыта, разделы прочитаны — встаёт поле выбора файла
-// копии (с 0.0.20 оно — признак готовности, CLAUDE.md, Правило 1).
-const WORKING = `return document.querySelector('input[type=file][accept=".json,application/json"]') ? true : null;`;
+// Рабочий экран: база открыта, разделы прочитаны — под экраном копии встают
+// слова о хранении на языке окна (с 0.0.142, CLAUDE.md, Правило 1; так же
+// в `tools/browser/check.mjs`). С 0.0.20 признаком было поле выбора файла
+// копии, а с задачи 91 экран копии рисуется с первого показа; слова
+// о хранении — в главном wasm и встают в тот же миг, что поле раньше.
+const STORED = ["hy", "ru", "en"].map((lang) => t("StorageTitle", lang));
+const READY = `[...document.querySelectorAll("#backup h2")].some((h) => ${JSON.stringify(STORED)}.includes(h.textContent))`;
+const WORKING = `return ${READY} ? true : null;`;
+// Поле выбора файла копии — когда экран копии показан и база открыта.
+const BACKUP_FILE = `input[type=file][accept=".json,application/json"]`;
 // Рабочий экран именно этой сборки: старая страница под новым service worker
 // проходит все остальные проверки (задача 65, 2026-10-16).
 const BUILD_PAGE = `const s = document.querySelector("script[type=module]");
-  return s && s.src.startsWith(location.origin + "/app/kvartik-app-") && document.querySelector('input[type=file][accept=".json,application/json"]') ? s.src : null;`;
+  return s && s.src.startsWith(location.origin + "/app/kvartik-app-") && ${READY} ? s.src : null;`;
 const CONTROLLER = `return navigator.serviceWorker.controller ? navigator.serviceWorker.controller.scriptURL : null;`;
 const CACHES = `const out = {}; for (const n of await caches.keys()) out[n] = (await (await caches.open(n)).keys()).map((r) => r.url); return out;`;
 const hasText = (text) => `return document.body && document.body.innerText.includes(${JSON.stringify(text)}) ? true : null;`;
@@ -78,8 +85,9 @@ async function restore(page, lang) {
   const sample = opt.sample === "last" ? all.at(-1) : all.find((s) => s.file.includes(`${path.sep}${opt.sample}${path.sep}`));
   if (!sample) throw new Error(`нет образца ${opt.sample} в samples.rs`);
   await page.eval(`location.hash = "#/backup"; return true;`);
-  await page.waitFor(WORKING);
-  await page.setFiles(`input[type=file][accept=".json,application/json"]`, [sample.file]);
+  checks.check("образец: экран копии нарисован",
+    await page.waitFor(`return document.querySelector(${JSON.stringify(BACKUP_FILE)}) ? true : null;`));
+  await page.setFiles(BACKUP_FILE, [sample.file]);
   const submit = `[...document.querySelectorAll("form.backup button[type=submit]")].find((b) =>
     b.textContent.trim() === ${JSON.stringify(t("BackupRestore", lang))} && b.getClientRects().length > 0)`;
   checks.check("образец: спросил пароль копии", await page.waitFor(`return ${submit} ? true : null;`));
@@ -292,8 +300,13 @@ async function install() {
 async function measure() {
   const servers = DISTS.map((d, i) => own(d, 8801 + i));
   const browser = await Browser.launch({ work: WORK, name: "measure", port: 9334 });
+  // Рабочий экран — слова о хранении (`READY`). Поле файла копии — прежний
+  // признак (до задачи 91): у сборок до 0.0.142 оно встаёт тогда же, и замер
+  // их обоими признаками сшивает ряд `docs/measurements.md`; у новых его нет
+  // до показа экрана копии — `old` пустой.
   const OBSERVER = `new MutationObserver((_, obs) => {
-    if (document.querySelector('input[type=file][accept=".json,application/json"]')) { window.__working = performance.now(); obs.disconnect(); }
+    if (window.__old === undefined && document.querySelector(${JSON.stringify(BACKUP_FILE)})) window.__old = performance.now();
+    if (${READY}) { window.__working = performance.now(); obs.disconnect(); }
   }).observe(document, { childList: true, subtree: true });
   navigator.serviceWorker?.addEventListener("controllerchange", () => { window.__sw ??= performance.now(); });`;
   const visit = async (url) => {
@@ -308,7 +321,8 @@ async function measure() {
     await page.send("Page.navigate", { url });
     const read = `if (window.__working === undefined) return null; await document.fonts.ready;
       const fonts = performance.getEntriesByType("resource").filter((r) => r.name.endsWith(".ttf")).map((r) => r.responseEnd);
-      return { working: window.__working, fcp: (performance.getEntriesByName("first-contentful-paint")[0] || {}).startTime,
+      return { working: window.__working, old: window.__old ?? null,
+        fcp: (performance.getEntriesByName("first-contentful-paint")[0] || {}).startTime,
         fonts: fonts.length ? Math.max(...fonts) : null };`;
     const first = await page.waitFor(read, 30000);
     const sw = opt.sw && first ? await page.waitFor(`return window.__sw ?? null;`, 60000) : null;
@@ -341,7 +355,8 @@ async function measure() {
   for (const r of runs) {
     const ok = r.results.filter(Boolean);
     checks.check(`${r.name}: все заходы дошли до рабочего экрана`, ok.length === Number(opt.runs), `${ok.length} из ${opt.runs}`);
-    console.log(`${r.name} ${opt.path}: первый текст ${sec(median(ok.map((x) => x.fcp)))} с, рабочий экран ${sec(median(ok.map((x) => x.working)))} с, `
+    const old = ok.some((x) => x.old != null) ? ` (поле файла копии — ${sec(median(ok.map((x) => x.old)))} с)` : "";
+    console.log(`${r.name} ${opt.path}: первый текст ${sec(median(ok.map((x) => x.fcp)))} с, рабочий экран ${sec(median(ok.map((x) => x.working)))} с${old}, `
       + `шрифты ${sec(median(ok.map((x) => x.fonts)))} с${opt.sw ? `, под service worker ${sec(median(ok.map((x) => x.sw)))} с` : ""}`
       + `${opt.repeat ? `, повторный заход ${median(ok.map((x) => x.repeat)).toFixed(0)} мс` : ""} `
       + `(медиана ${ok.length}; Chrome ${(await chromeVersion())})`);

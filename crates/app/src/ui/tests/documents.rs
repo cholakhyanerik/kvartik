@@ -27,8 +27,8 @@ use web_sys::{HtmlElement, Response};
 use super::ledger::png;
 use super::share::ShareStub;
 use super::{
-    button, choose_file, field, mount, mount_at, pick_client, select, shown_step, sleep, type_into,
-    visit, wait_for,
+    backup_file, button, choose_file, field, mount, mount_at, pick_client, select, shown_step, sleep,
+    type_into, visit, wait_for,
 };
 use crate::ui::documents::save;
 use crate::ui::profile::fitted;
@@ -537,16 +537,10 @@ async fn restoring_a_backup_shows_its_documents() {
     if !wait_for(&host, t(lang, Key::DocsAbout)).await {
         wrong.push("пустая база — а о документах ни слова".to_owned());
     }
-    if !wait_for(&host, t(lang, Key::BackupChooseFile)).await {
-        wrong.push("раздела копии нет".to_owned());
-    }
-    match host
-        .query_selector(r#"input[type="file"][accept=".json,application/json"]"#)
-        .ok()
-        .flatten()
-    {
+    // Экран документов уже нарисован — восстановление идёт с экрана копии.
+    match backup_file(&host).await {
         Some(input) => choose_file(
-            input.unchecked_ref(),
+            &input,
             "kvartik-2026-10-13.json",
             include_str!("../../../../core/tests/backups/v5/kvartik-2026-10-13.json"),
         ),

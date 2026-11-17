@@ -363,15 +363,9 @@ async fn a_restored_key_is_read_after_the_form_that_read_keys_first() {
         wrong.push("до восстановления экран лицензии не сказал, что выпуск заперт".to_owned());
     }
 
-    set_hash("#/backup");
-    let input = host
-        .query_selector(r#"input[type="file"][accept=".json,application/json"]"#)
-        .ok()
-        .flatten()
-        .map(JsCast::unchecked_into::<HtmlInputElement>);
-    match &input {
+    match super::backup_file(&host).await {
         Some(input) => super::choose_file(
-            input,
+            &input,
             "kvartik-2026-10-27.json",
             include_str!("../../../../core/tests/backups/v11/kvartik-2026-10-27.json"),
         ),

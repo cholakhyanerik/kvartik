@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.142",
+      "date": "2026-11-17",
+      "hy": [
+        "Ծրագիրն առաջին անգամ բացվում է ավելի արագ. «Պահուստային պատճեն» էկրանը բեռնվում է միայն այն բացելիս։ Էկրանում ամեն ինչ նույնն է։"
+      ],
+      "ru": [
+        "Программа открывается быстрее в первый раз: экран «Резервная копия» загружается, только когда его открывают. На самом экране всё как было."
+      ],
+      "en": [
+        "The app opens faster the first time: the “Backup” screen loads only when you open it. Everything on the screen stays as it was."
+      ]
+    },
+    {
       "version": "0.0.141",
       "date": "2026-11-17",
       "hy": [
@@ -263,19 +276,6 @@
         "The “License” screen now shows what a key gives you and what works without one, how to move the key and your data to another device, and that data doesn't move between devices on its own. An entered key has a “Copy the key” button.",
         "A week before your trial ends, the app tells you so once, in a window: a key arrives within a business day after payment, so it's best to buy it in advance.",
         "New edition of the license terms: a key paid for before the current one ends starts the day after it, so no days of the current key are lost."
-      ]
-    },
-    {
-      "version": "0.0.122",
-      "date": "2026-11-13",
-      "hy": [
-        "Ծրագրում ոչինչ չի փոխվել. այս տարբերակն ուղղում է ստուգումներից մեկը, որոնք կատարվում են յուրաքանչյուր թողարկումից առաջ։"
-      ],
-      "ru": [
-        "В программе ничего не изменилось: эта версия чинит одну из проверок, которые идут перед каждой выкладкой."
-      ],
-      "en": [
-        "Nothing changed in the app: this version fixes one of the checks that run before every release."
       ]
     }
   ]

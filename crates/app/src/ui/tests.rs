@@ -130,6 +130,33 @@ async fn wait_for(host: &HtmlElement, text: &str) -> bool {
     false
 }
 
+/// Подождать, пока база откроется и разделы прочитаются: тогда под экраном
+/// копии встают слова о хранении (`ui/storage.rs`) — в главном wasm, на каком
+/// бы экране окно ни стояло. До задачи 91 тем же признаком было поле файла
+/// копии, а теперь экран копии рисуется с первого показа.
+async fn opened(host: &HtmlElement, lang: Lang) -> bool {
+    wait_for(host, t(lang, Key::StorageTitle)).await
+}
+
+/// Открыть экран копии и дождаться поля выбора файла копии: экран рисуется
+/// с первого показа (`split::screen`, задача 91), а переход по адресу
+/// приходит событием `hashchange` своей задачей. `None` — не дождались за
+/// пять секунд.
+async fn backup_file(host: &HtmlElement) -> Option<HtmlInputElement> {
+    crate::platform::set_hash(&Screen::Backup.href());
+    for _ in 0..100 {
+        let input = host
+            .query_selector(r#"input[type="file"][accept=".json,application/json"]"#)
+            .ok()
+            .flatten();
+        if let Some(input) = input {
+            return Some(input.unchecked_into());
+        }
+        sleep(50).await;
+    }
+    None
+}
+
 /// Кнопка с одной из этих подписей.
 fn button(host: &HtmlElement, labels: &[&str]) -> Option<HtmlElement> {
     let buttons = host.query_selector_all("button").ok()?;
@@ -343,8 +370,8 @@ async fn choosing_a_language_translates_the_whole_window() {
     let mut wrong = Vec::new();
     // Разделы о данных появляются, когда открылась база; заголовок экрана
     // копии виден и раньше.
-    if !wait_for(&host, t(Lang::Am, Key::BackupChooseFile)).await {
-        wrong.push("раздел копии не появился".to_owned());
+    if !opened(&host, Lang::Am).await {
+        wrong.push("база не открылась".to_owned());
     }
     visit(
         &host,
@@ -356,10 +383,14 @@ async fn choosing_a_language_translates_the_whole_window() {
             Screen::Deadlines,
             Screen::Report,
             Screen::Profile,
+            Screen::Backup,
             Screen::About,
         ],
     )
     .await;
+    if !wait_for(&host, t(Lang::Am, Key::BackupChooseFile)).await {
+        wrong.push("раздел копии не появился".to_owned());
+    }
     if !wait_for(&host, t(Lang::Am, Key::AnnualSumOf)).await {
         wrong.push("экран годовых платежей не показал платежей".to_owned());
     }
@@ -742,7 +773,7 @@ async fn backup_label_stands_on_every_screen_when_due() {
     }
     let (host, mounted) = mount();
     let mut wrong = Vec::new();
-    if !wait_for(&host, t(lang, Key::BackupChooseFile)).await {
+    if !opened(&host, lang).await {
         wrong.push("база не открылась".to_owned());
     }
     for screen in Screen::PLAIN {
@@ -780,10 +811,11 @@ fn section_text(host: &HtmlElement, id: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Счета, клиенты и профиль рисуются с первого показа (`split::screen`,
-/// задача 61): до него в странице только заголовок экрана, а показанный
-/// однажды экран остаётся в ней спрятанным — с тем, что начато в его поле.
-/// Данные разделов прочитаны и без показа: главный экран знает профиль.
+/// Счета, клиенты, профиль и копия рисуются с первого показа
+/// (`split::screen`, задачи 61 и 91): до него в странице только заголовок
+/// экрана, а показанный однажды экран остаётся в ней спрятанным — с тем, что
+/// начато в его поле. Данные разделов прочитаны и без показа: главный экран
+/// знает профиль.
 #[wasm_bindgen_test]
 async fn hidden_screens_are_drawn_on_first_show() {
     let client = documents::fresh_base_with_client().await;
@@ -793,23 +825,28 @@ async fn hidden_screens_are_drawn_on_first_show() {
     Device::new().set_ui_lang(lang);
     let (host, mounted) = mount();
     let mut wrong = Vec::new();
-    if !wait_for(&host, t(lang, Key::BackupChooseFile)).await {
+    if !opened(&host, lang).await {
         wrong.push("база не открылась".to_owned());
     }
     if section_text(&host, "home").contains(t(lang, Key::StepsFillRequisites)) {
         wrong.push("главный экран не знает профиля, пока экран профиля не показан".to_owned());
     }
-    let drawn = |host: &HtmlElement, wrong: &mut Vec<String>, step: &str, expected: [bool; 3]| {
+    // И копия (задача 91): до показа на её экране только заголовок и слова
+    // о хранении.
+    let drawn = |host: &HtmlElement, wrong: &mut Vec<String>, step: &str, expected: [bool; 4]| {
         let shown = [
             section_text(host, "documents").contains(t(lang, Key::DocsAbout)),
             section_text(host, "clients").contains(&name),
             section_text(host, "profile").contains(&profile),
+            section_text(host, "backup").contains(t(lang, Key::BackupHeadline)),
         ];
         if shown != expected {
-            wrong.push(format!("{step}: нарисованы счета, клиенты, профиль — {shown:?}, а не {expected:?}"));
+            wrong.push(format!(
+                "{step}: нарисованы счета, клиенты, профиль, копия — {shown:?}, а не {expected:?}"
+            ));
         }
     };
-    drawn(&host, &mut wrong, "до показа", [false, false, false]);
+    drawn(&host, &mut wrong, "до показа", [false, false, false, false]);
 
     crate::platform::set_hash(&Screen::Clients.href());
     if !wait_for(&host, &name).await {
@@ -825,15 +862,15 @@ async fn hidden_screens_are_drawn_on_first_show() {
         None => wrong.push("у клиентов нет поиска".to_owned()),
     }
     visit(&host, &[]).await;
-    drawn(&host, &mut wrong, "после клиентов", [false, true, false]);
+    drawn(&host, &mut wrong, "после клиентов", [false, true, false, false]);
     match &search {
         Some(input) if input.is_connected() && input.value() == "Ac" => {}
         Some(_) => wrong.push("начатое в поиске клиентов пропало при уходе с экрана".to_owned()),
         None => {}
     }
 
-    visit(&host, &[Screen::Documents, Screen::Profile]).await;
-    drawn(&host, &mut wrong, "после всех", [true, true, true]);
+    visit(&host, &[Screen::Documents, Screen::Profile, Screen::Backup]).await;
+    drawn(&host, &mut wrong, "после всех", [true, true, true, true]);
 
     drop(mounted);
     host.remove();
@@ -871,17 +908,9 @@ async fn restoring_a_backup_shows_its_profile() {
     }
     // Раздел копии появляется позже профиля: после ответа браузера
     // о постоянном хранении, а он в CI бывает небыстрым.
-    if !wait_for(&host, t(lang, Key::BackupChooseFile)).await {
-        wrong.push("раздела копии нет".to_owned());
-    }
-    let input: Option<HtmlInputElement> = host
-        .query_selector(r#"input[type="file"][accept=".json,application/json"]"#)
-        .ok()
-        .flatten()
-        .map(JsCast::unchecked_into);
-    match &input {
+    match backup_file(&host).await {
         Some(input) => choose_file(
-            input,
+            &input,
             "kvartik-2026-10-12.json",
             include_str!("../../../core/tests/backups/v2/kvartik-2026-10-12.json"),
         ),
@@ -938,17 +967,9 @@ async fn restoring_a_backup_shows_its_profile() {
 /// Выбрать образец копии 0.0.12 и нажать «Восстановить» с его паролем,
 /// как человек.
 async fn restore_sample_0_0_12(host: &HtmlElement, lang: Lang, wrong: &mut Vec<String>) {
-    if !wait_for(host, t(lang, Key::BackupChooseFile)).await {
-        wrong.push("раздела копии нет".to_owned());
-    }
-    let input: Option<HtmlInputElement> = host
-        .query_selector(r#"input[type="file"][accept=".json,application/json"]"#)
-        .ok()
-        .flatten()
-        .map(JsCast::unchecked_into);
-    match &input {
+    match backup_file(host).await {
         Some(input) => choose_file(
-            input,
+            &input,
             "kvartik-2026-10-12.json",
             include_str!("../../../core/tests/backups/v2/kvartik-2026-10-12.json"),
         ),
@@ -1653,16 +1674,10 @@ async fn restoring_a_backup_shows_its_clients() {
     if !wait_for(&host, t(lang, Key::ClientsAbout)).await {
         wrong.push("пустая база — а о клиентах ни слова".to_owned());
     }
-    if !wait_for(&host, t(lang, Key::BackupChooseFile)).await {
-        wrong.push("раздела копии нет".to_owned());
-    }
-    match host
-        .query_selector(r#"input[type="file"][accept=".json,application/json"]"#)
-        .ok()
-        .flatten()
-    {
+    // Экран клиентов уже нарисован — восстановление идёт с экрана копии.
+    match backup_file(&host).await {
         Some(input) => choose_file(
-            input.unchecked_ref(),
+            &input,
             "kvartik-2026-10-13.json",
             include_str!("../../../core/tests/backups/v3/kvartik-2026-10-13.json"),
         ),
