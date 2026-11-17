@@ -93,7 +93,9 @@ const buyPath = (lang) => (lang === "hy" ? "/buy/" : `/${lang}/buy/`);
 const RELEASE = fs.readFileSync(path.join(REPO, "crates/core/src/release.rs"), "utf8");
 const ACCOUNT = RELEASE.match(/pub const ACCOUNT: &str = "(\d+)";/)?.[1];
 const PRICE = RELEASE.match(/pub const PRICE: Money = Money::new\(([\d_]+), Currency::Amd\);/)?.[1]?.replaceAll("_", "");
-if (!ACCOUNT || !PRICE) throw new Error("в crates/core/src/release.rs не нашлись ACCOUNT и PRICE");
+// Цена «Pro» (задача 103) — вторая карточка той же страницы.
+const PRO_PRICE = RELEASE.match(/pub const PRO_PRICE: Money = Money::new\(([\d_]+), Currency::Amd\);/)?.[1]?.replaceAll("_", "");
+if (!ACCOUNT || !PRICE || !PRO_PRICE) throw new Error("в crates/core/src/release.rs не нашлись ACCOUNT, PRICE и PRO_PRICE");
 
 // Рабочий экран: база открыта, разделы прочитаны — под экраном копии встают
 // слова о хранении на языке окна (с 0.0.142; так же в skill browser-run).
@@ -465,14 +467,16 @@ async function landing(browser) {
         .querySelector('section.plan .price')?.textContent.replace(/\\D/g, "") === ${JSON.stringify(PRICE)}
         && document.querySelector('section.plan a.button[href="${buyPath(lang)}"]') ? true : null;`));
     }
-    // Страница «Купить» (задача 35): своего языка, с ценой, счётом продавца
-    // и письмом со словами согласия, без прокрутки вбок на 360.
+    // Страница «Купить» (задачи 35 и 103): своего языка, с ценами
+    // «Стандарта» и «Pro», счётом продавца и письмом со словами согласия, без
+    // прокрутки вбок на 360.
     for (const lang of ["hy", "ru", "en"]) {
       const at = buyPath(lang);
       await page.go(`${ORIGIN}${at}`);
-      checks.check(`«Купить» ${at}: свой язык, цена, счёт и письмо`, await page.waitFor(`return document.documentElement.lang
+      checks.check(`«Купить» ${at}: свой язык, цены «Стандарта» и «Pro», счёт и письмо`, await page.waitFor(`return document.documentElement.lang
         === ${JSON.stringify(lang)} && document.querySelector("article.buy h1")?.textContent === ${JSON.stringify(t("BuyTitle", lang))}
-        && document.querySelector("article.buy .price")?.textContent.replace(/\\D/g, "") === ${JSON.stringify(PRICE)}
+        && [...document.querySelectorAll("article.buy .price")].map((p) => p.textContent.replace(/\\D/g, "")).join()
+          === ${JSON.stringify(`${PRICE},${PRO_PRICE}`)}
         && [...document.querySelectorAll("article.buy .requisites .copy")].some((e) => e.textContent === ${JSON.stringify(ACCOUNT)})
         && decodeURIComponent(document.querySelector('article.buy a.button[href^="mailto:"]')?.href ?? "")
           .includes(${JSON.stringify(t("BuyAccept", lang))})

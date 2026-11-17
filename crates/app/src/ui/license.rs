@@ -689,10 +689,12 @@ fn quarters_open(lang: Lang, access: Access) -> Option<String> {
         .map(|term| fill(t(lang, Key::LicenseQuartersOpen), &[&i18n::date(lang, term.last())]))
 }
 
-/// Строка «Купить ключ» с тарифом и ценой (задача 35): ссылка на страницу
-/// «Купить» сайта на языке окна — в новой вкладке, как условия лицензии
-/// в «О программе»: страница вне программы, и программа остаётся на своём
-/// экране. Цена — из ядра (`release::PRICE`), та же, что на сайте.
+/// Строка «Купить ключ» с тарифами и ценами (задачи 35 и 103): ссылка на
+/// страницу «Купить» сайта на языке окна — в новой вкладке, как условия
+/// лицензии в «О программе»: страница вне программы, и программа остаётся
+/// на своём экране. Цены и места — из ядра (`release::PRICE`, `PRO_PRICE`,
+/// `PRO_SEATS`), те же, что на сайте; тарифы — частями строки, через точку
+/// (`.entry-meta` в `base.css`).
 #[component]
 fn BuyEntry(lang: ReadSignal<Lang>) -> impl IntoView {
     view! {
@@ -701,11 +703,19 @@ fn BuyEntry(lang: ReadSignal<Lang>) -> impl IntoView {
                 <a class="entry" href=move || release::buy_path(lang.get()) target="_blank" rel="noopener">
                     <span class="entry-main">
                         <span class="entry-title">{tr(lang, Key::LicenseBuy)}</span>
-                        <span class="entry-meta">{move || {
-                            let lang = lang.get();
-                            let price = i18n::money(lang, release::PRICE);
-                            fill(t(lang, Key::LicenseBuyPrice), &[t(lang, Key::PlanStandard), &price])
-                        }}</span>
+                        <span class="entry-meta">
+                            <span>{move || {
+                                let lang = lang.get();
+                                let price = i18n::money(lang, release::PRICE);
+                                fill(t(lang, Key::LicenseBuyPrice), &[t(lang, Key::PlanStandard), &price])
+                            }}</span>
+                            <span>{move || {
+                                let lang = lang.get();
+                                let price = i18n::money(lang, release::PRO_PRICE);
+                                let seats = release::PRO_SEATS.to_string();
+                                fill(t(lang, Key::LicenseBuyProPrice), &[t(lang, Key::PlanPro), &seats, &price])
+                            }}</span>
+                        </span>
                     </span>
                     {icon(Icon::Forward)}
                 </a>

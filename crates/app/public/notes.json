@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.144",
+      "date": "2026-11-17",
+      "hy": [
+        "«Գնել» էջում երկրորդ սակագինն է՝ «Pro»․ մեկ տարվա բանալի 10 ԱՁ-ի համար՝ 120 000 ֏, մի քանի ԱՁ վարող հաշվապահի համար։ Սեփական «Ստանդարտ» բանալի ունեցող ԱՁ-ն դրանում տեղ չի զբաղեցնում։",
+        "Լիցենզիայի պայմանները՝ նոր խմբագրությամբ, 17.11.2026։ Դրանում «Pro» սակագինն է, և բանալիներ կարող են գնել նաև կազմակերպությունները։"
+      ],
+      "ru": [
+        "На странице «Купить» — второй тариф, «Pro»: ключ на год на 10 ИП за 120 000 ֏ для бухгалтера, который ведёт несколько ИП. ИП со своим ключом «Стандарт» места в нём не занимает.",
+        "Условия лицензии — в новой редакции, от 17.11.2026: в ней тариф «Pro», и ключи могут покупать и организации."
+      ],
+      "en": [
+        "The “Buy” page has a second plan, “Pro”: a one-year key for 10 entrepreneurs at AMD 120,000 for a bookkeeper who keeps several of them. An entrepreneur with their own “Standard” key takes no seat in it.",
+        "The license terms have a new edition of November 17, 2026: it adds the “Pro” plan, and organizations can buy keys too."
+      ]
+    },
+    {
       "version": "0.0.143",
       "date": "2026-11-17",
       "hy": [
@@ -257,19 +273,6 @@
       ],
       "en": [
         "The language you choose on kvartik.com now carries over to the app: pick English on the site, and the app opens in English and remembers it, even if another language was chosen in it before."
-      ]
-    },
-    {
-      "version": "0.0.124",
-      "date": "2026-11-13",
-      "hy": [
-        "Ծրագրում ոչինչ չի փոխվել. iPhone-ում կայքի «Գնել» էջի փոխանցման վավերապայմաններն ու համաձայնության բառերն այժմ ընտրվում են ամբողջությամբ՝ մեկ հպումով։"
-      ],
-      "ru": [
-        "В программе ничего не изменилось: на iPhone реквизиты перевода и слова согласия на странице «Купить» сайта теперь выделяются целиком одним касанием."
-      ],
-      "en": [
-        "Nothing changed in the app: on iPhone, the payment details and the acceptance words on the website's “Buy” page are now selected whole with a single tap."
       ]
     }
   ]

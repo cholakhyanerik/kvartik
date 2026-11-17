@@ -36,6 +36,7 @@ use kvartik_core::model::office::{self, Ip, MAX_IPS};
 use kvartik_core::model::profile::Profile;
 use kvartik_core::model::record::{RecordId, Timestamp};
 use kvartik_core::model::tin::Tin;
+use kvartik_core::release;
 use kvartik_core::tax::closing::Closing;
 use kvartik_core::tax::deadlines::{self, When};
 use kvartik_core::tax::opening::Opening;
@@ -878,17 +879,20 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
         <button type="button" disabled=move || office.busy.get() on:click=add>
             <span class="label">{tr(lang, Key::OfficeAdd)}</span>
         </button>
-        // Пробный период — у устройства, а ключ — на ИНН одного ИП (задача 93).
-        // Пока идёт ключ «Pro», «ключ у каждого свой» неправда: о нём — строка
-        // выше (ревью задачи 38).
+        // Пробный период — у устройства, а ключ — на ИНН одного ИП (задача 93)
+        // или один «Pro» на всех (задача 103). Пока идёт ключ «Pro», «ключ
+        // у каждого свой» неправда: о нём — строка выше (ревью задачи 38).
         <p class="hint">{move || {
             let lang = lang.get();
-            let keys = if pro_term().is_some() {
-                &[Key::OfficeAddAbout, Key::OfficeTrialShared][..]
-            } else {
-                &[Key::OfficeAddAbout, Key::OfficeTrialShared, Key::OfficeKeyEach][..]
-            };
-            keys.iter().map(|&key| t(lang, key)).collect::<Vec<_>>().join(" ")
+            let mut words = vec![t(lang, Key::OfficeAddAbout).to_owned(), t(lang, Key::OfficeTrialShared).to_owned()];
+            if pro_term().is_none() {
+                words.push(t(lang, Key::OfficeKeyEach).to_owned());
+                words.push(fill(
+                    t(lang, Key::OfficeKeyPro),
+                    &[t(lang, Key::PlanPro), &release::PRO_SEATS.to_string(), t(lang, Key::OfficeTitle)],
+                ));
+            }
+            words.join(" ")
         }}</p>
         <Summary lang office base today open=summary_open />
         {removed}

@@ -51,7 +51,10 @@ use std::path::Path;
 use kvartik_core::i18n::{self, Key, Lang, fill, plural, t};
 use kvartik_core::license::TRIAL_DAYS;
 use kvartik_core::model::date::Date;
-use kvartik_core::release::{ACCOUNT, BANK, EMAIL, HOLDER, LICENSES, Legal, PRICE, SELLER_TIN, TELEGRAM, buy_path};
+use kvartik_core::model::money::{Currency, Money};
+use kvartik_core::release::{
+    ACCOUNT, BANK, EMAIL, HOLDER, LICENSES, Legal, PRICE, PRO_PRICE, PRO_SEATS, SELLER_TIN, TELEGRAM, buy_path,
+};
 use kvartik_core::tax::{calendar, example, rules, turnover};
 
 use super::{digest, legal};
@@ -409,6 +412,7 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
         link = app_link(app, lang),
         price = plan_card(
             lang,
+            Tariff::Standard,
             "price",
             &format!(
                 "        <p class=\"actions\"><a class=\"button\" href=\"{}\"><span class=\"label\">{}</span></a></p>\n",
@@ -491,11 +495,58 @@ fn trial(lang: Lang) -> String {
     escape(&fill(t(lang, Key::WelcomeTrial), &[&days]))
 }
 
-/// Карточка тарифа (задача 35): «Ключ «Стандарт» на год», цена из ядра
-/// (`release::PRICE`) крупно и что даёт ключ, а под ними `below` — готовая
-/// разметка: на лендинге — ссылка на страницу «Купить», на ней самой —
-/// пробный период. `id` — якорь заголовка.
-fn plan_card(lang: Lang, id: &str, below: &str) -> String {
+/// Тариф на карточке (задачи 35 и 103): «Стандарт» — один ИП, «Pro» —
+/// бухгалтеру на `release::PRO_SEATS` ИП. Цены и места — из ядра: условия
+/// берут их со страницы «Купить» (п. 4 и 5).
+#[derive(Clone, Copy)]
+enum Tariff {
+    Standard,
+    Pro,
+}
+
+impl Tariff {
+    /// Имя тарифа, как его зовут окно и условия.
+    fn name(self, lang: Lang) -> &'static str {
+        match self {
+            Tariff::Standard => t(lang, Key::PlanStandard),
+            Tariff::Pro => t(lang, Key::PlanPro),
+        }
+    }
+
+    /// Цена на год.
+    const fn price(self) -> Money {
+        match self {
+            Tariff::Standard => PRICE,
+            Tariff::Pro => PRO_PRICE,
+        }
+    }
+
+    /// Что даёт ключ: у «Pro» — сколько ИП и почём каждый.
+    fn about(self, lang: Lang) -> String {
+        match self {
+            Tariff::Standard => t(lang, Key::BuyPlanText).to_owned(),
+            Tariff::Pro => fill(
+                t(lang, Key::BuyPlanProText),
+                &[
+                    &PRO_SEATS.to_string(),
+                    &i18n::money(lang, per_ip()),
+                    t(lang, Key::OfficeTitle),
+                    t(lang, Key::PlanStandard),
+                ],
+            ),
+        }
+    }
+}
+
+/// Цена «Pro» за одно место: столько стоит ИП в ключе «Pro».
+fn per_ip() -> Money {
+    Money::new(PRO_PRICE.minor() / i64::from(PRO_SEATS), Currency::Amd)
+}
+
+/// Карточка тарифа `tariff` (задача 35): «Ключ «Стандарт» на год», цена из
+/// ядра крупно и что даёт ключ, а под ними `below` — готовая разметка: на
+/// лендинге — ссылка на страницу «Купить». `id` — якорь заголовка.
+fn plan_card(lang: Lang, tariff: Tariff, id: &str, below: &str) -> String {
     format!(
         r#"      <section class="card plan" aria-labelledby="{id}" data-tilt>
         <h2 id="{id}">{title}</h2>
@@ -503,15 +554,16 @@ fn plan_card(lang: Lang, id: &str, below: &str) -> String {
         <p>{about}</p>
 {below}      </section>
 "#,
-        title = escape(&fill(t(lang, Key::BuyPlan), &[t(lang, Key::PlanStandard)])),
-        price = escape(&i18n::money(lang, PRICE)),
-        about = escape(t(lang, Key::BuyPlanText)),
+        title = escape(&fill(t(lang, Key::BuyPlan), &[tariff.name(lang)])),
+        price = escape(&i18n::money(lang, tariff.price())),
+        about = escape(&tariff.about(lang)),
     )
 }
 
 /// Страница «Купить» на языке `lang` (задача 35) — рядом со страницей языка,
-/// с её шапкой, оформлением и подвалом: карточка тарифа, шаги покупки — те,
-/// что в условиях лицензии (п. 2), — и реквизиты перевода. «Написать
+/// с её шапкой, оформлением и подвалом: карточки тарифов — «Стандарт» и «Pro»
+/// (задача 103) — и пробный период под ними, шаги покупки — те, что
+/// в условиях лицензии (п. 2), — и реквизиты перевода с суммой каждого тарифа. «Написать
 /// письмо» открывает почту покупателя с темой, строками, которые он
 /// дополнит, и словами согласия: страница сама ничего не отправляет.
 /// Реквизиты — как их выдал банк, а владелец счёта и банк — по-армянски
@@ -519,19 +571,30 @@ fn plan_card(lang: Lang, id: &str, below: &str) -> String {
 /// касанием (`copy`).
 fn buy_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -> String {
     let text = |key: Key| escape(t(lang, key));
-    let price = i18n::money(lang, PRICE);
-    let plan = t(lang, Key::PlanStandard);
+    let (standard, pro) = (Tariff::Standard, Tariff::Pro);
     let meta = format!(
         "    <meta name=\"description\" content=\"{}\" />\n",
-        escape(&fill(t(lang, Key::BuyDescription), &[plan, &price]))
+        escape(&fill(
+            t(lang, Key::BuyDescription),
+            &[
+                standard.name(lang),
+                &i18n::money(lang, standard.price()),
+                pro.name(lang),
+                &PRO_SEATS.to_string(),
+                &i18n::money(lang, pro.price()),
+            ]
+        ))
     );
     let mail = format!(
         "mailto:{EMAIL}?subject={}&body={}",
         mailto_part(t(lang, Key::BuyMailSubject)),
-        mailto_part(&fill(t(lang, Key::BuyMailBody), &[t(lang, Key::BuyAccept)]))
+        mailto_part(&fill(t(lang, Key::BuyMailBody), &[standard.name(lang), pro.name(lang), t(lang, Key::BuyAccept)]))
     );
     let write = linked(t(lang, Key::BuyStepWrite), &format!("<a href=\"mailto:{EMAIL}\">{EMAIL}</a>"));
-    let pay = escape(&fill(t(lang, Key::BuyStepPay), &[&price]));
+    let pay = text(Key::BuyStepPay);
+    let amount = |tariff: Tariff| {
+        escape(&fill(t(lang, Key::BuyAmountPlan), &[tariff.name(lang), &i18n::money(lang, tariff.price())]))
+    };
     let key = escape(&fill(t(lang, Key::BuyStepKey), &[t(lang, Key::NavProfile), t(lang, Key::LicenseTitle)]));
     let holder_note = escape(&fill(t(lang, Key::BuyHolderNote), &[SELLER_TIN]));
     format!(
@@ -539,7 +602,8 @@ fn buy_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -
 {top}    <main>
       <article class="legal buy">
         <h1>{title}</h1>
-{plan_card}        <h2>{how}</h2>
+{standard_card}{pro_card}        <p class="hint">{trial} {after_trial}</p>
+        <h2>{how}</h2>
         <ol class="steps">
           <li>
             <p>{write}</p>
@@ -556,7 +620,8 @@ fn buy_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -
               <dt>{account_label}</dt>
               <dd><span class="copy">{ACCOUNT}</span></dd>
               <dt>{amount_label}</dt>
-              <dd>{amount}</dd>
+              <dd>{standard_amount}</dd>
+              <dd>{pro_amount}</dd>
               <dt>{purpose_label}</dt>
               <dd>{purpose}</dd>
             </dl>
@@ -575,11 +640,10 @@ fn buy_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -
         top = top(lang, url(lang), buy_path),
         footer = footer(lang, app, checked),
         title = text(Key::BuyTitle),
-        plan_card = plan_card(
-            lang,
-            "plan",
-            &format!("        <p class=\"hint\">{} {}</p>\n", trial(lang), text(Key::WelcomeAfterTrial))
-        ),
+        standard_card = plan_card(lang, standard, "plan", ""),
+        pro_card = plan_card(lang, pro, "plan-pro", ""),
+        trial = trial(lang),
+        after_trial = text(Key::WelcomeAfterTrial),
         faq = faq(lang),
         how = text(Key::BuyHow),
         accept = text(Key::BuyAccept),
@@ -594,7 +658,8 @@ fn buy_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -
         holder = escape(HOLDER),
         account_label = text(Key::BuyAccount),
         amount_label = text(Key::BuyAmount),
-        amount = escape(&price),
+        standard_amount = amount(standard),
+        pro_amount = amount(pro),
         purpose_label = text(Key::BuyPurpose),
         purpose = text(Key::BuyPurposeValue),
         only = text(Key::BuyOnly),
@@ -637,7 +702,7 @@ fn faq(lang: Lang) -> String {
                 list(&i18n::LICENSE_ALWAYS)
             ),
         ),
-        (Key::BuyFaqOffice, paragraphs(&[format!("{} {}", text(Key::OfficeKeyEach), text(Key::OfficeTrialShared))])),
+        (Key::BuyFaqOffice, paragraphs(&[format!("{} {} {}", text(Key::OfficeKeyEach), office_pro(lang), text(Key::OfficeTrialShared))])),
         (Key::BuyFaqRenew, paragraphs(&[format!("{} {}", text(Key::BuyFaqRenewWhen), text(Key::LicenseRenewKeeps))])),
     ];
     let mut out = format!("        <h2 id=\"faq\">{}</h2>\n        <div class=\"faq\">\n", text(Key::BuyFaq));
@@ -649,6 +714,15 @@ fn faq(lang: Lang) -> String {
     }
     out.push_str("        </div>\n");
     out
+}
+
+/// «Или один ключ «Pro» на 10 ИП…» (задача 103) — после «ключ у каждого ИП
+/// свой» в ответе «У меня несколько ИП», экранирован.
+fn office_pro(lang: Lang) -> String {
+    escape(&fill(
+        t(lang, Key::OfficeKeyPro),
+        &[t(lang, Key::PlanPro), &PRO_SEATS.to_string(), t(lang, Key::OfficeTitle)],
+    ))
 }
 
 /// Шаблон с одним `{}`, на месте которого — готовая разметка `link`:
@@ -860,10 +934,13 @@ mod tests {
     const LANDING_JS: &str = include_str!("../../app/site/landing.js");
     /// Утверждённые юридические тексты (задача 32) и прежние редакции условий
     /// (задачи 93 и 99) — те, что берёт сборка.
-    const LEGAL: [(&str, &str); 12] = [
+    const LEGAL: [(&str, &str); 15] = [
         ("terms.hy.md", include_str!("../../../docs/legal/terms.hy.md")),
         ("terms.ru.md", include_str!("../../../docs/legal/terms.ru.md")),
         ("terms.en.md", include_str!("../../../docs/legal/terms.en.md")),
+        ("terms.2026-11-15.hy.md", include_str!("../../../docs/legal/terms.2026-11-15.hy.md")),
+        ("terms.2026-11-15.ru.md", include_str!("../../../docs/legal/terms.2026-11-15.ru.md")),
+        ("terms.2026-11-15.en.md", include_str!("../../../docs/legal/terms.2026-11-15.en.md")),
         ("terms.2026-11-13.hy.md", include_str!("../../../docs/legal/terms.2026-11-13.hy.md")),
         ("terms.2026-11-13.ru.md", include_str!("../../../docs/legal/terms.2026-11-13.ru.md")),
         ("terms.2026-11-13.en.md", include_str!("../../../docs/legal/terms.2026-11-13.en.md")),
@@ -989,7 +1066,7 @@ mod tests {
                     t(lang, Key::LicenseMoveKey),
                     &[t(lang, Key::NavProfile), t(lang, Key::LicenseTitle), t(lang, Key::LicenseCopy)],
                 )),
-                format!("{} {}", text(Key::OfficeKeyEach), text(Key::OfficeTrialShared)),
+                format!("{} {} {}", text(Key::OfficeKeyEach), office_pro(lang), text(Key::OfficeTrialShared)),
                 format!("{} {}", text(Key::BuyFaqRenewWhen), text(Key::LicenseRenewKeeps)),
             ];
             for question in [Key::BuyFaqDevices, Key::BuyFaqMove, Key::BuyFaqWithout, Key::BuyFaqOffice, Key::BuyFaqRenew] {
@@ -1236,10 +1313,11 @@ mod tests {
     }
 
     /// Страница «Купить» (задача 35) — на своём языке, рядом со страницей
-    /// языка: тариф и цена, шаги условий (п. 2) со словами согласия,
-    /// письмом и ссылкой на условия своего языка, реквизиты перевода из
-    /// ядра — банк и владелец счёта по-армянски, как их выдал банк, счёт,
-    /// сумма, ՀՎՀՀ продавца — и кому продаётся.
+    /// языка: тарифы «Стандарт» и «Pro» (задача 103) с ценами и местами из
+    /// ядра, шаги условий (п. 2) со словами согласия, письмом и ссылкой на
+    /// условия своего языка, реквизиты перевода из ядра — банк и владелец
+    /// счёта по-армянски, как их выдал банк, счёт, сумма каждого тарифа,
+    /// ՀՎՀՀ продавца — и кому продаётся.
     #[test]
     fn the_buy_page_names_the_price_and_the_account() {
         let mut wrong = Vec::new();
@@ -1258,16 +1336,44 @@ mod tests {
                 format!("<span class=\"copy\" lang=\"hy\">{}</span>", escape(BANK)),
                 format!("<span class=\"copy\" lang=\"hy\">{}</span>", escape(HOLDER)),
                 format!("<span class=\"copy\">{ACCOUNT}</span>"),
-                format!("<dd>{}</dd>", escape(&i18n::money(lang, PRICE))),
+                format!(
+                    "<dd>{}</dd>",
+                    escape(&fill(t(lang, Key::BuyAmountPlan), &[t(lang, Key::PlanStandard), &i18n::money(lang, PRICE)]))
+                ),
+                format!(
+                    "<dd>{}</dd>",
+                    escape(&fill(t(lang, Key::BuyAmountPlan), &[t(lang, Key::PlanPro), &i18n::money(lang, PRO_PRICE)]))
+                ),
+                format!("<p class=\"price\">{}</p>", escape(&i18n::money(lang, PRICE))),
+                format!("<p class=\"price\">{}</p>", escape(&i18n::money(lang, PRO_PRICE))),
+                escape(&fill(t(lang, Key::BuyPlan), &[t(lang, Key::PlanPro)])),
+                escape(&fill(
+                    t(lang, Key::BuyPlanProText),
+                    &[
+                        &PRO_SEATS.to_string(),
+                        &i18n::money(lang, per_ip()),
+                        t(lang, Key::OfficeTitle),
+                        t(lang, Key::PlanStandard),
+                    ],
+                )),
                 escape(&fill(t(lang, Key::BuyHolderNote), &[SELLER_TIN])),
-                escape(&fill(t(lang, Key::BuyStepPay), &[&i18n::money(lang, PRICE)])),
+                escape(t(lang, Key::BuyStepPay)),
                 escape(t(lang, Key::BuyPurposeValue)),
                 escape(t(lang, Key::BuyOnly)),
                 escape(&fill(t(lang, Key::BuyStepKey), &[t(lang, Key::NavProfile), t(lang, Key::LicenseTitle)])),
                 trial(lang),
                 format!(
                     "<meta name=\"description\" content=\"{}\" />",
-                    escape(&fill(t(lang, Key::BuyDescription), &[t(lang, Key::PlanStandard), &i18n::money(lang, PRICE)]))
+                    escape(&fill(
+                        t(lang, Key::BuyDescription),
+                        &[
+                            t(lang, Key::PlanStandard),
+                            &i18n::money(lang, PRICE),
+                            t(lang, Key::PlanPro),
+                            &PRO_SEATS.to_string(),
+                            &i18n::money(lang, PRO_PRICE),
+                        ]
+                    ))
                 ),
             ];
             for other in Lang::ALL {
@@ -1291,7 +1397,10 @@ mod tests {
             let mail = format!(
                 "href=\"mailto:{EMAIL}?subject={}&amp;body={}\"",
                 mailto_part(t(lang, Key::BuyMailSubject)),
-                mailto_part(&fill(t(lang, Key::BuyMailBody), &[t(lang, Key::BuyAccept)]))
+                mailto_part(&fill(
+                    t(lang, Key::BuyMailBody),
+                    &[t(lang, Key::PlanStandard), t(lang, Key::PlanPro), t(lang, Key::BuyAccept)]
+                ))
             );
             if !html.contains(&mail) {
                 wrong.push(format!("{lang:?}: нет письма {mail}"));
@@ -1535,8 +1644,8 @@ mod tests {
         sources(&edition);
         fs::create_dir_all(edition.0.join("stage")).expect("папка сборки");
         let (_, terms) = LEGAL.iter().find(|(name, _)| *name == "terms.en.md").expect("текст есть");
-        assert!(terms.contains("November 15, 2026"), "в условиях — та редакция, что ждёт тест");
-        edition.put("legal/terms.en.md", &terms.replace("November 15, 2026", "December 1, 2026"));
+        assert!(terms.contains("November 17, 2026"), "в условиях — та редакция, что ждёт тест");
+        edition.put("legal/terms.en.md", &terms.replace("November 17, 2026", "December 1, 2026"));
         let error = build(&edition).expect_err("слов согласия нет в условиях");
         assert!(error.contains("terms.en.md") && error.contains("Key::BuyAccept"), "{error}");
         assert!(names(&edition.0.join("stage")).is_empty(), "в сайт что-то легло");
