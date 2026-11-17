@@ -263,5 +263,11 @@ fn early_settlement_is_the_earlier_quarter() {
     if let Some(quarter) = early(&document, Some(&it), day(2026, 9, 30), SettlementKind::Receipt) {
         wrong.push(format!("чек ККМ: {quarter:?}, а не None"));
     }
+    // Аннулированный документ дохода не даёт — и слов о квартале нет (ревью
+    // задачи 77).
+    let annulled = document.annul(day(2026, 10, 20), at(5_000)).expect("выпущен").expect("аннулирован");
+    if let Some(quarter) = early(&annulled, Some(&it), day(2026, 9, 30), SettlementKind::System) {
+        wrong.push(format!("аннулированный: {quarter:?}, а не None"));
+    }
     assert!(wrong.is_empty(), "расчётный документ раньше квартала услуги: {wrong:#?}");
 }
