@@ -15,7 +15,9 @@
 // Что проверяется, по порядку:
 // 0. Сервер пробного периода (задача 106): функция сайта `_worker.js`
 //    отвечает первым днём на ՀՎՀՀ тем видом, что читает ядро, хранит отпечаток,
-//    а не номер, и отказывает не тем запросам — в Node, без браузера.
+//    а не номер, и отказывает не тем запросам — в Node, без браузера. Она же
+//    отдаёт wasm программы его копией уровнем brotli 11 (задача 109), а когда
+//    нельзя — самим wasm.
 // 1. Часть не загрузилась — окно говорит словами и даёт «Отмену», а снятая
 //    блокировка открывает экран (CLAUDE.md, Правило 2, «Формы и действия по
 //    нажатию — частями wasm»). Лендинг (задача 34): страница каждого языка
@@ -63,9 +65,11 @@
 
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import zlib from "node:zlib";
 import { Browser, Checks, DEVICES, sleep } from "./cdp.mjs";
 import { REPO, newVersion, own } from "./serve.mjs";
 import { samples, t } from "./strings.mjs";
@@ -1262,20 +1266,133 @@ async function trialServer() {
   const wrong = refusals.filter(([, got, code]) => got.status !== code)
     .map(([name, got, code]) => `${name}: ${got.status}, а ждали ${code}`);
   checks.check("сервер пробного периода: отказы", wrong.length === 0, wrong.join("; "));
-  // Функцию зовут только адреса `/api/*`: файлы сайта — мимо неё, бесплатно
-  // и с заголовками `_headers`. А дошёл до неё другой адрес — она отдаёт его
-  // файлом (`env.ASSETS`), а не своим 404: страница сайта не сломается.
-  checks.check("сервер пробного периода: функцию зовут только адреса /api/*",
-    fs.readFileSync(path.join(DIST, "_routes.json"), "utf8").trim() === `{"version":1,"include":["/api/*"],"exclude":[]}`);
+  // Функцию зовут только адреса `/api/*` и wasm программы (задача 109):
+  // остальные файлы сайта — мимо неё, бесплатно и с заголовками `_headers`.
+  // А дошёл до неё другой адрес — она отдаёт его файлом (`env.ASSETS`), а не
+  // своим 404: страница сайта не сломается.
+  checks.check("сервер пробного периода: функцию зовут только адреса /api/* и /app/*.wasm",
+    fs.readFileSync(path.join(DIST, "_routes.json"), "utf8").trim()
+      === `{"version":1,"include":["/api/*","/app/*.wasm"],"exclude":[]}`);
   const assets = { fetch: async (request) => new Response(`файл ${new URL(request.url).pathname}`) };
   const page = await worker.fetch(new Request(`${origin}/app/`), { ...env, ASSETS: assets });
   checks.check("сервер пробного периода: не /api/ — файлом сайта", (await page.text()) === "файл /app/");
+}
+
+// Заранее сжатый wasm (задача 109) — та же функция сайта в Node, с хранилищем
+// файлов-подменой поверх `dist/`: на адрес wasm она отдаёт тело его копии
+// уровнем 11 как есть — `Content-Encoding: br` и `encodeBody: "manual"`,
+// иначе рантайм Cloudflare сжал бы его второй раз, — с заголовками копии,
+// а без brotli, диапазоном, без копии и при сбое хранилища — сам wasm. Что
+// Cloudflare доносит копию до браузера байт в байт, проверяет выкладка
+// (`tools/deploy/check.sh`), а здесь — что копия есть у каждого wasm,
+// разжимается в него и сжата уровнем 11, а не уровнем хостинга.
+async function precompressedWasm() {
+  const worker = (await import(pathToFileURL(path.join(WORK, "trial-worker.mjs")).href)).default;
+  const app = path.join(DIST, "app");
+  const wasm = fs.readdirSync(app).filter((n) => n.endsWith(".wasm")).sort();
+  const missing = wasm.filter((n) => !fs.existsSync(path.join(app, `${n}.br`)));
+  checks.check("заранее сжатый wasm: у каждого wasm программы — копия .br", wasm.length > 0 && missing.length === 0,
+    missing.join(", "));
+  const wrong = wasm.filter((n) => !missing.includes(n)
+    && !zlib.brotliDecompressSync(fs.readFileSync(path.join(app, `${n}.br`))).equals(fs.readFileSync(path.join(app, n))));
+  checks.check("заранее сжатый wasm: копия разжимается в тот же wasm", wrong.length === 0, wrong.join(", "));
+  const main = wasm.find((n) => /^kvartik-app-\w+_bg\.wasm$/.test(n));
+  if (!main || missing.includes(main)) return;
+  const raw = fs.readFileSync(path.join(app, main));
+  const packed = fs.readFileSync(path.join(app, `${main}.br`));
+  const level = (q) => zlib.brotliCompressSync(raw, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: q } }).length;
+  // Кодер сборки — не `zlib`, байты у него свои: запас — 2 %.
+  const [eleven, hosting] = [level(11), level(4)];
+  checks.check("заранее сжатый wasm: главный — уровнем 11, а не уровнем хостинга",
+    packed.length <= eleven * 1.02, `${packed.length} Б; zlib уровнем 11 — ${eleven}, уровнем хостинга — ${hosting}`);
+  const rules = fs.readFileSync(path.join(DIST, "_headers"), "utf8").replaceAll("\r", "");
+  checks.check("заранее сжатый wasm: у копии в _headers — год без сверки, как у wasm",
+    /^\/app\/\*\.wasm\.br\n {2}Cache-Control: public, max-age=31536000, immutable$/m.test(rules));
+  // Хранилище-подмена — как Pages: файл `dist/`, ETag по содержимому и 304 на
+  // свой ETag, заголовки — от `_headers`.
+  const state = { broken: false, encoded: false, asked: [] };
+  const assets = {
+    fetch: async (request) => {
+      const file = new URL(request.url).pathname;
+      state.asked.push(file);
+      if (state.broken && file.endsWith(".br")) throw new Error("хранилище не ответило");
+      const full = path.join(DIST, file);
+      if (!fs.existsSync(full)) return new Response("нет", { status: 404 });
+      const bytes = fs.readFileSync(full);
+      const headers = {
+        ETag: `"${crypto.createHash("sha1").update(bytes).digest("hex")}"`,
+        "Content-Type": file.endsWith(".br") ? "application/octet-stream" : "application/wasm",
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "X-Content-Type-Options": "nosniff",
+        ...(state.encoded && file.endsWith(".br") ? { "Content-Encoding": "gzip" } : {}),
+      };
+      if (request.headers.get("If-None-Match") === headers.ETag) return new Response(null, { status: 304, headers });
+      return new Response(request.method === "HEAD" ? null : bytes, { headers });
+    },
+  };
+  const origin = "https://kvartik.example";
+  const ask = async (file, headers = {}, method = "GET") => {
+    state.asked.length = 0;
+    const response = await worker.fetch(new Request(`${origin}/app/${file}`, { method, headers }), { ASSETS: assets });
+    const body = method === "HEAD" ? null : Buffer.from(await response.arrayBuffer());
+    return { response, body, init: response.init ?? {}, asked: [...state.asked] };
+  };
+  // `encodeBody` — свойство ответа Workers, Node его не знает: ответ функции
+  // запоминает, с чем его создали.
+  const Native = globalThis.Response;
+  globalThis.Response = class extends Native {
+    constructor(body, init) {
+      super(body, init);
+      this.init = init;
+    }
+  };
+  try {
+    const browser = { "Accept-Encoding": "gzip, deflate, br, zstd" };
+    const first = await ask(main, browser);
+    const h = first.response.headers;
+    checks.check("заранее сжатый wasm: на адрес wasm — копия как есть, br, тип wasm, заголовки копии",
+      first.response.status === 200 && first.body.equals(packed) && h.get("Content-Encoding") === "br"
+        && first.init.encodeBody === "manual" && h.get("Content-Type") === "application/wasm"
+        && h.get("Vary") === "Accept-Encoding" && h.get("Cache-Control") === "public, max-age=31536000, immutable"
+        && h.get("X-Content-Type-Options") === "nosniff" && Boolean(h.get("ETag")),
+      `${first.response.status} ${first.body.length} Б, ${JSON.stringify(Object.fromEntries(h))}, ${JSON.stringify(first.init.encodeBody)}`);
+    const again = await ask(main, { ...browser, "If-None-Match": h.get("ETag") });
+    checks.check("заранее сжатый wasm: сверка по ETag — 304, тело не качается второй раз",
+      again.response.status === 304 && again.body.length === 0 && !again.response.headers.has("Content-Encoding"),
+      `${again.response.status} ${again.body.length} Б`);
+    const head = await ask(main, browser, "HEAD");
+    checks.check("заранее сжатый wasm: HEAD — заголовки копии без тела",
+      head.response.status === 200 && head.response.headers.get("Content-Encoding") === "br"
+        && head.asked.join() === `/app/${main}.br`, `${head.response.status} ${head.asked.join()}`);
+    const asIs = [
+      ["без brotli", await ask(main, { "Accept-Encoding": "gzip, deflate" })],
+      ["brotli с q=0", await ask(main, { "Accept-Encoding": "br;q=0, gzip" })],
+      ["диапазон байтов", await ask(main, { ...browser, Range: "bytes=0-99" })],
+      ["POST", await ask(main, browser, "POST")],
+    ];
+    state.broken = true;
+    asIs.push(["хранилище не ответило о копии", await ask(main, browser)]);
+    state.broken = false;
+    state.encoded = true;
+    asIs.push(["копию сжал хостинг", await ask(main, browser)]);
+    state.encoded = false;
+    const plain = asIs.filter(([, got]) => !(got.response.status === 200 && got.body.equals(raw)
+      && !got.response.headers.has("Content-Encoding") && got.asked.at(-1) === `/app/${main}`))
+      .map(([name, got]) => `${name}: ${got.response.status} ${got.body.length} Б, ${got.asked.join(" ")}`);
+    checks.check("заранее сжатый wasm: когда копия не годится — сам wasm файлом", plain.length === 0, plain.join("; "));
+    const nothing = await ask("kvartik-nothing-0000000000000000_bg.wasm", browser);
+    checks.check("заранее сжатый wasm: нет ни копии, ни wasm — ответ хранилища (404)", nothing.response.status === 404,
+      `${nothing.response.status}`);
+  } finally {
+    globalThis.Response = Native;
+  }
 }
 
 async function main() {
   const parts = fs.readdirSync(path.join(DIST, "app")).filter((n) => /^split_\w+-\w+\.wasm$/.test(n));
   checks.check("в сборке есть части wasm", parts.length > 0, parts.join(", "));
   await trialServer();
+  await precompressedWasm();
   // Программа выкладки пишет из ответа ЦБ тот самый файл, который читают
   // тест ядра и программа: разойдись они — курсы на сайте окно отвергло бы.
   checks.check("курсы ЦБ: rates.mjs пишет из образца ответа ЦБ файл, который читает тест ядра",

@@ -304,10 +304,15 @@ expected_type() {
 
 # Каждый файл сборки — и корня, и программы. С хэшем в имени (Trunk и хук
 # сборки пишут его шестнадцатью знаками перед расширением) — `immutable`;
-# без хэша — без долгого кэша. Тексты и wasm — сжатыми. Страницы HTML —
-# выше: на `/404.html` Pages отвечает переадресацией на `/404`. Скрытые
-# файлы (`.trunk-lock` Trunk) в выкладку не идут: их не берёт артефакт CI.
+# без хэша — без долгого кэша. Тексты и wasm — сжатыми, а wasm программы —
+# байт в байт своей копией уровнем brotli 11 (задача 109): её отдаёт функция
+# сайта, а сжатие хостинга — около уровня 4 и на 49 КБ больше у главного
+# wasm. Сами копии `*.wasm.br` отдельно не перебираются: их тело и есть этот
+# ответ. Страницы HTML — выше: на `/404.html` Pages отвечает переадресацией
+# на `/404`. Скрытые файлы (`.trunk-lock` Trunk) в выкладку не идут: их не
+# берёт артефакт CI.
 checked=0
+packed=0
 while IFS= read -r path; do
   checked=$((checked + 1))
   code="$(fetch "$path" || true)"
@@ -339,6 +344,12 @@ while IFS= read -r path; do
       [ -n "$encoding" ] || fail "$path: не сжат"
       ;;
   esac
+  if [[ "$path" == "$app/"*.wasm ]] && [ -f "$dist/$path.br" ]; then
+    packed=$((packed + 1))
+    if [ "$(header content-encoding "$work/head")" != br ] || ! cmp -s "$work/body" "$dist/$path.br"; then
+      fail "$path: не копия уровнем 11 — по проводу $(wc -c < "$work/body") Б, а копия — $(wc -c < "$dist/$path.br") Б"
+    fi
+  fi
   # Тело обоих `sw.js` — этой сборки: по `sw.js` программы браузер
   # узнаёт новую версию, а по `sw.js` корня — что прежний service worker
   # корня пора снять. Тело файла курсов ЦБ (задача 43) — этой выкладки: его
@@ -352,7 +363,7 @@ while IFS= read -r path; do
       settling || { fail "$path: не этой сборки или не скачан"; break; }
     done
   fi
-done < <(cd "$dist" && find . -type f ! -name '_*' ! -name '.*' ! -name '*.html' | sed 's|^\./||' | sort)
+done < <(cd "$dist" && find . -type f ! -name '_*' ! -name '.*' ! -name '*.html' ! -name '*.wasm.br' | sed 's|^\./||' | sort)
 
 # Проверка, не проверившая ни одного файла, — тоже провал.
 [ "$checked" -gt 0 ] || fail "$dist: ни одного файла сборки"
@@ -360,4 +371,4 @@ if [ ${#failures[@]} -gt 0 ]; then
   printf '%s\n' "Выкладка $site — провалов: ${#failures[@]}" "${failures[@]}" >&2
   exit 1
 fi
-echo "Выкладка $site: страница программы, переадресации, CSP, сервер пробного периода и $checked файлов — как задумано"
+echo "Выкладка $site: страница программы, переадресации, CSP, сервер пробного периода и $checked файлов, из них wasm копией уровнем 11 — $packed, — как задумано"

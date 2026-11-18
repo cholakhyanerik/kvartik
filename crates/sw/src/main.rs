@@ -53,6 +53,7 @@ use kvartik_core::tax::calendar;
 mod landing;
 mod legal;
 mod licenses;
+mod precompress;
 mod wasm;
 
 /// Строка шаблона, вместо которой встаёт хэш сборки.
@@ -139,8 +140,11 @@ fn run() -> Result<String, String> {
             // и калькулятора лендинга (задача 51).
             crates.extend(built.crates);
             let crates = licenses::write(&app_dir, &crates)?;
+            // Заранее сжатый wasm (задача 109) — после всего, что пишет wasm:
+            // копия должна быть того же файла, что ляжет на сайт.
+            let packed = if wasm::release()? { precompress::write(&app_dir)? } else { 0 };
             format!(
-                ", wasm {} с частями: {}, крейтов в {LICENSES}: {crates}",
+                ", wasm {} с частями: {}, сжато заранее: {packed}, крейтов в {LICENSES}: {crates}",
                 built.hash, built.parts
             )
         }
@@ -334,13 +338,15 @@ fn digest<'a>(entries: impl IntoIterator<Item = (&'a str, &'a [u8])>) -> String 
 /// pages-shared/asset-server, 2026-10-15), а ответ с переадресацией
 /// установка не принимает. Страница программы лежит в кэше под адресом
 /// папки — шапка шаблона. Файлы корня сайта — не программы: их service
-/// worker не трогает (задача 65).
+/// worker не трогает (задача 65). И сжатые копии wasm (`*.wasm.br`, задача
+/// 109): это тело ответа функции сайта на адрес самого wasm, а не файл
+/// программы, и в кэше они лежали бы вторым экземпляром каждого wasm.
 fn precached<'a>(files: &'a [File], app: &str) -> impl Iterator<Item = &'a str> {
     let prefix = format!("{app}/");
     files
         .iter()
         .filter_map(move |file| file.path.strip_prefix(prefix.as_str()))
-        .filter(|path| !path.ends_with(".html") && !hosting(path))
+        .filter(|path| !path.ends_with(".html") && !path.ends_with(precompress::SUFFIX) && !hosting(path))
 }
 
 /// Настройка хостинга: имя файла начинается с `_`.
@@ -611,8 +617,9 @@ mod tests {
     }
 
     /// Настоящий шаблон: все три строки заменены, страница в список не
-    /// попала (она в кэше под адресом папки), в `LINKED` — ровно то, на что
-    /// она ссылается, и следа от «dev» не осталось.
+    /// попала (она в кэше под адресом папки), сжатая копия wasm — тоже
+    /// (задача 109), в `LINKED` — ровно то, на что она ссылается, и следа от
+    /// «dev» не осталось.
     #[test]
     fn renders_the_real_template() {
         let files = [
@@ -624,6 +631,7 @@ mod tests {
             file("app/fonts/noto-sans-armenian-400.ttf", b"ttf"),
             file("app/kvartik-app-1a2b.js", b"js"),
             file("app/kvartik-app-1a2b_bg.wasm", b"wasm"),
+            file("app/kvartik-app-1a2b_bg.wasm.br", b"br"),
             file("sw.js", b"root sw"),
         ];
         let sw = render(TEMPLATE, "0123456789abcdef", &files, "app").expect("шаблон узнан");

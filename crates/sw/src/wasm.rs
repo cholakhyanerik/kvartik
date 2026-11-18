@@ -102,7 +102,7 @@ pub struct Built {
 }
 
 /// Выпускная ли сборка: `trunk build --release` или отладочная.
-fn release() -> Result<bool, String> {
+pub fn release() -> Result<bool, String> {
     match env::var("TRUNK_PROFILE").as_deref() {
         Ok("release") => Ok(true),
         Ok("debug") => Ok(false),

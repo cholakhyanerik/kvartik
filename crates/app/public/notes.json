@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.154",
+      "date": "2026-11-18",
+      "hy": [
+        "Առաջին բացման ժամանակ ծրագիրն ավելի արագ է բեռնվում՝ դանդաղ բջջային ինտերնետում մոտ քառորդ վայրկյանով. կայքն այժմ ծրագրի կոդն ուղարկում է ավելի խիտ սեղմված։"
+      ],
+      "ru": [
+        "При первом заходе программа открывается быстрее — на медленном мобильном интернете примерно на четверть секунды: сайт теперь отдаёт её код сжатым плотнее."
+      ],
+      "en": [
+        "The app opens faster on the first visit, by about a quarter of a second on a slow mobile connection: the site now sends its code more tightly compressed."
+      ]
+    },
+    {
       "version": "0.0.153",
       "date": "2026-11-18",
       "hy": [
@@ -260,19 +273,6 @@
       ],
       "en": [
         "Like Pro keys, an entrepreneur's keys are now capped at a hundred: the app won't restore a backup with thousands of fake keys, as checking their signatures would freeze the page."
-      ]
-    },
-    {
-      "version": "0.0.134",
-      "date": "2026-11-16",
-      "hy": [
-        "Մի քանի ԱՁ վարողների համար՝ «Pro» բանալի՝ տեղերի թվով. այն մուտքագրվում է «Լիցենզիա» էկրանին, պահվում է «ԱՁ-ները ծրագրում» ցանկում և բացում է ցանկի առաջին ԱՁ-ները՝ ըստ ավելացման հերթականության։"
-      ],
-      "ru": [
-        "Для тех, кто ведёт несколько ИП, — ключ «Pro» с числом мест: он вводится на экране «Лицензия», лежит в списке «ИП в программе» и открывает первых ИП списка в том порядке, в каком их добавили."
-      ],
-      "en": [
-        "For those who keep several entrepreneurs: a Pro key with a number of seats. Enter it on the License screen; it sits in the “Entrepreneurs in the app” list and opens the first entrepreneurs on the list in the order they were added."
       ]
     }
   ]

@@ -13,7 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { Browser, Checks, sleep } from "../../../tools/browser/cdp.mjs";
-import { REPO, build, newVersion, own, start, wrangler } from "../../../tools/browser/serve.mjs";
+import { HOSTING_QUALITY, REPO, build, newVersion, own, start, wrangler } from "../../../tools/browser/serve.mjs";
 import { samples, t } from "../../../tools/browser/strings.mjs";
 
 const { values: opt, positionals } = parseArgs({
@@ -34,6 +34,7 @@ const { values: opt, positionals } = parseArgs({
     path: { type: "string", default: "/app/" },
     repeat: { type: "boolean", default: false },
     sw: { type: "boolean", default: false },
+    quality: { type: "string" },
     pdf: { type: "string", multiple: true },
   },
 });
@@ -296,9 +297,13 @@ async function install() {
 /// worker. `--sw` — ещё и когда страницей стал править service worker:
 /// он поставил весь сайт, и части приходят из его кэша (задача 80; каждый
 /// лишний файл — круг сети по шести соединениям, CLAUDE.md, Правило 6).
-/// Сравнивать можно только с замером тем же способом в тот же день.
+/// Сжатие — уровнем хостинга (`HOSTING_QUALITY`, задача 109); `--quality` —
+/// другим, например 11 — сравнить с замерами до 0.0.153 или прикинуть, что
+/// дали бы заранее сжатые файлы. Сравнивать можно только с замером тем же
+/// способом в тот же день.
 async function measure() {
-  const servers = DISTS.map((d, i) => own(d, 8801 + i));
+  const quality = opt.quality ? Number(opt.quality) : HOSTING_QUALITY;
+  const servers = DISTS.map((d, i) => own(d, 8801 + i, { quality }));
   const browser = await Browser.launch({ work: WORK, name: "measure", port: 9334 });
   // Рабочий экран — слова о хранении (`READY`). Поле файла копии — прежний
   // признак (до задачи 91): у сборок до 0.0.142 оно встаёт тогда же, и замер
@@ -359,7 +364,7 @@ async function measure() {
     console.log(`${r.name} ${opt.path}: первый текст ${sec(median(ok.map((x) => x.fcp)))} с, рабочий экран ${sec(median(ok.map((x) => x.working)))} с${old}, `
       + `шрифты ${sec(median(ok.map((x) => x.fonts)))} с${opt.sw ? `, под service worker ${sec(median(ok.map((x) => x.sw)))} с` : ""}`
       + `${opt.repeat ? `, повторный заход ${median(ok.map((x) => x.repeat)).toFixed(0)} мс` : ""} `
-      + `(медиана ${ok.length}; Chrome ${(await chromeVersion())})`);
+      + `(медиана ${ok.length}; brotli ${quality}; Chrome ${(await chromeVersion())})`);
   }
 }
 

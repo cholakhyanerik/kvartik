@@ -58,6 +58,14 @@
 /app/*.wasm
   Cache-Control: public, max-age=31536000, immutable
 
+# Копии wasm уровнем brotli 11 (задача 109): их тело функция сайта отдаёт на
+# адрес самого wasm (`_worker.js`) с заголовками, которые Pages поставил
+# копии, — правила `_headers` к ответу функции не применяются. Имя у копии —
+# с хэшем сборки, как у wasm, и `/app/*.wasm` к ней не подходит: оно кончается
+# на `.wasm`.
+/app/*.wasm.br
+  Cache-Control: public, max-age=31536000, immutable
+
 /app/kvartik-*.js
   Cache-Control: public, max-age=31536000, immutable
 

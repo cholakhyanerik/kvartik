@@ -12,8 +12,8 @@
 //   первом запросе нельзя — сжатие шрифтов держало шесть соединений HTTP/1.1,
 //   и части wasm выглядели на 650 мс медленнее (задача 58, 2026-10-13).
 //   Заголовков `_headers` он не ставит. Качество сжатия — параметр: замеру
-//   нужны байты, близкие к хостингу (11, весь сайт — 3,5 с на машине
-//   автора), а проверке CI — только сжатие, и 5 сжимает его за доли секунды.
+//   нужны байты хостинга (`HOSTING_QUALITY`, по умолчанию), а проверке CI —
+//   только сжатие, и 5 сжимает его за доли секунды.
 //
 // И сайт, который им отдать новой версией, — `newVersion` (задача 67):
 // проверке собранного сайта и сценарию `update` skill browser-run.
@@ -47,11 +47,24 @@ const TYPES = {
   ".xml": "application/xml",
 };
 
+/// Уровень brotli, которым сжимает хостинг (задача 109). Каждый файл,
+/// который отдал kvartik.com 2026-11-18 (узел EVN, 0.0.153), по проводу
+/// ближе всего к уровню 4: и wasm мимо кэша CDN (`cf-cache-status:
+/// DYNAMIC`), и CSS и JS из него (`HIT`). Главный wasm — 281 260 Б,
+/// уровнем 4 — 279 108, уровнем 11 — 232 277; всё, что ставит service
+/// worker, — около четверти сверх уровня 11. Выбрать уровень у Cloudflare
+/// нельзя, а заранее сжатых файлов Pages не отдаёт (docs Cloudflare,
+/// «Compression» и «Compression Rules», 2026-11-18). До задачи 109 замер
+/// сжимал уровнем 11 и занижал первый заход телефона: ~49 КБ главного wasm,
+/// рабочий экран 2,84 с вместо 3,12. С неё wasm программы сайт отдаёт копией
+/// уровнем 11, которую кладёт сборка, — `own` тоже, а остальное — этим.
+export const HOSTING_QUALITY = 4;
+
 /// Свой сервер. Возвращает `{ port, stop() }`. `extra` — файлы, которых нет
 /// в сборке, адрес → байты, по умолчанию — файлы выкладки (`DEPLOYED`):
 /// свой файл `dist/` важнее — копия сайта может нести другой. `dist/` он не
 /// трогает.
-export function own(dist, port, { quality = 11, extra = DEPLOYED } = {}) {
+export function own(dist, port, { quality = HOSTING_QUALITY, extra = DEPLOYED } = {}) {
   const files = new Map();
   const walk = (dir, prefix) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -67,6 +80,12 @@ export function own(dist, port, { quality = 11, extra = DEPLOYED } = {}) {
     }
   };
   walk(dist, "");
+  // Wasm программы сайт отдаёт его копией уровнем 11 (`*.wasm.br`, задача
+  // 109: функция сайта `_worker.js`), а не сжатием хостинга, — так же и здесь.
+  for (const [url, file] of files) {
+    const copy = files.get(`${url}.br`);
+    if (url.endsWith(".wasm") && copy) file.br = copy.raw;
+  }
   for (const [url, body] of Object.entries(extra)) {
     if (files.has(url)) continue;
     const raw = Buffer.from(body);
