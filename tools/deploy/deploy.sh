@@ -20,16 +20,20 @@ if [ $# -ne 3 ]; then
   exit 2
 fi
 branch="$1"
-dist="$2"
+dist="$(cd "$2" && pwd)"
 commit="$3"
 out="$(mktemp)"
 trap 'rm -f "$out"' EXIT
 
-# Настройки проекта — базы D1 функции сайта (задача 106) — из файла рядом:
-# wrangler ищет его в текущей папке, а CI зовёт этот скрипт из корня.
+# Настройки проекта — базы D1 функции сайта (задача 106) — из файла рядом,
+# `wrangler.toml`. `pages deploy` берёт его только из папки запуска и выше
+# по дереву, а `--config` не принимает вовсе («Pages does not support custom
+# paths», по исходникам wrangler 4.149.0; выкладка 0.0.152 в CI, 2026-11-18).
+# Не нашёл файла — шлёт выкладку без привязок, и молча (Правило 6). Поэтому
+# wrangler идёт из этой папки, а папка сборки — полным путём.
+cd "$(dirname "$0")"
 WRANGLER_OUTPUT_FILE_PATH="$out" WRANGLER_SEND_METRICS=false WRANGLER_SEND_ERROR_REPORTS=false \
-  "$(dirname "$0")/node_modules/.bin/wrangler" pages deploy "$dist" \
-  --config="$(dirname "$0")/wrangler.toml" \
+  ./node_modules/.bin/wrangler pages deploy "$dist" \
   --project-name="$PAGES_PROJECT" --branch="$branch" \
   --commit-hash="$commit" --commit-dirty=true >&2
 url="$(jq -r 'select(.type == "pages-deploy-detailed") | .url' "$out")"
