@@ -18,7 +18,13 @@
 //   `headless.rs`): машина CI одноразовая, а открывается только свой сайт;
 // - свои флаги Chrome — переменная CHROME_ARGS. В CI видеокарты нет, и
 //   рисует Chrome там иначе, чем на машине автора: проверку, зелёную здесь
-//   и красную там, повторяет `CHROME_ARGS=--disable-gpu` (2026-11-08).
+//   и красную там, повторяет `CHROME_ARGS=--disable-gpu` (2026-11-08);
+// - папка профиля на Windows — не длиннее `PROFILE_MAX` знаков: путь
+//   длиннее MAX_PATH Chrome не пишет, а запись в кэш service worker
+//   отвечает на это не словами о пути, а `InvalidAccessError: Entry already
+//   exists` (задача 108). Такой прогон красный во всём, что держится на
+//   service worker, и выглядит дефектом программы — поэтому `launch`
+//   отвергает его сразу.
 
 import { spawn, execSync } from "node:child_process";
 import fs from "node:fs";
@@ -33,6 +39,20 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /// ожидание проверок — опрос `waitFor` по 60 с, но он — много коротких
 /// команд; одна команда дольше минуты — значит, ответа не будет.
 const SEND_MS = 120_000;
+
+/// Самая длинная папка профиля Chrome на Windows. Путь файла там — не
+/// длиннее 259 знаков (MAX_PATH без завершающего нуля: длинных путей Windows
+/// Chrome не включает), а самый длинный путь, который Chrome пишет под
+/// профилем в наших прогонах, — индекс кэша service worker,
+/// `\Default\Service Worker\CacheStorage\<40 знаков>\<uuid>\index-dir\the-real-index`,
+/// 139 знаков от папки профиля. Длиннее — Chrome молча его не пишет; записи
+/// кэша рядом — 133, и за ними уже отказ `cache.put`. Вживую (Chrome
+/// 158.0.8127.37, 2026-11-18): с профилем в 126 знаков запись проходит,
+/// в 127 — «Entry already exists», а полный `check.mjs` с папкой `--work`
+/// в 115 знаков — красный, как в прошлой сессии, где папка лежала
+/// в черновиках сессии; с `C:/tmp/k108/…` — 279 из 279. Версия Chrome тут
+/// ни при чём.
+const PROFILE_MAX = 259 - 139;
 
 /// Эмуляции окна: телефон и компьютер (Правило 2: 360 и 1280).
 export const DEVICES = {
@@ -62,6 +82,11 @@ export class Browser {
   /// DevTools, у каждого прогона свой.
   static async launch({ work, name, port }) {
     const profile = path.join(work, `chrome-${name}`);
+    if (WINDOWS && path.resolve(profile).length > PROFILE_MAX) {
+      throw new Error(`папка профиля Chrome — ${path.resolve(profile).length} знаков, а на Windows можно не больше `
+        + `${PROFILE_MAX}: путь записей кэша service worker вышел бы за MAX_PATH, и cache.put ответил бы «Entry already `
+        + `exists» (задача 108). Возьмите папку короче — --work C:/tmp/k<номер задачи>.`);
+    }
     fs.rmSync(profile, { recursive: true, force: true });
     const child = spawnTree(CHROME, ["--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`,
       "--no-first-run", "--no-default-browser-check", ...(WINDOWS ? [] : ["--no-sandbox", "--disable-dev-shm-usage"]),
