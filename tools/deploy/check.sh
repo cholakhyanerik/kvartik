@@ -226,22 +226,31 @@ check_missing
 # применяет. ՀՎՀՀ проверки — восемь нулей: такого у ИП нет (`license::NO_TIN`),
 # а запись его проверка в конце снимает отзывом. 503 — нет секрета или базы:
 # окно тогда считает срок только по устройству, и это провал. Без согласия —
-# 400, `GET` — 405, а запрос браузера с чужой страницы — 403. Прежняя выкладка
-# функции ещё не знает и отвечает 404 — ждём, как файлы.
+# 400, `GET` — 405, а запрос браузера с чужой страницы — 403.
+#
+# Функция доходит до края сети позже файлов и не вся разом: прежняя выкладка
+# её не знает и отвечает 404, а у свежей первый вопрос предпросмотра 0.0.152
+# ответил днём, и следующие за ним в ту же секунду — 404 со страницей
+# Cloudflare (2026-11-18; через пять минут — все верно). 404 у `/api/trial`
+# функция не отвечает никогда, поэтому каждый запрос проверки ждёт, как
+# файлы: 404 — до трёх минут от первого вопроса, 5xx и обрыв — до пяти раз.
+trial_until=0
 trial() {
-  curl -sS -o "$work/trial" -D "$work/trial-head" -w '%{http_code}' "$@" "$site/api/trial" || true
-}
-check_trial() {
-  local code got answer attempt=1 question='{"tin":"00000000","consent":"2026-11-18"}'
+  local code errors=1
   while :; do
-    code="$(trial -X POST --data-binary "$question")"
+    code="$(curl -sS -o "$work/trial" -D "$work/trial-head" -w '%{http_code}' "$@" "$site/api/trial" || true)"
     case "$code" in
-      5?? | 000) [ "$attempt" -lt 5 ] || break; sleep 3 ;;
-      404) settling || break ;;
+      5?? | 000) [ "$errors" -lt 5 ] || break; errors=$((errors + 1)); sleep 3 ;;
+      404) [ "$(date +%s)" -lt "$trial_until" ] || break; sleep 3 ;;
       *) break ;;
     esac
-    attempt=$((attempt + 1))
   done
+  echo "$code"
+}
+check_trial() {
+  local code got answer question='{"tin":"00000000","consent":"2026-11-18"}'
+  trial_until=$(($(date +%s) + 180))
+  code="$(trial -X POST --data-binary "$question")"
   if [ "$code" != 200 ]; then
     fail "/api/trial: $code «$(head -c 200 "$work/trial")», а ждали 200"
     return
