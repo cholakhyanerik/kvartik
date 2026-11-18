@@ -78,12 +78,17 @@ pub(super) fn trial_from(start: Date) {
 /// и первый день данных (задача 99), и что устройство помнит о ключе базы:
 /// каким его нашла часть и о конце
 /// какого сказано окном (задача 92), — и что сказано о конце пробного
-/// периода (задача 93).
+/// периода (задача 93), — и сверку ИНН с сервером: согласия и ответ сервера
+/// (задача 106).
 pub(super) fn forget_trial() {
+    crate::ui::trial::forget_consents_for_tests();
+    crate::ui::trial::set_for_tests(None);
     if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
         for name in [
             "kvartik.trial",
             "kvartik.trial_data",
+            "kvartik.trial_tin",
+            "kvartik.trial_asked",
             "kvartik.license",
             "kvartik.license_told",
             "kvartik.trial_told",
@@ -313,6 +318,57 @@ async fn an_ended_trial_locks_issuing_and_numbers() {
 
     drop(mounted);
     host.remove();
+    forget_trial();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// В пробный период с ИНН в профиле выпуск ждёт согласия на сверку ИНН
+/// с сервером сайта (задача 106; решение человека 2026-11-18): в форме
+/// черновика вместо «Выпустить» — слова согласия и «Согласен», а
+/// «Сохранить черновик» осталось; «Согласен» открывает выпуск и остаётся
+/// на устройстве. На экране лицензии согласие потом — с «Отозвать согласие».
+#[wasm_bindgen_test]
+async fn issuing_waits_for_consent_to_check_the_tin() {
+    base_with_draft().await;
+    forget_trial();
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    trial_from(clock::today().expect("часы с датой"));
+
+    let (host, mounted) = mount_at("#/");
+    let mut wrong = Vec::new();
+    if !open_draft(&host).await {
+        wrong.push("в списке нет черновика".to_owned());
+    }
+    if !wait_for(&host, t(lang, Key::TrialConsentWhat)).await {
+        wrong.push("в форме нет слов согласия".to_owned());
+    }
+    if button(&host, &[t(lang, Key::DocIssue)]).is_some() {
+        wrong.push("«Выпустить» — без согласия".to_owned());
+    }
+    if button(&host, &[t(lang, Key::DocSaveDraft)]).is_none() {
+        wrong.push("«Сохранить черновик» пропало".to_owned());
+    }
+    match button(&host, &[t(lang, Key::TrialConsentAgree)]) {
+        Some(agree) => agree.click(),
+        None => wrong.push("нет «Согласен»".to_owned()),
+    }
+    if !wait_until(|| button(&host, &[t(lang, Key::DocIssue)]).is_some()).await {
+        wrong.push("после «Согласен» нет «Выпустить»".to_owned());
+    }
+    let consents = Device::new().trial_consents();
+    if consents != [(TIN.to_owned(), license::TRIAL_CONSENT.to_owned())] {
+        wrong.push(format!("устройство помнит согласия {consents:?}"));
+    }
+    set_hash("#/license");
+    let on = fill(t(lang, Key::TrialConsentOn), &[TIN]);
+    if !wait_for(&host, &on).await || button(&host, &[t(lang, Key::TrialConsentWithdraw)]).is_none() {
+        wrong.push(format!("экран лицензии: «{}», а ждали «{on}» и «Отозвать согласие»", license_text(&host)));
+    }
+
+    drop(mounted);
+    host.remove();
+    set_hash("");
     forget_trial();
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
@@ -786,6 +842,64 @@ async fn the_trial_travels_with_the_data() {
     }
     drop(mounted);
     host.remove();
+    set_hash("");
+    forget_trial();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Пробный период идёт и по ՀՎՀՀ (задача 106; условия, п. 3, редакция от
+/// 18.11.2026): браузер открыт сегодня, данных старше нет, а сервер ответил,
+/// что на ՀՎՀՀ профиля период начали двадцать дней назад, — экран лицензии
+/// говорит, что пробный период кончился и считается с первого дня на ИНН.
+/// Ответ о другом ՀՎՀՀ срок не трогает: спрошен он был о прежнем номере
+/// профиля, и сегодня идёт пробный период устройства.
+#[wasm_bindgen_test]
+async fn the_trial_follows_the_tin() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    forget_trial();
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let today = clock::today().expect("часы с датой");
+    trial_from(today);
+    let mut data = profile();
+    data.tin = Some(Tin::parse(TIN).expect("годный ՀՎՀՀ"));
+    let saved = Profile::save(None, data, clock::now()).expect("годный профиль").expect("новый");
+    let mut writes = Writes::default();
+    writes.insert(&saved);
+    commit(writes).await;
+    // День раньше первой версии программы: раньше любого дня данных, который
+    // мог остаться на устройстве от теста с образцом копии (в общем прогоне
+    // так и было — день образца 13.10.2026 побеждал день сервера). Сервер так
+    // не ответит (`license::trial_answer`), но ответ кладёт тест.
+    let first = license::FIRST_DAY.add_days(-1).expect("дата");
+    crate::ui::trial::set_for_tests(Some((Tin::parse(TIN).expect("годный ՀՎՀՀ"), first)));
+
+    let mut wrong = Vec::new();
+    let href = Screen::License.href();
+    let (host, mounted) = mount_at(&href);
+    let last = license::trial_last(first).expect("дата");
+    let ended = fill(t(lang, Key::LicenseTrialEnded), &[&i18n::date(lang, last)]);
+    let why = fill(t(lang, Key::LicenseTrialFromTin), &[&i18n::date(lang, first)]);
+    let said = wait_until(|| {
+        let text = license_text(&host);
+        text.contains(&ended) && text.contains(&why)
+    })
+    .await;
+    if !said {
+        wrong.push(format!("экран лицензии: «{}», а ждали «{ended}» и «{why}»", license_text(&host)));
+    }
+    crate::ui::trial::set_for_tests(Some((Tin::parse("00012345").expect("годный ՀՎՀՀ"), first)));
+    let calm = wait_until(|| {
+        let text = license_text(&host);
+        !text.is_empty() && !text.contains(&ended) && !text.contains(&why)
+    })
+    .await;
+    if !calm {
+        wrong.push(format!("ответ о другом ՀՎՀՀ: «{}»", license_text(&host)));
+    }
+    drop(mounted);
+    host.remove();
+    crate::ui::trial::set_for_tests(None);
     set_hash("");
     forget_trial();
     assert!(wrong.is_empty(), "{wrong:#?}");

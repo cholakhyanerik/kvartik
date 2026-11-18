@@ -2,15 +2,19 @@
 // меняет на сайте только файл курсов: всё остальное в её папке — байт
 // в байт то, что сайт отдаёт сейчас.
 //
-//   node tools/deploy/same.mjs <адрес сайта> <папка> <_headers репозитория>
+//   node tools/deploy/same.mjs <адрес сайта> <папка> <папка корня в репозитории>
 //
 // Зачем. Папку выкладка курсов берёт из артефакта `site` прошлой выкладки,
 // а не собирает: она не видит, кто и что положил в артефакт, и не должна
 // этому верить (ревью задачи 43, Правило 13). Сверка с живым сайтом делает
 // её безвредной: подменённая или отставшая папка — отказ, а не откат сайта
-// к прежней сборке. Файлы, которые хостинг не отдаёт, сверяются иначе:
-// `_headers` — с файлом репозитория, других `_…` и скрытых файлов в папке
-// быть не должно.
+// к прежней сборке. Файлы, которые хостинг не отдаёт, сверяются иначе: файлы
+// настроек хостинга в корне папки — `_headers`, а с задачи 106 ещё функция
+// сайта `_worker.js` и её адреса `_routes.json` — байт в байт с файлами корня
+// сайта в репозитории (`crates/app/public/root/`): подложенная в артефакт
+// функция исполнялась бы у всех на сервере, а сверить её с живым сайтом
+// нельзя — сам файл хостинг не отдаёт. Других `_…` и скрытых файлов в папке
+// быть не должно, а файлы настроек репозитория в ней есть все.
 //
 // Сразу после выкладки край Cloudflare минуты отдаёт прежнюю (CLAUDE.md,
 // Правило 6, «Хостинг отвечает успехом не тем»), поэтому несовпавшее
@@ -59,25 +63,28 @@ async function same(site, dir, rel) {
 }
 
 async function main() {
-  const [site, dir, headers] = process.argv.slice(2);
-  if (!site || !dir || !headers) {
-    console.error("использование: same.mjs <адрес сайта> <папка> <_headers репозитория>");
+  const [site, dir, root] = process.argv.slice(2);
+  if (!site || !dir || !root) {
+    console.error("использование: same.mjs <адрес сайта> <папка> <папка корня в репозитории>");
     process.exit(2);
   }
   const base = site.replace(/\/$/, "");
   const all = files(dir);
+  const settings = fs.readdirSync(root).filter((name) => name.startsWith("_"));
   const failures = [];
   for (const rel of all) {
     const name = rel.split("/").at(-1);
-    if (rel === "_headers") {
-      if (!fs.readFileSync(path.join(dir, rel)).equals(fs.readFileSync(headers))) {
-        failures.push("_headers — не тот, что в репозитории");
+    if (settings.includes(rel)) {
+      if (!fs.readFileSync(path.join(dir, rel)).equals(fs.readFileSync(path.join(root, rel)))) {
+        failures.push(`${rel} — не тот, что в репозитории`);
       }
     } else if (name.startsWith("_") || name.startsWith(".")) {
       failures.push(`${rel} — лишний файл`);
     }
   }
-  if (!all.includes("_headers")) failures.push("нет _headers");
+  for (const name of ["_headers", ...settings]) {
+    if (!all.includes(name)) failures.push(`нет ${name}`);
+  }
   let left = all.filter((rel) => rel !== RATES && !rel.split("/").at(-1).startsWith("_")
     && !rel.split("/").at(-1).startsWith("."));
   const checked = left.length;

@@ -933,11 +933,15 @@ mod tests {
     const LANDING_CSS: &str = include_str!("../../app/site/landing.css");
     const LANDING_JS: &str = include_str!("../../app/site/landing.js");
     /// Утверждённые юридические тексты (задача 32) и прежние редакции условий
-    /// (задачи 93 и 99) — те, что берёт сборка.
-    const LEGAL: [(&str, &str); 15] = [
+    /// (задачи 93, 99, 103 и 106) и политики (задача 106) — те, что берёт
+    /// сборка.
+    const LEGAL: [(&str, &str); 21] = [
         ("terms.hy.md", include_str!("../../../docs/legal/terms.hy.md")),
         ("terms.ru.md", include_str!("../../../docs/legal/terms.ru.md")),
         ("terms.en.md", include_str!("../../../docs/legal/terms.en.md")),
+        ("terms.2026-11-17.hy.md", include_str!("../../../docs/legal/terms.2026-11-17.hy.md")),
+        ("terms.2026-11-17.ru.md", include_str!("../../../docs/legal/terms.2026-11-17.ru.md")),
+        ("terms.2026-11-17.en.md", include_str!("../../../docs/legal/terms.2026-11-17.en.md")),
         ("terms.2026-11-15.hy.md", include_str!("../../../docs/legal/terms.2026-11-15.hy.md")),
         ("terms.2026-11-15.ru.md", include_str!("../../../docs/legal/terms.2026-11-15.ru.md")),
         ("terms.2026-11-15.en.md", include_str!("../../../docs/legal/terms.2026-11-15.en.md")),
@@ -950,6 +954,9 @@ mod tests {
         ("privacy.hy.md", include_str!("../../../docs/legal/privacy.hy.md")),
         ("privacy.ru.md", include_str!("../../../docs/legal/privacy.ru.md")),
         ("privacy.en.md", include_str!("../../../docs/legal/privacy.en.md")),
+        ("privacy.2026-11-09.hy.md", include_str!("../../../docs/legal/privacy.2026-11-09.hy.md")),
+        ("privacy.2026-11-09.ru.md", include_str!("../../../docs/legal/privacy.2026-11-09.ru.md")),
+        ("privacy.2026-11-09.en.md", include_str!("../../../docs/legal/privacy.2026-11-09.en.md")),
     ];
 
     /// Страница юридического текста из утверждённого файла: действующей
@@ -983,53 +990,52 @@ mod tests {
     /// каждом языке: канонический адрес и переводы — её же, а не
     /// действующей; страница говорит, что она прежняя, ведёт на действующую
     /// и просит поисковики её не показывать. Действующая называет прежние
-    /// днями ссылками, а в карте сайта прежних нет.
+    /// днями ссылками, а в карте сайта прежних нет. У условий и, с задачи
+    /// 106, у политики конфиденциальности.
     #[test]
     fn earlier_editions_stay_at_their_own_addresses() {
         let mut wrong = Vec::new();
-        let days = Legal::Terms.earlier();
-        assert!(!days.is_empty(), "у условий есть прежняя редакция");
-        for lang in Lang::ALL {
-            let current = legal_sample(Legal::Terms, lang, None);
-            for &day in days {
-                let at = Legal::Terms.earlier_path(lang, day);
-                let link = format!("<a href=\"{at}\">{}</a>", escape(&i18n::date(lang, day)));
-                if !current.contains(&format!("<p class=\"editions\">{} ", escape(t(lang, Key::LegalEditions))))
-                    || !current.contains(&link)
-                {
-                    wrong.push(format!("{lang:?}: действующая не ведёт на прежнюю {link}"));
-                }
-                let old = legal_sample(Legal::Terms, lang, Some(day));
-                let mut need = vec![
-                    format!("<link rel=\"canonical\" href=\"https://kvartik.com{at}\" />"),
-                    "<meta name=\"robots\" content=\"noindex\" />".to_owned(),
-                    format!(
-                        "<p class=\"edition-note\">{} <a href=\"{}\">{}</a></p>",
-                        escape(t(lang, Key::LegalOldEdition)),
-                        Legal::Terms.path(lang),
-                        escape(t(lang, Key::LegalCurrentEdition))
-                    ),
-                ];
-                for other in Lang::ALL {
-                    let there = Legal::Terms.earlier_path(other, day);
-                    need.push(format!("<link rel=\"alternate\" hreflang=\"{}\" href=\"https://kvartik.com{there}\" />", other.code()));
-                    need.push(format!("<a href=\"{there}\" hreflang=\"{}\"", other.code()));
-                }
-                for piece in need {
-                    if !old.contains(&piece) {
-                        wrong.push(format!("{lang:?} {at}: нет {piece}"));
+        for doc in Legal::ALL {
+            let days = doc.earlier();
+            assert!(!days.is_empty(), "у {doc:?} есть прежняя редакция");
+            for lang in Lang::ALL {
+                let current = legal_sample(doc, lang, None);
+                for &day in days {
+                    let at = doc.earlier_path(lang, day);
+                    let link = format!("<a href=\"{at}\">{}</a>", escape(&i18n::date(lang, day)));
+                    if !current.contains(&format!("<p class=\"editions\">{} ", escape(t(lang, Key::LegalEditions))))
+                        || !current.contains(&link)
+                    {
+                        wrong.push(format!("{doc:?} {lang:?}: действующая не ведёт на прежнюю {link}"));
+                    }
+                    let old = legal_sample(doc, lang, Some(day));
+                    let mut need = vec![
+                        format!("<link rel=\"canonical\" href=\"https://kvartik.com{at}\" />"),
+                        "<meta name=\"robots\" content=\"noindex\" />".to_owned(),
+                        format!(
+                            "<p class=\"edition-note\">{} <a href=\"{}\">{}</a></p>",
+                            escape(t(lang, Key::LegalOldEdition)),
+                            doc.path(lang),
+                            escape(t(lang, Key::LegalCurrentEdition))
+                        ),
+                    ];
+                    for other in Lang::ALL {
+                        let there = doc.earlier_path(other, day);
+                        need.push(format!("<link rel=\"alternate\" hreflang=\"{}\" href=\"https://kvartik.com{there}\" />", other.code()));
+                        need.push(format!("<a href=\"{there}\" hreflang=\"{}\"", other.code()));
+                    }
+                    for piece in need {
+                        if !old.contains(&piece) {
+                            wrong.push(format!("{lang:?} {at}: нет {piece}"));
+                        }
+                    }
+                    if old.contains("class=\"editions\"") || current.contains("noindex") || current.contains("edition-note") {
+                        wrong.push(format!("{doc:?} {lang:?}: прежняя и действующая перепутали свои слова"));
+                    }
+                    if sitemap().contains(&at) {
+                        wrong.push(format!("{at}: прежняя редакция в карте сайта"));
                     }
                 }
-                if old.contains("class=\"editions\"") || current.contains("noindex") || current.contains("edition-note") {
-                    wrong.push(format!("{lang:?}: прежняя и действующая перепутали свои слова"));
-                }
-                if sitemap().contains(&at) {
-                    wrong.push(format!("{at}: прежняя редакция в карте сайта"));
-                }
-            }
-            // У политики прежних редакций нет — и ссылок на них.
-            if legal_sample(Legal::Privacy, lang, None).contains("class=\"editions\"") {
-                wrong.push(format!("{lang:?}: у политики — ссылки на прежние редакции"));
             }
         }
         assert!(wrong.is_empty(), "{wrong:#?}");
@@ -1644,8 +1650,8 @@ mod tests {
         sources(&edition);
         fs::create_dir_all(edition.0.join("stage")).expect("папка сборки");
         let (_, terms) = LEGAL.iter().find(|(name, _)| *name == "terms.en.md").expect("текст есть");
-        assert!(terms.contains("November 17, 2026"), "в условиях — та редакция, что ждёт тест");
-        edition.put("legal/terms.en.md", &terms.replace("November 17, 2026", "December 1, 2026"));
+        assert!(terms.contains("November 18, 2026"), "в условиях — та редакция, что ждёт тест");
+        edition.put("legal/terms.en.md", &terms.replace("November 18, 2026", "December 1, 2026"));
         let error = build(&edition).expect_err("слов согласия нет в условиях");
         assert!(error.contains("terms.en.md") && error.contains("Key::BuyAccept"), "{error}");
         assert!(names(&edition.0.join("stage")).is_empty(), "в сайт что-то легло");

@@ -220,6 +220,56 @@ check_missing() {
 }
 check_missing
 
+# Сервер пробного периода (задача 106, `_worker.js` сборки): `POST /api/trial`
+# с версией согласия — первый день пробного периода на ՀՎՀՀ, при повторе тот
+# же, мимо кэша и со своими заголовками: `_headers` к ответам функции Pages не
+# применяет. ՀՎՀՀ проверки — восемь нулей: такого у ИП нет (`license::NO_TIN`),
+# а запись его проверка в конце снимает отзывом. 503 — нет секрета или базы:
+# окно тогда считает срок только по устройству, и это провал. Без согласия —
+# 400, `GET` — 405, а запрос браузера с чужой страницы — 403. Прежняя выкладка
+# функции ещё не знает и отвечает 404 — ждём, как файлы.
+trial() {
+  curl -sS -o "$work/trial" -D "$work/trial-head" -w '%{http_code}' "$@" "$site/api/trial" || true
+}
+check_trial() {
+  local code got answer attempt=1 question='{"tin":"00000000","consent":"2026-11-18"}'
+  while :; do
+    code="$(trial -X POST --data-binary "$question")"
+    case "$code" in
+      5?? | 000) [ "$attempt" -lt 5 ] || break; sleep 3 ;;
+      404) settling || break ;;
+      *) break ;;
+    esac
+    attempt=$((attempt + 1))
+  done
+  if [ "$code" != 200 ]; then
+    fail "/api/trial: $code «$(head -c 200 "$work/trial")», а ждали 200"
+    return
+  fi
+  answer="$(cat "$work/trial")"
+  [[ "$answer" =~ ^\{\"first\":\"[0-9]{4}-[0-9]{2}-[0-9]{2}\"\}$ ]] \
+    || fail "/api/trial: ответ «${answer:0:200}», а ждали {\"first\":\"ГГГГ-ММ-ДД\"}"
+  for expected in 'cache-control: no-store' 'x-content-type-options: nosniff' \
+    'content-type: application/json; charset=utf-8'; do
+    got="$(header "${expected%%:*}" "$work/trial-head")"
+    [ "$got" = "${expected#*: }" ] || fail "/api/trial: ${expected%%:*} «$got», а ждали «${expected#*: }»"
+  done
+  code="$(trial -X POST --data-binary "$question")"
+  [ "$code" = 200 ] && [ "$(cat "$work/trial")" = "$answer" ] \
+    || fail "/api/trial: повтор — $code «$(head -c 200 "$work/trial")», а ждали тот же «$answer»"
+  code="$(trial)"
+  [ "$code" = 405 ] || fail "/api/trial: GET — $code, а ждали 405"
+  code="$(trial -X POST --data-binary '{"tin":"00000000"}')"
+  [ "$code" = 400 ] || fail "/api/trial: вопрос без согласия — $code, а ждали 400"
+  code="$(trial -X POST --data-binary "$question" -H 'Sec-Fetch-Site: cross-site' \
+    -H 'Origin: https://example.com')"
+  [ "$code" = 403 ] || fail "/api/trial: запрос чужой страницы — $code, а ждали 403"
+  code="$(trial -X POST --data-binary '{"tin":"00000000","withdraw":true}')"
+  [ "$code" = 200 ] && [ "$(cat "$work/trial")" = '{"withdrawn":true}' ] \
+    || fail "/api/trial: отзыв — $code «$(head -c 200 "$work/trial")», а ждали {\"withdrawn\":true}"
+}
+check_trial
+
 # Тип по расширению — как его ждут браузер и service worker.
 expected_type() {
   case "$1" in
@@ -301,4 +351,4 @@ if [ ${#failures[@]} -gt 0 ]; then
   printf '%s\n' "Выкладка $site — провалов: ${#failures[@]}" "${failures[@]}" >&2
   exit 1
 fi
-echo "Выкладка $site: страница программы, переадресации, CSP и $checked файлов — как задумано"
+echo "Выкладка $site: страница программы, переадресации, CSP, сервер пробного периода и $checked файлов — как задумано"

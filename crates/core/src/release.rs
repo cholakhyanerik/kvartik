@@ -103,7 +103,7 @@ impl Legal {
     pub const fn earlier(self) -> &'static [Date] {
         match self {
             Legal::Terms => &TERMS_EARLIER,
-            Legal::Privacy => &[],
+            Legal::Privacy => &PRIVACY_EARLIER,
         }
     }
 
@@ -116,16 +116,25 @@ impl Legal {
 }
 
 /// Прежние редакции условий лицензии (`Legal::earlier`), от новой к старой:
-/// от 15.11.2026 — по ней продавались ключи до редакции от 17.11.2026
-/// (задача 103, тариф «Pro», п. 1, 2.1, 4.1, 4.2 и 5); от 13.11.2026 — до
-/// редакции от 15.11.2026 (задача 99, пробный период с первого дня данных,
-/// п. 3); от 09.11.2026 — первая, до редакции от 13.11.2026 (задача 93,
-/// продление заранее, п. 4.1).
-const TERMS_EARLIER: [Date; 3] = [
+/// от 17.11.2026 — по ней продавались ключи до редакции от 18.11.2026
+/// (задача 106, пробный период и по ՀՎՀՀ, п. 3); от 15.11.2026 — до редакции
+/// от 17.11.2026 (задача 103, тариф «Pro», п. 1, 2.1, 4.1, 4.2 и 5); от
+/// 13.11.2026 — до редакции от 15.11.2026 (задача 99, пробный период с
+/// первого дня данных, п. 3); от 09.11.2026 — первая, до редакции от
+/// 13.11.2026 (задача 93, продление заранее, п. 4.1).
+const TERMS_EARLIER: [Date; 4] = [
+    Date::new(2026, 11, 17).expect("17 ноября 2026 года в календаре есть"),
     Date::new(2026, 11, 15).expect("15 ноября 2026 года в календаре есть"),
     Date::new(2026, 11, 13).expect("13 ноября 2026 года в календаре есть"),
     Date::new(2026, 11, 9).expect("9 ноября 2026 года в календаре есть"),
 ];
+
+/// Прежние редакции политики конфиденциальности (`Legal::earlier`): от
+/// 09.11.2026 — первая, до редакции от 18.11.2026 (задача 106: ՀՎՀՀ уходит на
+/// сервер сайта ради пробного периода, п. 2). Своё место у прежней — по тому
+/// же обещанию, что у условий (п. 11 условий, п. 7 политики): человек вправе
+/// прочесть, на что соглашался.
+const PRIVACY_EARLIER: [Date; 1] = [Date::new(2026, 11, 9).expect("9 ноября 2026 года в календаре есть")];
 
 /// Почта продавца и автора — та же, что в условиях лицензии и политике
 /// конфиденциальности (задача 32): на неё пишут ՀՎՀՀ и согласие с условиями,
@@ -473,9 +482,11 @@ mod tests {
                 }
             }
         }
-        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[0]), "/ru/terms/2026-11-15/");
-        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[1]), "/ru/terms/2026-11-13/");
-        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[2]), "/ru/terms/2026-11-09/");
+        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[0]), "/ru/terms/2026-11-17/");
+        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[1]), "/ru/terms/2026-11-15/");
+        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[2]), "/ru/terms/2026-11-13/");
+        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[3]), "/ru/terms/2026-11-09/");
+        assert_eq!(Legal::Privacy.earlier_path(Lang::Am, Legal::Privacy.earlier()[0]), "/privacy/2026-11-09/");
         assert!(wrong.is_empty(), "{wrong:#?}");
     }
 

@@ -205,11 +205,13 @@ enum State {
 impl Licenses {
     /// Ключи окна и пробный период: начат ли он на этом устройстве, а нет —
     /// начинается сегодня; а были на устройстве данные раньше — с первого их
-    /// дня (задача 99, `Device::trial_data`). Не запомнилось (`localStorage`
-    /// отказал) — период начнётся заново при следующем открытии: бороться
-    /// с этим не нужно (`kvartik_core::license`). Документы и клиенты — базы,
-    /// которую откроет окно: по моментам их записей части считают день
-    /// данных ([`Licenses::data_since`]).
+    /// дня (задача 99, `Device::trial_data`), и сервер сайта ответил днём на
+    /// ՀՎՀՀ раньше — с него (задача 106, `Device::trial_tin`). Не запомнилось
+    /// (`localStorage` отказал) — период начнётся заново при следующем
+    /// открытии, пока сервер не ответит: бороться с этим не нужно
+    /// (`kvartik_core::license`). Документы и клиенты — базы, которую откроет
+    /// окно: по моментам их записей части считают день данных
+    /// ([`Licenses::data_since`]).
     pub fn start(today: Option<Date>, around: Around) -> Self {
         let device = Device::new();
         let first = device.trial_start().or_else(|| {
@@ -217,7 +219,7 @@ impl Licenses {
             device.set_trial_start(today);
             Some(today)
         });
-        let trial = license::trial_start(first, device.trial_data());
+        let trial = license::trial_start(license::trial_start(first, device.trial_data()), device.trial_tin());
         Self {
             state: RwSignal::new(State::Loading),
             watched: StoredValue::new(false),
@@ -354,6 +356,17 @@ impl Licenses {
                 {
                     device.set_trial_data(day);
                 }
+                // С какого дня идёт пробный период на ՀՎՀՀ профиля, знает сервер
+                // сайта (задача 106): спросить его, когда ответ что-то решает, —
+                // ՀՎՀՀ есть, а ни своего ключа, ни места в ключе «Pro» сегодня
+                // нет, — и только с согласия на сверку этого ՀՎՀՀ (ՀՕ-49-Ն, ст. 8
+                // ч. 1 п. 1). Купившему — ни одного запроса.
+                let keyed = licenses
+                    .today
+                    .zip(access.key())
+                    .is_some_and(|(today, (_, last))| today <= last);
+                let tin = profiles.with(|data| data.and_then(|data| data.tin.clone()));
+                super::trial::want(tin.filter(|tin| !keyed && super::trial::consented(tin)));
             });
         };
         match self.root.get_value() {
@@ -507,12 +520,17 @@ impl Licenses {
     }
 
     /// Что открыто — по ключам на ИНН профиля, месту открытого ИП в ключе
-    /// «Pro» конторы (задача 38) и пробному периоду. Отслеживаемое. Проверяет
+    /// «Pro» конторы (задача 38) и пробному периоду: с самого раннего из дней
+    /// устройства, данных открытой базы и сервера сайта о ՀՎՀՀ профиля (задача
+    /// 106, [`trial::day`](super::trial::day)). Отслеживаемое. Проверяет
     /// подпись каждого ключа — зовут только части (шапка модуля); пока ключи
     /// читаются, считается один пробный период.
     pub(super) fn access(&self, profiles: Profiles) -> Access {
         let tin = profiles.with(|data| data.and_then(|data| data.tin.clone()));
-        let trial = license::trial_start(self.trial, self.data_since(profiles));
+        let trial = license::trial_start(
+            license::trial_start(self.trial, self.data_since(profiles)),
+            tin.as_ref().and_then(super::trial::day),
+        );
         let seats = self.pro_seats();
         let own = self.state.with(|state| {
             let licenses: &[License] = match state {
@@ -578,16 +596,47 @@ impl Licenses {
         [profile, clients, documents, keys].into_iter().flatten().min()
     }
 
-    /// С какого дня идёт пробный период, когда его начало — первый день данных,
-    /// а не первый запуск на этом устройстве (задача 99): экран лицензии и окно
-    /// о конце пробного периода говорят, почему срок короче 14 дней.
-    /// Отслеживаемое; `None` — период идёт с первого запуска.
-    pub(super) fn trial_from_data(&self, profiles: Profiles) -> Option<Date> {
-        let start = license::trial_start(self.trial, self.data_since(profiles))?;
-        Device::new()
-            .trial_start()
-            .is_none_or(|first| start < first)
-            .then_some(start)
+    /// С какого дня идёт пробный период и почему, когда он начался раньше
+    /// первого запуска на этом устройстве: с первого дня данных (задача 99) —
+    /// слова [`Key::LicenseTrialFromData`], — или его уже начинали на ՀՎՀՀ
+    /// профиля, по ответу сервера сайта (задача 106) — [`Key::LicenseTrialFromTin`].
+    /// Экран лицензии и окно о конце пробного периода говорят, почему срок
+    /// короче 14 дней. День сервера о другом ՀՎՀՀ этого устройства
+    /// (`Device::trial_tin`) срок тоже сокращает — пробный период у всех ИП
+    /// устройства общий, — но слов «на ՀՎՀՀ из профиля» у него нет: они были
+    /// бы неправдой. Отслеживаемое; `None` — период идёт с первого запуска.
+    pub(super) fn trial_from(&self, profiles: Profiles) -> Option<(Key, Date)> {
+        let device = Device::new();
+        let tin = profiles.with(|data| data.and_then(|data| data.tin.clone()));
+        let data = license::trial_start(device.trial_data(), self.data_since(profiles));
+        let server = tin.as_ref().and_then(super::trial::day);
+        let start = license::trial_start(license::trial_start(self.trial, data), server)?;
+        if device.trial_start().is_some_and(|first| start >= first) {
+            return None;
+        }
+        if data == Some(start) {
+            Some((Key::LicenseTrialFromData, start))
+        } else {
+            (server == Some(start)).then_some((Key::LicenseTrialFromTin, start))
+        }
+    }
+
+    /// Нужно ли согласие на сверку ՀՎՀՀ, чтобы выпускать (задача 106; решение
+    /// человека 2026-11-18: «выпуск — только с согласием»): срок идёт, и это
+    /// пробный период — ни своего ключа, ни места в ключе «Pro» сегодня, — в
+    /// профиле есть ՀՎՀՀ, а согласия на его сверку с сервером нет. Тогда — этот
+    /// ՀՎՀՀ: о нём и спрашивает согласие ([`TrialConsent`]). Без согласия ՀՎՀՀ
+    /// на сервер не уходит, а выпуск ждёт: иначе тот, кто хочет обойти срок,
+    /// просто не согласился бы. Без ՀՎՀՀ в профиле — как до задачи 106.
+    /// Отслеживаемое.
+    pub(super) fn consent_needed(&self, profiles: Profiles, access: Access) -> Option<Tin> {
+        let today = self.today?;
+        let keyed = access.key().is_some_and(|(_, last)| today <= last);
+        if !self.ready() || keyed || !access.issue(today) {
+            return None;
+        }
+        let tin = profiles.with(|data| data.and_then(|data| data.tin.clone()))?;
+        (!super::trial::consented(&tin)).then_some(tin)
     }
 
     /// Введён ли ключ, выданный на `tin`, — по записи, без проверки
@@ -922,11 +971,12 @@ fn RenewCard(ctx: tax::Ctx, up: RwSignal<Option<Ending>>, told: RwSignal<Option<
         let template = if trial { Key::TrialSoonText } else { Key::LicenseSoonText };
         Some(fill(t(lang, template), &[&days(lang, left), &i18n::date(lang, ending.last())]))
     };
-    // Пробный период — с первого дня данных (задача 99): почему он кончается
-    // раньше, чем через 14 дней после первого запуска.
+    // Пробный период — с первого дня данных (задача 99) или с дня на ՀՎՀՀ по
+    // серверу (задача 106): почему он кончается раньше, чем через 14 дней
+    // после первого запуска.
     let from_data = move || {
-        let start = licenses.trial_from_data(sources.profiles)?;
-        Some(fill(t(lang.get(), Key::LicenseTrialFromData), &[&i18n::date(lang.get(), start)]))
+        let (words, start) = licenses.trial_from(sources.profiles)?;
+        Some(fill(t(lang.get(), words), &[&i18n::date(lang.get(), start)]))
     };
     let (title, act) = if trial {
         (Key::TrialSoonTitle, Key::LicenseBuy)
@@ -1066,12 +1116,12 @@ pub(super) fn LicensePage(ctx: tax::Ctx) -> impl IntoView {
             return None;
         }
         let mut lines = vec![(term_words(lang, access, today), false)];
-        // Пробный период — с первого дня данных (задача 99): почему он короче
-        // 14 дней.
+        // Пробный период — с первого дня данных (задача 99) или с дня на ՀՎՀՀ
+        // по серверу (задача 106): почему он короче 14 дней.
         if matches!(access.term(), Some(Term::Trial { .. }))
-            && let Some(start) = licenses.trial_from_data(profiles)
+            && let Some((words, start)) = licenses.trial_from(profiles)
         {
-            lines.push((fill(t(lang, Key::LicenseTrialFromData), &[&i18n::date(lang, start)]), false));
+            lines.push((fill(t(lang, words), &[&i18n::date(lang, start)]), false));
         }
         // Ключ «Pro» конторы идёт, а места в нём у этого ИП нет (задача 38):
         // места заняли ИП, добавленные раньше. Громко — только когда из-за
@@ -1107,9 +1157,23 @@ pub(super) fn LicensePage(ctx: tax::Ctx) -> impl IntoView {
             })
     };
 
+    // Сверка ՀՎՀՀ с сервером (задача 106): нет согласия, а выпуск в пробный
+    // период его ждёт, — само согласие, наверху: это шаг, который нужен сейчас.
+    // Дано — строкой с «Отозвать согласие» ниже, у введённых ключей.
+    let withdrawn = RwSignal::new(None::<bool>);
+    let consent = move || {
+        licenses
+            .consent_needed(profiles, access.get())
+            .filter(|_| known.get())
+            .map(|tin| view! { <TrialConsent lang tin /> })
+    };
+    let given_now = move || profile_tin.get().filter(|tin| known.get() && super::trial::consented(tin));
+    let given = move || given_now().map(|tin| view! { <TrialConsentGiven lang tin withdrawn /> });
+
     view! {
         {move || status().map(|lines| view! { <div class="notice" role="status">{lines}</div> })}
         {move || unkeyed().then(|| view! { <p class="have-key">{tr(lang, Key::LicenseHaveKey)}</p> })}
+        {consent}
         <BuyEntry lang />
         {move || licenses.failure().map(|error| view! { <p role="alert">{tr(lang, error_key(error))}</p> })}
         {move || {
@@ -1140,6 +1204,13 @@ pub(super) fn LicensePage(ctx: tax::Ctx) -> impl IntoView {
             </button>
         </form>
         <EnteredKeys lang licenses profile_tin />
+        {given}
+        // Слова об отзыве — пока согласия снова нет: после нового «Согласен»
+        // они были бы неправдой.
+        {move || withdrawn.get().filter(|_| given_now().is_none()).map(|deleted| {
+            let words = if deleted { Key::TrialConsentWithdrawn } else { Key::TrialConsentWithdrawnHere };
+            view! { <p role="status">{tr(lang, words)}</p> }
+        })}
         <Gives lang access known today />
         <Devices lang />
     }
@@ -1435,6 +1506,62 @@ pub(super) fn IssueLocked(lang: ReadSignal<Lang>, access: Access, today: Date) -
             }}</p>
             <LicenseLink lang />
         </div>
+    }
+}
+
+/// Согласие на сверку ՀՎՀՀ `tin` с сервером сайта (задача 106) — в форме
+/// документа вместо «Выпустить» и на экране лицензии, пока его нет, а выпуск
+/// в пробный период ждёт его ([`Licenses::consent_needed`]). Слова — те, что
+/// требует закон до согласия (ՀՕ-49-Ն, ст. 10 ч. 2 и ст. 18 ч. 3): зачем, что
+/// уходит и хранится, сколько, кому видно, кто отвечает, что будет без
+/// согласия и как его отозвать, — а целиком — политика конфиденциальности,
+/// п. 2, ссылкой. «Согласен» и есть согласие (ст. 9 ч. 7; решение человека
+/// 2026-11-18).
+#[component]
+pub(super) fn TrialConsent(lang: ReadSignal<Lang>, tin: Tin) -> impl IntoView {
+    let agree = move |_| super::trial::agree(&tin);
+    view! {
+        <section class="notice trial-consent" aria-labelledby="trial-consent-title">
+            <h3 id="trial-consent-title">{tr(lang, Key::TrialConsentTitle)}</h3>
+            <p>{tr(lang, Key::TrialConsentWhat)}</p>
+            // Кто отвечает и как отозвать — тише: главное читается первым
+            // (Правило 14), а сказано всё до «Согласен».
+            <p class="hint">{tr(lang, Key::TrialConsentTerms)}</p>
+            <p class="hint">
+                <a href=move || release::Legal::Privacy.path(lang.get()) target="_blank" rel="noopener">
+                    {tr(lang, Key::LegalPrivacy)}
+                </a>
+            </p>
+            <button type="button" class="wide" on:click=agree>
+                <span class="label">{tr(lang, Key::TrialConsentAgree)}</span>
+            </button>
+        </section>
+    }
+}
+
+/// На экране лицензии — что согласие на сверку ՀՎՀՀ `tin` дано, и «Отозвать
+/// согласие» (ՀՕ-49-Ն, ст. 9 ч. 3): запись на сервере удаляется, а выпуск
+/// в пробный период снова ждёт согласия. Удалил ли сервер запись, — в
+/// `withdrawn` экрана: этот блок с отзывом пропадает, а слова остаются.
+#[component]
+fn TrialConsentGiven(lang: ReadSignal<Lang>, tin: Tin, withdrawn: RwSignal<Option<bool>>) -> impl IntoView {
+    let number = tin.as_str().to_owned();
+    let withdraw = move |_| {
+        let tin = tin.clone();
+        leptos::task::spawn_local(async move {
+            let deleted = super::trial::withdraw(tin).await;
+            withdrawn.set(Some(deleted));
+        });
+    };
+    // Тихо и ссылкой: отзыв — редкое действие, и рядом с покупкой ключа он не
+    // спорит с ней за внимание (Правило 14).
+    view! {
+        <section class="trial-consent">
+            <p class="hint">{move || fill(t(lang.get(), Key::TrialConsentOn), &[&number])}</p>
+            <button type="button" class="link" on:click=withdraw>
+                {tr(lang, Key::TrialConsentWithdraw)}
+            </button>
+        </section>
     }
 }
 

@@ -1,10 +1,13 @@
 # Kvartik License Terms
 
-> **Редакция от 17.11.2026** (задача 103): перевод новых п. 1, 2.1, 4.1,
-> 4.2 и 5 и даты русского текста той же редакции.
+> **Редакция от 18.11.2026** (задача 106): перевод нового п. 3 и даты
+> русского текста той же редакции; утвердил человек 2026-11-18 вместе
+> с русским текстом.
 >
-> Прежние редакции — от 15.11.2026
-> ([terms.2026-11-15.en.md](terms.2026-11-15.en.md), на сайте —
+> Прежние редакции — от 17.11.2026
+> ([terms.2026-11-17.en.md](terms.2026-11-17.en.md), на сайте —
+> /en/terms/2026-11-17/), от 15.11.2026
+> ([terms.2026-11-15.en.md](terms.2026-11-15.en.md),
 > /en/terms/2026-11-15/), от 13.11.2026
 > ([terms.2026-11-13.en.md](terms.2026-11-13.en.md),
 > /en/terms/2026-11-13/) и от 09.11.2026
@@ -15,7 +18,7 @@
 > «Для проверки» — только в русском тексте. Квадратные скобки заполнены
 > 2026-11-09 вместе с русским текстом.
 
-**Edition of November 17, 2026. Public offer.**
+**Edition of November 18, 2026. Public offer.**
 
 ## 1. Parties and subject
 
@@ -31,7 +34,7 @@ individual entrepreneurs and organizations and only for their business.
    cholakhyanerik@gmail.com: the plan, the TIN (ՀՎՀՀ) of their IE or
    organization, its name, a contact to send the key to, and the words
    “I accept the Kvartik license terms in the edition of
-   November 17, 2026”.
+   November 18, 2026”.
 2. The user pays for the key. The contract is made upon payment.
 3. The seller sends the key to that contact within one business day after
    payment, together with the settlement document.
@@ -40,9 +43,18 @@ individual entrepreneurs and organizations and only for their business.
 
 The app is free to use for 14 days, with no sign-up and with every
 feature. That is how you can try it before buying. The 14 days count from
-the first opening on a device or from the first day of the data in the
-app, whichever is earlier: data moved with a backup to another device or
-browser brings the days already used along with it.
+the earliest of these days: the first opening on a device, the first day of
+the data in the app, and the first day of the trial period for the TIN
+(ՀՎՀՀ) given in the profile. Data moved with a backup to another device or
+browser brings the days already used along with it, and, with your consent,
+the first day for a TIN is kept by the Kvartik server (see section 2 of the
+Privacy Policy): for the same TIN the trial period doesn't start over in
+another browser, on another device or after the data is cleared. While the
+profile has a TIN and there is no key, invoices and acts can be issued
+during the trial period with this consent; without a TIN in the profile it
+isn't needed. If someone other than you started the trial period for your
+TIN, write to the seller: after checking, the seller will remove the
+record, and the trial period will start again.
 
 ## 4. The license: what you may do and for how long
 

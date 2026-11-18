@@ -1063,6 +1063,13 @@ strings! {
     ProfileTin = "ИНН (ՀՎՀՀ)", "TIN (ՀՎՀՀ)", "Հարկ վճարողի հաշվառման համար (ՀՎՀՀ)";
     /// Формат ՀՎՀՀ — Налоговый кодекс, ст. 287, ч. 4 (`model::tin`).
     ProfileTinHint = "8 цифр.", "8 digits.", "8 թվանշան։";
+    /// Под полем ՀՎՀՀ — что окно сверяет его с сервером сайта (задача 106;
+    /// политика конфиденциальности, п. 2, редакция от 18.11.2026): человек
+    /// узнаёт это там, где вводит номер.
+    ProfileTinTrial =
+        "Пока ключа нет, пробный период с вашего согласия сверяется по ИНН с сервером Kvartik, чтобы не начинаться заново в другом браузере или на другом устройстве.",
+        "Until there is a key, the trial is checked by the TIN with the Kvartik server, with your consent, so that it doesn't start over in another browser or on another device.",
+        "Քանի դեռ բանալի չկա, ձեր համաձայնությամբ փորձաշրջանը ստուգվում է ըստ ՀՎՀՀ-ի Kvartik-ի սերվերում, որպեսզի նորից չսկսվի այլ դիտարկիչում կամ այլ սարքում։";
     TinInvalid =
         "ИНН (ՀՎՀՀ)\u{A0}— ровно 8 цифр.",
         "A TIN (ՀՎՀՀ) is exactly 8 digits.",
@@ -3152,6 +3159,52 @@ strings! {
         "Пробный период считается с {}\u{A0}— с первого дня данных в программе: данные, перенесённые резервной копией, переносят с собой и прошедшие дни.",
         "The trial counts from {}, the first day of the data in the app: data moved with a backup brings the days already used along with it.",
         "Փորձաշրջանը հաշվվում է ծրագրում եղած տվյալների առաջին օրից՝ {}. պահուստային պատճենով տեղափոխված տվյալներն իրենց հետ տեղափոխում են նաև արդեն անցած օրերը։";
+    /// Пробный период — с дня, когда его начали на ՀՎՀՀ профиля, по серверу
+    /// сайта (задача 106; условия, п. 3, редакция от 18.11.2026): почему срок
+    /// короче 14 дней. Шаблон: день начала.
+    LicenseTrialFromTin =
+        "Пробный период считается с {}\u{A0}— с первого дня на ИНН (ՀՎՀՀ) из профиля: его уже начинали в другом браузере или на другом устройстве, и заново он не начинается.",
+        "The trial counts from {}, the first day for the TIN (ՀՎՀՀ) in the profile: it was already started in another browser or on another device, and it doesn't start over.",
+        "Փորձաշրջանը հաշվվում է պրոֆիլի ՀՎՀՀ-ի առաջին օրից՝ {}. այն արդեն սկսվել է այլ դիտարկիչում կամ այլ սարքում և նորից չի սկսվում։";
+    /// Согласие на сверку ՀՎՀՀ с сервером сайта (задача 106; политика
+    /// конфиденциальности, п. 2, редакция от 18.11.2026): ՀՎՀՀ того, кто
+    /// только пробует программу, уходит на сервер лишь с его согласия
+    /// (ՀՕ-49-Ն, ст. 8 ч. 1 п. 1), и до согласия закон велит сказать: зачем,
+    /// что и сколько хранится, кому видно, кто отвечает, что будет без
+    /// согласия и как его отозвать (ст. 10 ч. 2, ст. 18 ч. 3). Слова с
+    /// юридическим весом: их утверждает человек (CLAUDE.md, Правило 9), а
+    /// новые слова — новая версия `license::TRIAL_CONSENT`.
+    TrialConsentTitle =
+        "Сверка ИНН для пробного периода",
+        "Checking the TIN for the trial",
+        "ՀՎՀՀ-ի ստուգում փորձաշրջանի համար";
+    TrialConsentWhat =
+        "Чтобы пробный период не начинался заново в другом браузере, на другом устройстве или после очистки данных, программа отправит ИНН (ՀՎՀՀ) из профиля на сервер Kvartik и будет сверять его при открытии, не чаще раза в час. Сервер хранит не номер, а его отпечаток, первый день пробного периода, время первой сверки и версию этих слов\u{A0}— без IP-адреса и данных программы, 3 года с первого дня. Сервер работает на Cloudflare (США). Кто знает этот ИНН, может так же узнать, начинали ли на нём пробный период и когда.",
+        "So that the trial doesn't start over in another browser, on another device or after the data is cleared, the app will send the TIN (ՀՎՀՀ) from the profile to the Kvartik server and check it when it opens, no more than once an hour. The server keeps not the number but its fingerprint, the first day of the trial, the time of the first check and the version of these words, with no IP address and no data from the app, for 3 years from the first day. The server runs on Cloudflare (USA). Anyone who knows this TIN can learn the same way whether a trial was started for it and when.",
+        "Որպեսզի փորձաշրջանը նորից չսկսվի այլ դիտարկիչում, այլ սարքում կամ տվյալները մաքրելուց հետո, ծրագիրը պրոֆիլի ՀՎՀՀ-ն կուղարկի Kvartik-ի սերվեր և կստուգի այն բացվելիս, ոչ ավելի հաճախ, քան ժամը մեկ անգամ։ Սերվերը պահում է ոչ թե համարը, այլ դրա թվային մատնահետքը, փորձաշրջանի առաջին օրը, առաջին ստուգման ժամանակը և այս բառերի տարբերակը՝ առանց IP հասցեի և ծրագրի տվյալների, առաջին օրվանից 3 տարի։ Սերվերն աշխատում է Cloudflare-ում (ԱՄՆ)։ Ով գիտի այս ՀՎՀՀ-ն, կարող է նույն կերպ իմանալ՝ սկսվե՞լ է արդյոք դրա փորձաշրջանը և երբ։";
+    TrialConsentTerms =
+        "Отвечает за это продавец Kvartik\u{A0}— ИП Эрик Чолахян, Ереван. Согласие даёт ИП с этим ИНН или тот, кому он это поручил. Без согласия пробный период идёт, но выпускать счета и акты, пока в профиле есть ИНН, нельзя; с ключом сверка не нужна. Отозвать согласие можно на экране лицензии или письмом продавцу: запись на сервере удалится, а выпуск в пробный период снова попросит согласия.",
+        "The Kvartik seller is responsible for this: individual entrepreneur Erik Cholakhyan, Yerevan. Consent is given by the IE with this TIN or by someone the IE has asked to. Without consent the trial goes on, but invoices and acts can't be issued while the profile has a TIN; with a key no check is needed. You can withdraw consent on the license screen or by writing to the seller: the record on the server is deleted, and issuing during the trial asks for consent again.",
+        "Դրա համար պատասխանատու է Kvartik-ի վաճառողը՝ ԱՁ Էրիկ Չոլախյանը, Երևան։ Համաձայնությունը տալիս է այս ՀՎՀՀ-ով ԱՁ-ն կամ նա, ում ԱՁ-ն դա հանձնարարել է։ Առանց համաձայնության փորձաշրջանը շարունակվում է, բայց քանի դեռ պրոֆիլում ՀՎՀՀ կա, հաշիվներ և ակտեր թողարկել չի կարելի. բանալու դեպքում ստուգում պետք չէ։ Համաձայնությունը կարող եք հետ կանչել լիցենզիայի էկրանին կամ վաճառողին գրելով. սերվերի գրառումը կջնջվի, իսկ փորձաշրջանում թողարկումը նորից կխնդրի համաձայնություն։";
+    TrialConsentAgree = "Согласен", "I agree", "Համաձայն եմ";
+    TrialConsentChecking =
+        "Сверяем ИНН с сервером Kvartik…",
+        "Checking the TIN with the Kvartik server…",
+        "ՀՎՀՀ-ն ստուգվում է Kvartik-ի սերվերում…";
+    /// На экране лицензии — что согласие на сверку дано. Шаблон: ՀՎՀՀ.
+    TrialConsentOn =
+        "Вы согласились сверять ИНН {} с сервером Kvartik для пробного периода.",
+        "You agreed to have the TIN {} checked with the Kvartik server for the trial.",
+        "Դուք համաձայնել եք, որ {} ՀՎՀՀ-ն փորձաշրջանի համար ստուգվի Kvartik-ի սերվերում։";
+    TrialConsentWithdraw = "Отозвать согласие", "Withdraw consent", "Հետ կանչել համաձայնությունը";
+    TrialConsentWithdrawn =
+        "Согласие отозвано, запись на сервере удалена.",
+        "Consent withdrawn; the record on the server is deleted.",
+        "Համաձայնությունը հետ է կանչված, սերվերի գրառումը ջնջված է։";
+    TrialConsentWithdrawnHere =
+        "Согласие отозвано на этом устройстве, но сервер не ответил: напишите продавцу, и он удалит запись.",
+        "Consent is withdrawn on this device, but the server didn't answer: write to the seller, and the seller will delete the record.",
+        "Համաձայնությունը հետ է կանչված այս սարքում, բայց սերվերը չպատասխանեց. գրեք վաճառողին, և նա կջնջի գրառումը։";
     LicenseKeyEnded =
         "Срок ключа кончился {}.",
         "The key expired on {}.",
@@ -4363,9 +4416,9 @@ strings! {
     /// сборка (`crates/sw/src/landing.rs`): новая редакция условий без новых
     /// слов здесь сайт не соберёт.
     BuyAccept =
-        "Принимаю условия лицензии Kvartik в редакции от 17.11.2026",
-        "I accept the Kvartik license terms in the edition of November 17, 2026",
-        "Ընդունում եմ Kvartik-ի լիցենզիայի պայմանները՝ 17.11.2026 խմբագրությամբ";
+        "Принимаю условия лицензии Kvartik в редакции от 18.11.2026",
+        "I accept the Kvartik license terms in the edition of November 18, 2026",
+        "Ընդունում եմ Kvartik-ի լիցենզիայի պայմանները՝ 18.11.2026 խմբագրությամբ";
     BuyWrite = "Написать письмо", "Write an email", "Գրել նամակ";
     /// Тема и текст письма по «Написать письмо» (адрес `mailto:`): строки,
     /// которые покупатель дополнит, и слова согласия (шаблон — `BuyAccept`).

@@ -64,10 +64,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Файлы настроек хостинга корня — `_headers` и функция сайта с её
+          # адресами (задача 106): ими `same.mjs` сверяет артефакт.
           sparse-checkout: |
             /tools/deploy/
             /crates/core/tests/rates/
-            /crates/app/public/root/_headers
+            /crates/app/public/root/_*
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
@@ -105,7 +107,7 @@ jobs:
 
       - name: Артефакт — это сайт
         if: steps.rates.outputs.same != '1'
-        run: node tools/deploy/same.mjs "$SITE_URL" site/dist crates/app/public/root/_headers
+        run: node tools/deploy/same.mjs "$SITE_URL" site/dist crates/app/public/root
 
       - if: steps.rates.outputs.same != '1'
         run: npm ci --ignore-scripts

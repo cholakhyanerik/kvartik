@@ -390,6 +390,49 @@ fn the_trial_starts_with_the_earlier_day() {
     assert!(!Access::new(&public(), [], None, trial_start(Some(device), Some(data))).issue(today));
 }
 
+/// День с сервера по ՀՎՀՀ (задача 106) — третьим днём тем же вызовом: браузер,
+/// открытый 14 ноября без данных, а на этом ՀՎՀՀ пробный период начали ещё
+/// 20 октября в другом, — и 15 ноября срок уже кончился. Поздний день сервера
+/// срок не продлевает.
+#[test]
+fn the_server_day_of_the_tin_counts_too() {
+    let device = day(2026, 11, 14);
+    let server = day(2026, 10, 20);
+    let start = trial_start(trial_start(Some(device), None), Some(server));
+    assert_eq!(start, Some(server));
+    assert!(!Access::new(&public(), [], None, start).issue(day(2026, 11, 15)));
+    let later = trial_start(trial_start(Some(device), Some(day(2026, 11, 1))), Some(day(2026, 11, 16)));
+    assert_eq!(later, Some(day(2026, 11, 1)));
+}
+
+/// Запрос — ՀՎՀՀ профиля, ответ — первый день: образец ответа функции сайта
+/// (`tests/trial/answer.json`, его же сверяет с функцией проверка сайта),
+/// новые поля пропускаются, а не тот ответ — `None`, а не день.
+#[test]
+fn the_server_answer_is_read() {
+    assert_eq!(trial_ask(&tin("07654321")), r#"{"tin":"07654321","consent":"2026-11-18"}"#);
+    assert_eq!(trial_withdraw(&tin("07654321")), r#"{"tin":"07654321","withdraw":true}"#);
+    assert!(Date::from_iso(TRIAL_CONSENT).is_some(), "версия согласия — день редакции политики");
+    assert_eq!(trial_answer(include_str!("../../tests/trial/answer.json")), Some(day(2026, 11, 18)));
+    assert_eq!(trial_answer(r#"{"first":"2026-10-20","seen":3}"#), Some(day(2026, 10, 20)));
+    let mut failures = Vec::new();
+    for wrong in [
+        "",
+        "<!doctype html>",
+        "{}",
+        r#"{"first":20261020}"#,
+        r#"{"first":"2026-02-30"}"#,
+        r#"{"first":"20.10.2026"}"#,
+        r#"{"first":"2026-10-09"}"#,
+        r#"{"error":"not configured"}"#,
+    ] {
+        if trial_answer(wrong).is_some() {
+            failures.push(wrong);
+        }
+    }
+    assert!(failures.is_empty(), "приняты не те ответы: {failures:?}");
+}
+
 /// После срока числа для расчёта открыты за кварталы, кончившиеся в срок, —
 /// и у пробного периода, и у ключа; пока срок идёт — за любой.
 #[test]

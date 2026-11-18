@@ -1,0 +1,31 @@
+# Настройки проекта Cloudflare Pages «kvartik» для функции сайта (задача 106,
+# `crates/app/public/root/_worker.js`). Файл с `pages_build_output_dir` —
+# правда настроек проекта (docs Cloudflare, Pages «Wrangler configuration»,
+# сверено 2026-11-18): что задано в панели и не перенесено сюда, при
+# выкладке пропадёт. До задачи 106 настроек функций у проекта не было.
+#
+# Берёт его `deploy.sh` явно (`--config`): CI зовёт wrangler из корня
+# репозитория, а сам он ищет файл в текущей папке (по исходникам wrangler
+# 4.149.0, `findWranglerConfig`).
+#
+# Секрет `TRIAL_KEY` (ключ HMAC номеров) сюда не пишется никогда: его ставит
+# человек командой `node tools/deploy/trial-key.mjs` в своём терминале —
+# отдельно для выкладки всем и для предпросмотров (Правило 13).
+
+name = "kvartik"
+# `deploy.sh` называет папку выкладки сам; это — папка по умолчанию.
+pages_build_output_dir = "../../crates/app/dist"
+# Дата не новее рантайма wrangler из замка (workerd 1.20261006.1): иначе
+# `wrangler pages dev` взял бы другую, а выкладка — эту.
+compatibility_date = "2026-10-06"
+
+# Базы созданы 2026-11-18 (коннектор Cloudflare, рядом с Ереваном — EEUR).
+[[d1_databases]]
+binding = "TRIALS"
+database_name = "kvartik-trial"
+database_id = "e9749ad8-fc64-447d-972d-122b3e6e7dad"
+
+[[env.preview.d1_databases]]
+binding = "TRIALS"
+database_name = "kvartik-trial-preview"
+database_id = "8ac07849-d28e-4b95-95a0-c54031ec0adc"

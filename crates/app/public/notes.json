@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.152",
+      "date": "2026-11-18",
+      "hy": [
+        "Փորձաշրջանն այլևս նորից չի սկսվում այլ դիտարկիչում կամ այլ սարքում. ձեր համաձայնությամբ Kvartik-ի սերվերը հիշում է դրա առաջին օրը պրոֆիլի ՀՎՀՀ-ի համար։ Համաձայնությունը խնդրվում է մեկ անգամ՝ հաշիվ թողարկելուց առաջ, և հետ է կանչվում «Լիցենզիա» էկրանում։",
+        "Թարմացվել են լիցենզիայի պայմաններն ու գաղտնիության քաղաքականությունը՝ 18.11.2026 խմբագրությամբ։"
+      ],
+      "ru": [
+        "Пробный период больше не начинается заново в другом браузере или на другом устройстве: с вашего согласия сервер Kvartik помнит его первый день на ИНН из профиля. Согласие спрашивается один раз перед выпуском счёта и отзывается на экране «Лицензия».",
+        "Обновлены условия лицензии и политика конфиденциальности: редакции от 18.11.2026."
+      ],
+      "en": [
+        "The trial no longer starts over in another browser or on another device: with your consent, the Kvartik server remembers its first day for the TIN in the profile. Consent is asked once before issuing an invoice and can be withdrawn on the License screen.",
+        "The license terms and the privacy policy are updated: editions of November 18, 2026."
+      ]
+    },
+    {
       "version": "0.0.151",
       "date": "2026-11-18",
       "hy": [
@@ -257,19 +273,6 @@
       ],
       "en": [
         "Nothing changed in the app: this version fixes one of the checks that run before every release."
-      ]
-    },
-    {
-      "version": "0.0.132",
-      "date": "2026-11-15",
-      "hy": [
-        "2048 կետից մեծ կողմով լոգոտիպը պրոֆիլի ձևն այժմ ինքն է փոքրացնում՝ մինչև 512 կետ, ինչպես ծանր ֆայլը. նախկինում այն PDF չէր մտնում։"
-      ],
-      "ru": [
-        "Логотип больше 2048 точек на сторону форма профиля теперь уменьшает сама — до 512 точек, как тяжёлый файл: раньше такой в PDF не попадал."
-      ],
-      "en": [
-        "The profile form now shrinks a logo larger than 2048 pixels on a side to 512 pixels by itself, as it does with a heavy file; before, such a logo didn't make it into the PDF."
       ]
     }
   ]

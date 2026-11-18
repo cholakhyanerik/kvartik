@@ -25,8 +25,11 @@ commit="$3"
 out="$(mktemp)"
 trap 'rm -f "$out"' EXIT
 
+# Настройки проекта — базы D1 функции сайта (задача 106) — из файла рядом:
+# wrangler ищет его в текущей папке, а CI зовёт этот скрипт из корня.
 WRANGLER_OUTPUT_FILE_PATH="$out" WRANGLER_SEND_METRICS=false WRANGLER_SEND_ERROR_REPORTS=false \
   "$(dirname "$0")/node_modules/.bin/wrangler" pages deploy "$dist" \
+  --config="$(dirname "$0")/wrangler.toml" \
   --project-name="$PAGES_PROJECT" --branch="$branch" \
   --commit-hash="$commit" --commit-dirty=true >&2
 url="$(jq -r 'select(.type == "pages-deploy-detailed") | .url' "$out")"

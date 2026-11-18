@@ -13,6 +13,9 @@
 // обновления сборка прошла бы зелёной, а экраны перестали бы открываться.
 //
 // Что проверяется, по порядку:
+// 0. Сервер пробного периода (задача 106): функция сайта `_worker.js`
+//    отвечает первым днём на ՀՎՀՀ тем видом, что читает ядро, хранит отпечаток,
+//    а не номер, и отказывает не тем запросам — в Node, без браузера.
 // 1. Часть не загрузилась — окно говорит словами и даёт «Отмену», а снятая
 //    блокировка открывает экран (CLAUDE.md, Правило 2, «Формы и действия по
 //    нажатию — частями wasm»). Лендинг (задача 34): страница каждого языка
@@ -57,6 +60,7 @@
 // - «Без сети» — выключенный сервер, а не эмуляция (Правило 2).
 
 import { parseArgs } from "node:util";
+import { pathToFileURL } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1125,9 +1129,104 @@ async function firstSteps(page) {
   checks.check("первые шаги: снова на главном экране", await page.waitFor(VISIBLE("#home .first-steps")));
 }
 
+// Сервер пробного периода (задача 106) — функция сайта `_worker.js` сборки,
+// исполненная здесь же, в Node, с базой-подменой: настоящую D1 и секрет
+// проверяет выкладка на предпросмотре (`tools/deploy/check.sh`), а здесь —
+// разбор запроса, отказы, заголовки, что хранится отпечаток, а не номер, и что
+// ответ — того вида, что читает ядро (образец `crates/core/tests/trial/
+// answer.json`, `license::trial_answer`). Копией `.mjs`: модуль ли файл `.js`
+// без `package.json`, Node решает по своей версии.
+async function trialServer() {
+  const copy = path.join(WORK, "trial-worker.mjs");
+  fs.copyFileSync(path.join(DIST, "_worker.js"), copy);
+  const worker = (await import(pathToFileURL(copy).href)).default;
+  // База-подмена: те же пять запросов, что шлёт функция, — по началу текста.
+  const rows = new Map();
+  const exec = (sql, args) => {
+    if (sql.startsWith("CREATE")) return { results: [] };
+    if (sql.startsWith("DELETE FROM trials WHERE first_day <")) {
+      for (const [mark, row] of rows) if (row.first < args[0]) rows.delete(mark);
+    } else if (sql.startsWith("DELETE FROM trials WHERE tin_mac")) {
+      rows.delete(args[0]);
+    } else if (sql.startsWith("INSERT")) {
+      const row = rows.get(args[0]);
+      if (row) row.consent = args[3];
+      else rows.set(args[0], { first: args[1], at: args[2], consent: args[3] });
+    } else if (sql.startsWith("SELECT")) {
+      const row = rows.get(args[0]);
+      return { results: row ? [{ first_day: row.first }] : [] };
+    } else {
+      throw new Error(`база-подмена не знает запроса ${sql}`);
+    }
+    return { results: [] };
+  };
+  const statement = (sql, args = []) => ({ bind: (...bound) => statement(sql, bound), run: async () => exec(sql, args), exec: () => exec(sql, args) });
+  const db = { prepare: (sql) => statement(sql), batch: async (list) => list.map((one) => one.exec()) };
+  const env = { TRIAL_KEY: "0".repeat(64), TRIALS: db };
+  const origin = "https://kvartik.example";
+  const ask = (body, headers = {}, to = env) => worker.fetch(new Request(`${origin}/api/trial`, {
+    method: "POST", body, headers: { "Sec-Fetch-Site": "same-origin", Origin: origin, ...headers },
+  }), to);
+  const tin = "07654321";
+  // Версия согласия — та, что шлёт окно (`license::TRIAL_CONSENT`): из исходника
+  // ядра, а не своей копией.
+  const consent = fs.readFileSync(path.join(REPO, "crates/core/src/license.rs"), "utf8")
+    .match(/pub const TRIAL_CONSENT: &str = "(\d{4}-\d{2}-\d{2})";/)?.[1];
+  const question = `{"tin":"${tin}","consent":"${consent}"}`;
+  const first = await ask(question);
+  const text = await first.text();
+  const sample = JSON.parse(fs.readFileSync(path.join(REPO, "crates/core/tests/trial/answer.json"), "utf8"));
+  const today = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  checks.check("сервер пробного периода: новый ՀՎՀՀ — сегодня по Еревану, ответ того вида, что образец ядра",
+    consent && first.status === 200 && text === JSON.stringify({ first: today })
+      && Object.keys(JSON.parse(text)).join() === Object.keys(sample).join(), `${first.status} ${text}`);
+  checks.check("сервер пробного периода: мимо кэша и со своими заголовками",
+    first.headers.get("Cache-Control") === "no-store" && first.headers.get("X-Content-Type-Options") === "nosniff"
+      && first.headers.get("Content-Type") === "application/json; charset=utf-8");
+  const [mark] = rows.keys();
+  checks.check("сервер пробного периода: хранится отпечаток, а не номер, и версия согласия",
+    rows.size === 1 && /^[0-9a-f]{64}$/.test(mark) && !mark.includes(tin) && rows.get(mark).consent === consent, mark);
+  // Тот же ՀՎՀՀ спустя время — его первый день, а не «сегодня».
+  rows.get(mark).first = "2026-10-20";
+  const again = await ask(question);
+  checks.check("сервер пробного периода: повтор — первый день на ՀՎՀՀ", (await again.text()) === `{"first":"2026-10-20"}`);
+  // Старше трёх лет — удаляется, и пробный период на ՀՎՀՀ начинается заново.
+  rows.get(mark).first = "2020-01-01";
+  const expired = await ask(question);
+  checks.check("сервер пробного периода: запись старше трёх лет удаляется", (await expired.text()) === JSON.stringify({ first: today }));
+  // Отзыв согласия — запись удалена.
+  const withdrawn = await ask(`{"tin":"${tin}","withdraw":true}`);
+  checks.check("сервер пробного периода: отзыв согласия удаляет запись",
+    withdrawn.status === 200 && (await withdrawn.text()) === `{"withdrawn":true}` && rows.size === 0);
+  const refusals = [
+    ["GET", await worker.fetch(new Request(`${origin}/api/trial`), env), 405],
+    ["чужая страница", await ask(question, { "Sec-Fetch-Site": "cross-site", Origin: "https://example.com" }), 403],
+    ["чужой Origin", await ask(question, { Origin: "https://example.com" }), 403],
+    ["без согласия", await ask(`{"tin":"${tin}"}`), 400],
+    ["не ՀՎՀՀ", await ask(`{"tin":"7654321","consent":"${consent}"}`), 400],
+    ["не JSON", await ask(`tin=${tin}`), 400],
+    ["большое тело", await ask(`{"tin":"${tin}","consent":"${consent}","x":"${"x".repeat(300)}"}`), 413],
+    ["другой адрес", await worker.fetch(new Request(`${origin}/api/other`, { method: "POST", body: "{}" }), env), 404],
+    ["без секрета", await ask(question, {}, { TRIALS: db }), 503],
+    ["без базы", await ask(question, {}, { TRIAL_KEY: env.TRIAL_KEY }), 503],
+  ];
+  const wrong = refusals.filter(([, got, code]) => got.status !== code)
+    .map(([name, got, code]) => `${name}: ${got.status}, а ждали ${code}`);
+  checks.check("сервер пробного периода: отказы", wrong.length === 0, wrong.join("; "));
+  // Функцию зовут только адреса `/api/*`: файлы сайта — мимо неё, бесплатно
+  // и с заголовками `_headers`. А дошёл до неё другой адрес — она отдаёт его
+  // файлом (`env.ASSETS`), а не своим 404: страница сайта не сломается.
+  checks.check("сервер пробного периода: функцию зовут только адреса /api/*",
+    fs.readFileSync(path.join(DIST, "_routes.json"), "utf8").trim() === `{"version":1,"include":["/api/*"],"exclude":[]}`);
+  const assets = { fetch: async (request) => new Response(`файл ${new URL(request.url).pathname}`) };
+  const page = await worker.fetch(new Request(`${origin}/app/`), { ...env, ASSETS: assets });
+  checks.check("сервер пробного периода: не /api/ — файлом сайта", (await page.text()) === "файл /app/");
+}
+
 async function main() {
   const parts = fs.readdirSync(path.join(DIST, "app")).filter((n) => /^split_\w+-\w+\.wasm$/.test(n));
   checks.check("в сборке есть части wasm", parts.length > 0, parts.join(", "));
+  await trialServer();
   // Программа выкладки пишет из ответа ЦБ тот самый файл, который читают
   // тест ядра и программа: разойдись они — курсы на сайте окно отвергло бы.
   checks.check("курсы ЦБ: rates.mjs пишет из образца ответа ЦБ файл, который читает тест ядра",

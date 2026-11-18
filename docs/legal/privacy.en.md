@@ -1,15 +1,23 @@
 # Kvartik Privacy Policy
 
+> **Редакция от 18.11.2026** (задача 106): перевод новых «Коротко», п. 2, 3
+> и 6 и даты русского текста той же редакции; утвердил человек 2026-11-18
+> вместе с русским текстом. Прежняя редакция — от 09.11.2026
+> ([privacy.2026-11-09.en.md](privacy.2026-11-09.en.md), на сайте —
+> /en/privacy/2026-11-09/), по своему адресу.
+>
 > Перевод [privacy.ru.md](privacy.ru.md), утверждённого 2026-11-06. Блоки
 > «Для проверки» — только в русском тексте. Квадратные скобки заполнены
 > 2026-11-09 вместе с русским текстом.
 
-**Edition of November 9, 2026.**
+**Edition of November 18, 2026.**
 
 ## In short
 
-Your data does not leave your device. Kvartik has no server with your
-data, no accounts, no analytics, no counters and no ads.
+Your data does not leave your device, except the TIN (ՀՎՀՀ) of your IE if
+you agreed to have it checked while you have no key: by it the Kvartik
+server remembers the day your trial period started (section 2). Kvartik has
+no accounts, no analytics, no counters and no ads.
 
 ## 1. Who is responsible
 
@@ -21,14 +29,42 @@ Individual entrepreneur Erik Cholakhyan (TIN (ՀՎՀՀ) 58111423, Yerevan) is re
 The IE's details, clients, invoices and acts, income and expenses, files
 attached to entries and the license key are kept only in the browser on
 your device. The app sends them to no one, neither to us nor to third
-parties. This rests on more than a promise: the site's security settings
-forbid the app to contact any address other than kvartik.com.
+parties, except the TIN for the trial period (below). This rests on more
+than a promise: the site's security settings forbid the app to contact any
+address other than kvartik.com.
+
+The trial period is also counted by the TIN (License Terms, section 3),
+with your consent. While the profile has a TIN and there is no key for it,
+the app asks for consent once, before the first invoice or act is issued
+and on the license screen, with words about the same things as here and an
+“I agree” button. Without consent the TIN goes nowhere, but invoices and
+acts can't be issued during the trial period; without a TIN in the profile
+or with a key no consent is needed. Consent is given by the IE with this
+TIN or by someone the IE has asked to.
+
+With consent, the app, when it opens but no more than once an hour, sends
+the TIN to kvartik.com, and the Kvartik server answers from which day the
+trial period has been running for it; the first such question records that
+day. This way the trial period doesn't start over in another browser, on
+another device or after the data is cleared. The server keeps not the TIN
+itself but its fingerprint (HMAC-SHA256 with the server's secret key:
+without the key the number can't be learned from it), the first day of the
+trial period, the time of the first question and the version of the
+consent words, with no IP address, nothing else about you and no data from
+the app, and deletes them 3 years after the first day of the trial period.
+Someone who knows your TIN can ask the server the same way and learn whether
+a trial period was started for this TIN and when. You can withdraw consent
+on the license screen (“Withdraw consent”) or by writing to the seller: the
+record on the server is deleted (on a letter,
+within 10 business days at the latest), and issuing during the trial period
+asks for consent again.
 
 The app also keeps its settings on the device: the language, the day the
 trial period started, the day of the last backup, a check value of the
 backup password (not the password itself), the auto-backup folder and key
-if you turned it on, the list of your IEs if there are several, and which
-version you have already seen. What you entered in the calculator on the
+if you turned it on, the list of your IEs if there are several, which
+version you have already seen, and, with a TIN, when the app asked the
+server about it and what the server answered. What you entered in the calculator on the
 site also stays in your browser, so that the app can offer to take it into
 the profile. All of this is erased together with the site data in the
 browser settings.
@@ -39,7 +75,8 @@ The site runs on Cloudflare (Cloudflare, Inc., USA). When you open the
 site, or the app checks for a new version, the browser, as with any site,
 passes to Cloudflare your IP address and the technical details of the
 request: which page or file it asks for and which browser you have. Your
-data from the app is not in these requests. Calendar apps request the site
+data from the app is not in these requests, except the TIN in the question
+about the trial period (section 2). Calendar apps request the site
 the same way if you subscribed to the deadlines calendar.
 
 Cloudflare keeps request records for 31 days, and the site owner can see
@@ -83,7 +120,8 @@ send your TIN (ՀՎՀՀ) and your acceptance of the terms by email.
 You may ask the seller which of your data they hold, why and on what basis
 they keep it and to whom they may pass it, and demand that data which is
 incomplete, inaccurate, outdated or unnecessary for these purposes be
-corrected, blocked or deleted. The seller tells you which data they hold
+corrected, blocked or deleted. The seller removes the trial period record
+for your TIN on the same kind of request. The seller tells you which data they hold
 within 5 days of a written request, and corrects or deletes at once or,
 if that is impossible, within 3 business days. A refusal is given in
 writing, with the reason, within 5 days. Write from the email you bought
