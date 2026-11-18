@@ -663,6 +663,54 @@ pub fn painted(text: &str) -> Option<(Scheme, Vec<(&str, &str)>)> {
     Some((painted?, colors))
 }
 
+/// Палитра стилем — для первого кадра, до wasm (задача 89). Окно ставит
+/// палитру на `<html>` при запуске wasm, а страницу браузер рисует раньше:
+/// у кого свой фон тёмный, а устройство в светлой теме, каждое открытие
+/// начиналось с кремового кадра. Поэтому окно держит копию палитры этим
+/// стилем, а service worker вписывает в страницу ссылку на неё
+/// (`crates/app/public/sw.js`).
+///
+/// `html:root` сильнее `:root` обеих тем `tokens.css` — и тёмной тоже,
+/// в каком бы порядке ни легли стили. `color-scheme` — тот же, что окно
+/// ставит на `<html>`: полосы прокрутки и поля первого кадра — в тон
+/// палитре.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Sheet {
+    /// Сам стиль: одно правило, переменные палитры и `color-scheme`.
+    pub css: String,
+    /// Тема палитры — service worker ставит её и мета-тегу страницы.
+    pub scheme: Scheme,
+    /// Отметка стиля: по ней окно узнаёт, та ли копия у страницы, не читая
+    /// её. FNV-1a текста — 16 шестнадцатеричных знаков: это не защита,
+    /// а сверка своей же записи.
+    pub mark: String,
+}
+
+impl Sheet {
+    /// Стиль палитры. Переменные — только палитры, как у [`painted`]: имя
+    /// со скобкой или точкой с запятой сломало бы правило.
+    pub fn of(paint: &Paint) -> Self {
+        let mut css = format!("html:root{{color-scheme:{};", paint.scheme.code());
+        for (name, color) in paint.colors.iter().filter(|&(name, _)| is_token(name)) {
+            css.push_str(name);
+            css.push(':');
+            css.push_str(&color.hex());
+            css.push(';');
+        }
+        css.push_str("}\n");
+        let mark = css
+            .bytes()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            });
+        Self {
+            css,
+            scheme: paint.scheme,
+            mark: format!("{mark:016x}"),
+        }
+    }
+}
+
 /// Имя переменной палитры: `--`, строчные латинские буквы, цифры и дефисы —
 /// и не бумага.
 fn is_token(name: &str) -> bool {
@@ -977,5 +1025,37 @@ mod tests {
             assert_eq!(Record::parse(broken), None, "{broken:?}");
             assert_eq!(painted(broken), None, "{broken:?}");
         }
+    }
+
+    /// Стиль первого кадра (задача 89) — та же палитра, что окно ставит на
+    /// `<html>`: каждая переменная и `color-scheme`, одним правилом
+    /// `html:root`, а чужое имя в правило не попадает. Отметка — от текста:
+    /// та же палитра — та же отметка, другой цвет — другая.
+    #[test]
+    fn the_sheet_is_the_palette() {
+        let (light, dark) = themes();
+        let mut choice = Choice::new(Scheme::Light);
+        choice.set(Pick::Background, Some(rgb(0x0b1d33)));
+        let mut painted = paint(&choice, &light, &dark).expect("выбран фон");
+        let sheet = Sheet::of(&painted);
+        assert_eq!(sheet.scheme, Scheme::Dark);
+        assert!(sheet.css.starts_with("html:root{color-scheme:dark;--"), "{}", sheet.css);
+        assert!(sheet.css.ends_with(";}\n") && sheet.css.matches('{').count() == 1, "{}", sheet.css);
+        assert!(sheet.css.contains("--surface:#0b1d33;"), "{}", sheet.css);
+        for (name, color) in painted.colors.iter() {
+            assert!(sheet.css.contains(&format!("{name}:{};", color.hex())), "{name}");
+        }
+        assert_eq!(sheet.mark.len(), 16);
+        assert!(sheet.mark.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)), "{}", sheet.mark);
+        assert_eq!(Sheet::of(&painted), sheet);
+
+        painted.colors.set("--x}body{color:red", rgb(0x000000));
+        painted.colors.set("--fill-paper", rgb(0x000000));
+        assert_eq!(Sheet::of(&painted), sheet, "чужое имя и бумага в стиль не идут");
+
+        painted.colors.set("--surface", rgb(0x0b1d34));
+        let other = Sheet::of(&painted);
+        assert!(other.css.contains("--surface:#0b1d34;"));
+        assert_ne!(other.mark, sheet.mark);
     }
 }

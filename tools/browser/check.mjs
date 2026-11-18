@@ -214,6 +214,13 @@ async function licenses(page, when) {
 /// встаёт на страницу сразу — его ставит часть настроек, — а после
 /// перезагрузки его ставит главный wasm из записи устройства, ещё до части.
 /// «Вернуть цвета программы» снимает его со страницы и с устройства.
+///
+/// С 0.0.156 (задача 89) свой фон — уже в первом кадре, до wasm: копию
+/// палитры окно кладёт в кэш, а service worker вписывает в страницу ссылку
+/// на неё и тему её мета-тегу. Первый кадр меряет `firstFrame`: окно ещё не
+/// поставило на `<html>` ни одного свойства, а фон уже свой. Ссылку снимает
+/// часть настроек, когда загрузились части. Без своих цветов копии нет,
+/// и первый кадр — в цветах программы.
 async function settings(page) {
   const SURFACE = `getComputedStyle(document.documentElement).getPropertyValue("--surface").trim()`;
   const SWATCH = `return document.querySelector("#settings input[type=color]")?.value === ${SURFACE} ? true : null;`;
@@ -229,15 +236,51 @@ async function settings(page) {
     field.dispatchEvent(new Event("input", { bubbles: true }));
     return ${SURFACE} === "#0b1d33" ? true : null;`);
   checks.check("настройки: свой фон встал на страницу", picked);
-  await page.reload();
-  checks.check("настройки: свой фон — и после перезагрузки",
-    (await page.waitFor(WORKING)) && (await page.eval(`return ${SURFACE};`)) === "#0b1d33");
+  const copied = await page.waitFor(`const look = await caches.match("look.css", { cacheName: "kvartik.look" });
+    return look && (await look.text()).includes("--surface:#0b1d33;") ? look.headers.get("Kvartik-Mark") : null;`);
+  checks.check("настройки: копия своих цветов — в кэше", copied);
+  const first = await firstFrame(page);
+  checks.check("настройки: свой фон — с первого кадра, до wasm",
+    first && first.background === "rgb(11, 29, 51)" && first.inline === 0 && first.link === copied
+      && first.scheme === "dark", JSON.stringify(first));
+  checks.check("настройки: свой фон — и после перезагрузки, а ссылку на копию окно сняло",
+    (await page.waitFor(WORKING)) && (await page.waitFor(`return ${SURFACE} === "#0b1d33"
+      && !document.querySelector("link[data-look]") ? true : null;`)));
   await go(page, "#/settings");
   const reset = await page.waitFor(`return ${BUTTON("#settings", s("ColorsResetAll"))} ? true : null;`);
   checks.check("настройки: «Вернуть цвета программы» есть", reset && await press(page, "#settings", s("ColorsResetAll")));
   checks.check("настройки: цвета программы вернулись", await page.waitFor(`
     return document.documentElement.style.getPropertyValue("--surface") === ""
       && localStorage.getItem("kvartik.colors") === null ? true : null;`));
+  checks.check("настройки: копии своих цветов больше нет",
+    await page.waitFor(`return (await caches.has("kvartik.look")) ? null : true;`));
+  const plain = await firstFrame(page);
+  const background = (await page.waitFor(WORKING))
+    && await page.eval(`return getComputedStyle(document.documentElement).backgroundColor;`);
+  checks.check("настройки: без своих цветов первый кадр — в цветах программы",
+    plain && plain.link === null && plain.scheme === "light dark" && plain.background === background,
+    `${JSON.stringify(plain)}, после запуска — ${background}`);
+}
+
+/// Первый кадр после перезагрузки (задача 89) — в `DOMContentLoaded`, когда
+/// wasm ещё не встал: фон `<html>`, сколько свойств окно уже поставило ему
+/// (0 — ни одного), отметка ссылки на копию своих цветов и тема мета-тега.
+/// Стили в `<head>` держат первую отрисовку, а модуль клея — и
+/// `DOMContentLoaded`: фон здесь — тот, что в первом кадре. Скрипт ставит
+/// протокол DevTools, и CSP страницы его не касается.
+async function firstFrame(page) {
+  const { identifier } = await page.send("Page.addScriptToEvaluateOnNewDocument", {
+    source: `addEventListener("DOMContentLoaded", () => {
+      const html = document.documentElement;
+      window.firstFrame = { background: getComputedStyle(html).backgroundColor, inline: html.style.length,
+        link: document.querySelector("link[data-look]")?.dataset.look ?? null,
+        scheme: document.querySelector('meta[name="color-scheme"]')?.content ?? null };
+    }, { once: true });`,
+  });
+  await page.reload();
+  const got = await page.waitFor(`return window.firstFrame ?? null;`);
+  await page.send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  return got;
 }
 
 /// Главный экран: кнопка «Установить» есть всегда, пока программа не
@@ -1073,10 +1116,11 @@ const SEEN = (version) => `localStorage.setItem("kvartik.seen_version", ${JSON.s
 /// больше не показывает. Включение здесь доказывает кэш, а не метка на
 /// странице: при заходе на страницу она могла бы встать уже на новую сборку.
 /// Ждётся именно кэш новой сборки: до того, как браузер нашёл её, единственный
-/// кэш — прежний.
+/// кэш — прежний. Кэш копии своих цветов (`kvartik.look`, задача 89) — не
+/// сборки, и новая версия его не трогает.
 async function switched(page, next, running, when) {
   const name = `kvartik-${next.build}`;
-  const cache = await page.waitFor(`const n = await caches.keys();
+  const cache = await page.waitFor(`const n = (await caches.keys()).filter((c) => c.startsWith("kvartik-"));
     return n.length === 1 && n[0] === ${JSON.stringify(name)} ? n[0] : null;`, 30000);
   checks.check(`новая версия: ${when} — новая сборка, прежний кэш удалён`, cache === name, cache);
   const dialog = await page.waitFor(`const d = document.querySelector("[role=dialog]");

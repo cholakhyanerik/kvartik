@@ -17,15 +17,24 @@
 //! без расчёта: разбор `tokens.css` и расчёт — в части настроек, вместе с её
 //! экраном (Правило 1). После обновления программы цвета `tokens.css` могли
 //! смениться, поэтому части, загрузившись, пересчитывают палитру по выбору
-//! ([`refresh`]). Пока wasm не запустился, страница — в цветах программы:
-//! их рисует CSS до него.
+//! ([`refresh`]).
+//!
+//! До запуска wasm палитру ставит стиль-копия, который service worker
+//! вписывает в страницу (задача 89, `platform::look`): иначе первый кадр был
+//! бы в цветах программы. Копия идёт вслед за записью устройства ([`copy`]),
+//! а читается при открытии одна запись: копия, разошедшаяся с ней — запись
+//! в кэш не удалась, — видна по отметке ссылки, и [`refresh`] её
+//! переписывает. Первый заход и браузер без service worker — в цветах
+//! программы, пока wasm не запустился.
 //!
 //! Кружок — атрибутом `data-cursor` на `<html>` (`platform::look`), а не
 //! разметкой: кружок с условием в корне окна стоил главному wasm лишнего
 //! кода больше, чем атрибут (замер задачи 88).
 
+use std::cell::RefCell;
+
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
-use kvartik_core::theme::{self, Choice, Low, Pair, Palette, Pick, Record, Rgb};
+use kvartik_core::theme::{self, Choice, Low, Paint, Pair, Palette, Pick, Record, Rgb, Sheet};
 use leptos::prelude::*;
 
 use crate::platform::look;
@@ -53,7 +62,9 @@ impl Look {
     /// готовой палитрой из записи устройства (`theme::painted`: главному wasm
     /// не нужен ни разбор выбора, ни расчёт — Правило 1); кружок — каким его
     /// оставили. Запись не читается — окно в цветах программы, а экран
-    /// настроек начнёт с них.
+    /// настроек начнёт с них. Ссылку на копию палитры, которую вписал service
+    /// worker, снимает часть настроек ([`refresh`]): палитра на `<html>`
+    /// сильнее любого стиля, и до неё ссылка ничего не меняет.
     pub fn start() -> Self {
         let device = Device::new();
         let record = device.colors();
@@ -107,13 +118,14 @@ pub fn SettingsScreen(lang: ReadSignal<Lang>, look: Look, backups: Backups, rout
     }
 }
 
-/// Пересчитать свои цвета после открытия — частью настроек ([`Job::Refresh`]).
-/// Зовёт загрузка частей (`split::preload`), последней: часть уже в памяти.
-/// У кого своих цветов нет, её не зовут.
+/// Пересчитать свои цвета после открытия — частью настроек ([`Job::Refresh`]),
+/// и копию для первого кадра — вслед за ними. Зовёт загрузка частей
+/// (`split::preload`), последней: часть уже в памяти. Зовут её у всех: есть ли
+/// свои цвета и пришла ли страница с копией, часть узнаёт сама: проверка
+/// копии здесь стоила главному wasm байтов (замер задачи 89, CLAUDE.md,
+/// Правило 6), а у кого нет ни того, ни другого, часть ничего не делает.
 pub async fn refresh() {
-    if Device::new().colors().is_some() {
-        let _ = settings_part(Job::Refresh).await;
-    }
+    let _ = settings_part(Job::Refresh).await;
 }
 
 /// Что делает часть настроек.
@@ -121,7 +133,8 @@ pub async fn refresh() {
 pub(super) enum Job {
     /// Нарисовать экран.
     Page(ReadSignal<Lang>, Look),
-    /// Пересчитать палитру записи по выбору (`repaint`).
+    /// Пересчитать палитру записи по выбору (`repaint`) и сверить с ней
+    /// копию, с которой пришла страница.
     Refresh,
 }
 
@@ -133,11 +146,68 @@ split! {
         match job {
             Job::Page(lang, look) => view! { <SettingsPage lang look /> }.into_any(),
             Job::Refresh => {
-                let (light, dark) = themes();
-                repaint(&light, &dark);
+                let page = look::take_copy();
+                if page.is_some() || Device::new().colors().is_some() {
+                    let (light, dark) = themes();
+                    let paint = repaint(&light, &dark);
+                    // Что в кэше, говорит отметка ссылки, с которой пришла
+                    // страница, — если экран настроек не записал копию раньше.
+                    COPIER.with_borrow_mut(|copier| {
+                        copier.known.get_or_insert(page);
+                    });
+                    copy(paint.as_ref());
+                }
                 ().into_any()
             }
         }
+    }
+}
+
+/// Копия палитры для первого кадра (задача 89): что в кэше и что ещё
+/// записать. Запись в кэш — не мгновенна, а выбор цвета зовёт [`copy`] на
+/// каждое движение по полю: пишется одна копия за раз, а ждёт — только
+/// последняя.
+#[derive(Default)]
+struct Copier {
+    /// Отметка копии, которая в кэше или уже ушла туда; `Some(None)` — копии
+    /// нет, `None` — неизвестно.
+    known: Option<Option<String>>,
+    /// Что записать следующим: `Some(None)` — убрать копию.
+    next: Option<Option<Sheet>>,
+    /// Идёт ли запись.
+    busy: bool,
+}
+
+thread_local! {
+    static COPIER: RefCell<Copier> = RefCell::default();
+}
+
+/// Копию палитры — вслед за записью устройства: палитра — стилем в кэш,
+/// `None` — убрать копию. Та, что уже там, второй раз не пишется.
+fn copy(paint: Option<&Paint>) {
+    let sheet = paint.map(Sheet::of);
+    let mark = sheet.as_ref().map(|sheet| sheet.mark.clone());
+    let start = COPIER.with_borrow_mut(|copier| {
+        if copier.known.as_ref() == Some(&mark) {
+            return false;
+        }
+        copier.known = Some(mark);
+        copier.next = Some(sheet);
+        !std::mem::replace(&mut copier.busy, true)
+    });
+    if start {
+        leptos::task::spawn_local(async {
+            while let Some(next) = COPIER.with_borrow_mut(|copier| {
+                let next = copier.next.take();
+                copier.busy = next.is_some();
+                next
+            }) {
+                match next {
+                    Some(sheet) => look::keep_copy(&sheet).await,
+                    None => look::drop_copy().await,
+                }
+            }
+        });
     }
 }
 
@@ -148,25 +218,25 @@ fn themes() -> (Palette, Palette) {
 
 /// Палитра записи — заново по выбору: у новой версии программы цвета
 /// `tokens.css` могли смениться, а в записи — посчитанные прежней.
-/// Совпало — ничего не пишется.
-fn repaint(light: &Palette, dark: &Palette) {
+/// Совпало — ничего не пишется. Вернёт палитру записи; `None` — своих цветов
+/// нет или запись не читается.
+fn repaint(light: &Palette, dark: &Palette) -> Option<Paint> {
     let device = Device::new();
-    let Some(record) = device.colors().and_then(|text| Record::parse(&text)) else {
-        return;
-    };
-    let Some(paint) = theme::paint(&record.choice, light, dark) else {
-        return;
-    };
+    let record = device.colors().and_then(|text| Record::parse(&text))?;
+    let paint = theme::paint(&record.choice, light, dark)?;
     if paint != record.paint {
         look::paint(Some(&paint));
-        device.set_colors(
+        if device.set_colors(
             &Record {
                 choice: record.choice,
-                paint,
+                paint: paint.clone(),
             }
             .to_text(),
-        );
+        ) {
+            copy(Some(&paint));
+        }
     }
+    Some(paint)
 }
 
 /// Цвета под названием в строке — по паре, которая читается плохо.
@@ -222,24 +292,24 @@ fn SettingsPage(lang: ReadSignal<Lang>, look: Look) -> impl IntoView {
     );
     let painted = RwSignal::new(record.map(|record| record.paint));
     // Выбор сменился — палитра на страницу сразу, и на устройство: окно
-    // перекрашивается, пока человек ведёт по выбору цвета.
+    // перекрашивается, пока человек ведёт по выбору цвета. Копия первого
+    // кадра — только вслед за записью: иначе она разошлась бы с ней.
     let apply = move |next: Choice| {
         let paint = themes.with_value(|(light, dark)| theme::paint(&next, light, dark));
         look::paint(paint.as_ref());
         let device = Device::new();
-        match &paint {
-            Some(paint) => {
-                device.set_colors(
-                    &Record {
-                        choice: next,
-                        paint: paint.clone(),
-                    }
-                    .to_text(),
-                );
-            }
-            None => {
-                device.clear_colors();
-            }
+        let saved = match &paint {
+            Some(paint) => device.set_colors(
+                &Record {
+                    choice: next,
+                    paint: paint.clone(),
+                }
+                .to_text(),
+            ),
+            None => device.clear_colors(),
+        };
+        if saved {
+            copy(paint.as_ref());
         }
         choice.set(next);
         painted.set(paint);

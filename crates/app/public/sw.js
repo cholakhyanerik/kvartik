@@ -36,6 +36,25 @@ const CACHE = PREFIX + BUILD;
 // с переадресацией браузер на переход по странице не принимает.
 const SHELL = "./";
 
+// Свои цвета с первого кадра (задача 89). Палитру человека окно ставит на
+// <html> при запуске wasm, а страницу браузер рисует раньше — в цветах
+// программы и темы устройства. Поэтому окно кладёт копию палитры стилем
+// в кэш LOOK (crates/app/src/platform/look.rs), а страницу программы этот
+// файл отдаёт со ссылкой на неё: стиль в <head> держит первую отрисовку,
+// а приходит отсюда, из кэша, без круга сети. Своего скрипта в странице нет
+// — встроенный CSP не пускает. Окно, встав, ставит палитру само, а ссылку
+// снимает его часть настроек.
+//
+// Решений здесь по-прежнему нет: что в копии, решает окно, а здесь — только
+// вписать её. Переписанная страница существует лишь на пути к вкладке:
+// в кэше лежат байты сборки, их сверяет установка (LINKED), и проверка
+// выкладки берёт страницу с сервера, а не отсюда. LOOK — не кэш сборки: имя
+// не начинается с PREFIX, и новая версия его не удаляет.
+const LOOK = "kvartik.look";
+const SHEET = "look.css";
+const SHEET_PATH = new URL(SHEET, self.location).pathname;
+const COLOR_SCHEME = /<meta\b[^>]*?\bname=(?:"color-scheme"|color-scheme(?=[\s>\/]))[^>]*>/;
+
 self.addEventListener("install", (event) => {
   event.waitUntil(install());
 });
@@ -107,7 +126,12 @@ self.addEventListener("message", (event) => {
 // в IndexedDB, а не в запросах.
 self.addEventListener("fetch", (event) => {
   const request = event.request;
-  if (request.method !== "GET" || new URL(request.url).origin !== self.location.origin) {
+  const url = new URL(request.url);
+  if (request.method !== "GET" || url.origin !== self.location.origin) {
+    return;
+  }
+  if (url.pathname === SHEET_PATH) {
+    event.respondWith(sheet());
     return;
   }
   const navigate = request.mode === "navigate";
@@ -115,15 +139,56 @@ self.addEventListener("fetch", (event) => {
     caches.open(CACHE).then(async (cache) => {
       const hit = await cache.match(request, { ignoreSearch: navigate });
       if (hit) {
-        return hit;
+        return navigate ? dressed(hit) : hit;
       }
       if (navigate) {
         const shell = await cache.match(SHELL);
         if (shell) {
-          return shell;
+          return dressed(shell);
         }
       }
       return fetch(request);
     }),
   );
 });
+
+// Страница — со ссылкой на копию палитры, если она есть, и с её темой
+// у мета-тега color-scheme: полосы прокрутки первого кадра — тоже в тон.
+// Копию ищет caches.match с cacheName: caches.open завёл бы пустой кэш
+// у каждого, у кого своих цветов нет. Тема и отметка — заголовками копии,
+// и вписываются они, только если это они: в разметку не попадёт ничего,
+// кроме слова темы и шестнадцатеричной отметки. Нет копии, не та она или
+// это не страница — ответ кэша как есть.
+async function dressed(page) {
+  const look = await caches.match(SHEET, { cacheName: LOOK });
+  const scheme = look ? look.headers.get("Kvartik-Scheme") : null;
+  const mark = look ? look.headers.get("Kvartik-Mark") : null;
+  const html = (page.headers.get("Content-Type") || "").startsWith("text/html");
+  if (!html || !/^(light|dark)$/.test(scheme || "") || !/^[0-9a-f]{16}$/.test(mark || "")) {
+    return page;
+  }
+  const text = await page.clone().text();
+  // Конец <head> — или начало <body>: выпускная сборка сжимает разметку
+  // (Trunk, minify-html), и закрывающий тег мог бы и пропасть.
+  const head = text.search(/<\/head>|<body[\s>]/);
+  if (head < 0) {
+    return page;
+  }
+  const link = `<link rel="stylesheet" href="${SHEET}" data-look="${mark}">`;
+  // Мета-тег — заменой целиком: сжатая разметка пишет его по-своему
+  // (`<meta content="light dark" name=color-scheme>`).
+  const body = text.slice(0, head).replace(COLOR_SCHEME, `<meta name="color-scheme" content="${scheme}">`)
+    + link + text.slice(head);
+  // Заголовки — страницы, и CSP с ними; длины и сжатия у нового тела нет.
+  const headers = new Headers(page.headers);
+  headers.delete("Content-Length");
+  headers.delete("Content-Encoding");
+  return new Response(body, { status: page.status, statusText: page.statusText, headers });
+}
+
+// Копия палитры для ссылки. Её убрали, пока страница шла, — пустой стиль:
+// страница рисуется в цветах программы, без ошибки в консоли.
+async function sheet() {
+  const look = await caches.match(SHEET, { cacheName: LOOK });
+  return look || new Response("", { headers: { "Content-Type": "text/css; charset=utf-8" } });
+}

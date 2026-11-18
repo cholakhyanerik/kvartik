@@ -50,6 +50,9 @@ web-sys = { version = "0.3.107", features = [
     "AesGcmParams",
     "Blob",
     "BlobPropertyBag",
+    # Копия своих цветов для первого кадра (задача 89, `platform::look`):
+    # окно кладёт стиль палитры в свой кэш, а отдаёт его service worker.
+    "Cache",
     "CacheQueryOptions",
     "CacheStorage",
     "console",
@@ -102,6 +105,7 @@ web-sys = { version = "0.3.107", features = [
     # `POST` — единственный запрос окна не за файлом.
     "RequestInit",
     "Response",
+    "ResponseInit",
     "ServiceWorker",
     "ServiceWorkerContainer",
     "ServiceWorkerRegistration",

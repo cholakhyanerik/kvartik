@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.156",
+      "date": "2026-11-19",
+      "hy": [
+        "Կարգավորումների ձեր գույներն այժմ երևում են բացման առաջին իսկ պահից. մուգ ֆոնով ծրագիրն այլևս չի սկսվում բաց գույնի կադրով։"
+      ],
+      "ru": [
+        "Свои цвета из настроек теперь видны с первого мгновения открытия: с тёмным фоном программа больше не начинается светлым кадром."
+      ],
+      "en": [
+        "Your own colors from Settings now show from the very first moment the app opens: with a dark background, it no longer starts with a light frame."
+      ]
+    },
+    {
       "version": "0.0.155",
       "date": "2026-11-18",
       "hy": [
@@ -260,19 +273,6 @@
       ],
       "en": [
         "Nothing changed in the app: this version fixes one of the checks that run before every release."
-      ]
-    },
-    {
-      "version": "0.0.136",
-      "date": "2026-11-16",
-      "hy": [
-        "«ԱՁ-ները ծրագրում» էկրանին այժմ ամփոփում կա. յուրաքանչյուր ԱՁ-ի մոտակա ժամկետը, նախորդ եռամսյակի հարկը կամ «հաշվարկը ներկայացված է», և տարեկան վճարները։ Այն բաց է փորձաշրջանում և «Pro» բանալիով։"
-      ],
-      "ru": [
-        "На экране «ИП в программе» — сводка: у каждого ИП ближайший срок, налог прошлого квартала или «расчёт подан» и годовые платежи. Она открыта в пробный период и с ключом «Pro»."
-      ],
-      "en": [
-        "The Entrepreneurs in the app screen now has a summary: each entrepreneur's nearest deadline, last quarter's tax or “return filed”, and annual payments. It's open during the trial and with a “Pro” key."
       ]
     }
   ]
