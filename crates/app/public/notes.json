@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.155",
+      "date": "2026-11-18",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել. ուղղվել է այն ստուգումը, որն այն անցնում է թողարկումից առաջ։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось: поправлена проверка, которую она проходит перед выпуском."
+      ],
+      "en": [
+        "Nothing changed in the app: a check it goes through before each release was fixed."
+      ]
+    },
+    {
       "version": "0.0.154",
       "date": "2026-11-18",
       "hy": [
@@ -260,19 +273,6 @@
       ],
       "en": [
         "The Entrepreneurs in the app screen now has a summary: each entrepreneur's nearest deadline, last quarter's tax or “return filed”, and annual payments. It's open during the trial and with a “Pro” key."
-      ]
-    },
-    {
-      "version": "0.0.135",
-      "date": "2026-11-16",
-      "hy": [
-        "Մեկ ԱՁ-ի բանալիներն այժմ նույնպես առավելագույնը հարյուր են, ինչպես «Pro» բանալիները. հազարավոր կեղծ բանալիներով պատճենը ծրագիրն այլևս չի վերականգնում՝ դրանց ստորագրությունների ստուգումն էջը կդանդաղեցներ։"
-      ],
-      "ru": [
-        "Ключей у одного ИП теперь не больше ста, как и ключей «Pro»: копию с тысячами поддельных ключей программа не кладёт — проверка их подписей держала бы страницу."
-      ],
-      "en": [
-        "Like Pro keys, an entrepreneur's keys are now capped at a hundred: the app won't restore a backup with thousands of fake keys, as checking their signatures would freeze the page."
       ]
     }
   ]

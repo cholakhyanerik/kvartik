@@ -1152,6 +1152,11 @@ async fn a_pro_key_goes_to_the_office() {
     if !wait_for(&host, &plan_until(lang, Key::PlanPro, until)).await {
         wrong.push("срок — не ключа Pro".to_owned());
     }
+    // Слова о вводе и срок встают раньше карточки ключа: её окно рисует,
+    // когда части перечитают ключи конторы (`Licenses::load`), — в CI
+    // Firefox карточки ещё не было (2026-11-18). Ждать её, а не читать сразу.
+    let facts = [fill(t(lang, Key::LicenseSeats), &["3"]), t(lang, Key::LicenseForOffice).to_owned()];
+    wait_until(|| facts.iter().all(|fact| license_text(&host).contains(fact.as_str()))).await;
     let screen = license_text(&host);
     let mismatch = fill(t(lang, Key::LicenseOtherTin), &["07654321", TIN]);
     for (what, found) in [
@@ -1163,7 +1168,7 @@ async fn a_pro_key_goes_to_the_office() {
             wrong.push(format!("у ключа Pro — {what}"));
         }
     }
-    for fact in [fill(t(lang, Key::LicenseSeats), &["3"]), t(lang, Key::LicenseForOffice).to_owned()] {
+    for fact in facts {
         if !screen.contains(&fact) {
             wrong.push(format!("у введённого ключа Pro нет «{fact}»"));
         }
@@ -1178,12 +1183,18 @@ async fn a_pro_key_goes_to_the_office() {
     if !enter_key(&host, lang, &gift) || !wait_for(&host, &gift_entered).await {
         wrong.push(format!("ключ Pro без ИНН не введён: «{}»", license_text(&host)));
     }
+    let hundred = fill(t(lang, Key::LicenseSeats), &["100"]);
+    wait_until(|| {
+        let screen = license_text(&host);
+        screen.contains(t(lang, Key::LicenseKeyNoTin)) && screen.contains(&hundred)
+    })
+    .await;
     let screen = license_text(&host);
     let zeros = fill(t(lang, Key::TinShort), &[license::NO_TIN]);
     if !screen.contains(t(lang, Key::LicenseKeyNoTin)) || screen.contains(&zeros) {
         wrong.push(format!("у ключа без ИНН нет «{}» или есть «{zeros}»", t(lang, Key::LicenseKeyNoTin)));
     }
-    if !screen.contains(&fill(t(lang, Key::LicenseSeats), &["100"])) {
+    if !screen.contains(&hundred) {
         wrong.push("у ключа без ИНН нет «мест: 100»".to_owned());
     }
 
