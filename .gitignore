@@ -25,3 +25,7 @@ kvartik-license/
 # wrangler для выкладки (tools/deploy): ставит его `npm ci` в CI, а версию
 # держит замок рядом.
 /tools/deploy/node_modules/
+# Кэш wrangler в папке запуска: id и имя аккаунта Cloudflare (имя — с почтой
+# владельца). Его заводит любой запуск, `tools/deploy/trial-key.mjs` из корня
+# тоже (2026-11-18).
+.wrangler/
