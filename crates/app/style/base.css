@@ -1911,6 +1911,14 @@ button.link,
   text-underline-offset: 3px;
 }
 
+/* Ссылка словами в абзаце, без своего класса, — цветом ссылок программы:
+   иначе цвет ей ставит браузер — синий, мимо палитры (ссылка на политику
+   в согласии на сверку ИНН, 0.0.152; держит tools/browser/check.mjs).
+   Линия под ней — в правилах движения ниже. */
+main p a:not([class]) {
+  color: var(--accent-text);
+}
+
 form > button.wide,
 form > button.link {
   margin-top: 0;

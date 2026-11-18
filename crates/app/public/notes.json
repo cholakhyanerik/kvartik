@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.153",
+      "date": "2026-11-18",
+      "hy": [
+        "«ՀՎՀՀ-ի ստուգում փորձաշրջանի համար» բաժնում «Գաղտնիության քաղաքականություն» հղումն այժմ ծրագրի մյուս հղումների գույնն ունի, ոչ թե կապույտ։"
+      ],
+      "ru": [
+        "Ссылка «Политика конфиденциальности» в блоке «Сверка ИНН для пробного периода» теперь цвета остальных ссылок программы, а не синяя."
+      ],
+      "en": [
+        "The “Privacy policy” link in the “Checking the TIN for the trial” block now has the color of the program’s other links instead of blue."
+      ]
+    },
+    {
       "version": "0.0.152",
       "date": "2026-11-18",
       "hy": [
@@ -260,19 +273,6 @@
       ],
       "en": [
         "For those who keep several entrepreneurs: a Pro key with a number of seats. Enter it on the License screen; it sits in the “Entrepreneurs in the app” list and opens the first entrepreneurs on the list in the order they were added."
-      ]
-    },
-    {
-      "version": "0.0.133",
-      "date": "2026-11-15",
-      "hy": [
-        "Ծրագրում ոչինչ չի փոխվել. այս տարբերակն ուղղում է ստուգումներից մեկը, որոնք կատարվում են յուրաքանչյուր թողարկումից առաջ։"
-      ],
-      "ru": [
-        "В программе ничего не изменилось: эта версия чинит одну из проверок, которые идут перед каждой выкладкой."
-      ],
-      "en": [
-        "Nothing changed in the app: this version fixes one of the checks that run before every release."
       ]
     }
   ]

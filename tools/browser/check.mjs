@@ -24,7 +24,9 @@
 //    «Открыть Kvartik» берёт введённое с собой и программа предлагает его
 //    в профиль, а старый адрес программы `/#/…` ведёт в /app/ на тот же
 //    экран. Несколько ИП (задача 38): второй заводится и открывается
-//    перезагрузкой, и первый открывается снова.
+//    перезагрузкой, и первый открывается снова. Согласие на сверку ИНН
+//    (задача 106): ссылки экрана лицензии — цветом ссылок программы, а не
+//    синим браузера (0.0.153).
 // 2. С сетью: восстановление образца копии, экраны и их формы, карточка
 //    выпущенного документа, PDF, выгрузка с закрытым кварталом, разошедшимся
 //    с поданным, новая копия, свои цвета настроек и они же после
@@ -429,6 +431,53 @@ async function blocked(browser) {
     checks.check("блокировка: без плашки сбоя", await page.eval(NO_PANIC));
     const errors = [...new Set(page.errors)].filter((e) => !/split_book_part|Failed to fetch/.test(e));
     checks.check("блокировка: других ошибок в консоли нет", errors.length === 0, errors.slice(0, 8).join(" | "));
+  } finally {
+    await page.close();
+  }
+}
+
+/// Ссылка словами — цветом ссылок программы, а не браузера (0.0.153): ссылка
+/// на политику конфиденциальности в согласии на сверку ИНН (задача 106) вышла
+/// синей — у ссылки без своего класса цвет ставил браузер. Согласие встаёт,
+/// когда в профиле есть ИНН, а ключа и согласия нет, — поэтому в своём
+/// контексте браузера: в основной вкладке потом восстанавливается образец
+/// копии другого ИП. Проверяется каждая видимая ссылка экрана лицензии.
+async function consentLink(browser) {
+  const page = await browser.page({ context: true });
+  try {
+    await page.emulate(360);
+    await page.go(`${ORIGIN}/app/`);
+    await page.setLang(opt.lang);
+    checks.check("согласие: рабочий экран", await page.waitFor(WORKING));
+    await go(page, "#/profile");
+    await page.waitFor(`return ${BUTTON("#profile", s("ProfileFill"))} ? true : null;`);
+    await press(page, "#profile", s("ProfileFill"));
+    const typed = await page.waitFor(`const field = (label) => [...document.querySelectorAll("#profile form.profile label")]
+        .find((l) => l.getClientRects().length > 0 && (l.firstChild?.textContent ?? "").trim() === label)?.querySelector("input");
+      const name = field(${JSON.stringify(s("ProfileNameRu"))});
+      const tin = field(${JSON.stringify(s("ProfileTin"))});
+      if (!name || !tin) return null;
+      for (const [input, value] of [[name, "ИП Проба"], [tin, "12345678"]]) {
+        input.value = value;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      return true;`);
+    checks.check("согласие: в профиле — имя и ИНН", typed && (await press(page, "#profile", s("ProfileSave")))
+      && (await page.waitFor(TEXT_IN("#profile", s("ProfileSaved")))));
+    await go(page, "#/license");
+    const links = await page.waitFor(`const policy = document.querySelector("#license .trial-consent a");
+      if (!policy) return null;
+      const hex = getComputedStyle(document.documentElement).getPropertyValue("--accent-text").trim();
+      const want = "rgb(" + [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ") + ")";
+      const seen = [...document.querySelectorAll("#license a")].filter((a) => a.getClientRects().length > 0);
+      return { want, policy: getComputedStyle(policy).color,
+        browser: seen.filter((a) => ["rgb(0, 0, 238)", "rgb(85, 26, 139)"].includes(getComputedStyle(a).color))
+          .map((a) => a.textContent.trim()) };`);
+    checks.check("согласие: ссылка на политику — цветом ссылок программы, а не браузера",
+      links && links.policy === links.want, JSON.stringify(links));
+    checks.check("согласие: на экране лицензии нет ссылок цвета браузера",
+      links && links.browser.length === 0, JSON.stringify(links?.browser));
+    checks.check("согласие: без плашки сбоя", await page.eval(NO_PANIC));
   } finally {
     await page.close();
   }
@@ -1237,6 +1286,7 @@ async function main() {
   const browser = await Browser.launch({ work: WORK, name: "check", port: 9340 });
   try {
     await blocked(browser);
+    await consentLink(browser);
     await landing(browser);
     await office(browser);
     await motion(browser);
