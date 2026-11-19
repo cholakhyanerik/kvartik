@@ -595,6 +595,28 @@ async fn restoring_a_backup_shows_its_documents() {
     if !host.text_content().unwrap_or_default().contains(&deleted) {
         wrong.push("удалённый черновик копии не в удалённых".to_owned());
     }
+    // Копия легла в пустую программу — так заводят второе устройство
+    // (задача 41): окно спрашивает, где выпускать, а ответ помнит устройство.
+    if !wait_for(&host, t(lang, Key::BackupIssuerAsk)).await {
+        wrong.push("после копии в пустую программу не спросили, где выпускать".to_owned());
+    }
+    match button(&host, &[t(lang, Key::BackupIssuerThere)]) {
+        Some(there) => there.click(),
+        None => wrong.push(format!("нет «{}»", t(lang, Key::BackupIssuerThere))),
+    }
+    if !wait_for(&host, t(lang, Key::BackupIssuerThereDone)).await || !Device::new().issue_elsewhere() {
+        wrong.push("ответ «там» не выключил выпуск здесь".to_owned());
+    }
+    // Повтор образца (с 13 октября 2026 года) ждёт черновика за ноябрь, но
+    // восстановление его не создаёт: вопрос, где выпускать, встаёт позже
+    // чтения базы (задача 41) — черновик создаст следующее открытие. Ждать
+    // нечего — черновика не должно быть, — поэтому пауза, как у повтора выше.
+    sleep(300).await;
+    let (documents, _) = stored().await;
+    if documents.iter().any(|document| document.data().recurring.is_some()) {
+        wrong.push("восстановление создало черновик повтора до ответа, где выпускать".to_owned());
+    }
+    crate::ui::settings::set_issue_elsewhere(false);
     drop(mounted);
     host.remove();
     if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten())
@@ -693,6 +715,132 @@ async fn a_repeating_invoice_appears_when_the_app_opens() {
     }
     forget_device();
     assert!(wrong.is_empty(), "повтор: {wrong:#?}");
+}
+
+/// Два устройства (задача 41). Слитые копии двух устройств, выпускавших
+/// порознь, — два счёта с одним номером: список называет номер и ведёт
+/// в настройки. На устройстве, где выпуск выключен, повтор черновика месяца
+/// не создаёт, а форма черновика вместо «Выпустить» говорит, где выпуск, —
+/// черновик сохраняется; выпуск, включённый на экране настроек, возвращает
+/// «Выпустить» той же форме.
+#[wasm_bindgen_test]
+async fn a_device_without_issuing_keeps_drafts_and_names_repeated_numbers() {
+    let client = fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let today = clock::today().expect("часы с датой");
+    let now = clock::now();
+    let date = today.add_days(-40).expect("дата есть");
+    let data = |kind| DocumentData {
+        kind,
+        client: client.id(),
+        lang: Lang::En,
+        currency: Currency::Usd,
+        date,
+        service_date: date,
+        due: None,
+        items: vec![Item {
+            text: line("Software development"),
+            quantity_e3: 1_000,
+            price: 500_000,
+        }],
+        basis: None,
+        recurring: None,
+        rate: None,
+        activity: None,
+        income_kind: None,
+    };
+    // Каждое устройство выпустило свой первый счёт: номера одинаковые.
+    let issue = || {
+        Document::create(data(DocKind::Invoice), now)
+            .expect("черновик")
+            .issue(&[], 0, Some(&profile()), Some(None), &client, now)
+            .expect("выпущен")
+    };
+    let (here, there) = (issue(), issue());
+    let draft = Document::create(data(DocKind::Invoice), now).expect("черновик");
+    let recurring = Recurring::start(None, &here, date, now)
+        .expect("годится")
+        .expect("новый");
+    let mut writes = Writes::default();
+    for document in [&here, &there, &draft] {
+        writes.insert(document);
+    }
+    writes.insert(&recurring);
+    commit(writes).await;
+    assert!(crate::ui::settings::set_issue_elsewhere(true), "устройство не записало выпуск");
+
+    let (host, mounted) = mount_at("#/documents");
+    let mut wrong = Vec::new();
+    let number = here.number().map(|number| number.to_string()).unwrap_or_default();
+    let named = fill(t(lang, Key::DocNumbered), &[t(lang, Key::KindInvoice), &number]);
+    let repeated = fill(t(lang, Key::DocsRepeated), &[&named]);
+    if !wait_for(&host, &repeated).await {
+        wrong.push(format!("нет «{repeated}»"));
+    }
+    // Список прочитан — повтор черновик здесь не создал.
+    sleep(300).await;
+    let (documents, _) = stored().await;
+    if documents.iter().any(|document| document.data().recurring.is_some()) {
+        wrong.push("повтор создал черновик там, где выпуск выключен".to_owned());
+    }
+    // Черновик в списке — строка со статусом «Черновик»: номера у него нет.
+    match row_with(&host, "ul.documents:not(.deleted)", t(lang, Key::StatusDraft))
+        .and_then(|row| row.query_selector("a.entry").ok().flatten())
+    {
+        Some(open) => open.unchecked_into::<HtmlElement>().click(),
+        None => wrong.push("в списке нет черновика".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::DocIssueElsewhere)).await {
+        wrong.push("форма черновика не сказала, где выпуск".to_owned());
+    }
+    if button(&host, &[t(lang, Key::DocIssue)]).is_some() {
+        wrong.push("«Выпустить» там, где выпуск выключен".to_owned());
+    }
+    if button(&host, &[t(lang, Key::DocSaveDraft)]).is_none() {
+        wrong.push("нет «Сохранить черновик»".to_owned());
+    }
+    // Выпуск включают на экране настроек — форма, спрятанная за ним, снова
+    // с «Выпустить».
+    crate::platform::set_hash("#/settings");
+    let switch = "#settings li.issuing input[role=switch]";
+    if !wait_selector(&host, switch).await {
+        wrong.push("на экране настроек нет переключателя выпуска".to_owned());
+    } else if let Some(input) = host.query_selector(switch).ok().flatten() {
+        let input: web_sys::HtmlInputElement = input.unchecked_into();
+        if input.checked() {
+            wrong.push("переключатель выпуска включён, а выпуск выключен".to_owned());
+        }
+        input.click();
+    }
+    if !wait_until(|| !Device::new().issue_elsewhere()).await {
+        wrong.push("включили выпуск — устройство не помнит".to_owned());
+    }
+    crate::platform::set_hash("#/documents");
+    if !wait_until(|| button(&host, &[t(lang, Key::DocIssue)]).is_some()).await {
+        wrong.push("выпуск включили — «Выпустить» не вернулось".to_owned());
+    }
+    // Выпуск выключили в другой вкладке — запись устройства есть, а сигнал
+    // этой вкладки о ней не знает: «Выпустить» здесь не выпускает, а форма
+    // встаёт со словами (ревью задачи 41).
+    Device::new().set_issue_elsewhere(true);
+    match button(&host, &[t(lang, Key::DocIssue)]) {
+        Some(issue) => issue.click(),
+        None => wrong.push("нет «Выпустить»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::DocIssueElsewhere)).await {
+        wrong.push("выпуск, выключенный в другой вкладке, — а слов нет".to_owned());
+    }
+    sleep(300).await;
+    let (documents, _) = stored().await;
+    if documents.iter().any(|document| document.id() == draft.id() && document.number().is_some()) {
+        wrong.push("выпустился черновик, хотя выпуск выключили в другой вкладке".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    crate::ui::settings::set_issue_elsewhere(false);
+    forget_device();
+    assert!(wrong.is_empty(), "устройство без выпуска: {wrong:#?}");
 }
 
 /// Числа в форме документа читаются по языку окна, и при смене языка они

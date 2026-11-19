@@ -1,7 +1,11 @@
-//! Настройки (задача 88): кружок у курсора и свои цвета окна.
+//! Настройки (задача 88): выпуск на этом устройстве (задача 41), кружок
+//! у курсора и свои цвета окна.
 //!
-//! Обе настройки — на устройстве (`store/device.rs`), а не в базе: это не
-//! данные человека, и в копию они не идут, как язык окна. Кружок по
+//! Все — на устройстве (`store/device.rs`), а не в базе: это не данные
+//! человека, и в копию они не идут, как язык окна. Выпуск — потому что
+//! номера документов выдаёт одно устройство (`Document::next_number` знает
+//! только свою базу): копия с телефона, где выпуск выключен, восстановленная
+//! на основном компьютере, не выключила бы выпуск на нём самом. Кружок по
 //! умолчанию выключен (решение человека 2026-11-09), и лендинг читает ту же
 //! запись: у его страниц кружок тот же.
 //!
@@ -36,6 +40,7 @@ use std::cell::RefCell;
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
 use kvartik_core::theme::{self, Choice, Low, Paint, Pair, Palette, Pick, Record, Rgb, Sheet};
 use leptos::prelude::*;
+use web_sys::HtmlInputElement;
 
 use crate::platform::look;
 use crate::store::device::Device;
@@ -180,6 +185,53 @@ struct Copier {
 
 thread_local! {
     static COPIER: RefCell<Copier> = RefCell::default();
+    /// Выключен ли выпуск на этом устройстве (задача 41) — сигналом: его
+    /// меняют экран настроек и вопрос после восстановления копии, а форма
+    /// документа, даже спрятанная, следит за ним.
+    static ELSEWHERE: ArcRwSignal<bool> = ArcRwSignal::new(Device::new().issue_elsewhere());
+}
+
+/// Выключен ли выпуск счетов и актов на этом устройстве (задача 41): номера
+/// выдаёт другое устройство человека. Отслеживаемое.
+pub(super) fn issue_elsewhere() -> bool {
+    ELSEWHERE.with(|shared| shared.get())
+}
+
+/// То же — без слежения: для решения, которое принимают один раз.
+pub(super) fn issue_elsewhere_untracked() -> bool {
+    ELSEWHERE.with(|shared| shared.get_untracked())
+}
+
+/// Выключен ли выпуск — по записи устройства сейчас, а не по сигналу
+/// вкладки: его могли выключить в другой вкладке, а сигнал берёт запись один
+/// раз (ревью задачи 41). Разошлись — сигнал догоняет запись, и форма
+/// вместо «Выпустить» показывает слова. Зовёт выпуск перед записью.
+pub(super) fn issue_elsewhere_now() -> bool {
+    let now = Device::new().issue_elsewhere();
+    follow(now);
+    now
+}
+
+/// Выключить или включить выпуск здесь — на устройстве и, если запись легла,
+/// в окне. `false` — `localStorage` отказал: сигнал остаётся прежним,
+/// иначе вкладка говорила бы «выключен», а после перезагрузки выпуск снова
+/// был бы включён без единого слова (ревью задачи 41).
+pub(super) fn set_issue_elsewhere(on: bool) -> bool {
+    let saved = Device::new().set_issue_elsewhere(on);
+    if saved {
+        follow(on);
+    }
+    saved
+}
+
+/// Сигнал — к значению `on`, только когда оно другое: запись того же будила
+/// бы всех, кто за ним следит (CLAUDE.md, Правило 2, «Общий сигнал»).
+fn follow(on: bool) {
+    ELSEWHERE.with(|shared| {
+        if shared.get_untracked() != on {
+            shared.set(on);
+        }
+    });
 }
 
 /// Копию палитры — вслед за записью устройства: палитра — стилем в кэш,
@@ -390,9 +442,37 @@ fn SettingsPage(lang: ReadSignal<Lang>, look: Look) -> impl IntoView {
 
     let reset_all = move |_| apply(Choice::new(scheme.get_untracked()));
     view! {
+        // Выпуск — первым: от него зависят номера документов, а кружок
+        // и цвета — только вид окна (Правило 14).
+        <h2>{tr(lang, Key::SettingsDevice)}</h2>
+        <ul class="list">
+            <li class="issuing">
+                <label class="switch-row">
+                    <span class="entry-main">
+                        <span class="entry-title">{tr(lang, Key::SettingsIssue)}</span>
+                        <span class="entry-meta">{tr(lang, Key::SettingsIssueHint)}</span>
+                    </span>
+                    <input
+                        type="checkbox"
+                        role="switch"
+                        class="visually-hidden"
+                        prop:checked=move || !issue_elsewhere()
+                        on:change=move |event| {
+                            let here = event_target_checked(&event);
+                            // Запись не легла — переключатель назад: выпуск
+                            // остался прежним.
+                            if !set_issue_elsewhere(!here) {
+                                event_target::<HtmlInputElement>(&event).set_checked(!here);
+                            }
+                        }
+                    />
+                    <span class="switch" aria-hidden="true"></span>
+                </label>
+            </li>
+        </ul>
         <h2>{tr(lang, Key::SettingsMouse)}</h2>
         <ul class="list">
-            <li>
+            <li class="mouse">
                 <label class="switch-row">
                     <span class="entry-main">
                         <span class="entry-title">{tr(lang, Key::SettingsCursor)}</span>

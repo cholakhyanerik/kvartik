@@ -72,6 +72,10 @@ fn choose(field: &HtmlInputElement, color: Rgb) {
     field.dispatch_event(&event).expect("событие доставлено");
 }
 
+/// Переключатель кружка у курсора: первым на экране стоит переключатель
+/// выпуска (задача 41).
+const MOUSE_SWITCH: &str = "#settings li.mouse input[role=switch]";
+
 /// Тёмно-синий фон и текст почти его цвета.
 const NAVY: Rgb = Rgb::from_u32(0x0b1d33);
 const DUSK: Rgb = Rgb::from_u32(0x13253b);
@@ -95,7 +99,7 @@ async fn the_cursor_circle_follows_the_setting() {
         wrong.push("кружок есть, хотя его не включали".to_owned());
     }
     set_hash("#/settings");
-    let Some(switch) = element(&host, "#settings input[role=switch]").await else {
+    let Some(switch) = element(&host, MOUSE_SWITCH).await else {
         drop(mounted);
         host.remove();
         forget();
@@ -117,7 +121,7 @@ async fn the_cursor_circle_follows_the_setting() {
     if !cursor_marked() {
         wrong.push("после нового открытия кружка нет".to_owned());
     }
-    let Some(switch) = element(&host, "#settings input[role=switch]").await else {
+    let Some(switch) = element(&host, MOUSE_SWITCH).await else {
         drop(mounted);
         host.remove();
         forget();

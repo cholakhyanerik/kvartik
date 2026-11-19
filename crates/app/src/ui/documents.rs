@@ -157,8 +157,13 @@ impl Documents {
     /// Прочитать документы и повторы: когда база открылась и когда её
     /// заменило восстановление из копии. Повторам, которым к дню `today`
     /// пора, — создать черновики: транзакция записи открывается, только
-    /// когда пора.
+    /// когда пора. На устройстве, где выпуск выключен (задача 41), — нет:
+    /// черновик месяца создаст устройство, которое выпускает, а созданный
+    /// и там, и здесь лёг бы после слияния копий вторым — и счёт за месяц
+    /// выпустили бы дважды. Запись устройства — напрямую, а не сигналом
+    /// настроек: этот код в главном wasm (Правило 1).
     pub async fn load(&self, store: &Store, today: Option<Date>) {
+        let today = today.filter(|_| !crate::store::device::Device::new().issue_elsewhere());
         let read = async {
             let tx = store.read()?;
             Ok::<_, StoreError>((tx.list::<Document>().await?, tx.list::<Recurring>().await?))
@@ -481,14 +486,19 @@ pub fn DocumentsScreen(
     });
     // Копию восстановили — документы в базе могли стать другими. Здесь,
     // а не в части экрана: документы нужны и главному экрану, а экран мог
-    // ещё ни разу не показываться.
+    // ещё ни разу не показываться. Черновиков повторов — нет, без дня: копию
+    // в пустую программу кладут на второе устройство, и вопрос, выпускать ли
+    // на нём (задача 41), встаёт уже после этого чтения — черновик месяца,
+    // созданный до ответа «там», лёг бы после слияния вторым рядом с черновиком
+    // устройства, которое выпускает (ревью задачи 41). Их создаст следующее
+    // открытие программы, как всегда.
     Effect::watch(
         move || base.replacements(),
         move |_, _, _| {
             if let Some(store) = base.get() {
                 ctx.mode.set(Mode::List);
                 ctx.notice.set(None);
-                leptos::task::spawn_local(async move { documents.load(&store, ctx.today).await });
+                leptos::task::spawn_local(async move { documents.load(&store, None).await });
             }
         },
         false,
@@ -720,6 +730,9 @@ fn DocList(ctx: Ctx) -> impl IntoView {
         documents.with(|list, _, _| Document::deleted(list).into_iter().cloned().collect::<Vec<_>>())
     });
     let unreadable = Memo::new(move |_| documents.with(|_, _, unreadable| unreadable));
+    // Номера, которые выдали два устройства порознь (задача 41): слияние
+    // копий оставило оба документа.
+    let repeated = Memo::new(move |_| documents.with(|list, _, _| Document::repeated_numbers(list)));
     let has_clients = Memo::new(move |_| !clients.alive().is_empty());
     // Год «этого» месяца — без года в заголовке: сегодня, а часы без даты —
     // год самого свежего документа.
@@ -748,6 +761,29 @@ fn DocList(ctx: Ctx) -> impl IntoView {
                     fill(t(lang, Key::DocsUnreadable), &[&i18n::integer(lang, unreadable.get() as i64)])
                 }}
             </p>
+        })}
+        // Номера искать в поиске списка: он находит документ и по номеру.
+        // Плашкой, как другие слова, которые просят действия: абзац жирным
+        // над поиском читался тяжело (глазной прогон задачи 41).
+        {move || repeated.with(|list| !list.is_empty()).then(|| view! {
+            <div class="notice" role="status">
+                <p class="warning">{move || {
+                    let lang = lang.get();
+                    let named = repeated.with(|list| {
+                        list.iter()
+                            .map(|&(kind, number)| {
+                                fill(t(lang, Key::DocNumbered), &[t(lang, kind_key(kind)), &number.to_string()])
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    });
+                    fill(t(lang, Key::DocsRepeated), &[&named])
+                }}</p>
+                <p>{tr(lang, Key::DocsRepeatedWhy)}</p>
+                <a class="button secondary" href=Screen::Settings.href()>
+                    <span class="label">{tr(lang, Key::SettingsTitle)}</span>
+                </a>
+            </div>
         })}
         {move || (documents.created.get() > 0).then(|| view! {
             <p role="status">
@@ -1611,7 +1647,13 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
             .then(|| ctx.licenses.consent_needed(ctx.profiles, access.get()))
             .flatten()
     });
-    let blocked = Memo::new(move |_| locked.get().is_some() || consent.get().is_some() || super::trial::asking());
+    // На этом устройстве выпуск выключен (задача 41): номера выдаёт другое,
+    // а черновик туда перенесёт копия. Тогда о сроке и согласии — ни слова:
+    // выпускать будут там.
+    let elsewhere = Memo::new(move |_| super::settings::issue_elsewhere());
+    let blocked = Memo::new(move |_| {
+        elsewhere.get() || locked.get().is_some() || consent.get().is_some() || super::trial::asking()
+    });
     // Выбранный клиент — из живых.
     let chosen = move || {
         let chosen = form.client.get()?;
@@ -1661,7 +1703,11 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
         }
     };
     let submit = move |issue: bool| {
-        if form.busy.get_untracked() || (issue && locked.get_untracked().is_some()) {
+        // Выпуск выключен — и в другой вкладке тоже: запись устройства
+        // читается заново (ревью задачи 41).
+        if form.busy.get_untracked()
+            || (issue && (locked.get_untracked().is_some() || super::settings::issue_elsewhere_now()))
+        {
             return;
         }
         form.tried.set(true);
@@ -2221,6 +2267,7 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                 .into_any()),
                 _ => Some(view! {
                     {move || match (locked.get(), consent.get()) {
+                        _ if elsewhere.get() => view! { <IssueElsewhere lang /> }.into_any(),
                         (Some(today), _) => view! { <IssueLocked lang access=access.get() today /> }.into_any(),
                         (None, Some(tin)) => view! { <TrialConsent lang tin /> }.into_any(),
                         (None, None) if super::trial::asking() => {
@@ -2266,6 +2313,21 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                 .into_any()),
             }}
         </form>
+    }
+}
+
+/// Слова вместо «Выпустить», когда на этом устройстве выпуск выключен
+/// (задача 41): выпускает другое устройство, а черновик туда перенесёт
+/// копия. Вид — как у слов о запертом выпуске: то же место и то же «нельзя
+/// здесь», а ссылка ведёт туда, где это меняют.
+#[component]
+fn IssueElsewhere(lang: ReadSignal<Lang>) -> impl IntoView {
+    view! {
+        <div class="notice due" role="status">
+            {icon(Icon::Document)}
+            <p class="reminder">{tr(lang, Key::DocIssueElsewhere)}</p>
+            <a class="button" href=Screen::Settings.href()><span class="label">{tr(lang, Key::SettingsTitle)}</span></a>
+        </div>
     }
 }
 

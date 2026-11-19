@@ -1777,6 +1777,109 @@ fn merge_keeps_the_later_record() {
     assert!(wrong.is_empty(), "слияние ошиблось: {wrong:#?}");
 }
 
+/// Правка в копии позже «сейчас» больше чем на десять минут — часы одного из
+/// устройств спешат (задача 41); раньше, ровно на пределе и без записей —
+/// нет: окно не тревожит часами, поставленными вручную.
+#[test]
+fn copy_from_a_clock_ahead_is_told() {
+    let now = Timestamp::from_unix_millis(1_000_000_000);
+    let cases = [
+        ("раньше сейчас", 999_000_000, false),
+        ("на пределе", 1_000_000_000 + CLOCK_SLACK_MILLIS, false),
+        ("позже предела", 1_000_000_001 + CLOCK_SLACK_MILLIS, true),
+        ("на сутки вперёд", 1_086_400_000, true),
+    ];
+    let mut wrong = Vec::new();
+    for (name, modified, told) in cases {
+        if ahead(&incoming_note(NOTE_ID, modified, "копия"), now) != told {
+            wrong.push(name);
+        }
+    }
+    if ahead(&[], now) {
+        wrong.push("пустая копия");
+    }
+    assert!(wrong.is_empty(), "часы копии: {wrong:#?}");
+}
+
+/// Черновик ушёл копией на устройство, которое выпускает, и выпущен там,
+/// а на прежнем его правят или удаляют позже (задача 41): выпущенный
+/// остаётся выпущенным, в какую бы сторону ни шла копия, а две версии
+/// выпущенного — аннулирование после выпуска — решают моменты, как всё.
+#[test]
+fn an_issued_document_outlives_a_later_draft() {
+    use crate::model::client::{Client, ClientData};
+    use crate::model::country::Country;
+    use crate::model::document::{DocKind, DocumentData, Item};
+    use crate::model::money::Currency;
+    use crate::model::text::Lines;
+
+    let at = Timestamp::from_unix_millis;
+    let line = |text: &str| Line::new(text).expect("годный текст");
+    let client = Client::create(
+        ClientData {
+            name: line("«Արարատ» ՍՊԸ"),
+            country: Some(Country::ARMENIA),
+            address: Lines::default(),
+            tin: None,
+            tax_id: Line::default(),
+            currency: Some(Currency::Amd),
+            lang: Some(Lang::Am),
+            payment_days: None,
+        },
+        at(500),
+    )
+    .expect("годный клиент");
+    let mut profile = ProfileData::default();
+    profile.name.hy = line("ԱՁ Արամ Պետրոսյան");
+    let day = Date::new(2026, 11, 2).expect("дата");
+    let data = |text: &str| DocumentData {
+        kind: DocKind::Invoice,
+        client: client.id(),
+        lang: Lang::Am,
+        currency: Currency::Amd,
+        date: day,
+        service_date: day,
+        due: None,
+        items: vec![Item {
+            text: line(text),
+            quantity_e3: 1_000,
+            price: 100_000,
+        }],
+        basis: None,
+        recurring: None,
+        rate: None,
+        activity: None,
+        income_kind: None,
+    };
+    let draft = Document::create(data("Խորհրդատվություն"), at(1_000)).expect("черновик");
+    let issued = draft
+        .issue(&[], 0, Some(&profile), Some(None), &client, at(2_000))
+        .expect("выпущен");
+    let edited = draft.edit(data("Խմբագրված"), at(3_000)).expect("правится").expect("изменён");
+    let deleted = draft.delete(at(3_000)).expect("удаляется").expect("удалён");
+    let annulled = issued.annul(day, at(4_000)).expect("выпущен").expect("аннулирован");
+    let id = draft.id().to_string();
+    let cases = [
+        ("черновик правили позже — в базе выпущенный", &edited, &issued, false),
+        ("черновик удалили позже — в базе выпущенный", &deleted, &issued, false),
+        ("выпущенный — в базе черновик, правленный позже", &issued, &edited, true),
+        ("аннулирован позже выпуска", &annulled, &issued, true),
+        ("в базе аннулирован позже", &issued, &annulled, false),
+    ];
+    let mut wrong = Vec::new();
+    for (name, incoming, existing, written) in cases {
+        let incoming = collect(KINDS, [raw(Document::KIND, &id, &encode(incoming))])
+            .expect("собрано")
+            .entries;
+        let stored = encode(existing);
+        let merge = merge(KINDS, &incoming, [raw(Document::KIND, &id, &stored)]).expect("слито");
+        if !merge.writes().is_empty() != written {
+            wrong.push(name);
+        }
+    }
+    assert!(wrong.is_empty(), "выпущенный против черновика: {wrong:#?}");
+}
+
 /// Удаление в копии — правка: позднее удаление переезжает в базу, а запись,
 /// восстановленная в базе после удаления, остаётся живой.
 #[test]

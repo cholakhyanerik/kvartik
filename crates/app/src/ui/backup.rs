@@ -802,7 +802,7 @@ enum Restoring {
     Password(Rc<Sealed>, Option<Problem>),
     /// Копия другого ИП расшифрована: слить ли её (задача 38, этап 1).
     Other(Rc<Asked>),
-    Done(Restored),
+    Done(Restored, After),
     /// Копия другого ИП легла новым ИП (задача 38).
     AsNew,
     /// Копия ИП из списка, а открыт другой: ничего не записано (задача 38).
@@ -1673,7 +1673,7 @@ pub(super) enum RestoreJob {
 /// Чем кончилась часть восстановления.
 pub(super) enum Recovered {
     /// Записи легли.
-    Done(Restored),
+    Done(Restored, After),
     /// Копия другого ИП: окно спрашивает, а записано ничего.
     Other(Rc<Asked>),
     /// Копия легла новым ИП.
@@ -1682,6 +1682,17 @@ pub(super) enum Recovered {
     Elsewhere(Arc<Ip>),
     /// Легла не вся — вот почему; повтор безвреден.
     Partial(Key),
+}
+
+/// Что сказать после восстановления, кроме итога (задача 41).
+#[derive(Clone, Copy, Default)]
+pub(super) struct After {
+    /// Копия легла в пустую программу — так заводят второе устройство,
+    /// а номера документов выдаёт одно: окно спрашивает, где выпускать.
+    fresh: bool,
+    /// В копии — правки позже «сейчас» этого устройства (`backup::ahead`):
+    /// часы одного из устройств идут неверно.
+    ahead: bool,
 }
 
 /// Расшифрованная копия другого ИП — ждёт ответа человека (задача 38,
@@ -2035,7 +2046,7 @@ fn RestoreBackup(
                 password.set(String::new());
             }
             restoring.set(match outcome {
-                Ok(Recovered::Done(restored)) => Restoring::Done(restored),
+                Ok(Recovered::Done(restored, after)) => Restoring::Done(restored, after),
                 Ok(Recovered::Other(asked)) => Restoring::Other(asked),
                 Ok(Recovered::AsNew) => Restoring::AsNew,
                 Ok(Recovered::Elsewhere(ip)) => Restoring::Elsewhere(ip),
@@ -2063,7 +2074,7 @@ fn RestoreBackup(
                 Err(_) => Err(Problem::Say(Key::PartFailed)),
             };
             restoring.set(match outcome {
-                Ok(Recovered::Done(restored)) => Restoring::Done(restored),
+                Ok(Recovered::Done(restored, after)) => Restoring::Done(restored, after),
                 Ok(Recovered::AsNew) => Restoring::AsNew,
                 Ok(Recovered::Elsewhere(ip)) => Restoring::Elsewhere(ip),
                 Ok(Recovered::Partial(why)) => Restoring::Failed(Problem::Partly(why)),
@@ -2169,7 +2180,7 @@ fn RestoreBackup(
                     />
                 </label>
                 {match state {
-                    Restoring::Done(restored) => Some(view! {
+                    Restoring::Done(restored, after) => Some(view! {
                         <p role="status">
                             {move || {
                                 let lang = lang.get();
@@ -2183,6 +2194,10 @@ fn RestoreBackup(
                                 )
                             }}
                         </p>
+                        {after.ahead.then(|| view! { <p class="warning">{tr(lang, Key::BackupAhead)}</p> })}
+                        // Выпуск уже выключен — спрашивать не о чем.
+                        {(after.fresh && restored.added > 0 && !super::settings::issue_elsewhere_untracked())
+                            .then(|| view! { <IssuerAsk lang /> })}
                     }.into_any()),
                     // Другой ИП открывается на экране списка: переход
                     // перезагружает страницу, и его место там (`ui/office.rs`).
@@ -2212,6 +2227,51 @@ fn RestoreBackup(
     }
 }
 
+/// Где выпускать счета и акты дальше — после копии, легшей в пустую
+/// программу (задача 41): так заводят второе устройство, а номера документов
+/// выдаёт одно — `Document::next_number` знает только свою базу. Ответ —
+/// запись устройства, и его меняют в настройках; без ответа выпуск здесь
+/// остаётся, как был. «Выпускать здесь» — главным: так и после переезда на
+/// новое устройство, и после стёртых данных браузера, а у кого их два,
+/// слова после ответа просят выключить выпуск на прежнем.
+#[component]
+fn IssuerAsk(lang: ReadSignal<Lang>) -> impl IntoView {
+    let answered = RwSignal::new(None::<bool>);
+    // Запись не легла — вопрос остаётся: ответа устройство не помнит.
+    let answer = move |elsewhere: bool| {
+        if super::settings::set_issue_elsewhere(elsewhere) {
+            answered.set(Some(elsewhere));
+        }
+    };
+    view! {
+        <div class="notice">
+            {move || match answered.get() {
+                None => view! {
+                    <p>{tr(lang, Key::BackupIssuerAsk)}</p>
+                    <div class="actions">
+                        <button type="button" on:click=move |_| answer(false)>
+                            <span class="label">{tr(lang, Key::BackupIssuerHere)}</span>
+                        </button>
+                        <button type="button" class="secondary" on:click=move |_| answer(true)>
+                            <span class="label">{tr(lang, Key::BackupIssuerThere)}</span>
+                        </button>
+                    </div>
+                }
+                .into_any(),
+                Some(elsewhere) => view! {
+                    <p role="status">
+                        {tr(lang, if elsewhere { Key::BackupIssuerThereDone } else { Key::BackupIssuerHereDone })}
+                    </p>
+                    <a class="button secondary" href=Screen::Settings.href()>
+                        <span class="label">{tr(lang, Key::SettingsTitle)}</span>
+                    </a>
+                }
+                .into_any(),
+            }}
+        </div>
+    }
+}
+
 /// ИП словами: имя и ՀՎՀՀ через запятую — или что их нет.
 fn who(lang: Lang, owner: &Owner) -> String {
     let name = match owner.name(lang) {
@@ -2233,8 +2293,9 @@ async fn restore(backups: Backups, job: RestoreJob) -> Result<Recovered, Problem
         RestoreJob::Open(sealed, typed) => {
             let password = crypto::normalize(&typed);
             let (entries, key) = stored::unlock(FILE_KINDS, &sealed, &password).await?;
+            let ahead = backup::ahead(&entries, clock::now());
             if backup::is_full(&entries) {
-                return restore_full(backups, &store, (&sealed, &key), entries).await;
+                return restore_full(backups, &store, (&sealed, &key), entries, ahead).await;
             }
             // ИП несколько, а копия — ИП из списка, не открытого: в открытую
             // базу её не класть, а отдельным ИП — тем более (ревью 2026-11-06).
@@ -2251,13 +2312,14 @@ async fn restore(backups: Backups, job: RestoreJob) -> Result<Recovered, Problem
             // Копия одного ИП — копия данных программы, только когда ИП один:
             // тогда и день копии сдвигается, и пароль её — свой.
             let own = if several { SameIe::No } else { SameIe::Yes };
+            // Пустая ли программа — до записи: после неё не узнать. Пустая
+            // при нескольких ИП — ещё не значит новое устройство.
+            let fresh = !several && empty(&store).await?;
             Ok(match stored::restore(&store, KINDS, &entries, OtherIe::Ask).await? {
-                Merged::Done(restored) => Recovered::Done(restored_from(
-                    backups,
-                    (&sealed, &key),
-                    restored,
-                    Landed::single(&restored, &entries, own),
-                )),
+                Merged::Done(restored) => Recovered::Done(
+                    restored_from(backups, (&sealed, &key), restored, Landed::single(&restored, &entries, own)),
+                    After { fresh, ahead },
+                ),
                 Merged::Other { ours, theirs } => Recovered::Other(Rc::new(Asked {
                     sealed,
                     entries,
@@ -2268,19 +2330,29 @@ async fn restore(backups: Backups, job: RestoreJob) -> Result<Recovered, Problem
             })
         }
         RestoreJob::Merge(asked) => {
+            // Копия другого ИП: программа не пуста — в ней свой профиль.
+            let ahead = backup::ahead(&asked.entries, clock::now());
             match stored::restore(&store, KINDS, &asked.entries, OtherIe::Merge).await? {
-                Merged::Done(restored) => Ok(Recovered::Done(restored_from(
-                    backups,
-                    (&asked.sealed, &asked.key),
-                    restored,
-                    Landed::single(&restored, &asked.entries, SameIe::No),
-                ))),
+                Merged::Done(restored) => Ok(Recovered::Done(
+                    restored_from(
+                        backups,
+                        (&asked.sealed, &asked.key),
+                        restored,
+                        Landed::single(&restored, &asked.entries, SameIe::No),
+                    ),
+                    After { fresh: false, ahead },
+                )),
                 // С ответом «слить» хранилище не спрашивает.
                 Merged::Other { .. } => Err(Problem::Say(Key::BackupFailed)),
             }
         }
         RestoreJob::AsNew(asked) => restore_as_new(backups, &store, &asked).await,
     }
+}
+
+/// Нет ли в базе ни одной записи.
+async fn empty(store: &Store) -> Result<bool, Failure> {
+    Ok(store.read()?.is_empty().await?)
 }
 
 /// Открытый ИП и список конторы, который заводит восстановление (задача 38):
@@ -2313,6 +2385,7 @@ async fn restore_full(
     store: &Store,
     opened: (&Sealed, &crypto::Key),
     entries: Vec<Entry>,
+    ahead: bool,
 ) -> Result<Recovered, Problem> {
     let office = backups.office().ok_or(Problem::Say(Key::BackupFailed))?;
     // Конторы не было — устройство чьё-то своё, и пароль его копии — его.
@@ -2332,8 +2405,11 @@ async fn restore_full(
         adopt: !had_office,
     };
     let restored = restored_from(backups, opened, done.restored, landed);
+    // Программа была пуста — ни списка ИП, ни записей открытого: так копию
+    // всех ИП кладут на новое устройство.
+    let fresh = spare.is_some();
     Ok(match done.failed {
-        None => Recovered::Done(restored),
+        None => Recovered::Done(restored, After { fresh, ahead }),
         Some(failure) => Recovered::Partial(match Problem::from(failure) {
             Problem::Say(why) => why,
             _ => Key::BackupFailed,
@@ -2588,7 +2664,7 @@ mod tests {
         }
 
         match restore(backups, RestoreJob::Open(aram_file, PASSWORD.to_owned())).await {
-            Ok(Recovered::Done(_)) => {}
+            Ok(Recovered::Done(..)) => {}
             Ok(_) => wrong.push("своя копия не легла".to_owned()),
             Err(problem) => wrong.push(format!("своя копия: {}", problem.text(Lang::Ru))),
         }
@@ -2680,7 +2756,7 @@ mod tests {
         backups.attach(Office::new(backups));
         let mut wrong = Vec::new();
         match restore(backups, RestoreJob::Open(file, PASSWORD.to_owned())).await {
-            Ok(Recovered::Done(_)) => {}
+            Ok(Recovered::Done(..)) => {}
             Ok(_) => wrong.push("копия всех ИП легла не вся".to_owned()),
             Err(problem) => wrong.push(format!("копия всех ИП: {}", problem.text(Lang::Ru))),
         }

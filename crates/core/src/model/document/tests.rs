@@ -562,6 +562,45 @@ fn numbers_grow_within_their_series() {
     assert_eq!(Document::next_number(&[], DocKind::Invoice, 2026).map(Number::seq), Some(1));
 }
 
+/// Два устройства выпускали порознь, и слияние их копий оставило оба
+/// документа (задача 41): совпавший номер назван один раз — в своей серии,
+/// с аннулированным, — а одинаковые номера разных видов и годов, черновики
+/// и номера без пары — нет. Следующий номер всё равно не повторит ни один.
+#[test]
+fn numbers_given_out_on_two_devices_are_named() {
+    let client = client();
+    let mut here = Vec::new();
+    let mut there = Vec::new();
+    for _ in 0..2 {
+        let next = issued(DocKind::Invoice, &client, day(2026, 10, 1), &here);
+        here.push(next);
+    }
+    let theirs = issued(DocKind::Invoice, &client, day(2026, 10, 5), &there);
+    there.push(theirs);
+    let theirs = issued(DocKind::Invoice, &client, day(2026, 10, 6), &there);
+    there.push(theirs);
+    // Акт № 2026-001 рядом со счетами № 2026-001 — другая серия, как и
+    // счёт следующего года.
+    let act = issued(DocKind::Act, &client, day(2026, 10, 7), &there);
+    there.push(act);
+    let next_year = issued(DocKind::Invoice, &client, day(2027, 1, 2), &there);
+    there.push(next_year);
+    // Счёт № 2026-002 одного устройства аннулирован — номер всё равно занят.
+    there[1] = there[1].annul(day(2026, 10, 8), at(9_000)).expect("выпущен").expect("аннулирован");
+    there.push(Document::create(data(DocKind::Invoice, &client, day(2026, 10, 9)), at(9_500)).expect("черновик"));
+    let merged: Vec<Document> = here.iter().chain(&there).cloned().collect();
+    let named: Vec<String> = Document::repeated_numbers(&merged)
+        .into_iter()
+        .map(|(kind, number)| format!("{kind:?} {number}"))
+        .collect();
+    assert_eq!(named, ["Invoice 2026-001", "Invoice 2026-002"]);
+    assert!(Document::repeated_numbers(&here).is_empty(), "одно устройство повторов не даёт");
+    assert_eq!(
+        Document::next_number(&merged, DocKind::Invoice, 2026).map(|n| n.to_string()).as_deref(),
+        Some("2026-003")
+    );
+}
+
 /// Номер — год и номер не короче трёх цифр.
 #[test]
 fn number_is_written_with_its_year() {
