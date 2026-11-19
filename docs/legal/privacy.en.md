@@ -1,23 +1,27 @@
 # Kvartik Privacy Policy
 
-> **Редакция от 18.11.2026** (задача 106): перевод новых «Коротко», п. 2, 3
-> и 6 и даты русского текста той же редакции; утвердил человек 2026-11-18
-> вместе с русским текстом. Прежняя редакция — от 09.11.2026
-> ([privacy.2026-11-09.en.md](privacy.2026-11-09.en.md), на сайте —
-> /en/privacy/2026-11-09/), по своему адресу.
+> **Редакция от 20.11.2026** (задача 102): перевод нового абзаца п. 2 об
+> ИИ-помощнике, «Коротко», строк п. 2 о настройках безопасности и о записях
+> устройства и даты русского текста той же редакции; утвердил человек вместе
+> с русским текстом. Прежние редакции — от 18.11.2026
+> ([privacy.2026-11-18.en.md](privacy.2026-11-18.en.md), на сайте —
+> /en/privacy/2026-11-18/) и от 09.11.2026
+> ([privacy.2026-11-09.en.md](privacy.2026-11-09.en.md),
+> /en/privacy/2026-11-09/), каждая по своему адресу.
 >
 > Перевод [privacy.ru.md](privacy.ru.md), утверждённого 2026-11-06. Блоки
 > «Для проверки» — только в русском тексте. Квадратные скобки заполнены
 > 2026-11-09 вместе с русским текстом.
 
-**Edition of November 18, 2026.**
+**Edition of November 20, 2026.**
 
 ## In short
 
 Your data does not leave your device, except the TIN (ՀՎՀՀ) of your IE if
-you agreed to have it checked while you have no key: by it the Kvartik
-server remembers the day your trial period started (section 2). Kvartik has
-no accounts, no analytics, no counters and no ads.
+you agreed to have it checked while you have no key (section 2), and the
+questions you ask the AI assistant if you connected your own AI provider's
+key to it: the app sends them straight to that provider, not through us
+(section 2). Kvartik has no accounts, no analytics, no counters and no ads.
 
 ## 1. Who is responsible
 
@@ -27,11 +31,12 @@ Individual entrepreneur Erik Cholakhyan (TIN (ՀՎՀՀ) 58111423, Yerevan) is re
 ## 2. Data in the app
 
 The IE's details, clients, invoices and acts, income and expenses, files
-attached to entries and the license key are kept only in the browser on
-your device. The app sends them to no one, neither to us nor to third
-parties, except the TIN for the trial period (below). This rests on more
-than a promise: the site's security settings forbid the app to contact any
-address other than kvartik.com.
+attached to entries and the license key are kept only in the browser on your
+device. The app sends them to no one, neither to us nor to third parties,
+except the TIN for the trial period and what you ask the AI assistant
+yourself (below). This rests on more than a promise: the site's security
+settings forbid the app to contact any address other than kvartik.com and
+the four addresses at which the AI assistant asks AI providers.
 
 The trial period is also counted by the TIN (License Terms, section 3),
 with your consent. While the profile has a TIN and there is no key for it,
@@ -59,15 +64,36 @@ record on the server is deleted (on a letter,
 within 10 business days at the latest), and issuing during the trial period
 asks for consent again.
 
+The AI assistant works only if you connected to it an API key of your own
+account with one of the AI providers: Anthropic (Claude), OpenAI (ChatGPT),
+Google (Gemini) or xAI (Grok). The key is kept only in the browser on this
+device and does not go into backups. When you ask a question, the app sends
+to that provider, straight from the browser and with your key: your
+question, the earlier questions and answers of the same conversation,
+today's date, the window language and Kvartik's reference — its tax rules
+with their sources. None of this passes through the Kvartik server, and we
+do not see it. The question carries no other data from the app — TIN, name,
+clients, amounts, entries — unless you type it in yourself: the “Add my
+details” button puts the regime, activity codes, registration day,
+citizenship and residence status from the profile into the question field,
+where you see them and can delete them before sending. The app does not keep
+conversations: “New conversation” or a closed window erases them. The
+provider also receives your IP address and browser details, processes the
+question under its own terms and privacy policy, which you accepted when you
+got the key, and charges you for the answers at its own prices. All four
+providers are US companies (section 3). You can remove the key on the AI
+assistant screen.
+
 The app also keeps its settings on the device: the language, the day the
 trial period started, the day of the last backup, a check value of the
-backup password (not the password itself), the auto-backup folder and key
-if you turned it on, the list of your IEs if there are several, which
-version you have already seen, and, with a TIN, when the app asked the
-server about it and what the server answered. What you entered in the calculator on the
-site also stays in your browser, so that the app can offer to take it into
-the profile. All of this is erased together with the site data in the
-browser settings.
+backup password (not the password itself), the auto-backup folder and key if
+you turned it on, the list of your IEs if there are several, which version
+you have already seen, the AI assistant's key, provider and model if you
+connected it, and, with a TIN, when the app asked the server about it and
+what the server answered. What you entered in the calculator on the site
+also stays in your browser, so that the app can offer to take it into the
+profile. All of this is erased together with the site data in the browser
+settings.
 
 ## 3. What the hosting sees
 

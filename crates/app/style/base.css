@@ -2644,6 +2644,91 @@ ul.gives > li + li {
   margin-top: var(--space-4);
 }
 
+/* ИИ-помощник (`ui/assistant.rs`, задача 102). Строка к нему — под строкой
+   сроков. Разговор — вопрос человека плашкой, ответ — текстом с переносами
+   строк, как его пишет модель; длинный адрес в ответе переносится, а не
+   раздвигает экран телефона. */
+.assistant-entry {
+  margin-top: var(--space-4);
+}
+
+.ai-setup,
+.ai-key,
+.ai-ask {
+  margin-top: var(--space-5);
+}
+
+.ai-setup,
+.ai-ask {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.ai-setup h2 {
+  margin: 0;
+}
+
+/* Четыре поставщика — сеткой: на телефоне в 360 точек два ряда по два, а не
+   три и один, на компьютере — один ряд (глазной прогон задачи 102). */
+.ai-setup .seg {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+}
+
+/* Чем кончился вопрос — под разговором, не вплотную к ответу: у абзацев
+   полей нет (`p { margin: 0 }`). «Новый разговор» — под ними. */
+.ai-note {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+
+.ai-new {
+  margin-top: var(--space-4);
+}
+
+.ai-setup .hint,
+.ai-ask .hint,
+.ai-key .hint {
+  margin: 0;
+}
+
+.ai-key .actions {
+  margin-top: var(--space-3);
+}
+
+.ai-talk {
+  display: grid;
+  gap: var(--space-6);
+  margin: var(--space-6) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-who {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--weight-strong);
+}
+
+.ai-q,
+.ai-a {
+  margin: var(--space-1) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ai-q {
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--surface-sunken);
+}
+
+.ai-q + .ai-who {
+  margin-top: var(--space-4);
+}
+
 /* Список сроков — под словами о нём; насколько близок срок и что квартал
    закрыт — строкой под днём, словами: цвет их не говорит (Правило 4). */
 ul.deadlines {

@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.158",
+      "date": "2026-11-20",
+      "hy": [
+        "ԱԲ օգնական. «Հարկ» բաժնում կարող եք հարկերի մասին հարցնել ձեր ԱԲ-ին (Claude, ChatGPT, Gemini կամ Grok)՝ ձեր API բանալիով։ Հարցն ուղիղ գնում է ձեր ընտրած մատակարարին, ոչ թե մեզ, իսկ բանալին պահվում է միայն այս սարքում։ ԱԲ-ի պատասխանը խորհրդատվություն չէ. ստուգեք այն օրենքով և հաշվապահի մոտ։",
+        "Թարմացվել են լիցենզիայի պայմաններն ու գաղտնիության քաղաքականությունը՝ 20.11.2026 խմբագրությամբ։"
+      ],
+      "ru": [
+        "ИИ-помощник: в разделе «Налог» можно спросить о налогах свой ИИ (Claude, ChatGPT, Gemini или Grok) по своему ключу API. Вопрос уходит прямо выбранному поставщику, а не нам, а ключ хранится только на этом устройстве. Ответ ИИ — не консультация: проверяйте его по закону и у бухгалтера.",
+        "Обновлены условия лицензии и политика конфиденциальности: редакции от 20.11.2026."
+      ],
+      "en": [
+        "AI assistant: under Tax you can ask your own AI (Claude, ChatGPT, Gemini or Grok) about taxes, with your own API key. The question goes straight to the provider you chose, not to us, and the key stays only on this device. An AI answer is not tax advice: check it against the law and with an accountant.",
+        "The license terms and the privacy policy are updated: editions of November 20, 2026."
+      ]
+    },
+    {
       "version": "0.0.157",
       "date": "2026-11-19",
       "hy": [
@@ -263,19 +279,6 @@
       ],
       "en": [
         "An issued document's card now has “File for the SRC system (XML)”: upload it in the SRC system (“Սևագրեր”, “Ներբեռնել”), and the settlement document becomes a draft there: choose the deal type, check it and issue it — no need to enter the document twice."
-      ]
-    },
-    {
-      "version": "0.0.138",
-      "date": "2026-11-16",
-      "hy": [
-        "Դոլարի և եվրոյի փոխարժեքի դաշտի մոտ այժմ ԿԲ փոխարժեքն է, որն օրենքը վերցնում է ծառայության օրվա համար՝ նախորդ աշխատանքային օրը հրապարակվածը (2026 թ. հուլիսի 1-ից)։ «Լրացնել»-ը գրում է այն դաշտում, իսկ առանց փոխարժեքի փաստաթղթում «Նշել ԿԲ փոխարժեքը»-ն պահպանում է այն մեկ սեղմումով։ Փոխարժեքները գալիս են kvartik.com կայքից և կան նաև առանց ցանցի։"
-      ],
-      "ru": [
-        "У поля курса доллара и евро — курс ЦБ, который берёт закон для дня услуги: опубликованный в предыдущий рабочий день (с 1 июля 2026 года). «Подставить» пишет его в поле, а у выпущенного документа без курса «Указать курс ЦБ» сохраняет его одним нажатием. Курсы приходят с сайта kvartik.com, и последние есть и без сети."
-      ],
-      "en": [
-        "The dollar and euro rate fields now show the CBA rate the law takes for the service day: the one published on the previous working day (since 1 July 2026). “Use it” fills it in, and an issued document without a rate gets it in one tap with “Enter the CBA rate”. Rates come from kvartik.com, and the latest ones work offline too."
       ]
     }
   ]

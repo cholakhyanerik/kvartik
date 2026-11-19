@@ -7,6 +7,7 @@
 
 mod about;
 mod annual;
+mod assistant;
 mod avatar;
 mod backup;
 mod cba;
@@ -45,6 +46,7 @@ use crate::platform::clock;
 use crate::store::{self, Store};
 use about::{AboutEntry, AboutScreen};
 use annual::AnnualScreen;
+use assistant::AssistantScreen;
 use backup::{BackupChip, BackupEntry, BackupSection, Backups};
 use clients::{Clients, ClientsSection};
 use deadlines::DeadlinesScreen;
@@ -346,6 +348,9 @@ pub fn App() -> impl IntoView {
                 </section>
                 <section id=Screen::Report.id() class="screen" hidden=hidden(Screen::Report)>
                     <ReportScreen ctx=tax router />
+                </section>
+                <section id=Screen::Assistant.id() class="screen" hidden=hidden(Screen::Assistant)>
+                    <AssistantScreen ctx=tax router />
                 </section>
                 <section id=Screen::Profile.id() class="screen" hidden=hidden(Screen::Profile)>
                     <h1 tabindex="-1">{tr(lang, Key::ProfileTitle)}</h1>

@@ -26,6 +26,7 @@ use crate::store::device::Device;
 use crate::store::{Store, StoreError, Writes};
 
 mod annual;
+mod assistant;
 mod documents;
 mod install;
 mod ledger;
@@ -382,6 +383,7 @@ async fn choosing_a_language_translates_the_whole_window() {
             Screen::Annual,
             Screen::Deadlines,
             Screen::Report,
+            Screen::Assistant,
             Screen::Profile,
             Screen::Backup,
             Screen::About,

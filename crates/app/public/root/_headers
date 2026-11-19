@@ -20,8 +20,15 @@
 
 # CSP держит обещание «ничего не уходит с устройства» (CLAUDE.md,
 # Правило 13): ни запроса, ни скрипта, ни картинки, ни шрифта с чужого
-# адреса. `connect-src`, `font-src`, `style-src`, `manifest-src` берут
-# `default-src` (по спецификации CSP3), `worker-src` — `script-src`.
+# адреса. `font-src`, `style-src`, `manifest-src` берут `default-src` (по
+# спецификации CSP3), `worker-src` — `script-src`. `connect-src` — свой сайт
+# и ровно четыре адреса, куда ИИ-помощник шлёт вопрос человека с его ключом
+# (задача 102, решение человека 2026-11-17; `kvartik_core::ai::Provider::url`,
+# их сверяет тест `crates/app/tests/csp.rs`): с путём, а не весь сервер, —
+# путь без `/` в конце CSP сравнивает целиком (CSP3, «path-part match»), и
+# ни файлов, ни пакетов вопросов поставщика отсюда не достать. Но сам вопрос
+# — дверь наружу: чем она опасна и что от этого держит, — CLAUDE.md,
+# Правило 13, «ИИ-помощник».
 # `'wasm-unsafe-eval'` — без него wasm не запустится, и страница останется
 # пустой (Правило 6). `blob:` у картинок — логотип и превью PDF
 # (platform/file.rs, Picture). `form-action 'none'` — формы окна никуда не
@@ -38,7 +45,7 @@
 # Pages (CLAUDE.md, Правило 13; выключаются настройкой своей зоны —
 # задача 16).
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; connect-src 'self' https://api.anthropic.com/v1/messages https://api.openai.com/v1/chat/completions https://generativelanguage.googleapis.com/v1beta/openai/chat/completions https://api.x.ai/v1/chat/completions; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
   Cross-Origin-Opener-Policy: same-origin
   Referrer-Policy: no-referrer
   X-Content-Type-Options: nosniff

@@ -32,7 +32,8 @@
 // 2. С сетью: восстановление образца копии, экраны и их формы, карточка
 //    выпущенного документа, PDF, выгрузка с закрытым кварталом, разошедшимся
 //    с поданным, новая копия, свои цвета настроек и они же после
-//    перезагрузки (задача 88) — каждая из десяти частей;
+//    перезагрузки (задача 88), ИИ-помощник с поставщиком-подменой за
+//    настоящим CSP (задача 102) — каждая из десяти частей;
 //    и все части `dist/app/split_*.wasm` загружены. Курс ЦБ (задача 43):
 //    программа выкладки пишет из образца ответа ЦБ тот же файл курсов, что
 //    читает тест ядра, программа берёт его со своего сайта, помнит
@@ -128,6 +129,9 @@ const TEXT_IN = (scope, text) =>
 const NO_TEXT_IN = (scope, text) =>
   `return document.querySelector(${JSON.stringify(scope)})?.innerText.includes(${JSON.stringify(text)}) ? null : true;`;
 const NO_PANIC = `return document.getElementById("panic") ? null : true;`;
+/// Виден ли текст внутри раздела — выражением, для своих условий.
+const SHOWN_IN = (scope, text) =>
+  `document.querySelector(${JSON.stringify(scope)})?.innerText.includes(${JSON.stringify(text)})`;
 
 async function go(page, hash) {
   await page.eval(`location.hash = ${JSON.stringify(hash)}; return true;`);
@@ -177,6 +181,7 @@ const SCREENS = [
       && document.querySelector("#license")?.innerText.includes(${JSON.stringify(s("LicenseGives"))}) ? true : null;` },
   { name: "О программе", hash: "#/about", shown: TEXT_IN("#about", s("AboutRules")) },
   { name: "Настройки", hash: "#/settings", shown: TEXT_IN("#settings", s("SettingsCursorHint")) },
+  { name: "ИИ-помощник", hash: "#/ask", shown: TEXT_IN("#ask", s("AiAbout")) },
 ];
 
 async function screens(page, when) {
@@ -260,6 +265,104 @@ async function settings(page) {
   checks.check("настройки: без своих цветов первый кадр — в цветах программы",
     plain && plain.link === null && plain.scheme === "light dark" && plain.background === background,
     `${JSON.stringify(plain)}, после запуска — ${background}`);
+}
+
+/// ИИ-помощник (задача 102) на собранном сайте — с настоящим CSP из
+/// `_headers` (его отдаёт свой сервер) и поставщиком-подменой: запрос
+/// к четырём адресам перехватывает протокол DevTools (`Fetch.enable`) — уже
+/// после того, как браузер сверил его с CSP, — и отвечает потоком SSE, как
+/// Anthropic; в сеть не уходит ничего, ни вопрос, ни ключ. Ключ подключается,
+/// ответ встаёт по мере прихода, запрос несёт ключ, версию API, заголовок
+/// прямого доступа и вопрос, а запрос на другой путь того же поставщика и на
+/// чужой адрес CSP не пускает. Предварительный запрос CORS (`OPTIONS`) —
+/// тоже подменой: Chrome показывает его перехвату (по протоколу DevTools,
+/// «Fetch.requestPaused»), а не прошёл бы перехват — его ответил бы сам
+/// поставщик, без ключа и вопроса.
+const AI_ANSWER = "Срок — до 20 января. Подробнее: https://www.arlis.am/hy/acts/230455";
+async function assistant(page) {
+  const sse = [
+    `event: message_start\ndata: {"type":"message_start","message":{}}\n\n`,
+    `event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: AI_ANSWER } })}\n\n`,
+    `event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n`,
+    `event: message_stop\ndata: {"type":"message_stop"}\n\n`,
+  ].join("");
+  const seen = [];
+  const cors = [
+    { name: "Access-Control-Allow-Origin", value: "*" },
+    { name: "Access-Control-Allow-Headers", value: "*, authorization, x-api-key" },
+    { name: "Access-Control-Allow-Methods", value: "POST" },
+  ];
+  page.on((msg) => {
+    if (msg.method !== "Fetch.requestPaused") return;
+    const { requestId, request } = msg.params;
+    seen.push({ url: request.url, method: request.method, headers: request.headers, body: request.postData ?? "" });
+    const answer = request.method === "OPTIONS"
+      ? { requestId, responseCode: 204, responseHeaders: cors }
+      : { requestId, responseCode: 200, responseHeaders: [...cors, { name: "Content-Type", value: "text/event-stream" }],
+        body: Buffer.from(sse).toString("base64") };
+    page.send("Fetch.fulfillRequest", answer).catch(() => {});
+  });
+  await page.send("Fetch.enable", { patterns: ["api.anthropic.com", "api.openai.com", "generativelanguage.googleapis.com", "api.x.ai"]
+    .map((host) => ({ urlPattern: `https://${host}/*`, requestStage: "Request" })) });
+  try {
+    await go(page, "#/ask");
+    checks.check("ИИ-помощник: экран и форма ключа", await page.waitFor(`return ${SHOWN_IN("#ask", s("AiAbout"))}
+      && document.querySelector("#ask .ai-setup input") ? true : null;`));
+    await page.type(s("AiKey"), "sk-ant-check-0123abcd");
+    checks.check("ИИ-помощник: «Сохранить ключ»", await press(page, "#ask", s("AiSave")));
+    const connected = t("AiConnected", opt.lang).replace("{}", "Claude").replace("{}", "claude-opus-5-5").replace("{}", "abcd");
+    checks.check("ИИ-помощник: ключ подключён и в записи устройства", await page.waitFor(TEXT_IN("#ask", connected))
+      && JSON.parse(await page.eval(`return localStorage.getItem("kvartik.ai");`) ?? "{}").key === "sk-ant-check-0123abcd");
+    await page.type(s("AiQuestion"), "Когда срок расчёта за IV квартал?");
+    // Кнопку включает привязка поля своей задачей — ждать её, а не паузу.
+    checks.check("ИИ-помощник: «Спросить»", await page.waitFor(`const b = ${BUTTON("#ask", s("AiAsk"))};
+      return b && !b.disabled ? true : null;`) && await press(page, "#ask", s("AiAsk")));
+    checks.check("ИИ-помощник: ответ встал, адрес закона — ссылкой", await page.waitFor(`return ${SHOWN_IN("#ask", AI_ANSWER)}
+      && document.querySelector('#ask .ai-a a[href="https://www.arlis.am/hy/acts/230455"]') ? true : null;`));
+    // Ссылка в ответе — цветом ссылок программы, а не синим браузера
+    // (глазной прогон задачи 102: ответ лежал в `div`, мимо `main p a`).
+    const tint = await page.eval(`const a = document.querySelector("#ask .ai-a a");
+      const probe = document.createElement("span");
+      probe.style.color = getComputedStyle(document.documentElement).getPropertyValue("--accent-text").trim();
+      document.body.append(probe);
+      const want = getComputedStyle(probe).color;
+      probe.remove();
+      return { want, got: a ? getComputedStyle(a).color : null };`);
+    checks.check("ИИ-помощник: ссылка в ответе — цветом ссылок программы", tint?.got && tint.got === tint.want,
+      JSON.stringify(tint));
+    const posts = seen.filter((r) => r.method === "POST");
+    const sent = posts[0];
+    const header = (name) => Object.entries(sent?.headers ?? {}).find(([key]) => key.toLowerCase() === name)?.[1];
+    checks.check("ИИ-помощник: один вопрос — на адрес Anthropic, с ключом, версией API и вопросом, без куки",
+      posts.length === 1 && sent.url === "https://api.anthropic.com/v1/messages" && header("x-api-key") === "sk-ant-check-0123abcd"
+        && header("anthropic-version") === "2026-10-21" && header("anthropic-dangerous-direct-browser-access") === "true"
+        && !header("cookie") && !header("referer") && JSON.parse(sent.body).messages.at(-1).content === "Когда срок расчёта за IV квартал?",
+      JSON.stringify(seen.map((r) => `${r.method} ${r.url}`)));
+    // Другой путь того же поставщика и чужой адрес — мимо CSP не уйти.
+    const refused = await page.eval(`const blocked = [];
+      const listen = (event) => blocked.push(event.blockedURI);
+      document.addEventListener("securitypolicyviolation", listen);
+      const tries = [];
+      for (const url of ["https://api.anthropic.com/v1/files", "https://kvartik-check.invalid/collect"]) {
+        try { await fetch(url, { method: "POST", body: "x" }); tries.push("ушёл"); } catch { tries.push("не пущен"); }
+      }
+      await new Promise((r) => setTimeout(r, 200));
+      document.removeEventListener("securitypolicyviolation", listen);
+      return { tries, blocked };`);
+    checks.check("ИИ-помощник: CSP не пускает другой путь поставщика и чужой адрес",
+      refused?.tries?.every((r) => r === "не пущен") && refused.blocked.some((u) => u.startsWith("https://api.anthropic.com/v1/files"))
+        && refused.blocked.some((u) => u.startsWith("https://kvartik-check.invalid")) && !seen.some((r) => r.url.includes("/v1/files")),
+      JSON.stringify(refused));
+    // Отказы CSP, которые проверка вызвала сама, — не ошибки программы.
+    for (let i = page.errors.length - 1; i >= 0; i--) {
+      if (/v1\/files|kvartik-check\.invalid/.test(page.errors[i])) page.errors.splice(i, 1);
+    }
+    checks.check("ИИ-помощник: «Убрать ключ» стирает его с устройства", await press(page, "#ask", s("AiRemove"))
+      && await page.waitFor(`return localStorage.getItem("kvartik.ai") === null
+        && document.querySelector("#ask .ai-setup input") ? true : null;`));
+  } finally {
+    await page.send("Fetch.disable").catch(() => {});
+  }
 }
 
 /// Первый кадр после перезагрузки (задача 89) — в `DOMContentLoaded`, когда
@@ -389,17 +492,32 @@ async function cardClose(page) {
 /// ссылка получает файл по адресу `blob:` в самом нажатии, XLSX — пакет ZIP
 /// («PK»), CSV — с BOM UTF-8. Браузерные тесты частей не видят, а файл
 /// собирает код части книги.
+/// Файл, который окно сделало ссылкой `blob:`, — самим `Blob`: `fetch` по
+/// такому адресу CSP сайта не пускает (`connect-src` — свой сайт и адреса
+/// ИИ-помощника), а свой сервер проверки с задачи 102 ставит CSP, как сайт.
+/// Подмена `URL.createObjectURL` запоминает каждый `Blob` по его адресу —
+/// ставится до нажатия, в той же странице; окно зовёт `URL.createObjectURL`
+/// в самом нажатии.
+const KEEP_BLOBS = `if (!window.__kvartikBlobs) {
+    window.__kvartikBlobs = new Map();
+    const made = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = (blob) => { const url = made(blob); window.__kvartikBlobs.set(url, blob); return url; };
+  }`;
+const BLOB_BYTES = (href) => `new Uint8Array(await window.__kvartikBlobs.get(${href}).arrayBuffer())`;
+
 async function exported(page, when) {
   await go(page, "#/ledger");
   const shown = await page.waitFor(VISIBLE("#ledger section.export"));
   if (!checks.check(`${when}: выгрузка под книгой`, shown)) return;
   for (const [key, head, extension] of [["ExportXlsx", "504b0304", ".xlsx"], ["ExportCsvDocuments", "efbbbf", ".csv"]]) {
-    const file = await page.eval(`const a = [...document.querySelectorAll("#ledger section.export a")]
+    const file = await page.eval(`${KEEP_BLOBS}
+      const a = [...document.querySelectorAll("#ledger section.export a")]
         .find((a) => a.textContent.trim() === ${JSON.stringify(s(key))} && a.getClientRects().length > 0);
       if (!a) return { error: "нет ссылки" };
       a.click();
       if (!a.href.startsWith("blob:")) return { error: "адрес не blob: " + a.href };
-      const bytes = new Uint8Array(await (await fetch(a.href)).arrayBuffer());
+      if (!window.__kvartikBlobs.has(a.href)) return { error: "Blob ссылки не пойман: " + a.href };
+      const bytes = ${BLOB_BYTES("a.href")};
       return { name: a.getAttribute("download"), size: bytes.length,
         head: [...bytes.subarray(0, 4)].map((b) => b.toString(16).padStart(2, "0")).join("") };`);
     checks.check(`${when}: файл «${s(key)}»`,
@@ -441,11 +559,13 @@ async function drifted(page, when) {
   checks.check(`${when}: выгрузка за 2026 год говорит о разошедшемся закрытом квартале`,
     await page.waitFor(`return [...document.querySelectorAll("#ledger section.export p[role=alert]")]
       .some((p) => p.textContent.includes(${JSON.stringify(words)})) ? true : null;`), words);
-  const sheet = await page.eval(`const a = [...document.querySelectorAll("#ledger section.export a")]
+  const sheet = await page.eval(`${KEEP_BLOBS}
+    const a = [...document.querySelectorAll("#ledger section.export a")]
       .find((a) => a.textContent.trim() === ${JSON.stringify(s("ExportXlsx"))} && a.getClientRects().length > 0);
     if (!a) return { error: "нет ссылки" };
     a.click();
-    const text = new TextDecoder().decode(await (await fetch(a.href)).arrayBuffer());
+    if (!window.__kvartikBlobs.has(a.href)) return { error: "Blob ссылки не пойман: " + a.href };
+    const text = new TextDecoder().decode(${BLOB_BYTES("a.href")});
     return { sheet: text.includes(${JSON.stringify(s("ExportClosingsSheet"))}),
       drift: text.includes(${JSON.stringify(s("ExportClosingDrift"))}) };`);
   checks.check(`${when}: в XLSX лист закрытых кварталов, сверка — «${s("ExportClosingDrift")}»`,
@@ -1469,6 +1589,7 @@ async function main() {
     await forms(page, "с сетью");
     await screens(page, "с сетью");
     await settings(page);
+    await assistant(page);
     await card(page, "с сетью");
     await cardClose(page);
     await exported(page, "с сетью");

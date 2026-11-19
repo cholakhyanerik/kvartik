@@ -933,12 +933,15 @@ mod tests {
     const LANDING_CSS: &str = include_str!("../../app/site/landing.css");
     const LANDING_JS: &str = include_str!("../../app/site/landing.js");
     /// Утверждённые юридические тексты (задача 32) и прежние редакции условий
-    /// (задачи 93, 99, 103 и 106) и политики (задача 106) — те, что берёт
-    /// сборка.
-    const LEGAL: [(&str, &str); 21] = [
+    /// (задачи 93, 99, 103, 106 и 102) и политики (задачи 106 и 102) — те, что
+    /// берёт сборка.
+    const LEGAL: [(&str, &str); 27] = [
         ("terms.hy.md", include_str!("../../../docs/legal/terms.hy.md")),
         ("terms.ru.md", include_str!("../../../docs/legal/terms.ru.md")),
         ("terms.en.md", include_str!("../../../docs/legal/terms.en.md")),
+        ("terms.2026-11-18.hy.md", include_str!("../../../docs/legal/terms.2026-11-18.hy.md")),
+        ("terms.2026-11-18.ru.md", include_str!("../../../docs/legal/terms.2026-11-18.ru.md")),
+        ("terms.2026-11-18.en.md", include_str!("../../../docs/legal/terms.2026-11-18.en.md")),
         ("terms.2026-11-17.hy.md", include_str!("../../../docs/legal/terms.2026-11-17.hy.md")),
         ("terms.2026-11-17.ru.md", include_str!("../../../docs/legal/terms.2026-11-17.ru.md")),
         ("terms.2026-11-17.en.md", include_str!("../../../docs/legal/terms.2026-11-17.en.md")),
@@ -954,6 +957,9 @@ mod tests {
         ("privacy.hy.md", include_str!("../../../docs/legal/privacy.hy.md")),
         ("privacy.ru.md", include_str!("../../../docs/legal/privacy.ru.md")),
         ("privacy.en.md", include_str!("../../../docs/legal/privacy.en.md")),
+        ("privacy.2026-11-18.hy.md", include_str!("../../../docs/legal/privacy.2026-11-18.hy.md")),
+        ("privacy.2026-11-18.ru.md", include_str!("../../../docs/legal/privacy.2026-11-18.ru.md")),
+        ("privacy.2026-11-18.en.md", include_str!("../../../docs/legal/privacy.2026-11-18.en.md")),
         ("privacy.2026-11-09.hy.md", include_str!("../../../docs/legal/privacy.2026-11-09.hy.md")),
         ("privacy.2026-11-09.ru.md", include_str!("../../../docs/legal/privacy.2026-11-09.ru.md")),
         ("privacy.2026-11-09.en.md", include_str!("../../../docs/legal/privacy.2026-11-09.en.md")),
@@ -1650,8 +1656,8 @@ mod tests {
         sources(&edition);
         fs::create_dir_all(edition.0.join("stage")).expect("папка сборки");
         let (_, terms) = LEGAL.iter().find(|(name, _)| *name == "terms.en.md").expect("текст есть");
-        assert!(terms.contains("November 18, 2026"), "в условиях — та редакция, что ждёт тест");
-        edition.put("legal/terms.en.md", &terms.replace("November 18, 2026", "December 1, 2026"));
+        assert!(terms.contains("November 20, 2026"), "в условиях — та редакция, что ждёт тест");
+        edition.put("legal/terms.en.md", &terms.replace("November 20, 2026", "December 1, 2026"));
         let error = build(&edition).expect_err("слов согласия нет в условиях");
         assert!(error.contains("terms.en.md") && error.contains("Key::BuyAccept"), "{error}");
         assert!(names(&edition.0.join("stage")).is_empty(), "в сайт что-то легло");

@@ -45,6 +45,7 @@ use leptos::prelude::*;
 
 use super::about::AboutPage;
 use super::annual::{AnnualCard, AnnualEntry, AnnualPage};
+use super::assistant::{AssistantEntry, AssistantPage};
 use super::deadlines::{ApplicationCard, DeadlineReminder, DeadlinesEntry, DeadlinesPage};
 use super::backup::{AutoCards, BackupChip, Backups};
 use super::documents::{Documents, SettlementReminder};
@@ -633,6 +634,9 @@ pub(super) enum Part {
     License,
     /// Содержимое экрана «О программе» (`ui/about.rs`, задача 31).
     About,
+    /// Содержимое экрана ИИ-помощника (`ui/assistant.rs`, задача 102):
+    /// разговор держит новую версию, пока экран на виду, — по адресу.
+    Assistant(Router),
 }
 
 /// Карточки или экран — зовёт часть книги (`ledger::book_part`). Годовые
@@ -661,6 +665,7 @@ pub(super) fn content(ctx: Ctx, part: Part) -> AnyView {
         Part::Report => view! { <ReportPage ctx /> }.into_any(),
         Part::License => view! { <LicensePage ctx /> }.into_any(),
         Part::About => view! { <AboutPage ctx /> }.into_any(),
+        Part::Assistant(router) => view! { <AssistantPage ctx router /> }.into_any(),
     }
 }
 
@@ -927,6 +932,7 @@ fn TaxBody(ctx: Ctx) -> impl IntoView {
         })}
         <AnnualEntry ctx />
         <DeadlinesEntry ctx />
+        <AssistantEntry lang />
         <p class="tax-check">{tr(lang, Key::TaxCheck)}</p>
         <p class="hint">{move || fill(t(lang.get(), Key::TaxRulesVersion), &[&rules_version])}</p>
     }

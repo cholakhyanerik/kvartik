@@ -11,7 +11,10 @@
 //   Для замера первого захода: сжимать файл при
 //   первом запросе нельзя — сжатие шрифтов держало шесть соединений HTTP/1.1,
 //   и части wasm выглядели на 650 мс медленнее (задача 58, 2026-10-13).
-//   Заголовков `_headers` он не ставит. Качество сжатия — параметр: замеру
+//   Из `_headers` он ставит только правило `/*` — его Pages ставит на каждый
+//   ответ, и CSP в нём: до задачи 102 прогоны шли вовсе без CSP, и запрос,
+//   который CSP сайта не пустил бы, проверка видела ушедшим. Правила
+//   с путями (кэш) он не ставит. Качество сжатия — параметр: замеру
 //   нужны байты хостинга (`HOSTING_QUALITY`, по умолчанию), а проверке CI —
 //   только сжатие, и 5 сжимает его за доли секунды.
 //
@@ -60,11 +63,31 @@ const TYPES = {
 /// уровнем 11, которую кладёт сборка, — `own` тоже, а остальное — этим.
 export const HOSTING_QUALITY = 4;
 
+/// Заголовки правила `/*` из `_headers` сборки — CSP, COOP, Referrer-Policy,
+/// nosniff: Pages ставит их на каждый ответ сайта (шапка `_headers`). Нет
+/// файла — заголовков нет.
+function everywhere(dist) {
+  const file = path.join(dist, "_headers");
+  if (!fs.existsSync(file)) return {};
+  const out = {};
+  let inside = false;
+  for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+    if (/^\S/.test(line)) {
+      inside = line.trim() === "/*";
+      continue;
+    }
+    const header = inside && line.match(/^\s+([A-Za-z-]+):\s*(.+)$/);
+    if (header) out[header[1]] = header[2].trim();
+  }
+  return out;
+}
+
 /// Свой сервер. Возвращает `{ port, stop() }`. `extra` — файлы, которых нет
 /// в сборке, адрес → байты, по умолчанию — файлы выкладки (`DEPLOYED`):
 /// свой файл `dist/` важнее — копия сайта может нести другой. `dist/` он не
 /// трогает.
 export function own(dist, port, { quality = HOSTING_QUALITY, extra = DEPLOYED } = {}) {
+  const site = everywhere(dist);
   const files = new Map();
   const walk = (dir, prefix) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -126,7 +149,7 @@ export function own(dist, port, { quality = HOSTING_QUALITY, extra = DEPLOYED } 
     if (!f) { res.writeHead(404); return res.end(); }
     const br = (req.headers["accept-encoding"] ?? "").includes("br");
     res.writeHead(found ? 200 : 404, {
-      "Content-Type": f.type, "Cache-Control": "no-cache", ...(br ? { "Content-Encoding": "br" } : {}),
+      ...site, "Content-Type": f.type, "Cache-Control": "no-cache", ...(br ? { "Content-Encoding": "br" } : {}),
     });
     res.end(br ? f.br : f.raw);
   }).listen(port, "127.0.0.1");

@@ -36,6 +36,8 @@ pub enum Screen {
     Deadlines,
     /// Числа для расчёта ՊԵԿ — экран внутри раздела налога (задача 24).
     Report,
+    /// ИИ-помощник — экран внутри раздела налога (задача 102).
+    Assistant,
     Profile,
     /// Резервная копия и хранение данных — экран внутри профиля.
     Backup,
@@ -56,7 +58,7 @@ const DOCUMENT: &str = "#/documents/";
 
 impl Screen {
     /// Экраны без параметров — в порядке разделов.
-    pub const PLAIN: [Screen; 14] = [
+    pub const PLAIN: [Screen; 15] = [
         Screen::Home,
         Screen::Documents,
         Screen::Ledger,
@@ -65,6 +67,7 @@ impl Screen {
         Screen::Annual,
         Screen::Deadlines,
         Screen::Report,
+        Screen::Assistant,
         Screen::Profile,
         Screen::Backup,
         Screen::License,
@@ -86,6 +89,7 @@ impl Screen {
             Screen::Annual => "#/annual".to_owned(),
             Screen::Deadlines => "#/deadlines".to_owned(),
             Screen::Report => "#/report".to_owned(),
+            Screen::Assistant => "#/ask".to_owned(),
             Screen::Profile => "#/profile".to_owned(),
             Screen::Backup => "#/backup".to_owned(),
             Screen::License => "#/license".to_owned(),
@@ -118,12 +122,13 @@ impl Screen {
     }
 
     /// Раздел, который подсвечен в меню на этом экране: копия, лицензия,
-    /// «О программе» и ИП в программе — часть профиля, годовые платежи, сроки
-    /// и числа для расчёта — налога, документ — раздела документов.
+    /// «О программе» и ИП в программе — часть профиля, годовые платежи, сроки,
+    /// числа для расчёта и ИИ-помощник — налога, документ — раздела
+    /// документов.
     pub const fn section(self) -> Screen {
         match self {
             Screen::Backup | Screen::License | Screen::About | Screen::Office => Screen::Profile,
-            Screen::Annual | Screen::Deadlines | Screen::Report => Screen::Tax,
+            Screen::Annual | Screen::Deadlines | Screen::Report | Screen::Assistant => Screen::Tax,
             Screen::Document(_) => Screen::Documents,
             other => other,
         }
@@ -140,6 +145,7 @@ impl Screen {
             Screen::Annual => "annual",
             Screen::Deadlines => "deadlines",
             Screen::Report => "report",
+            Screen::Assistant => "ask",
             Screen::Profile => "profile",
             Screen::Backup => "backup",
             Screen::License => "license",
@@ -321,6 +327,9 @@ mod tests {
         assert_eq!(Screen::Report.section(), Screen::Tax);
         assert_eq!(Screen::Report.page(), Screen::Report);
         assert_eq!(Screen::Report.href(), "#/report");
+        assert_eq!(Screen::Assistant.section(), Screen::Tax);
+        assert_eq!(Screen::Assistant.page(), Screen::Assistant);
+        assert_eq!(Screen::Assistant.href(), "#/ask");
         assert_eq!(document.section(), Screen::Documents);
         assert_eq!(document.page(), Screen::Documents);
         assert_eq!(document.id(), "documents");

@@ -1,10 +1,12 @@
 # Kvartik License Terms
 
-> **Редакция от 18.11.2026** (задача 106): перевод нового п. 3 и даты
-> русского текста той же редакции; утвердил человек 2026-11-18 вместе
-> с русским текстом.
+> **Редакция от 20.11.2026** (задача 102): перевод нового абзаца п. 8 и даты
+> русского текста той же редакции; утвердил человек вместе с русским
+> текстом.
 >
-> Прежние редакции — от 17.11.2026
+> Прежние редакции — от 18.11.2026
+> ([terms.2026-11-18.en.md](terms.2026-11-18.en.md), на сайте —
+> /en/terms/2026-11-18/), от 17.11.2026
 > ([terms.2026-11-17.en.md](terms.2026-11-17.en.md), на сайте —
 > /en/terms/2026-11-17/), от 15.11.2026
 > ([terms.2026-11-15.en.md](terms.2026-11-15.en.md),
@@ -18,7 +20,7 @@
 > «Для проверки» — только в русском тексте. Квадратные скобки заполнены
 > 2026-11-09 вместе с русским текстом.
 
-**Edition of November 18, 2026. Public offer.**
+**Edition of November 20, 2026. Public offer.**
 
 ## 1. Parties and subject
 
@@ -34,7 +36,7 @@ individual entrepreneurs and organizations and only for their business.
    cholakhyanerik@gmail.com: the plan, the TIN (ՀՎՀՀ) of their IE or
    organization, its name, a contact to send the key to, and the words
    “I accept the Kvartik license terms in the edition of
-   November 18, 2026”.
+   November 20, 2026”.
 2. The user pays for the key. The contract is made upon payment.
 3. The seller sends the key to that contact within one business day after
    payment, together with the settlement document.
@@ -117,6 +119,12 @@ paid. The app is provided “as is”: the seller is not liable for
 calculation errors, loss of data on the user's device or interruptions
 of the site, except for a deliberate breach of the contract and where the
 law does not allow such a disclaimer.
+
+Answers of the AI assistant are written by the model of the provider whose
+key the user connected, under that provider's terms and at the user's
+expense. They are not tax advice: a model's answer can be wrong, and the
+seller does not check it and is not liable for it. Tax amounts are
+calculated by the app itself, not by the model.
 
 ## 9. Third-party code
 
