@@ -116,7 +116,9 @@ impl Legal {
 }
 
 /// Прежние редакции условий лицензии (`Legal::earlier`), от новой к старой:
-/// от 18.11.2026 — по ней продавались ключи до редакции от 20.11.2026
+/// от 20.11.2026 — до редакции от 21.11.2026 (задача 113, пробный ключ
+/// продавца вместо 14 дней без ключа, п. 3, 4.4 и 6); от 18.11.2026 — по ней
+/// продавались ключи до редакции от 20.11.2026
 /// (задача 102, ответы ИИ-помощника — не консультация, п. 8); от 17.11.2026 —
 /// до редакции от 18.11.2026 (задача 106, пробный период и по ՀՎՀՀ, п. 3);
 /// от 15.11.2026 — до редакции
@@ -124,7 +126,8 @@ impl Legal {
 /// 13.11.2026 — до редакции от 15.11.2026 (задача 99, пробный период с
 /// первого дня данных, п. 3); от 09.11.2026 — первая, до редакции от
 /// 13.11.2026 (задача 93, продление заранее, п. 4.1).
-const TERMS_EARLIER: [Date; 5] = [
+const TERMS_EARLIER: [Date; 6] = [
+    Date::new(2026, 11, 20).expect("20 ноября 2026 года в календаре есть"),
     Date::new(2026, 11, 18).expect("18 ноября 2026 года в календаре есть"),
     Date::new(2026, 11, 17).expect("17 ноября 2026 года в календаре есть"),
     Date::new(2026, 11, 15).expect("15 ноября 2026 года в календаре есть"),
@@ -133,13 +136,16 @@ const TERMS_EARLIER: [Date; 5] = [
 ];
 
 /// Прежние редакции политики конфиденциальности (`Legal::earlier`), от новой
-/// к старой: от 18.11.2026 — до редакции от 20.11.2026 (задача 102: вопрос
+/// к старой: от 20.11.2026 — до редакции от 21.11.2026 (задача 113: ՀՎՀՀ на
+/// сервер больше не уходит, «Коротко», п. 2, 3, 5 и 6); от 18.11.2026 — до
+/// редакции от 20.11.2026 (задача 102: вопрос
 /// ИИ-помощнику уходит выбранному человеком поставщику, «Коротко» и п. 2);
 /// от 09.11.2026 — первая, до редакции от 18.11.2026 (задача 106: ՀՎՀՀ уходит
 /// на сервер сайта ради пробного периода, п. 2). Своё место у прежней — по тому
 /// же обещанию, что у условий (п. 11 условий, п. 7 политики): человек вправе
 /// прочесть, на что соглашался.
-const PRIVACY_EARLIER: [Date; 2] = [
+const PRIVACY_EARLIER: [Date; 3] = [
+    Date::new(2026, 11, 20).expect("20 ноября 2026 года в календаре есть"),
     Date::new(2026, 11, 18).expect("18 ноября 2026 года в календаре есть"),
     Date::new(2026, 11, 9).expect("9 ноября 2026 года в календаре есть"),
 ];
@@ -155,6 +161,37 @@ pub const EMAIL: &str = "cholakhyanerik@gmail.com";
 /// продавец сменит, а новая редакция ради этого не нужна. ՀՎՀՀ и согласие
 /// с условиями — только почтой (условия, п. 2; политика, п. 5).
 pub const TELEGRAM: &str = "https://t.me/cholakhyanerik";
+
+/// Письмо продавцу ([`EMAIL`]) адресом `mailto:` с темой `subject` и текстом
+/// `body` — «Написать письмо» страницы «Купить» (задача 35) и «Написать
+/// продавцу» о пробном ключе в окне (задача 113): почта человека открывается
+/// с уже вписанным, а сама страница ничего не отправляет.
+pub fn mailto(subject: &str, body: &str) -> String {
+    format!("mailto:{EMAIL}?subject={}&body={}", mailto_part(subject), mailto_part(body))
+}
+
+/// Тема или текст письма в адресе `mailto:` (RFC 6068): всё, кроме
+/// незарезервированных знаков URI, — байтами UTF-8 через `%`, а перенос
+/// строки — `%0D%0A`, как RFC велит для текста письма (п. 5).
+pub fn mailto_part(text: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut out = String::with_capacity(text.len() * 3);
+    let mut bytes = [0; 4];
+    for c in text.chars() {
+        if c == '\n' {
+            out.push_str("%0D%0A");
+        } else if c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | '~') {
+            out.push(c);
+        } else {
+            for byte in c.encode_utf8(&mut bytes).bytes() {
+                out.push('%');
+                out.push(char::from(HEX[usize::from(byte >> 4)]));
+                out.push(char::from(HEX[usize::from(byte & 0xF)]));
+            }
+        }
+    }
+    out
+}
 
 /// Страница «Купить» (задача 35) на языке `lang` от корня сайта — рядом со
 /// страницей лендинга того же языка, как юридические тексты: армянская —
@@ -490,13 +527,15 @@ mod tests {
                 }
             }
         }
-        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[0]), "/ru/terms/2026-11-18/");
-        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[1]), "/ru/terms/2026-11-17/");
-        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[2]), "/ru/terms/2026-11-15/");
-        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[3]), "/ru/terms/2026-11-13/");
-        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[4]), "/ru/terms/2026-11-09/");
-        assert_eq!(Legal::Privacy.earlier_path(Lang::Am, Legal::Privacy.earlier()[0]), "/privacy/2026-11-18/");
-        assert_eq!(Legal::Privacy.earlier_path(Lang::Am, Legal::Privacy.earlier()[1]), "/privacy/2026-11-09/");
+        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[0]), "/ru/terms/2026-11-20/");
+        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[1]), "/ru/terms/2026-11-18/");
+        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[2]), "/ru/terms/2026-11-17/");
+        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[3]), "/ru/terms/2026-11-15/");
+        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[4]), "/ru/terms/2026-11-13/");
+        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[5]), "/ru/terms/2026-11-09/");
+        assert_eq!(Legal::Privacy.earlier_path(Lang::Am, Legal::Privacy.earlier()[0]), "/privacy/2026-11-20/");
+        assert_eq!(Legal::Privacy.earlier_path(Lang::Am, Legal::Privacy.earlier()[1]), "/privacy/2026-11-18/");
+        assert_eq!(Legal::Privacy.earlier_path(Lang::Am, Legal::Privacy.earlier()[2]), "/privacy/2026-11-09/");
         assert!(wrong.is_empty(), "{wrong:#?}");
     }
 

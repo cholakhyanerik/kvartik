@@ -724,18 +724,20 @@ async function blocked(browser) {
 }
 
 /// Ссылка словами — цветом ссылок программы, а не браузера (0.0.153): ссылка
-/// на политику конфиденциальности в согласии на сверку ИНН (задача 106) вышла
-/// синей — у ссылки без своего класса цвет ставил браузер. Согласие встаёт,
-/// когда в профиле есть ИНН, а ключа и согласия нет, — поэтому в своём
-/// контексте браузера: в основной вкладке потом восстанавливается образец
-/// копии другого ИП. Проверяется каждая видимая ссылка экрана лицензии.
-async function consentLink(browser) {
+/// на политику в согласии на сверку ИНН (задача 106, согласия больше нет)
+/// вышла синей — у ссылки без своего класса цвет ставил браузер. Теперь на
+/// том же месте — письмо о пробном ключе (задача 113): оно встаёт, когда
+/// ключа нет и не было, а в письме — ИНН профиля, — поэтому в своём контексте
+/// браузера: в основной вкладке потом восстанавливается образец копии другого
+/// ИП. Проверяется ссылка «Вопросы — в Telegram» и каждая видимая ссылка
+/// экрана лицензии.
+async function trialKeyLinks(browser) {
   const page = await browser.page({ context: true });
   try {
     await page.emulate(360);
     await page.go(`${ORIGIN}/app/`);
     await page.setLang(opt.lang);
-    checks.check("согласие: рабочий экран", await page.waitFor(WORKING));
+    checks.check("пробный ключ: рабочий экран", await page.waitFor(WORKING));
     await go(page, "#/profile");
     await page.waitFor(`return ${BUTTON("#profile", s("ProfileFill"))} ? true : null;`);
     await press(page, "#profile", s("ProfileFill"));
@@ -749,22 +751,25 @@ async function consentLink(browser) {
         input.dispatchEvent(new Event("input", { bubbles: true }));
       }
       return true;`);
-    checks.check("согласие: в профиле — имя и ИНН", typed && (await press(page, "#profile", s("ProfileSave")))
+    checks.check("пробный ключ: в профиле — имя и ИНН", typed && (await press(page, "#profile", s("ProfileSave")))
       && (await page.waitFor(TEXT_IN("#profile", s("ProfileSaved")))));
     await go(page, "#/license");
-    const links = await page.waitFor(`const policy = document.querySelector("#license .trial-consent a");
-      if (!policy) return null;
+    const links = await page.waitFor(`const policy = document.querySelector("#license .trial-key a.link");
+      const mail = document.querySelector("#license .trial-key a.button:not(.link)");
+      if (!policy || !mail) return null;
       const hex = getComputedStyle(document.documentElement).getPropertyValue("--accent-text").trim();
       const want = "rgb(" + [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ") + ")";
       const seen = [...document.querySelectorAll("#license a")].filter((a) => a.getClientRects().length > 0);
-      return { want, policy: getComputedStyle(policy).color,
+      return { want, policy: getComputedStyle(policy).color, mail: mail.getAttribute("href"),
         browser: seen.filter((a) => ["rgb(0, 0, 238)", "rgb(85, 26, 139)"].includes(getComputedStyle(a).color))
           .map((a) => a.textContent.trim()) };`);
-    checks.check("согласие: ссылка на политику — цветом ссылок программы, а не браузера",
+    checks.check("пробный ключ: ссылка на Telegram — цветом ссылок программы, а не браузера",
       links && links.policy === links.want, JSON.stringify(links));
-    checks.check("согласие: на экране лицензии нет ссылок цвета браузера",
+    checks.check("пробный ключ: письмо продавцу с ИНН профиля",
+      links && links.mail.startsWith("mailto:") && links.mail.includes("12345678"), links?.mail);
+    checks.check("пробный ключ: на экране лицензии нет ссылок цвета браузера",
       links && links.browser.length === 0, JSON.stringify(links?.browser));
-    checks.check("согласие: без плашки сбоя", await page.eval(NO_PANIC));
+    checks.check("пробный ключ: без плашки сбоя", await page.eval(NO_PANIC));
   } finally {
     await page.close();
   }
@@ -1466,100 +1471,31 @@ async function firstSteps(page) {
   checks.check("первые шаги: снова на главном экране", await page.waitFor(VISIBLE("#home .first-steps")));
 }
 
-// Сервер пробного периода (задача 106) — функция сайта `_worker.js` сборки,
-// исполненная здесь же, в Node, с базой-подменой: настоящую D1 и секрет
-// проверяет выкладка на предпросмотре (`tools/deploy/check.sh`), а здесь —
-// разбор запроса, отказы, заголовки, что хранится отпечаток, а не номер, и что
-// ответ — того вида, что читает ядро (образец `crates/core/tests/trial/
-// answer.json`, `license::trial_answer`). Копией `.mjs`: модуль ли файл `.js`
-// без `package.json`, Node решает по своей версии.
-async function trialServer() {
-  const copy = path.join(WORK, "trial-worker.mjs");
+// Функция сайта `_worker.js` сборки — здесь же, в Node. Сервера пробного
+// периода больше нет (задача 113): функцию зовут только адреса wasm
+// программы (задача 109), а `/api/trial`, который ещё спросит прежняя версия
+// из кэша, — не её: хостинг отдаёт его сам, отказом, и прежняя версия считает
+// срок по устройству, как без сети. А дошёл до неё другой адрес — она отдаёт
+// его файлом (`env.ASSETS`), а не своим 404: страница сайта не сломается.
+// Копией `.mjs`: модуль ли файл `.js` без `package.json`, Node решает по своей
+// версии.
+async function siteFunction() {
+  const copy = path.join(WORK, "site-worker.mjs");
   fs.copyFileSync(path.join(DIST, "_worker.js"), copy);
   const worker = (await import(pathToFileURL(copy).href)).default;
-  // База-подмена: те же пять запросов, что шлёт функция, — по началу текста.
-  const rows = new Map();
-  const exec = (sql, args) => {
-    if (sql.startsWith("CREATE")) return { results: [] };
-    if (sql.startsWith("DELETE FROM trials WHERE first_day <")) {
-      for (const [mark, row] of rows) if (row.first < args[0]) rows.delete(mark);
-    } else if (sql.startsWith("DELETE FROM trials WHERE tin_mac")) {
-      rows.delete(args[0]);
-    } else if (sql.startsWith("INSERT")) {
-      const row = rows.get(args[0]);
-      if (row) row.consent = args[3];
-      else rows.set(args[0], { first: args[1], at: args[2], consent: args[3] });
-    } else if (sql.startsWith("SELECT")) {
-      const row = rows.get(args[0]);
-      return { results: row ? [{ first_day: row.first }] : [] };
-    } else {
-      throw new Error(`база-подмена не знает запроса ${sql}`);
-    }
-    return { results: [] };
-  };
-  const statement = (sql, args = []) => ({ bind: (...bound) => statement(sql, bound), run: async () => exec(sql, args), exec: () => exec(sql, args) });
-  const db = { prepare: (sql) => statement(sql), batch: async (list) => list.map((one) => one.exec()) };
-  const env = { TRIAL_KEY: "0".repeat(64), TRIALS: db };
-  const origin = "https://kvartik.example";
-  const ask = (body, headers = {}, to = env) => worker.fetch(new Request(`${origin}/api/trial`, {
-    method: "POST", body, headers: { "Sec-Fetch-Site": "same-origin", Origin: origin, ...headers },
-  }), to);
-  const tin = "07654321";
-  // Версия согласия — та, что шлёт окно (`license::TRIAL_CONSENT`): из исходника
-  // ядра, а не своей копией.
-  const consent = fs.readFileSync(path.join(REPO, "crates/core/src/license.rs"), "utf8")
-    .match(/pub const TRIAL_CONSENT: &str = "(\d{4}-\d{2}-\d{2})";/)?.[1];
-  const question = `{"tin":"${tin}","consent":"${consent}"}`;
-  const first = await ask(question);
-  const text = await first.text();
-  const sample = JSON.parse(fs.readFileSync(path.join(REPO, "crates/core/tests/trial/answer.json"), "utf8"));
-  const today = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  checks.check("сервер пробного периода: новый ՀՎՀՀ — сегодня по Еревану, ответ того вида, что образец ядра",
-    consent && first.status === 200 && text === JSON.stringify({ first: today })
-      && Object.keys(JSON.parse(text)).join() === Object.keys(sample).join(), `${first.status} ${text}`);
-  checks.check("сервер пробного периода: мимо кэша и со своими заголовками",
-    first.headers.get("Cache-Control") === "no-store" && first.headers.get("X-Content-Type-Options") === "nosniff"
-      && first.headers.get("Content-Type") === "application/json; charset=utf-8");
-  const [mark] = rows.keys();
-  checks.check("сервер пробного периода: хранится отпечаток, а не номер, и версия согласия",
-    rows.size === 1 && /^[0-9a-f]{64}$/.test(mark) && !mark.includes(tin) && rows.get(mark).consent === consent, mark);
-  // Тот же ՀՎՀՀ спустя время — его первый день, а не «сегодня».
-  rows.get(mark).first = "2026-10-20";
-  const again = await ask(question);
-  checks.check("сервер пробного периода: повтор — первый день на ՀՎՀՀ", (await again.text()) === `{"first":"2026-10-20"}`);
-  // Старше трёх лет — удаляется, и пробный период на ՀՎՀՀ начинается заново.
-  rows.get(mark).first = "2020-01-01";
-  const expired = await ask(question);
-  checks.check("сервер пробного периода: запись старше трёх лет удаляется", (await expired.text()) === JSON.stringify({ first: today }));
-  // Отзыв согласия — запись удалена.
-  const withdrawn = await ask(`{"tin":"${tin}","withdraw":true}`);
-  checks.check("сервер пробного периода: отзыв согласия удаляет запись",
-    withdrawn.status === 200 && (await withdrawn.text()) === `{"withdrawn":true}` && rows.size === 0);
-  const refusals = [
-    ["GET", await worker.fetch(new Request(`${origin}/api/trial`), env), 405],
-    ["чужая страница", await ask(question, { "Sec-Fetch-Site": "cross-site", Origin: "https://example.com" }), 403],
-    ["чужой Origin", await ask(question, { Origin: "https://example.com" }), 403],
-    ["без согласия", await ask(`{"tin":"${tin}"}`), 400],
-    ["не ՀՎՀՀ", await ask(`{"tin":"7654321","consent":"${consent}"}`), 400],
-    ["не JSON", await ask(`tin=${tin}`), 400],
-    ["большое тело", await ask(`{"tin":"${tin}","consent":"${consent}","x":"${"x".repeat(300)}"}`), 413],
-    ["другой адрес", await worker.fetch(new Request(`${origin}/api/other`, { method: "POST", body: "{}" }), env), 404],
-    ["без секрета", await ask(question, {}, { TRIALS: db }), 503],
-    ["без базы", await ask(question, {}, { TRIAL_KEY: env.TRIAL_KEY }), 503],
-  ];
-  const wrong = refusals.filter(([, got, code]) => got.status !== code)
-    .map(([name, got, code]) => `${name}: ${got.status}, а ждали ${code}`);
-  checks.check("сервер пробного периода: отказы", wrong.length === 0, wrong.join("; "));
-  // Функцию зовут только адреса `/api/*` и wasm программы (задача 109):
-  // остальные файлы сайта — мимо неё, бесплатно и с заголовками `_headers`.
-  // А дошёл до неё другой адрес — она отдаёт его файлом (`env.ASSETS`), а не
-  // своим 404: страница сайта не сломается.
-  checks.check("сервер пробного периода: функцию зовут только адреса /api/* и /app/*.wasm",
+  checks.check("функция сайта: её зовут только адреса /app/*.wasm",
     fs.readFileSync(path.join(DIST, "_routes.json"), "utf8").trim()
-      === `{"version":1,"include":["/api/*","/app/*.wasm"],"exclude":[]}`);
-  const assets = { fetch: async (request) => new Response(`файл ${new URL(request.url).pathname}`) };
-  const page = await worker.fetch(new Request(`${origin}/app/`), { ...env, ASSETS: assets });
-  checks.check("сервер пробного периода: не /api/ — файлом сайта", (await page.text()) === "файл /app/");
+      === `{"version":1,"include":["/app/*.wasm"],"exclude":[]}`);
+  const origin = "https://kvartik.example";
+  const assets = { fetch: async (request) => new Response(`файл ${new URL(request.url).pathname}`, { status: 404 }) };
+  const page = await worker.fetch(new Request(`${origin}/app/`), { ASSETS: assets });
+  checks.check("функция сайта: не wasm — файлом сайта", (await page.text()) === "файл /app/");
+  const trial = await worker.fetch(new Request(`${origin}/api/trial`, {
+    method: "POST", body: `{"tin":"07654321","consent":"2026-11-18"}`,
+  }), { ASSETS: assets });
+  const text = await trial.text();
+  checks.check("функция сайта: вопрос о пробном периоде прежней версии — не её ответ, а отказ хостинга",
+    trial.status === 404 && text === "файл /api/trial", `${trial.status} ${text}`);
 }
 
 // Заранее сжатый wasm (задача 109) — та же функция сайта в Node, с хранилищем
@@ -1571,7 +1507,7 @@ async function trialServer() {
 // (`tools/deploy/check.sh`), а здесь — что копия есть у каждого wasm,
 // разжимается в него и сжата уровнем 11, а не уровнем хостинга.
 async function precompressedWasm() {
-  const worker = (await import(pathToFileURL(path.join(WORK, "trial-worker.mjs")).href)).default;
+  const worker = (await import(pathToFileURL(path.join(WORK, "site-worker.mjs")).href)).default;
   const app = path.join(DIST, "app");
   const wasm = fs.readdirSync(app).filter((n) => n.endsWith(".wasm")).sort();
   const missing = wasm.filter((n) => !fs.existsSync(path.join(app, `${n}.br`)));
@@ -1675,7 +1611,7 @@ async function precompressedWasm() {
 async function main() {
   const parts = fs.readdirSync(path.join(DIST, "app")).filter((n) => /^split_\w+-\w+\.wasm$/.test(n));
   checks.check("в сборке есть части wasm", parts.length > 0, parts.join(", "));
-  await trialServer();
+  await siteFunction();
   await precompressedWasm();
   // Программа выкладки пишет из ответа ЦБ тот самый файл, который читают
   // тест ядра и программа: разойдись они — курсы на сайте окно отвергло бы.
@@ -1687,7 +1623,7 @@ async function main() {
   const browser = await Browser.launch({ work: WORK, name: "check", port: 9340 });
   try {
     await blocked(browser);
-    await consentLink(browser);
+    await trialKeyLinks(browser);
     await landing(browser);
     await office(browser);
     await motion(browser);

@@ -127,22 +127,6 @@ export function own(dist, port, { quality = HOSTING_QUALITY, extra = DEPLOYED } 
     const url = new URL(req.url, "http://x");
     let p = decodeURIComponent(url.pathname);
     if (p === "/app") { res.writeHead(308, { Location: `/app/${url.search}` }); return res.end(); }
-    // Сервер пробного периода (задача 106) — его функция сайта (`_worker.js`)
-    // свой сервер не исполняет, а окно спрашивает его, когда в профиле есть
-    // ՀՎՀՀ без ключа и на сверку согласились: без ответа прогон ловил бы 404
-    // в консоли. Ответ — как у функции о новом ՀՎՀՀ: сегодня по Еревану, —
-    // а на отзыв согласия — что запись удалена.
-    if (p === "/api/trial") {
-      if (req.method !== "POST") { res.writeHead(405, { Allow: "POST" }); return res.end(); }
-      let body = "";
-      req.on("data", (chunk) => { body += chunk; });
-      req.on("end", () => {
-        const first = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString().slice(0, 10);
-        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
-        res.end(JSON.stringify(body.includes('"withdraw":true') ? { withdrawn: true } : { first }));
-      });
-      return;
-    }
     if (p.endsWith("/")) p += "index.html";
     const found = files.get(p);
     const f = found ?? notFound(p);
@@ -185,13 +169,10 @@ export async function wrangler(dist, port, work) {
   // Правило 3) — сервер прогона так не делаем.
   const env = { ...process.env, WRANGLER_SEND_METRICS: "false" };
   delete env.CLAUDECODE;
-  // Функция сайта (задача 106, `_worker.js` сборки) исполняется и здесь —
-  // со своей базой D1 в `work` и ключом проб: настоящего ключа у прогона нет
-  // (Правило 13), а дата рантайма — та же, что у выкладки
-  // (`tools/deploy/wrangler.toml`).
+  // Функция сайта (`_worker.js` сборки, задача 109) исполняется и здесь,
+  // а дата рантайма — та же, что у выкладки (`tools/deploy/wrangler.toml`).
   const child = spawnTree(process.execPath, [WRANGLER, "pages", "dev", path.resolve(site), "--port", String(port),
-    "--compatibility-date", "2026-10-06", "--d1", "TRIALS=kvartik-trial-local",
-    "--binding", `TRIAL_KEY=${"0".repeat(64)}`],
+    "--compatibility-date", "2026-10-06"],
     { cwd: work, env, stdio: ["ignore", log, log] });
   const stop = async () => {
     // У wrangler дочерние workerd: TaskStop оставил бы их держать порт.

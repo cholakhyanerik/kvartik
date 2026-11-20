@@ -8,8 +8,10 @@
 //! установленная программа не видит данных браузера — на iPhone, iPad и Mac
 //! (Правило 6), — вторым шагом того же экрана идёт установка: до данных.
 //!
-//! Дальше ведёт карточка на главном экране: реквизиты, вид деятельности,
-//! первый клиент, первый счёт и его PDF. Своих форм у неё нет: шаг открывает
+//! Дальше ведёт карточка на главном экране: реквизиты, пробный ключ (задача
+//! 113: без ключа счёт не выпустить, а приходит он в течение рабочего дня —
+//! просить его лучше сразу), вид деятельности, первый клиент, первый счёт
+//! и его PDF. Своих форм у неё нет: шаг открывает
 //! форму, которая и так есть, а какой шаг следующий, говорят сами данные, а не
 //! своя запись. Поэтому прерваться можно где угодно, а после восстановления
 //! копии с документами карточки нет вовсе. Скрыть её можно на любом шаге:
@@ -21,7 +23,7 @@
 //! не грузится и не делит канал со шрифтами, а первый шаг ведёт в ту же часть.
 
 use kvartik_core::i18n::{Key, Lang, fill, plural, t};
-use kvartik_core::license::TRIAL_DAYS;
+use kvartik_core::license::TRIAL_KEY_DAYS;
 use kvartik_core::model::record::RecordId;
 use leptos::prelude::*;
 
@@ -29,6 +31,7 @@ use super::clients::Clients;
 use super::documents::Documents;
 use super::icon::{Icon, icon};
 use super::lang::WindowLang;
+use super::license::Licenses;
 use super::office::Office;
 use super::profile::{Profiles, handoff_part, steps_part};
 use super::pwa::{InstallSection, Program};
@@ -74,18 +77,18 @@ pub fn Welcome(
             close(screen);
         }
     };
-    // Срок пробного периода и что потом (задача 98) — одним абзацем под
-    // кнопками, как на лендинге: о том, что запрёт конец срока, человек
-    // узнаёт до первых данных, а не на экране лицензии за неделю до конца.
+    // Пробный ключ и что без ключа (задачи 98 и 113) — одним абзацем под
+    // кнопками, как на лендинге: о том, что запирает отсутствие ключа,
+    // человек узнаёт до первых данных, а не у кнопки «Выпустить».
     // Над выбором языка эти шесть строк мелкого текста уводили «Продолжить»
     // за край первого экрана телефона (360×780: низ кнопки — 818–860 точек
     // вместо 734, глазной прогон задачи 98), а в дизайне экрана 01 под
     // вводной — сразу выбор языка.
     let trial = move || {
         let lang = lang.get();
-        let days = u64::from(TRIAL_DAYS.unsigned_abs());
+        let days = u64::from(TRIAL_KEY_DAYS.unsigned_abs());
         let days = fill(plural(lang, days, Key::DaysOne, Key::DaysFew, Key::DaysMany), &[&days.to_string()]);
-        format!("{} {}", fill(t(lang, Key::WelcomeTrial), &[&days]), t(lang, Key::WelcomeAfterTrial))
+        format!("{} {}", fill(t(lang, Key::WelcomeTrial), &[&days]), t(lang, Key::WelcomeWithoutKey))
     };
     view! {
         <section class="welcome">
@@ -167,11 +170,18 @@ impl Steps {
         Device::new().set_steps_hidden(&self.office.open_name());
         self.hidden.set(true);
     }
+
+    /// Отправлено ли письмо о пробном ключе для открытого ИП
+    /// (`Device::trial_key_asked`).
+    fn key_asked(self) -> bool {
+        Device::new().trial_key_asked(&self.office.open_name())
+    }
 }
 
 /// Подписи шагов по порядку.
-const STEPS: [Key; 5] = [
+const STEPS: [Key; 6] = [
     Key::StepRequisites,
+    Key::StepKey,
     Key::StepActivity,
     Key::StepClient,
     Key::StepInvoice,
@@ -182,6 +192,9 @@ const STEPS: [Key; 5] = [
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Next {
     Requisites,
+    /// Пробный ключ (задача 113): срока нет, и письмо продавцу ещё не
+    /// отправлено.
+    Key,
     Activity,
     Client,
     Invoice,
@@ -190,13 +203,16 @@ enum Next {
 }
 
 impl Next {
-    /// Шаг по данным: есть ли имя ИП, коды деятельности, живой клиент
-    /// и выпущенный документ. Выпущенный документ решает всё: значит, шаги до
-    /// него пройдены, что бы с данными ни стало потом.
-    fn of(named: bool, coded: bool, client: bool, issued: Option<RecordId>) -> Self {
+    /// Шаг по данным: есть ли имя ИП, срок или письмо о пробном ключе
+    /// (`keyed`), коды деятельности, живой клиент и выпущенный документ.
+    /// Выпущенный документ решает всё: значит, шаги до него пройдены, что бы
+    /// с данными ни стало потом. Ключ не ждут: он приходит в течение рабочего
+    /// дня, и отправленного письма хватает, чтобы идти дальше.
+    fn of(named: bool, keyed: bool, coded: bool, client: bool, issued: Option<RecordId>) -> Self {
         match issued {
             Some(id) => Self::Pdf(id),
             None if !named => Self::Requisites,
+            None if !keyed => Self::Key,
             None if !coded => Self::Activity,
             None if !client => Self::Client,
             None => Self::Invoice,
@@ -207,10 +223,11 @@ impl Next {
     const fn index(self) -> usize {
         match self {
             Self::Requisites => 0,
-            Self::Activity => 1,
-            Self::Client => 2,
-            Self::Invoice => 3,
-            Self::Pdf(_) => 4,
+            Self::Key => 1,
+            Self::Activity => 2,
+            Self::Client => 3,
+            Self::Invoice => 4,
+            Self::Pdf(_) => 5,
         }
     }
 
@@ -218,6 +235,7 @@ impl Next {
     const fn action(self) -> Key {
         match self {
             Self::Requisites => Key::StepsFillRequisites,
+            Self::Key => Key::LicenseGetTrial,
             Self::Activity => Key::StepsFillActivity,
             Self::Client => Key::ClientAdd,
             Self::Invoice => Key::DocNewInvoice,
@@ -272,6 +290,8 @@ pub struct Card {
     pub profiles: Profiles,
     pub clients: Clients,
     pub documents: Documents,
+    /// Срок без проверки подписи — для шага пробного ключа (задача 113).
+    pub licenses: Licenses,
 }
 
 /// Карточка первых шагов — уже в части.
@@ -284,8 +304,13 @@ pub fn StepsCard(card: Card) -> impl IntoView {
         profiles,
         clients,
         documents,
+        licenses,
     } = card;
     let next = Memo::new(move |_| {
+        // Письмо о пробном ключе пишут на экране лицензии, а записи устройства
+        // не отслеживаются: шаг перечитывает её, когда человек вернулся.
+        router.screen();
+        let keyed = licenses.open_now() || steps.key_asked();
         let (_, first) = documents.issued();
         let (named, coded) = profiles.with(|data| {
             data.map_or((false, false), |data| {
@@ -293,13 +318,14 @@ pub fn StepsCard(card: Card) -> impl IntoView {
                 (named, !data.activities.is_empty())
             })
         });
-        Next::of(named, coded, !clients.alive().is_empty(), first)
+        Next::of(named, keyed, coded, !clients.alive().is_empty(), first)
     });
     let act = move |now: Next| match now {
         Next::Requisites => {
             profiles.open_brief(false);
             router.guide(Screen::Profile);
         }
+        Next::Key => router.go(Screen::License),
         Next::Activity => {
             profiles.open_brief(true);
             router.guide(Screen::Profile);
@@ -359,26 +385,28 @@ mod tests {
 
     /// Шаг — первый непройденный, а выпущенный документ решает всё: после
     /// него клиента могли удалить, а коды убрать, и назад к ним не ведём.
+    /// Пробный ключ (задача 113) — после реквизитов: письмо продавцу с ИНН.
     #[test]
     fn the_next_step_follows_the_data() {
         let id = RecordId::random();
         let mut wrong = Vec::new();
-        for (named, coded, client, issued, expected) in [
-            (false, false, false, None, Next::Requisites),
-            (false, true, true, None, Next::Requisites),
-            (true, false, true, None, Next::Activity),
-            (true, true, false, None, Next::Client),
-            (true, true, true, None, Next::Invoice),
-            (true, true, true, Some(id), Next::Pdf(id)),
-            (false, false, false, Some(id), Next::Pdf(id)),
+        for (named, keyed, coded, client, issued, expected) in [
+            (false, false, false, false, None, Next::Requisites),
+            (false, true, true, true, None, Next::Requisites),
+            (true, false, true, true, None, Next::Key),
+            (true, true, false, true, None, Next::Activity),
+            (true, true, true, false, None, Next::Client),
+            (true, true, true, true, None, Next::Invoice),
+            (true, true, true, true, Some(id), Next::Pdf(id)),
+            (false, false, false, false, Some(id), Next::Pdf(id)),
         ] {
-            let got = Next::of(named, coded, client, issued);
+            let got = Next::of(named, keyed, coded, client, issued);
             if got != expected {
-                wrong.push(format!("{named}, {coded}, {client}, {issued:?}: {got:?}"));
+                wrong.push(format!("{named}, {keyed}, {coded}, {client}, {issued:?}: {got:?}"));
             }
         }
         assert!(wrong.is_empty(), "следующий шаг: {wrong:#?}");
-        let order = [Next::Requisites, Next::Activity, Next::Client, Next::Invoice, Next::Pdf(id)];
+        let order = [Next::Requisites, Next::Key, Next::Activity, Next::Client, Next::Invoice, Next::Pdf(id)];
         assert!(order.iter().enumerate().all(|(at, step)| step.index() == at));
         assert_eq!(order.len(), STEPS.len());
     }

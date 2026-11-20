@@ -859,16 +859,20 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
         );
         Some(view! { <p class="hint">{words}</p> })
     };
-    // Сводка (этап 5) — в пробный период устройства и пока идёт ключ «Pro»
-    // (решение человека 2026-11-05). Пробный период — тот, что окно посчитало
-    // при открытии (`Licenses::start`): с первого запуска на устройстве или
-    // с первого дня данных, который оно помнит.
+    // Сводка (этап 5) — пока идёт ключ «Pro», пробный тоже (решение человека
+    // 2026-11-05), и в пробный период без ключа, начатый до задачи 113: с
+    // первого запуска на устройстве, первого дня данных или ответа сервера
+    // о ՀՎՀՀ, которые оно помнит. Новых таких периодов нет
+    // (`license::trial_last`).
     let trial_last = {
         let device = Device::new();
-        license::trial_start(device.trial_start(), device.trial_data()).and_then(license::trial_last)
+        license::trial_start(license::trial_start(device.trial_start(), device.trial_data()), device.trial_tin())
+            .and_then(license::trial_last)
     };
     let summary_open = Signal::derive(move || {
-        today.is_some_and(|today| trial_last.is_some_and(|last| today <= last)) || pro_term().is_some()
+        today.is_some_and(|today| trial_last.is_some_and(|last| today <= last))
+            || pro_term().is_some()
+            || super::license::open_for_tests()
     });
     view! {
         <p>{tr(lang, Key::OfficeAbout)}</p>
@@ -879,12 +883,12 @@ fn OfficePage(ctx: Ctx) -> impl IntoView {
         <button type="button" disabled=move || office.busy.get() on:click=add>
             <span class="label">{tr(lang, Key::OfficeAdd)}</span>
         </button>
-        // Пробный период — у устройства, а ключ — на ИНН одного ИП (задача 93)
-        // или один «Pro» на всех (задача 103). Пока идёт ключ «Pro», «ключ
-        // у каждого свой» неправда: о нём — строка выше (ревью задачи 38).
+        // Ключ — на ИНН одного ИП (задача 93) или один «Pro» на всех (задача
+        // 103). Пока идёт ключ «Pro», «ключ у каждого свой» неправда: о нём —
+        // строка выше (ревью задачи 38).
         <p class="hint">{move || {
             let lang = lang.get();
-            let mut words = vec![t(lang, Key::OfficeAddAbout).to_owned(), t(lang, Key::OfficeTrialShared).to_owned()];
+            let mut words = vec![t(lang, Key::OfficeAddAbout).to_owned()];
             if pro_term().is_none() {
                 words.push(t(lang, Key::OfficeKeyEach).to_owned());
                 words.push(fill(

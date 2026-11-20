@@ -1305,9 +1305,6 @@ fn Requisites(
                 check=|text| (!text.trim().is_empty() && Tin::parse(text).is_err()).then_some(Key::TinInvalid)
             />
             {tin_license}
-            // Что окно сверяет ՀՎՀՀ с сервером сайта (задача 106), — там, где его
-            // вводят.
-            <p class="hint">{tr(lang, Key::ProfileTinTrial)}</p>
             {(!brief).then(|| view! {
                 <TextField
                     lang

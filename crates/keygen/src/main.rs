@@ -33,12 +33,23 @@
 //! друг от друга не отличить. Проданный ключ — на ИНН покупателя (условия,
 //! п. 4.1).
 //!
+//! Пробный ключ (задача 113; условия, п. 3, редакция от 21.11.2026) — [`TRIAL`]:
+//! обычный ключ тарифа на [`license::TRIAL_KEY_DAYS`] дней, считая день
+//! выдачи, а `--until` с ним — не дальше этого. Пометка «пробный» — только
+//! в журнале ([`line_of`]): в самом ключе она была бы новой версией ключа,
+//! которую прежние программы не прочли бы. Второй пробный ключ на тот же
+//! ՀՎՀՀ — отказ, пока не назван [`AGAIN`] (предложение агента 2026-11-20:
+//! иначе пробный продлевался бы без конца); у «Pro» без ИНН такого счёта нет —
+//! такие ключи в журнале друг от друга не отличить. Ключ, оплаченный до конца
+//! пробного, продлевает его `--renew`, как любой ключ того же тарифа (п. 3).
+//!
 //! ```text
 //! kvartik-keygen pair <путь закрытого ключа>
 //! kvartik-keygen issue --tin 00054321 --plan standard --until 2027-10-10 [--key <путь закрытого ключа>]
 //! kvartik-keygen issue --tin 00054321 --plan standard --renew [--key <путь закрытого ключа>]
 //! kvartik-keygen issue --tin 00054321 --plan pro --seats 10 --until 2027-10-10 [--key <путь закрытого ключа>]
 //! kvartik-keygen issue --plan pro --seats 100 --until 2027-11-18 [--key <путь закрытого ключа>]
+//! kvartik-keygen issue --tin 00054321 --plan standard --trial [--key <путь закрытого ключа>]
 //! ```
 
 use std::fs::{self, OpenOptions};
@@ -78,6 +89,17 @@ const FLAGS: [&str; 5] = ["--tin", "--plan", "--until", "--key", "--seats"];
 /// Флаг `issue` без значения — продление по журналу вместо `--until`.
 const RENEW: &str = "--renew";
 
+/// Флаг `issue` без значения — пробный ключ (шапка модуля): последний день —
+/// [`license::TRIAL_KEY_DAYS`]-й, считая день выдачи, а `--until` — не дальше.
+const TRIAL: &str = "--trial";
+
+/// Флаг `issue` без значения — второй пробный ключ на тот же ՀՎՀՀ: без него
+/// это отказ.
+const AGAIN: &str = "--again";
+
+/// Пометка пробного ключа в столбце тарифа журнала ([`line_of`]).
+const TRIAL_MARK: &str = "пробный";
+
 /// Срок тарифа, месяцев, — год: на странице «Купить» продаётся только
 /// «Стандарт» на год (`release::PRICE`, решение человека 2026-11-09).
 /// Появится тариф с другим сроком (задача 90) — у продления срок его тарифа.
@@ -94,9 +116,11 @@ const USAGE: &str = "использование:
   kvartik-keygen issue --tin <ՀՎՀՀ> --plan standard|pro [--seats <N>] --until <ГГГГ-ММ-ДД> [--key <путь закрытого ключа>]
   kvartik-keygen issue --tin <ՀՎՀՀ> --plan standard|pro [--seats <N>] --renew [--key <путь закрытого ключа>]
   kvartik-keygen issue --plan pro [--seats <N>] --until <ГГГГ-ММ-ДД> [--key <путь закрытого ключа>]
+  kvartik-keygen issue [--tin <ՀՎՀՀ>] --plan standard|pro [--seats <N>] --trial [--until <ГГГГ-ММ-ДД>] [--again] [--key <путь закрытого ключа>]
 --tin — у pro можно не называть: ключ без ИНН, подарком на пробу; продать — только на ИНН покупателя, продлить --renew — только ключ с ИНН
 --renew — продление заранее (условия, п. 4.1): последний день — год после последнего дня самого долгого ключа того же тарифа на этот ՀՎՀՀ в журнале, пока тот ещё идёт
 --seats — только у pro: сколько ИП конторы открывает ключ, от 1 до 100; без него — сколько у продлённого ключа pro, иначе 10, как у тарифа на странице «Купить»
+--trial — пробный ключ (условия, п. 3): до 30 дней, считая день выдачи, --until — не дальше; в журнале — с пометкой «пробный»; второй пробный на тот же ՀՎՀՀ — только с --again
 закрытый ключ issue по умолчанию — license.key в папке kvartik-license домашнего каталога";
 
 fn main() -> ExitCode {
@@ -167,8 +191,22 @@ struct Order {
     /// Число мест ключа «Pro», названное флагом `--seats`; `None` — не
     /// названо ([`seats`]).
     seats: Option<u8>,
+    /// Пробный ли ключ ([`TRIAL`]) и разрешён ли второй пробный на этот
+    /// ՀՎՀՀ ([`AGAIN`]).
+    trial: Trial,
     /// Закрытый ключ; `None` — [`SECRET`] в [`FOLDER`] домашнего каталога.
     key: Option<PathBuf>,
+}
+
+/// Пробный ли ключ.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Trial {
+    /// Обычный — купленный или подарок.
+    No,
+    /// Пробный ([`TRIAL`]): первый на этот ՀՎՀՀ.
+    First,
+    /// Пробный, и пусть на этот ՀՎՀՀ уже выдавали пробный ([`AGAIN`]).
+    Again,
 }
 
 /// Последний день срока, включительно.
@@ -179,19 +217,29 @@ enum Until {
     /// [`RENEW`]: у продления самого долгого ключа на этот ՀՎՀՀ из журнала
     /// ([`renewal`]).
     Renew,
+    /// У пробного ключа без `--until`: [`license::TRIAL_KEY_DAYS`]-й день,
+    /// считая день выдачи.
+    Trial,
 }
 
 impl Order {
     /// Флаги [`FLAGS`] в любом порядке, каждый со значением и не больше
-    /// раза, и [`RENEW`] без значения вместо `--until`; `--key` можно не
-    /// называть. Ошибка — словами, с тем, что ввели.
+    /// раза, [`RENEW`] без значения вместо `--until`, а [`TRIAL`] и [`AGAIN`] —
+    /// тоже без значения; `--key` можно не называть. Ошибка — словами, с тем,
+    /// что ввели.
     fn parse(args: &[String]) -> Result<Self, String> {
         let mut values: [Option<&str>; FLAGS.len()] = [None; FLAGS.len()];
-        let mut renew = false;
+        let (mut renew, mut trial, mut again) = (false, false, false);
         let mut args = args.iter();
         while let Some(flag) = args.next() {
-            if flag == RENEW {
-                if std::mem::replace(&mut renew, true) {
+            let switch = match flag.as_str() {
+                RENEW => Some(&mut renew),
+                TRIAL => Some(&mut trial),
+                AGAIN => Some(&mut again),
+                _ => None,
+            };
+            if let Some(switch) = switch {
+                if std::mem::replace(switch, true) {
                     return Err(format!("{flag} — дважды"));
                 }
                 continue;
@@ -206,7 +254,7 @@ impl Order {
                 return Err(format!("{flag} — дважды"));
             }
         }
-        let missing = || format!("нужны --tin, --plan и --until или {RENEW}\n{USAGE}");
+        let missing = || format!("нужны --tin, --plan и --until, {RENEW} или {TRIAL}\n{USAGE}");
         let [tin, Some(plan), until, key, seats] = values else {
             return Err(missing());
         };
@@ -230,6 +278,9 @@ impl Order {
             (None, Plan::Pro) if renew => {
                 return Err(format!("{RENEW} без --tin: ключи без ИНН в журнале не отличить, назовите ИНН"));
             }
+            (None, Plan::Pro) if again => {
+                return Err(format!("{AGAIN} без --tin: пробные ключи без ИНН не считаются, флаг не нужен"));
+            }
             (None, Plan::Pro) => Tin::parse(license::NO_TIN).map_err(|_| "ИНН без номера не разобрался".to_owned())?,
         };
         let seats = match (seats, plan) {
@@ -244,21 +295,32 @@ impl Order {
                     .ok_or_else(|| format!("--seats {text}: мест — от 1 до {MAX_IPS}, столько ИП бывает в программе"))?,
             ),
         };
-        let until = match (until, renew) {
-            (Some(until), false) => Until::Day(Date::from_iso(until).ok_or_else(|| {
+        let trial = match (trial, again) {
+            (false, false) => Trial::No,
+            (true, false) => Trial::First,
+            (true, true) => Trial::Again,
+            (false, true) => return Err(format!("{AGAIN} — только с {TRIAL}: это второй пробный ключ")),
+        };
+        let until = match (until, renew, trial) {
+            (_, true, Trial::First | Trial::Again) => {
+                return Err(format!("{RENEW} и {TRIAL} — что-то одно: пробный ключ не продлевается, а выдаётся"));
+            }
+            (Some(until), false, _) => Until::Day(Date::from_iso(until).ok_or_else(|| {
                 format!("--until {until}: последний день срока — ГГГГ-ММ-ДД, например 2027-10-10")
             })?),
-            (None, true) => Until::Renew,
-            (Some(_), true) => {
+            (None, true, Trial::No) => Until::Renew,
+            (Some(_), true, Trial::No) => {
                 return Err(format!("--until и {RENEW} — что-то одно: продление считает последний день само"));
             }
-            (None, false) => return Err(missing()),
+            (None, false, Trial::First | Trial::Again) => Until::Trial,
+            (None, false, Trial::No) => return Err(missing()),
         };
         Ok(Self {
             tin,
             plan,
             until,
             seats,
+            trial,
             key: key.map(PathBuf::from),
         })
     }
@@ -308,8 +370,9 @@ fn issue_command(flags: &[String]) -> Result<(), String> {
     } else {
         format!("на ՀՎՀՀ {}", key.tin().as_str())
     };
+    let kind = if order.trial == Trial::No { "Ключ" } else { "Пробный ключ" };
     println!(
-        "Ключ {holder}, тариф {}, выпущен {}, последний день — {} ({} дн.):",
+        "{kind} {holder}, тариф {}, выпущен {}, последний день — {} ({} дн.):",
         plan_column(&key),
         key.issued().iso(),
         key.until().iso(),
@@ -346,11 +409,57 @@ fn issue(order: &Order, secret: &Path, public: &[u8; PUBLIC_KEY_BYTES], today: D
             let (renewed, until) = renewal(&journal, &order.tin, order.plan, public, today)?;
             (until, Some(renewed))
         }
+        Until::Trial => (trial_last(today)?, None),
     };
+    let trial = order.trial != Trial::No;
+    if trial {
+        let last = trial_last(today)?;
+        if until > last {
+            return Err(format!(
+                "--until {}: пробный ключ — не дальше {} ({} дн., считая день выдачи; условия, п. 3)",
+                until.iso(),
+                last.iso(),
+                license::TRIAL_KEY_DAYS
+            ));
+        }
+        if order.trial == Trial::First && order.tin.as_str() != license::NO_TIN {
+            given_trial(&journal, &order.tin, public)?;
+        }
+    }
     let seats = seats(order, renewed.as_ref());
     let key = sign(&signing, public, &order.tin, order.plan, today, until, seats)?;
-    record(&journal, &key)?;
+    record(&journal, &key, trial)?;
     Ok(Issued { key, renewed })
+}
+
+/// Последний день пробного ключа, выданного `today`: [`license::TRIAL_KEY_DAYS`]-й,
+/// считая день выдачи.
+fn trial_last(today: Date) -> Result<Date, String> {
+    today
+        .add_days(license::TRIAL_KEY_DAYS - 1)
+        .ok_or_else(|| format!("{} — у края календаря", today.iso()))
+}
+
+/// Второй пробный ключ на `tin` — отказ, пока не назван [`AGAIN`]: в журнале
+/// `path` пробный на этот ՀՎՀՀ уже есть. Журнала нет — пробных и не
+/// выдавали; строка, которой выпуск не писал, — отказ с её номером, как
+/// у продления: пропущенной могла быть строка того пробного.
+fn given_trial(path: &Path, tin: &Tin, public: &[u8; PUBLIC_KEY_BYTES]) -> Result<(), String> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("журнал {}: {error}", path.display())),
+    };
+    let rows = rows(&text, public).map_err(|problem| format!("журнал {}: {problem} — поправьте её", path.display()))?;
+    match rows.iter().find(|row| row.trial && row.key.tin() == tin) {
+        Some(row) => Err(format!(
+            "пробный ключ на ՀՎՀՀ {} уже выдан {}, по {}: второй — только с {AGAIN}",
+            tin.as_str(),
+            row.key.issued().iso(),
+            row.key.until().iso()
+        )),
+        None => Ok(()),
+    }
 }
 
 /// Закрытый ключ из файла `path` — такого, какой пишет `pair`. Файл внутри
@@ -498,14 +607,27 @@ fn renewal(
     Ok((last, until))
 }
 
-/// Ключи журнала `text` — строк, которые пишет [`record`], — подписанные
+/// Ключи журнала `text` ([`rows`]) — пробные тоже: ключ, оплаченный до конца
+/// пробного, продлевает его, как любой ключ того же тарифа (условия, п. 3).
+fn journal(text: &str, public: &[u8; PUBLIC_KEY_BYTES]) -> Result<Vec<Key>, String> {
+    Ok(rows(text, public)?.into_iter().map(|row| row.key).collect())
+}
+
+/// Строка журнала: ключ и пробный ли он ([`line_of`]).
+#[derive(Debug, PartialEq, Eq)]
+struct Row {
+    key: Key,
+    trial: bool,
+}
+
+/// Строки журнала `text` — те, что пишет [`record`], — с ключами, подписанными
 /// парой `public`. Строка не такая, какой её пишет выпуск, — правленная
 /// рукой, пересохранённая Excel без нулей ՀՎՀՀ, ключ другой пары, — отказ
 /// с её номером, а не пропуск: пропущенной могла быть строка самого долгого
 /// ключа, и продление вышло бы короче оплаченного. Пустые строки и пробелы
 /// в конце строк ключа не спрячут, а BOM и переводы строки Windows оставил
 /// бы Блокнот, — их журнал прощает.
-fn journal(text: &str, public: &[u8; PUBLIC_KEY_BYTES]) -> Result<Vec<Key>, String> {
+fn rows(text: &str, public: &[u8; PUBLIC_KEY_BYTES]) -> Result<Vec<Row>, String> {
     let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
     let mut rows = text.lines().enumerate();
     if let Some((_, first)) = rows.next()
@@ -513,21 +635,24 @@ fn journal(text: &str, public: &[u8; PUBLIC_KEY_BYTES]) -> Result<Vec<Key>, Stri
     {
         return Err("первая строка — не заголовки журнала".to_owned());
     }
-    let mut keys = Vec::new();
+    let mut found = Vec::new();
     for (at, row) in rows {
         let row = row.trim_end();
         if row.is_empty() {
             continue;
         }
-        let key = row
+        let read = row
             .rsplit('\t')
             .next()
             .and_then(|text| Key::read(text, public).ok())
-            .filter(|key| line(key).trim_end() == row)
+            .and_then(|key| {
+                let trial = [false, true].into_iter().find(|&trial| line_of(&key, trial).trim_end() == row)?;
+                Some(Row { key, trial })
+            })
             .ok_or_else(|| format!("строка {} — не та, что пишет выпуск", at + 1))?;
-        keys.push(key);
+        found.push(read);
     }
-    Ok(keys)
+    Ok(found)
 }
 
 /// Последний день ключа, продлевающего ключ с последним днём `last`: `last`
@@ -547,26 +672,40 @@ const fn year_after(last: Date) -> Option<Date> {
     last.add_months(TERM_MONTHS)
 }
 
-/// Строка ключа `key` — в конец журнала `path`; журнал, которого ещё нет,
-/// начинается заголовками. Успех — только когда строка легла на диск.
-fn record(path: &Path, key: &Key) -> Result<(), String> {
+/// Строка ключа `key`, пробного ли (`trial`), — в конец журнала `path`;
+/// журнал, которого ещё нет, начинается заголовками. Успех — только когда
+/// строка легла на диск.
+fn record(path: &Path, key: &Key, trial: bool) -> Result<(), String> {
     let failed = |error: std::io::Error| format!("журнал {}: {error} — ключ не выпущен", path.display());
     let mut file = OpenOptions::new().create(true).append(true).open(path).map_err(failed)?;
     let mut text = String::new();
     if file.metadata().map_err(failed)?.len() == 0 {
         text.push_str(HEADER);
     }
-    text.push_str(&line(key));
+    text.push_str(&line_of(key, trial));
     file.write_all(text.as_bytes()).and_then(|()| file.sync_all()).map_err(failed)
 }
 
-/// Строка журнала: день выпуска, ՀՎՀՀ, тариф, последний день и ключ.
+/// Строка журнала обычного ключа ([`line_of`]).
+#[cfg(test)]
 fn line(key: &Key) -> String {
+    line_of(key, false)
+}
+
+/// Строка журнала: день выпуска, ՀՎՀՀ, тариф, последний день и ключ, а у
+/// пробного (`trial`) — в столбце тарифа ещё и [`TRIAL_MARK`] через пробел:
+/// `standard пробный`. Нового столбца нет по той же причине, что у мест
+/// ([`plan_column`]): журнал с ним не прочёл бы строк, выпущенных раньше.
+fn line_of(key: &Key, trial: bool) -> String {
+    let plan = if trial {
+        format!("{} {TRIAL_MARK}", plan_column(key))
+    } else {
+        plan_column(key)
+    };
     format!(
-        "{}\t{}\t{}\t{}\t{}\n",
+        "{}\t{}\t{plan}\t{}\t{}\n",
         key.issued().iso(),
         key.tin().as_str(),
-        plan_column(key),
         key.until().iso(),
         key.text()
     )
@@ -692,6 +831,7 @@ mod tests {
                 plan: Plan::Pro,
                 until: Until::Day(day("2027-10-10")),
                 seats: Some(12),
+                trial: Trial::No,
                 key: Some(PathBuf::from("D:/flash/seed.txt")),
             })
         );
@@ -702,6 +842,7 @@ mod tests {
                 plan: Plan::Standard,
                 until: Until::Day(day("2027-10-10")),
                 seats: None,
+                trial: Trial::No,
                 key: None,
             })
         );
@@ -712,6 +853,7 @@ mod tests {
                 plan: Plan::Standard,
                 until: Until::Renew,
                 seats: None,
+                trial: Trial::No,
                 key: Some(PathBuf::from("D:/flash/seed.txt")),
             })
         );
@@ -728,6 +870,7 @@ mod tests {
                 plan: Plan::Pro,
                 until: Until::Day(day("2027-11-18")),
                 seats: Some(100),
+                trial: Trial::No,
                 key: None,
             })
         );
@@ -874,6 +1017,105 @@ mod tests {
                 second.text()
             )
         );
+    }
+
+    /// Пробный ключ (задача 113): без `--until` — по 30-й день, считая день
+    /// выдачи, а `--until` с ним — не дальше; в журнале — с пометкой, и второй
+    /// пробный на тот же ՀՎՀՀ — отказ, пока не назван `--again`, а журнал при
+    /// отказе не тронут. Обычный ключ и пробный на другой ՀՎՀՀ первому пробному
+    /// не мешают, а «Pro» без ИНН пробным выдаётся сколько угодно раз. Ключ,
+    /// оплаченный до конца пробного, продлевает его (условия, п. 3).
+    #[test]
+    fn a_trial_key_is_short_marked_and_given_once() {
+        let (folder, secret) = folder("trial");
+        let issued = day("2026-11-21");
+        let trial = |line: &str| Order::parse(&args(line)).expect("годный заказ");
+        let paid = issue(&order("2027-11-20"), &secret, &public(), day("2026-11-01"));
+        let first = issue(&trial("--tin 07654321 --plan standard --trial"), &secret, &public(), issued);
+        let long = issue(&trial("--tin 00012345 --plan standard --trial --until 2026-12-21"), &secret, &public(), issued);
+        let short = issue(&trial("--tin 00012345 --plan standard --trial --until 2026-11-30"), &secret, &public(), issued);
+        let second = issue(&trial("--tin 07654321 --plan standard --trial"), &secret, &public(), day("2026-12-25"));
+        let refused = fs::read_to_string(folder.join(JOURNAL)).unwrap_or_default();
+        let again = issue(&trial("--tin 07654321 --plan standard --trial --again"), &secret, &public(), day("2026-12-25"));
+        let gift = issue(&trial("--plan pro --trial"), &secret, &public(), issued);
+        let gift_again = issue(&trial("--plan pro --trial"), &secret, &public(), issued);
+        let bought = issue(&renew("00012345"), &secret, &public(), day("2026-11-25"));
+        let journal = fs::read_to_string(folder.join(JOURNAL)).unwrap_or_default();
+        let _ = fs::remove_dir_all(&folder);
+
+        let mut wrong = Vec::new();
+        if paid.is_err() {
+            wrong.push(format!("обычный ключ: {paid:?}"));
+        }
+        match &first {
+            Ok(Issued { key, renewed: None }) if key.until() == day("2026-12-20") && key.plan() == Plan::Standard => {
+                let row = format!("2026-11-21\t07654321\tstandard пробный\t2026-12-20\t{}\n", key.text());
+                if !journal.contains(&row) {
+                    wrong.push(format!("в журнале нет строки «{row}»"));
+                }
+            }
+            other => wrong.push(format!("пробный по умолчанию: {other:?}")),
+        }
+        if long.is_ok() {
+            wrong.push(format!("пробный на 31 день: {long:?}"));
+        }
+        if !short.as_ref().is_ok_and(|issued| issued.key.until() == day("2026-11-30")) {
+            wrong.push(format!("пробный короче: {short:?}"));
+        }
+        match &second {
+            Err(problem) if problem.contains("--again") => {}
+            other => wrong.push(format!("второй пробный: {other:?}")),
+        }
+        if refused.lines().count() != 4 {
+            wrong.push(format!("отказ тронул журнал:\n{refused}"));
+        }
+        if !again.as_ref().is_ok_and(|issued| issued.key.until() == day("2027-01-23")) {
+            wrong.push(format!("второй пробный с --again: {again:?}"));
+        }
+        if gift.is_err() || gift_again.is_err() || !journal.contains("\t00000000\tpro:10 пробный\t2026-12-20\t") {
+            wrong.push(format!("«Pro» без ИНН пробным: {gift:?} {gift_again:?}"));
+        }
+        match &bought {
+            Ok(Issued { key, renewed: Some(old) }) if old.until() == day("2026-11-30") && key.until() == day("2027-11-30") => {}
+            other => wrong.push(format!("купленный в пробный период: {other:?}")),
+        }
+        let rows = rows(&journal, &public()).map(|rows| rows.iter().filter(|row| row.trial).count());
+        if rows != Ok(5) {
+            wrong.push(format!("пробных строк в журнале: {rows:?}"));
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// `--trial` — без значения, `--again` — только с ним, а продление
+    /// и пробный — что-то одно.
+    #[test]
+    fn trial_flags_are_read() {
+        let parsed = Order::parse(&args("--trial --plan standard --tin 00054321"));
+        assert_eq!(
+            parsed.map(|order| (order.until, order.trial)),
+            Ok((Until::Trial, Trial::First))
+        );
+        let again = Order::parse(&args("--tin 00054321 --plan standard --trial --again --until 2026-12-01"));
+        assert_eq!(
+            again.map(|order| (order.until, order.trial)),
+            Ok((Until::Day(day("2026-12-01")), Trial::Again))
+        );
+        let mut accepted = Vec::new();
+        for line in [
+            "--tin 00054321 --plan standard --again --until 2026-12-01",
+            "--tin 00054321 --plan standard --trial --renew",
+            "--tin 00054321 --plan standard --trial --trial",
+            "--tin 00054321 --plan standard --trial --again --again",
+            "--plan standard --trial",
+            "--plan pro --trial --again",
+            "--tin 00054321 --plan standard --trial 2026-12-01",
+        ] {
+            if Order::parse(&args(line)).is_ok() {
+                accepted.push(line);
+            }
+        }
+        assert!(accepted.is_empty(), "приняты негодные флаги: {accepted:#?}");
+        assert!(USAGE.contains(&format!("до {} дней", license::TRIAL_KEY_DAYS)), "в подсказке — не тот срок пробного");
     }
 
     /// Продлевается ключ того же тарифа: «Pro» — от самого долгого «Pro» на

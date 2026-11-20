@@ -58,7 +58,7 @@ use super::clients::Clients;
 use super::form::{CURRENCIES, Forms, TextField, WizardHead, currency_code, currency_key};
 use super::icon::{Icon, icon};
 use super::ledger::{IncomeActivity, IncomeKindChoice, equivalent, rate_problem};
-use super::license::{self, IssueLocked, Licenses, TrialConsent};
+use super::license::{self, IssueLocked, Licenses};
 use super::paper::{PaperPanel, Request};
 use super::profile::Profiles;
 use super::route::{Router, Screen};
@@ -1637,23 +1637,11 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
     ctx.licenses.watch(ctx.base, ctx.profiles);
     let access = Memo::new(move |_| ctx.licenses.access(ctx.profiles));
     let locked = Memo::new(move |_| license::issue_locked(ctx.licenses, access.get(), ctx.today));
-    // В пробный период с ՀՎՀՀ в профиле выпуск ждёт согласия на его сверку
-    // с сервером (задача 106), а только что данное согласие — ответа сервера:
-    // на этом ՀՎՀՀ срок мог кончиться в другом браузере.
-    let consent = Memo::new(move |_| {
-        locked
-            .get()
-            .is_none()
-            .then(|| ctx.licenses.consent_needed(ctx.profiles, access.get()))
-            .flatten()
-    });
     // На этом устройстве выпуск выключен (задача 41): номера выдаёт другое,
-    // а черновик туда перенесёт копия. Тогда о сроке и согласии — ни слова:
-    // выпускать будут там.
+    // а черновик туда перенесёт копия. Тогда о сроке — ни слова: выпускать
+    // будут там.
     let elsewhere = Memo::new(move |_| super::settings::issue_elsewhere());
-    let blocked = Memo::new(move |_| {
-        elsewhere.get() || locked.get().is_some() || consent.get().is_some() || super::trial::asking()
-    });
+    let blocked = Memo::new(move |_| elsewhere.get() || locked.get().is_some());
     // Выбранный клиент — из живых.
     let chosen = move || {
         let chosen = form.client.get()?;
@@ -2266,14 +2254,10 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
                 }
                 .into_any()),
                 _ => Some(view! {
-                    {move || match (locked.get(), consent.get()) {
+                    {move || match locked.get() {
                         _ if elsewhere.get() => view! { <IssueElsewhere lang /> }.into_any(),
-                        (Some(today), _) => view! { <IssueLocked lang access=access.get() today /> }.into_any(),
-                        (None, Some(tin)) => view! { <TrialConsent lang tin /> }.into_any(),
-                        (None, None) if super::trial::asking() => {
-                            view! { <p class="hint" role="status">{tr(lang, Key::TrialConsentChecking)}</p> }.into_any()
-                        }
-                        (None, None) => view! { <p class="hint">{tr(lang, Key::DocIssueHint)}</p> }.into_any(),
+                        Some(today) => view! { <IssueLocked lang access=access.get() today /> }.into_any(),
+                        None => view! { <p class="hint">{tr(lang, Key::DocIssueHint)}</p> }.into_any(),
                     }}
                     <div class="actions">
                         {move || (!blocked.get()).then(|| view! {

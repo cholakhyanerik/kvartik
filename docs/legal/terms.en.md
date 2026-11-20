@@ -1,13 +1,15 @@
 # Kvartik License Terms
 
-> **Редакция от 20.11.2026** (задача 102): перевод нового абзаца п. 8 и даты
-> русского текста той же редакции; утвердил человек вместе с русским
-> текстом.
+> **Редакция от 21.11.2026** (задача 113): перевод нового п. 3, п. 4.4
+> и 6 и даты русского текста той же редакции; утвердил человек
+> вместе с русским текстом 2026-11-20.
 >
-> Прежние редакции — от 18.11.2026
-> ([terms.2026-11-18.en.md](terms.2026-11-18.en.md), на сайте —
+> Прежние редакции — от 20.11.2026
+> ([terms.2026-11-20.en.md](terms.2026-11-20.en.md), на сайте —
+> /en/terms/2026-11-20/), от 18.11.2026
+> ([terms.2026-11-18.en.md](terms.2026-11-18.en.md),
 > /en/terms/2026-11-18/), от 17.11.2026
-> ([terms.2026-11-17.en.md](terms.2026-11-17.en.md), на сайте —
+> ([terms.2026-11-17.en.md](terms.2026-11-17.en.md),
 > /en/terms/2026-11-17/), от 15.11.2026
 > ([terms.2026-11-15.en.md](terms.2026-11-15.en.md),
 > /en/terms/2026-11-15/), от 13.11.2026
@@ -20,7 +22,7 @@
 > «Для проверки» — только в русском тексте. Квадратные скобки заполнены
 > 2026-11-09 вместе с русским текстом.
 
-**Edition of November 20, 2026. Public offer.**
+**Edition of November 21, 2026. Public offer.**
 
 ## 1. Parties and subject
 
@@ -36,27 +38,32 @@ individual entrepreneurs and organizations and only for their business.
    cholakhyanerik@gmail.com: the plan, the TIN (ՀՎՀՀ) of their IE or
    organization, its name, a contact to send the key to, and the words
    “I accept the Kvartik license terms in the edition of
-   November 20, 2026”.
+   November 21, 2026”.
 2. The user pays for the key. The contract is made upon payment.
 3. The seller sends the key to that contact within one business day after
    payment, together with the settlement document.
 
-## 3. Trial period
+## 3. Trial key
 
-The app is free to use for 14 days, with no sign-up and with every
-feature. That is how you can try it before buying. The 14 days count from
-the earliest of these days: the first opening on a device, the first day of
-the data in the app, and the first day of the trial period for the TIN
-(ՀՎՀՀ) given in the profile. Data moved with a backup to another device or
-browser brings the days already used along with it, and, with your consent,
-the first day for a TIN is kept by the Kvartik server (see section 2 of the
-Privacy Policy): for the same TIN the trial period doesn't start over in
-another browser, on another device or after the data is cleared. While the
-profile has a TIN and there is no key, invoices and acts can be issued
-during the trial period with this consent; without a TIN in the profile it
-isn't needed. If someone other than you started the trial period for your
-TIN, write to the seller: after checking, the seller will remove the
-record, and the trial period will start again.
+You can try the app before buying with a trial key. The seller issues it
+free of charge for up to 30 days, counting the day of issue: a “Standard”
+key for the TIN (ՀՎՀՀ) of your IE, and for an accountant a “Pro” key may
+also be issued without a TIN. To get one, write to the seller at
+cholakhyanerik@gmail.com: the TIN of your IE, a contact to send the key to
+and the words from section 2.1. The seller sends the key within one
+business day. A trial key is issued once per TIN. With a trial key every
+feature of the plan works and these terms apply, except price and payment.
+A key paid for before the trial key ends counts from the day after its last
+day (section 4.1).
+
+Without a key the app opens, keeps the data and calculates the tax, but new
+invoices and acts cannot be issued and the return figures cannot be opened
+(section 4.4).
+
+A trial period without a key that began no later than November 21, 2026
+under the previous edition of this section runs to its end: 14 days from
+the day from which the app already counts it. There are no new trial
+periods without a key.
 
 ## 4. The license: what you may do and for how long
 
@@ -77,9 +84,10 @@ record, and the trial period will start again.
    exports and backups, for their own business.
 3. The key may not be given, sold or rented to anyone else, and the app
    may not be passed off as one's own.
-4. With a valid key every feature of the plan works. After the term ends,
-   new invoices and acts cannot be issued, and the return figures for
-   quarters that ended after the term cannot be opened. Everything else
+4. With a valid key every feature of the plan works. Without one, new
+   invoices and acts cannot be issued and the return figures cannot be
+   opened, except for quarters that ended while a key or a trial period was
+   running. Everything else
    works always: the data, drafts, income and expenses, the tax on screen,
    PDFs of issued documents, export and backup. The user's data remains
    the user's.
@@ -93,8 +101,8 @@ listed on the same page.
 ## 6. Refunds
 
 Once the key has been issued, the money is not refunded: an issued key
-cannot be revoked, and the app can be tried before buying during the
-trial period. The seller refunds in two cases:
+cannot be revoked, and the app can be tried before buying with a trial key
+(section 3). The seller refunds in two cases:
 
 1. the key has not arrived within one business day after payment and the
    user asks for a refund before the key is issued: the whole amount;

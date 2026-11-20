@@ -1,11 +1,13 @@
-//! Лицензия в окне (задача 25): пробный период, ввод ключа, запертый выпуск
+//! Лицензия в окне (задача 25): ввод ключа, пробный ключ, запертый выпуск
 //! и числа для расчёта — всё окно в настоящем DOM и настоящей IndexedDB.
 //! Окно под тестом проверяет подпись ключом пары проб (`ui/license.rs`,
 //! `author`): закрытого ключа автора у тестов нет (Правило 9).
 //!
-//! День начала пробного периода лежит на устройстве (`kvartik.trial`),
-//! а устройство у тестов общее: тест ставит свой день и в конце убирает его,
-//! иначе выпуск в тестах документов оказался бы заперт.
+//! Остальным тестам выпуск открыт без ключа (`OPEN_FOR_TESTS` в
+//! `ui/license.rs`, задача 113), а каждый тест здесь закрывает его стражем
+//! [`RealTerms`] и проверяет настоящий срок. Пробный период без ключа —
+//! только начатый не позже `license::LAST_TRIAL_START`, и тесты ставят дни
+//! раньше его: так тест не зависит от того, в какой день его запустили.
 
 use ed25519_dalek::{Signer, SigningKey};
 use kvartik_core::format::Stored;
@@ -31,6 +33,7 @@ use super::{button, launch_at, mount_at, shown_screens, sleep, type_into, wait_f
 use crate::platform::{clock, hash, set_hash};
 use crate::store::device::Device;
 use crate::store::{Store, Writes};
+use crate::ui::license::RealTerms;
 use crate::ui::route::Screen;
 
 /// Закрытый ключ проб — тот же, что у тестов ядра (`license/tests.rs`).
@@ -45,16 +48,47 @@ pub(in crate::ui) fn signer() -> SigningKey {
     SigningKey::from_bytes(&SEED)
 }
 
-/// Ключ «Стандарт» на `tin` до `until`, подписанный парой `seed`, — так его
-/// записал бы `kvartik-keygen`.
+/// Ключ «Стандарт» на `tin` до `until`, выданный сегодня и подписанный парой
+/// `seed`, — так его записал бы `kvartik-keygen`.
 fn key_text(seed: [u8; 32], tin: &str, until: Date) -> String {
+    key_text_from(seed, tin, clock::today().expect("часы с датой"), until)
+}
+
+/// Ключ «Стандарт» на `tin`, выданный `issued`, до `until`, подписанный парой
+/// `seed`: кончившийся ключ выдан раньше своего последнего дня.
+fn key_text_from(seed: [u8; 32], tin: &str, issued: Date, until: Date) -> String {
     let tin = Tin::parse(tin).expect("годный ՀՎՀՀ");
-    let issued = clock::today().expect("часы с датой");
     let message = license::Key::message(&tin, Plan::Standard, issued, until, None);
     let signature = SigningKey::from_bytes(&seed).sign(&message).to_bytes();
     license::Key::signed(tin, Plan::Standard, issued, until, None, signature)
         .expect("срок не раньше выпуска")
         .text()
+}
+
+/// Ввести строку `text` в поле ключа и нажать «Ввести ключ».
+fn enter_key(host: &HtmlElement, lang: Lang, text: &str) -> bool {
+    match host.query_selector("#license textarea").ok().flatten() {
+        Some(area) => {
+            type_into(&area.unchecked_into::<HtmlInputElement>(), text);
+            button(host, &[t(lang, Key::LicenseEnter)]).map(|button| button.click()).is_some()
+        }
+        None => false,
+    }
+}
+
+/// Убрать за тестом конторы всё, что он оставил: метку устройства, базы ИП
+/// списка и саму контору, — иначе следующие тесты открыли бы не ту базу.
+async fn forget_office_bases() {
+    if let Ok(office) = Store::open_office(|_| {}).await
+        && let Ok(listed) = crate::store::office::list(&office).await
+    {
+        drop(office);
+        for ip in listed.records.iter().filter(|ip| ip.base() != crate::store::DB_NAME) {
+            crate::store::delete_database(ip.base()).await;
+        }
+    }
+    crate::store::delete_database(crate::store::office::OFFICE_DB).await;
+    super::office::forget_office();
 }
 
 /// Ключ «Pro» на `seats` мест на `tin` до `until`, подписанный парой проб, —
@@ -69,30 +103,21 @@ fn pro_text(tin: &str, until: Date, seats: u8) -> String {
         .text()
 }
 
-/// Пробный период устройства начался в `start`.
-pub(super) fn trial_from(start: Date) {
-    Device::new().set_trial_start(start);
-}
-
-/// Забыть пробный период устройства — следующее окно начнёт его сегодня, —
-/// и первый день данных (задача 99), и что устройство помнит о ключе базы:
-/// каким его нашла часть и о конце
-/// какого сказано окном (задача 92), — и что сказано о конце пробного
-/// периода (задача 93), — и сверку ИНН с сервером: согласия и ответ сервера
-/// (задача 106).
+/// Забыть пробный период устройства — первый запуск, первый день данных
+/// (задача 99) и ответ сервера о ՀՎՀՀ (задача 106), которые записали бы
+/// прежние версии, — и что устройство помнит о ключе базы: каким его нашла
+/// часть и о конце какого сказано окном (задача 92), — и письмо о пробном
+/// ключе (задача 113).
 pub(super) fn forget_trial() {
-    crate::ui::trial::forget_consents_for_tests();
-    crate::ui::trial::set_for_tests(None);
     if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
         for name in [
             "kvartik.trial",
             "kvartik.trial_data",
             "kvartik.trial_tin",
-            "kvartik.trial_asked",
             "kvartik.license",
             "kvartik.license_told",
-            "kvartik.trial_told",
             "kvartik.pro_told",
+            "kvartik.trial_key_asked",
         ] {
             let _ = storage.remove_item(name);
         }
@@ -141,12 +166,22 @@ fn plan_until(lang: Lang, plan: Key, until: Date) -> String {
     )
 }
 
-/// Записать в базу ключ «Стандарт» на ՀՎՀՀ профиля до `until`, подписанный
-/// парой проб.
+/// Записать в базу ключ «Стандарт» на ՀՎՀՀ профиля до `until`, выданный
+/// сегодня и подписанный парой проб.
 async fn store_key(until: Date) {
-    let key = license::Key::read(&key_text(SEED, TIN, until), &signer().verifying_key().to_bytes())
+    store_key_from(clock::today().expect("часы с датой"), until).await;
+}
+
+/// Записать в базу ключ «Стандарт» на ՀՎՀՀ профиля, выданный `issued`, до
+/// `until`, подписанный парой проб.
+async fn store_key_from(issued: Date, until: Date) {
+    let key = license::Key::read(&key_text_from(SEED, TIN, issued, until), &signer().verifying_key().to_bytes())
         .expect("ключ пары проб");
-    let entered = License::enter(key, &[], clock::now()).expect("новый ключ");
+    // Момент записи — на два дня вперёд, как у `base_with_draft`: день данных
+    // его не берёт, и пробного периода без ключа тест не получит ни в какой
+    // день запуска.
+    let later = Timestamp::from_unix_millis(clock::now().unix_millis() + 2 * 86_400_000);
+    let entered = License::enter(key, &[], later).expect("новый ключ");
     let mut writes = Writes::default();
     writes.insert(&entered);
     commit(writes).await;
@@ -181,7 +216,12 @@ async fn wait_chip(host: &HtmlElement, scope: &str, text: &str) -> Result<HtmlEl
 /// в прошлом квартале — чтобы у чисел для расчёта было что показать.
 async fn base_with_draft() -> Document {
     crate::store::delete_database(crate::store::DB_NAME).await;
-    let now = clock::now();
+    // Моменты записей — на два дня вперёд: «из будущего» день данных их не
+    // берёт (`license::data_since`), и свежие данные не дают тестам пробного
+    // периода без ключа, который до `license::LAST_TRIAL_START` ещё
+    // начинается (задача 113), — тест не зависит от дня, в который его
+    // запустили.
+    let now = Timestamp::from_unix_millis(clock::now().unix_millis() + 2 * 86_400_000);
     let today = clock::today().expect("часы с датой");
     let previous = today.quarter().previous().expect("прошлый квартал есть");
     let mut data = profile();
@@ -233,30 +273,32 @@ async fn open_draft(host: &HtmlElement) -> bool {
     false
 }
 
-/// Пробный период кончился: на главном — карточка со сроком и «Купить или
+/// Срок ключа кончился: на главном — карточка со сроком и «Купить или
 /// ввести ключ»; в форме черновика вместо «Выпустить» — слова о ключе,
 /// а «Сохранить черновик» осталось; числа прошлого квартала, кончившегося
 /// после срока, заперты, и экран называет, по какой день кварталы открыты;
 /// экран лицензии говорит, что заперто — «сейчас закрыто» у списка того, что
 /// открывает срок, — а что работает, и с каким днём открыты числа кварталов
-/// (задача 93), и спрашивает купившего, где его ключ.
+/// (задача 93), и спрашивает купившего, где его ключ. Пробного ключа тому,
+/// у кого ключ был, экран не предлагает.
 #[wasm_bindgen_test]
-async fn an_ended_trial_locks_issuing_and_numbers() {
+async fn an_ended_key_locks_issuing_and_numbers() {
+    let _real = RealTerms::new();
     base_with_draft().await;
+    forget_trial();
     let lang = Lang::Ru;
     Device::new().set_ui_lang(lang);
     let today = clock::today().expect("часы с датой");
     let previous = today.quarter().previous().expect("прошлый квартал есть");
-    // Срок кончился за неделю до начала прошлого квартала.
-    let start = previous.first_day().add_days(-20).expect("дата");
-    let last = license::trial_last(start).expect("дата");
-    trial_from(start);
-    let ended = fill(t(lang, Key::LicenseTrialEnded), &[&i18n::date(lang, last)]);
+    // Срок кончился через неделю после начала прошлого квартала.
+    let last = previous.first_day().add_days(6).expect("дата");
+    store_key_from(previous.first_day().add_days(-30).expect("дата"), last).await;
+    let ended = fill(t(lang, Key::LicenseKeyEnded), &[&i18n::date(lang, last)]);
 
     let (host, mounted) = mount_at("#/");
     let mut wrong = Vec::new();
     if !wait_for(&host, &ended).await {
-        wrong.push("на главном нет карточки о конце пробного периода".to_owned());
+        wrong.push("на главном нет карточки о конце ключа".to_owned());
     }
     let link = host
         .query_selector(&format!("#home .notice a.button[href=\"{}\"]", Screen::License.href()))
@@ -315,61 +357,139 @@ async fn an_ended_trial_locks_issuing_and_numbers() {
             wrong.push(format!("экран лицензии не сказал {what}"));
         }
     }
+    if screen.contains(t(lang, Key::LicenseTrialKeyWrite)) {
+        wrong.push("купившему, у кого ключ кончился, — пробный ключ".to_owned());
+    }
 
     drop(mounted);
     host.remove();
     forget_trial();
+    drop(_real);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
-/// В пробный период с ИНН в профиле выпуск ждёт согласия на сверку ИНН
-/// с сервером сайта (задача 106; решение человека 2026-11-18): в форме
-/// черновика вместо «Выпустить» — слова согласия и «Согласен», а
-/// «Сохранить черновик» осталось; «Согласен» открывает выпуск и остаётся
-/// на устройстве. На экране лицензии согласие потом — с «Отозвать согласие».
+/// Без ключа вовсе (задача 113; условия, п. 3, редакция от 21.11.2026) —
+/// срока нет, но и «кончился» нет: запуск остаётся на главном, карточки
+/// о конце срока нет, а метка тихо зовёт за пробным ключом и над другими
+/// экранами не стоит. В форме черновика вместо «Выпустить» — слова о ключе
+/// и «Получить пробный ключ», числа заперты без слов об открытых кварталах,
+/// а экран лицензии говорит, что ключа нет, и даёт письмо продавцу: в нём
+/// тема, ИНН профиля и слова согласия с условиями. Нажатое письмо помнит
+/// устройство — первые шаги идут дальше.
 #[wasm_bindgen_test]
-async fn issuing_waits_for_consent_to_check_the_tin() {
+async fn without_a_key_a_trial_key_is_offered() {
+    let _real = RealTerms::new();
     base_with_draft().await;
     forget_trial();
     let lang = Lang::Ru;
     Device::new().set_ui_lang(lang);
-    trial_from(clock::today().expect("часы с датой"));
-
-    let (host, mounted) = mount_at("#/");
     let mut wrong = Vec::new();
+
+    let (host, mounted) = launch_at("#/");
+    let free = t(lang, Key::LicenseChipNone);
+    match wait_chip(&host, "nav", free).await {
+        Ok(chip) if chip.class_list().contains("due") => wrong.push("без ключа метка цвета напоминания".to_owned()),
+        Ok(_) => {}
+        Err(seen) => wrong.push(format!("метка «{seen}», а не «{free}»")),
+    }
+    sleep(300).await;
+    if shown_screens(&host) != ["home"] {
+        wrong.push(format!("без ключа запуск увёл с главного: видны {:?}", shown_screens(&host)));
+    }
+    if super::section_text(&host, "home").contains(t(lang, Key::LicenseLockedShort)) {
+        wrong.push("на главном — карточка о конце срока".to_owned());
+    }
+    set_hash(&Screen::Clients.href());
+    if !shows(&host, "clients").await {
+        wrong.push("экран клиентов не открылся".to_owned());
+    }
+    sleep(200).await;
+    if term_chip(&host, ABOVE).is_some() {
+        wrong.push("без ключа метка над экраном клиентов".to_owned());
+    }
+
     if !open_draft(&host).await {
         wrong.push("в списке нет черновика".to_owned());
     }
-    if !wait_for(&host, t(lang, Key::TrialConsentWhat)).await {
-        wrong.push("в форме нет слов согласия".to_owned());
+    if !wait_for(&host, t(lang, Key::DocIssueLocked)).await {
+        wrong.push("в форме нет слов о запертом выпуске".to_owned());
     }
     if button(&host, &[t(lang, Key::DocIssue)]).is_some() {
-        wrong.push("«Выпустить» — без согласия".to_owned());
+        wrong.push("«Выпустить» без ключа".to_owned());
     }
-    if button(&host, &[t(lang, Key::DocSaveDraft)]).is_none() {
-        wrong.push("«Сохранить черновик» пропало".to_owned());
+    let link = host
+        .query_selector(&format!("#documents .notice a.button[href=\"{}\"]", Screen::License.href()))
+        .ok()
+        .flatten()
+        .and_then(|link| link.text_content())
+        .unwrap_or_default();
+    if link.trim() != t(lang, Key::LicenseGetTrial) {
+        wrong.push(format!("у слов о запертом выпуске кнопка «{}»", link.trim()));
     }
-    match button(&host, &[t(lang, Key::TrialConsentAgree)]) {
-        Some(agree) => agree.click(),
-        None => wrong.push("нет «Согласен»".to_owned()),
+
+    set_hash("#/report");
+    if !wait_for(&host, t(lang, Key::ReportLocked)).await {
+        wrong.push("числа без ключа не заперты".to_owned());
     }
-    if !wait_until(|| button(&host, &[t(lang, Key::DocIssue)]).is_some()).await {
-        wrong.push("после «Согласен» нет «Выпустить»".to_owned());
+    let open = t(lang, Key::LicenseQuartersOpen).split("{}").next().unwrap_or_default();
+    if super::section_text(&host, "report").contains(open) {
+        wrong.push("без срока экран чисел назвал открытые кварталы".to_owned());
     }
-    let consents = Device::new().trial_consents();
-    if consents != [(TIN.to_owned(), license::TRIAL_CONSENT.to_owned())] {
-        wrong.push(format!("устройство помнит согласия {consents:?}"));
-    }
+
     set_hash("#/license");
-    let on = fill(t(lang, Key::TrialConsentOn), &[TIN]);
-    if !wait_for(&host, &on).await || button(&host, &[t(lang, Key::TrialConsentWithdraw)]).is_none() {
-        wrong.push(format!("экран лицензии: «{}», а ждали «{on}» и «Отозвать согласие»", license_text(&host)));
+    let about = fill(t(lang, Key::LicenseTrialKeyAbout), &[&days(lang, license::TRIAL_KEY_DAYS)]);
+    if !wait_for(&host, &about).await {
+        wrong.push(format!("на экране лицензии нет слов о пробном ключе: «{}»", license_text(&host)));
+    }
+    let screen = license_text(&host);
+    for (said, what) in [
+        (t(lang, Key::LicenseNone), "что ключа нет"),
+        (t(lang, Key::LicenseLockedShort), "что заперто"),
+        (t(lang, Key::LicenseTrialKeyTelegram), "о Telegram для вопросов"),
+    ] {
+        if !screen.contains(said) {
+            wrong.push(format!("экран лицензии не сказал {what}"));
+        }
+    }
+    if screen.contains(t(lang, Key::LicenseTrialKeyNoTin)) {
+        wrong.push("ИНН в профиле есть, а экран говорит, что нет".to_owned());
+    }
+    let mail = host.query_selector("#license .trial-key a.button").ok().flatten();
+    let href = mail.as_ref().and_then(|mail| mail.get_attribute("href")).unwrap_or_default();
+    let subject = format!("subject={}", kvartik_core::release::mailto_part(t(lang, Key::TrialMailSubject)));
+    for (piece, what) in [
+        (format!("mailto:{}?", kvartik_core::release::EMAIL), "адрес продавца"),
+        (subject, "тема"),
+        (kvartik_core::release::mailto_part(TIN), "ИНН профиля"),
+        (kvartik_core::release::mailto_part(t(lang, Key::BuyAccept)), "слова согласия"),
+    ] {
+        if !href.contains(&piece) {
+            wrong.push(format!("в письме нет: {what} ({href})"));
+        }
+    }
+    // Нажатие — без перехода по `mailto:`: почты в браузере тестов нет, а
+    // обработчик нажатия окна всё равно срабатывает.
+    let stop = wasm_bindgen::closure::Closure::<dyn Fn(web_sys::Event)>::new(|event: web_sys::Event| {
+        event.prevent_default();
+    });
+    if let Some(window) = web_sys::window() {
+        let _ = window.add_event_listener_with_callback_and_bool("click", stop.as_ref().unchecked_ref(), true);
+    }
+    if let Some(mail) = &mail {
+        mail.unchecked_ref::<HtmlElement>().click();
+    }
+    if let Some(window) = web_sys::window() {
+        let _ = window.remove_event_listener_with_callback_and_bool("click", stop.as_ref().unchecked_ref(), true);
+    }
+    if !wait_until(|| Device::new().trial_key_asked(crate::store::DB_NAME)).await {
+        wrong.push("устройство не запомнило письмо о пробном ключе".to_owned());
     }
 
     drop(mounted);
     host.remove();
     set_hash("");
     forget_trial();
+    drop(_real);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
@@ -392,11 +512,10 @@ fn button_in(host: &HtmlElement, scope: &str, label: &str) -> Option<HtmlElement
 /// «Стандарт» на ՀՎՀՀ 07654321 до 31 октября 2027 года подписан парой проб.
 #[wasm_bindgen_test]
 async fn a_restored_key_is_read_after_the_form_that_read_keys_first() {
+    let _real = RealTerms::new();
     crate::store::delete_database(crate::store::DB_NAME).await;
     let lang = Lang::Ru;
     Device::new().set_ui_lang(lang);
-    let today = clock::today().expect("часы с датой");
-    trial_from(today.add_days(-100).expect("дата"));
 
     let (host, mounted) = mount_at("#/profile");
     let mut wrong = Vec::new();
@@ -453,6 +572,7 @@ async fn a_restored_key_is_read_after_the_form_that_read_keys_first() {
     drop(mounted);
     host.remove();
     forget_trial();
+    drop(_real);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
@@ -463,11 +583,11 @@ async fn a_restored_key_is_read_after_the_form_that_read_keys_first() {
 /// что ключ выдан на прежний.
 #[wasm_bindgen_test]
 async fn a_key_opens_issuing_for_the_profile_tin() {
+    let _real = RealTerms::new();
     base_with_draft().await;
     let lang = Lang::Ru;
     Device::new().set_ui_lang(lang);
     let today = clock::today().expect("часы с датой");
-    trial_from(today.add_days(-100).expect("дата"));
     let until = today.add_days(365).expect("дата");
 
     let (host, mounted) = mount_at("#/license");
@@ -629,6 +749,7 @@ async fn a_key_opens_issuing_for_the_profile_tin() {
     drop(mounted);
     host.remove();
     forget_trial();
+    drop(_real);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
@@ -647,13 +768,14 @@ async fn shows(host: &HtmlElement, id: &str) -> bool {
 const ABOVE: &str = "main >";
 
 /// Срок на виду (задача 92): метка в меню и на главном экране — сколько дней
-/// осталось пробного периода, а над остальными экранами её нет, пока до
-/// конца больше недели; в последнюю неделю она цвета напоминания и стоит над
-/// каждым экраном, кроме главного, где она и так есть, и экрана лицензии.
-/// С ключом метка — дни ключа, а ключ, найденный частью, устройство помнит
-/// записью: со следующего открытия метка встанет, не дожидаясь части.
+/// осталось ключа, а над остальными экранами её нет, пока до конца больше
+/// недели; в последнюю неделю она цвета напоминания и стоит над каждым
+/// экраном, кроме главного, где она и так есть, и экрана лицензии. Ключ,
+/// найденный частью, устройство помнит записью: со следующего открытия метка
+/// встанет, не дожидаясь части. Пробный ключ (задача 113) — тот же ключ.
 #[wasm_bindgen_test]
 async fn the_term_is_always_on_view() {
+    let _real = RealTerms::new();
     base_with_draft().await;
     forget_trial();
     let lang = Lang::Ru;
@@ -661,9 +783,9 @@ async fn the_term_is_always_on_view() {
     let today = clock::today().expect("часы с датой");
     let mut wrong = Vec::new();
 
-    // Десять дней пробного периода — метка в меню и на главном, тихая.
-    trial_from(today.add_days(-4).expect("дата"));
-    let ten = fill(t(lang, Key::LicenseChipTrial), &[&days(lang, 10)]);
+    // Десять дней ключа — метка в меню и на главном, тихая.
+    store_key(today.add_days(9).expect("дата")).await;
+    let ten = fill(t(lang, Key::LicenseChipKey), &[&days(lang, 10)]);
     let (host, mounted) = mount_at("#/");
     for scope in ["nav", "#home"] {
         match wait_chip(&host, scope, &ten).await {
@@ -685,12 +807,13 @@ async fn the_term_is_always_on_view() {
     drop(mounted);
     host.remove();
 
-    // Три дня — громче и под заголовком каждого экрана. О конце пробного
-    // периода уже сказано: окно поверх программы — свой тест ниже.
-    let start = today.add_days(-11).expect("дата");
-    trial_from(start);
-    Device::new().set_trial_told(license::trial_last(start).expect("дата"));
-    let three = fill(t(lang, Key::LicenseChipTrial), &[&days(lang, 3)]);
+    // Три дня — громче и под заголовком каждого экрана. О конце ключа уже
+    // сказано: окно поверх программы — свой тест ниже.
+    base_with_draft().await;
+    let soon = today.add_days(2).expect("дата");
+    store_key(soon).await;
+    Device::new().set_key_told(crate::store::DB_NAME, soon);
+    let three = fill(t(lang, Key::LicenseChipKey), &[&days(lang, 3)]);
     let (host, mounted) = mount_at("#/");
     match wait_chip(&host, "nav", &three).await {
         Ok(chip) if !chip.class_list().contains("due") => wrong.push("за три дня метка тихая".to_owned()),
@@ -733,22 +856,25 @@ async fn the_term_is_always_on_view() {
     host.remove();
     set_hash("");
     forget_trial();
+    drop(_real);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
 /// Срок кончился — программа открывается экраном лицензии при запуске
 /// (задача 92), а «Назад» возвращает на экран, с которым она открылась.
 /// Перезагрузка открывает тот же экран, что был (Правило 2), а запуск, пока
-/// срок идёт, остаётся на своём экране.
+/// срок идёт, остаётся на своём экране. Без срока вовсе запуск тоже остаётся
+/// на своём (задача 113) — свой тест выше.
 #[wasm_bindgen_test]
 async fn an_ended_term_opens_the_license_screen_at_launch() {
+    let _real = RealTerms::new();
     base_with_draft().await;
     forget_trial();
     let lang = Lang::Ru;
     Device::new().set_ui_lang(lang);
     let today = clock::today().expect("часы с датой");
     let mut wrong = Vec::new();
-    trial_from(today.add_days(-30).expect("дата"));
+    store_key_from(today.add_days(-60).expect("дата"), today.add_days(-30).expect("дата")).await;
 
     let (host, mounted) = launch_at("#/");
     if !shows(&host, "license").await || hash() != Screen::License.href() {
@@ -764,7 +890,7 @@ async fn an_ended_term_opens_the_license_screen_at_launch() {
     host.remove();
 
     let (host, mounted) = mount_at("#/clients");
-    let ended = t(lang, Key::LicenseChipTrialEnded);
+    let ended = t(lang, Key::LicenseChipKeyEnded);
     if let Err(seen) = wait_chip(&host, "nav", ended).await {
         wrong.push(format!("перезагрузка: метка «{seen}», а не «{ended}»"));
     }
@@ -775,9 +901,13 @@ async fn an_ended_term_opens_the_license_screen_at_launch() {
     drop(mounted);
     host.remove();
 
-    trial_from(today);
+    store_key(today.add_days(13).expect("дата")).await;
+    // Ключ лёг в базу мимо окна, а устройство помнит прежний, кончившийся
+    // (`Device::key_term`): запуск увёл бы на экран лицензии, пока часть не
+    // проверила новый. Окно, через которое ключ вводят, запись обновляет само.
+    forget_found_term();
     let (host, mounted) = launch_at("#/");
-    let fourteen = fill(t(lang, Key::LicenseChipTrial), &[&days(lang, 14)]);
+    let fourteen = fill(t(lang, Key::LicenseChipKey), &[&days(lang, 14)]);
     if let Err(seen) = wait_chip(&host, "nav", &fourteen).await {
         wrong.push(format!("срок идёт: метка «{seen}», а не «{fourteen}»"));
     }
@@ -789,25 +919,29 @@ async fn an_ended_term_opens_the_license_screen_at_launch() {
     host.remove();
     set_hash("");
     forget_trial();
+    drop(_real);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
-/// Пробный период едет с данными (задача 99; условия, п. 3, редакция от
-/// 15.11.2026): клиент, записанный двадцать дней назад, в браузере, открытом
-/// сегодня, приносит и прошедшие дни — экран лицензии говорит, что пробный
-/// период кончился и считается с первого дня данных, а устройство запоминает
-/// этот день. Со следующего запуска срок знает и главный wasm: у пустой базы
-/// части нет, а метка — «кончился».
+/// Пробный период, начатый до задачи 113, едет с данными (задача 99; условия,
+/// п. 3, редакция от 15.11.2026): клиент, записанный 1 ноября 2026 года, в
+/// браузере, открытом сегодня, приносит и прошедшие дни — экран лицензии
+/// говорит, что пробный период кончился, а устройство запоминает этот день.
+/// Со следующего запуска срок знает и главный wasm: у пустой базы части нет,
+/// а метка — «кончился». День — до `license::LAST_TRIAL_START`, а не «двадцать
+/// дней назад»: тест не зависит от дня, в который его запустили.
 #[wasm_bindgen_test]
 async fn the_trial_travels_with_the_data() {
+    let _real = RealTerms::new();
     crate::store::delete_database(crate::store::DB_NAME).await;
     forget_trial();
     let lang = Lang::Ru;
     Device::new().set_ui_lang(lang);
     let today = clock::today().expect("часы с датой");
     let mut wrong = Vec::new();
-    trial_from(today);
-    let then = Timestamp::from_unix_millis(clock::now().unix_millis() - 20 * 86_400_000);
+    // 1 ноября 2026 года, 08:00 по UTC — 22:00 того же дня и в поясе UTC+14,
+    // по которому считается день данных (`license::data_since`).
+    let then = Timestamp::from_unix_millis(1_793_520_000_000);
     let client = Client::create(acme(), then).expect("годный клиент");
     let mut writes = Writes::default();
     writes.insert(&client);
@@ -816,16 +950,13 @@ async fn the_trial_travels_with_the_data() {
 
     let href = Screen::License.href();
     let (host, mounted) = mount_at(&href);
+    if data != Date::new(2026, 11, 1).expect("дата") {
+        wrong.push(format!("день данных {data:?}, а ждали 1 ноября 2026 года"));
+    }
     let last = license::trial_last(data).expect("дата");
     let ended = fill(t(lang, Key::LicenseTrialEnded), &[&i18n::date(lang, last)]);
-    let why = fill(t(lang, Key::LicenseTrialFromData), &[&i18n::date(lang, data)]);
-    let said = wait_until(|| {
-        let text = license_text(&host);
-        text.contains(&ended) && text.contains(&why)
-    })
-    .await;
-    if !said {
-        wrong.push(format!("экран лицензии: «{}», а ждали «{ended}» и «{why}»", license_text(&host)));
+    if !wait_until(|| license_text(&host).contains(&ended)).await {
+        wrong.push(format!("экран лицензии: «{}», а ждали «{ended}»", license_text(&host)));
     }
     if !wait_until(|| Device::new().trial_data() == Some(data)).await {
         wrong.push(format!("устройство помнит день данных как {:?}", Device::new().trial_data()));
@@ -844,23 +975,22 @@ async fn the_trial_travels_with_the_data() {
     host.remove();
     set_hash("");
     forget_trial();
+    drop(_real);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
-/// Пробный период идёт и по ՀՎՀՀ (задача 106; условия, п. 3, редакция от
-/// 18.11.2026): браузер открыт сегодня, данных старше нет, а сервер ответил,
-/// что на ՀՎՀՀ профиля период начали двадцать дней назад, — экран лицензии
-/// говорит, что пробный период кончился и считается с первого дня на ИНН.
-/// Ответ о другом ՀՎՀՀ срок не трогает: спрошен он был о прежнем номере
-/// профиля, и сегодня идёт пробный период устройства.
+/// Ответ сервера о ՀՎՀՀ, который устройство запомнило до 0.0.162 (задача 106),
+/// по-прежнему сокращает начатый пробный период (задача 113): браузер с
+/// профилем без старых данных, а устройство помнит, что на ՀՎՀՀ период начали
+/// раньше первой версии программы, — экран лицензии говорит, что пробный
+/// период кончился.
 #[wasm_bindgen_test]
-async fn the_trial_follows_the_tin() {
+async fn a_remembered_server_day_still_counts() {
+    let _real = RealTerms::new();
     crate::store::delete_database(crate::store::DB_NAME).await;
     forget_trial();
     let lang = Lang::Ru;
     Device::new().set_ui_lang(lang);
-    let today = clock::today().expect("часы с датой");
-    trial_from(today);
     let mut data = profile();
     data.tin = Some(Tin::parse(TIN).expect("годный ՀՎՀՀ"));
     let saved = Profile::save(None, data, clock::now()).expect("годный профиль").expect("новый");
@@ -869,39 +999,23 @@ async fn the_trial_follows_the_tin() {
     commit(writes).await;
     // День раньше первой версии программы: раньше любого дня данных, который
     // мог остаться на устройстве от теста с образцом копии (в общем прогоне
-    // так и было — день образца 13.10.2026 побеждал день сервера). Сервер так
-    // не ответит (`license::trial_answer`), но ответ кладёт тест.
+    // так и было — день образца 13.10.2026 побеждал день сервера).
     let first = license::FIRST_DAY.add_days(-1).expect("дата");
-    crate::ui::trial::set_for_tests(Some((Tin::parse(TIN).expect("годный ՀՎՀՀ"), first)));
+    Device::new().set_trial_tin(first);
 
     let mut wrong = Vec::new();
     let href = Screen::License.href();
     let (host, mounted) = mount_at(&href);
     let last = license::trial_last(first).expect("дата");
     let ended = fill(t(lang, Key::LicenseTrialEnded), &[&i18n::date(lang, last)]);
-    let why = fill(t(lang, Key::LicenseTrialFromTin), &[&i18n::date(lang, first)]);
-    let said = wait_until(|| {
-        let text = license_text(&host);
-        text.contains(&ended) && text.contains(&why)
-    })
-    .await;
-    if !said {
-        wrong.push(format!("экран лицензии: «{}», а ждали «{ended}» и «{why}»", license_text(&host)));
-    }
-    crate::ui::trial::set_for_tests(Some((Tin::parse("00012345").expect("годный ՀՎՀՀ"), first)));
-    let calm = wait_until(|| {
-        let text = license_text(&host);
-        !text.is_empty() && !text.contains(&ended) && !text.contains(&why)
-    })
-    .await;
-    if !calm {
-        wrong.push(format!("ответ о другом ՀՎՀՀ: «{}»", license_text(&host)));
+    if !wait_until(|| license_text(&host).contains(&ended)).await {
+        wrong.push(format!("экран лицензии: «{}», а ждали «{ended}»", license_text(&host)));
     }
     drop(mounted);
     host.remove();
-    crate::ui::trial::set_for_tests(None);
     set_hash("");
     forget_trial();
+    drop(_real);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
@@ -912,12 +1026,12 @@ async fn the_trial_follows_the_tin() {
 /// поэтому его ищут во всём `<body>`.
 #[wasm_bindgen_test]
 async fn a_key_ending_within_a_week_asks_once() {
+    let _real = RealTerms::new();
     base_with_draft().await;
     forget_trial();
     let lang = Lang::Ru;
     Device::new().set_ui_lang(lang);
     let today = clock::today().expect("часы с датой");
-    trial_from(today.add_days(-30).expect("дата"));
     let until = today.add_days(4).expect("дата");
     store_key(until).await;
     let words = fill(t(lang, Key::LicenseSoonText), &[&days(lang, 5), &i18n::date(lang, until)]);
@@ -987,141 +1101,8 @@ async fn a_key_ending_within_a_week_asks_once() {
     }
     set_hash("");
     forget_trial();
+    drop(_real);
     assert!(wrong.is_empty(), "{wrong:#?}");
-}
-
-/// За неделю до конца пробного периода — то же окно поверх программы
-/// (задача 93): сколько дней и до какого дня, что запрёт конец срока и что
-/// ключ приходит в течение рабочего дня после оплаты; программа под ним
-/// неактивна. «Понятно» закрывает его, и больше оно не встаёт — запись одна
-/// на устройство, — а «Купить ключ» закрывает и ведёт на экран лицензии.
-/// С ключом дольше пробного периода окна о пробном нет.
-#[wasm_bindgen_test]
-async fn a_trial_ending_within_a_week_asks_once() {
-    base_with_draft().await;
-    forget_trial();
-    let lang = Lang::Ru;
-    Device::new().set_ui_lang(lang);
-    let today = clock::today().expect("часы с датой");
-    // Последний день — через четыре дня: осталось пять, считая сегодня.
-    let start = today.add_days(-9).expect("дата");
-    trial_from(start);
-    let last = license::trial_last(start).expect("дата");
-    let words = fill(t(lang, Key::TrialSoonText), &[&days(lang, 5), &i18n::date(lang, last)]);
-    let body = super::document().body().expect("есть <body>");
-    let dialog = || body.query_selector("[role=dialog]").ok().flatten().is_some();
-    let inert = |host: &HtmlElement| {
-        host.query_selector(".app")
-            .ok()
-            .flatten()
-            .is_some_and(|app| app.has_attribute("inert"))
-    };
-    let mut wrong = Vec::new();
-
-    let (host, mounted) = mount_at("#/");
-    if !wait_for(&body, &words).await {
-        wrong.push("за пять дней до конца пробного периода окна нет".to_owned());
-    }
-    let card = body.text_content().unwrap_or_default();
-    if !card.contains(t(lang, Key::TrialSoonTitle)) || card.contains(t(lang, Key::LicenseSoonTitle)) {
-        wrong.push("у окна не заголовок пробного периода".to_owned());
-    }
-    if !inert(&host) {
-        wrong.push("под окном программа активна".to_owned());
-    }
-    match button(&body, &[t(lang, Key::LicenseSoonOk)]) {
-        Some(ok) => ok.click(),
-        None => wrong.push("нет «Понятно»".to_owned()),
-    }
-    if !wait_until(|| !dialog() && !inert(&host)).await {
-        wrong.push("«Понятно» не закрыло окно".to_owned());
-    }
-    if Device::new().trial_told() != Some(last) {
-        wrong.push("устройство не запомнило, что о пробном периоде сказано".to_owned());
-    }
-    drop(mounted);
-    host.remove();
-
-    // Устройство забыло, каким нашла срок часть, и метка встанет, только когда
-    // часть проверит его снова, — а с ней и решение об окне (ревью задачи 93:
-    // по записи метка встала бы раньше части, и окно, вставшее позже, тест
-    // не застал бы).
-    forget_found_term();
-    let (host, mounted) = mount_at("#/");
-    let five = fill(t(lang, Key::LicenseChipTrial), &[&days(lang, 5)]);
-    if let Err(seen) = wait_chip(&host, "nav", &five).await {
-        wrong.push(format!("метка «{seen}», а не «{five}»"));
-    }
-    sleep(500).await;
-    if dialog() {
-        wrong.push("окно встало второй раз".to_owned());
-    }
-    drop(mounted);
-    host.remove();
-
-    if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
-        let _ = storage.remove_item("kvartik.trial_told");
-    }
-    let (host, mounted) = mount_at("#/");
-    if !wait_for(&body, &words).await {
-        wrong.push("окна нет и после того, как устройство забыло".to_owned());
-    }
-    match button(&body, &[t(lang, Key::LicenseBuy)]) {
-        Some(buy) => buy.click(),
-        None => wrong.push("нет «Купить ключ»".to_owned()),
-    }
-    if !shows(&host, "license").await || !wait_until(|| !dialog() && !inert(&host)).await {
-        wrong.push(format!("«Купить ключ»: видны {:?}, окно — {}", shown_screens(&host), dialog()));
-    }
-    drop(mounted);
-    host.remove();
-
-    // Ключ на год дольше пробного периода: окна о пробном нет, хоть
-    // устройство о нём и не помнит.
-    if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
-        let _ = storage.remove_item("kvartik.trial_told");
-    }
-    store_key(today.add_days(364).expect("дата")).await;
-    let (host, mounted) = mount_at("#/");
-    let year = fill(t(lang, Key::LicenseChipKey), &[&days(lang, 365)]);
-    if let Err(seen) = wait_chip(&host, "nav", &year).await {
-        wrong.push(format!("с ключом метка «{seen}», а не «{year}»"));
-    }
-    sleep(500).await;
-    if dialog() {
-        wrong.push("с ключом на год — окно о конце пробного периода".to_owned());
-    }
-    drop(mounted);
-    host.remove();
-    set_hash("");
-    forget_trial();
-    assert!(wrong.is_empty(), "{wrong:#?}");
-}
-
-/// Ввести строку `text` в поле ключа и нажать «Ввести ключ».
-fn enter_key(host: &HtmlElement, lang: Lang, text: &str) -> bool {
-    match host.query_selector("#license textarea").ok().flatten() {
-        Some(area) => {
-            type_into(&area.unchecked_into::<HtmlInputElement>(), text);
-            button(host, &[t(lang, Key::LicenseEnter)]).map(|button| button.click()).is_some()
-        }
-        None => false,
-    }
-}
-
-/// Убрать за тестом конторы всё, что он оставил: метку устройства, базы ИП
-/// списка и саму контору, — иначе следующие тесты открыли бы не ту базу.
-async fn forget_office_bases() {
-    if let Ok(office) = Store::open_office(|_| {}).await
-        && let Ok(listed) = crate::store::office::list(&office).await
-    {
-        drop(office);
-        for ip in listed.records.iter().filter(|ip| ip.base() != crate::store::DB_NAME) {
-            crate::store::delete_database(ip.base()).await;
-        }
-    }
-    crate::store::delete_database(crate::store::office::OFFICE_DB).await;
-    super::office::forget_office();
 }
 
 /// Ключ «Pro» (задача 38) — на ՀՎՀՀ бухгалтера, не профиля, — ложится не
@@ -1131,12 +1112,12 @@ async fn forget_office_bases() {
 /// введённых у ключа — число мест. Повтор — «уже введён».
 #[wasm_bindgen_test]
 async fn a_pro_key_goes_to_the_office() {
+    let _real = RealTerms::new();
     base_with_draft().await;
     forget_office_bases().await;
     let lang = Lang::Ru;
     Device::new().set_ui_lang(lang);
     let today = clock::today().expect("часы с датой");
-    trial_from(today.add_days(-100).expect("дата"));
     let until = today.add_days(365).expect("дата");
 
     let (host, mounted) = mount_at("#/license");
@@ -1229,6 +1210,7 @@ async fn a_pro_key_goes_to_the_office() {
     set_hash("");
     forget_trial();
     forget_office_bases().await;
+    drop(_real);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
@@ -1238,13 +1220,13 @@ async fn a_pro_key_goes_to_the_office() {
 /// Убрали из списка того, кто раньше, — место освободилось, и срок — «Pro».
 #[wasm_bindgen_test]
 async fn a_pro_key_opens_only_its_seats() {
+    let _real = RealTerms::new();
     base_with_draft().await;
     forget_office_bases().await;
     let lang = Lang::Ru;
     let device = Device::new();
     device.set_ui_lang(lang);
     let (today, now) = (clock::today().expect("часы с датой"), clock::now());
-    trial_from(today.add_days(-100).expect("дата"));
     let until = today.add_days(365).expect("дата");
     let earlier = Ip::new(today.add_days(-2).expect("дата"), now);
     let open = Ip::first(None, today, now);
@@ -1307,6 +1289,7 @@ async fn a_pro_key_opens_only_its_seats() {
     forget_trial();
     forget_office_bases().await;
     crate::store::delete_database(earlier.base()).await;
+    drop(_real);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
@@ -1318,13 +1301,13 @@ async fn a_pro_key_opens_only_its_seats() {
 /// ни у кого.
 #[wasm_bindgen_test]
 async fn an_own_key_leaves_its_seat_to_the_next() {
+    let _real = RealTerms::new();
     base_with_draft().await;
     forget_office_bases().await;
     let lang = Lang::Ru;
     let device = Device::new();
     device.set_ui_lang(lang);
     let (today, now) = (clock::today().expect("часы с датой"), clock::now());
-    trial_from(today.add_days(-100).expect("дата"));
     let until = today.add_days(365).expect("дата");
     // Ранний ИП — со своим профилем на свой ՀՎՀՀ и своим ключом в своей базе.
     let own_tin = "07654321";
@@ -1379,6 +1362,7 @@ async fn an_own_key_leaves_its_seat_to_the_next() {
     set_hash("");
     forget_trial();
     forget_office_bases().await;
+    drop(_real);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
@@ -1402,12 +1386,12 @@ async fn office_with_pro(ips: &[&Ip], key: &str) {
 /// до перезагрузки (ревью задачи 38).
 #[wasm_bindgen_test]
 async fn a_known_pro_key_brings_the_office_in() {
+    let _real = RealTerms::new();
     base_with_draft().await;
     forget_office_bases().await;
     let lang = Lang::Ru;
     Device::new().set_ui_lang(lang);
     let today = clock::today().expect("часы с датой");
-    trial_from(today.add_days(-100).expect("дата"));
     let until = today.add_days(365).expect("дата");
     let (host, mounted) = mount_at("#/license");
     let mut wrong = Vec::new();
@@ -1427,6 +1411,7 @@ async fn a_known_pro_key_brings_the_office_in() {
     set_hash("");
     forget_trial();
     forget_office_bases().await;
+    drop(_real);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
@@ -1436,13 +1421,13 @@ async fn a_known_pro_key_brings_the_office_in() {
 /// пуста — «данных пока нет», а не налог в 0 ֏.
 #[wasm_bindgen_test]
 async fn the_summary_opens_with_a_pro_key() {
+    let _real = RealTerms::new();
     base_with_draft().await;
     forget_office_bases().await;
     let lang = Lang::Ru;
     let device = Device::new();
     device.set_ui_lang(lang);
     let (today, now) = (clock::today().expect("часы с датой"), clock::now());
-    trial_from(today.add_days(-100).expect("дата"));
     let until = today.add_days(365).expect("дата");
     let other = Ip::new(today, now);
     office_with_pro(&[&Ip::first(None, today, now), &other], &pro_text("07654321", until, 30)).await;
@@ -1469,22 +1454,27 @@ async fn the_summary_opens_with_a_pro_key() {
     crate::store::delete_database(other.base()).await;
     forget_trial();
     forget_office_bases().await;
+    drop(_real);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
 /// Пустая база ИП с местом в ключе «Pro», запуск после конца пробного
 /// периода: срок — ключа «Pro», и окно остаётся на главном, а не уводит на
 /// экран лицензии с «пробный период кончился» (ревью задачи 38: срок пустой
-/// базы считался пробным периодом, пока его не пересчитает часть).
+/// базы считался пробным периодом, пока его не пересчитает часть). Пробный
+/// период — начатый до `license::LAST_TRIAL_START` и кончившийся: только
+/// кончившийся срок при запуске и уводит на экран лицензии.
 #[wasm_bindgen_test]
 async fn an_empty_base_with_a_pro_seat_opens_home() {
+    let _real = RealTerms::new();
     crate::store::delete_database(crate::store::DB_NAME).await;
     forget_office_bases().await;
+    forget_trial();
     let lang = Lang::Ru;
     let device = Device::new();
     device.set_ui_lang(lang);
+    device.set_trial_start(license::LAST_TRIAL_START.add_days(-30).expect("дата"));
     let today = clock::today().expect("часы с датой");
-    trial_from(today.add_days(-100).expect("дата"));
     let until = today.add_days(365).expect("дата");
     office_with_pro(&[&Ip::first(None, today, clock::now())], &pro_text("07654321", until, 1)).await;
     device.set_base(crate::store::DB_NAME);
@@ -1502,6 +1492,42 @@ async fn an_empty_base_with_a_pro_seat_opens_home() {
     set_hash("");
     forget_trial();
     forget_office_bases().await;
+    drop(_real);
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// «Продлите ключ» (задача 93) — за месяц до конца годового ключа, а у
+/// короткого, пробного (задача 113), — только в последнюю неделю: пробный
+/// ключ на 30 дней иначе с первого дня стоял бы под «продлите».
+#[wasm_bindgen_test]
+async fn a_trial_key_is_not_asked_to_be_renewed_at_once() {
+    let _real = RealTerms::new();
+    let lang = Lang::Ru;
+    let today = clock::today().expect("часы с датой");
+    let mut wrong = Vec::new();
+    for (issued, until, renew) in [
+        (today, today.add_days(29).expect("дата"), false),
+        (today.add_days(-340).expect("дата"), today.add_days(20).expect("дата"), true),
+    ] {
+        base_with_draft().await;
+        forget_trial();
+        Device::new().set_ui_lang(lang);
+        store_key_from(issued, until).await;
+        let href = Screen::License.href();
+        let (host, mounted) = mount_at(&href);
+        let term = key_until(lang, until);
+        if !wait_until(|| license_text(&host).contains(&term)).await {
+            wrong.push(format!("ключ до {until:?}: экран — «{}»", license_text(&host)));
+        }
+        if license_text(&host).contains(t(lang, Key::LicenseRenew)) != renew {
+            wrong.push(format!("ключ с {issued:?} до {until:?}: «продлите» — {}", !renew));
+        }
+        drop(mounted);
+        host.remove();
+    }
+    set_hash("");
+    forget_trial();
+    drop(_real);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
@@ -1509,11 +1535,11 @@ async fn an_empty_base_with_a_pro_seat_opens_home() {
 /// говорит словами, сколько их и что больше не бывает (ревью задачи 38).
 #[wasm_bindgen_test]
 async fn a_key_over_the_limit_is_refused() {
+    let _real = RealTerms::new();
     base_with_draft().await;
     let lang = Lang::Ru;
     Device::new().set_ui_lang(lang);
     let today = clock::today().expect("часы с датой");
-    trial_from(today.add_days(-100).expect("дата"));
     let mut writes = Writes::default();
     for n in 0..license::MAX_KEYS {
         let until = today.add_days(i32::try_from(n).expect("число") + 1).expect("дата");
@@ -1539,5 +1565,6 @@ async fn a_key_over_the_limit_is_refused() {
     host.remove();
     set_hash("");
     forget_trial();
+    drop(_real);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }

@@ -101,9 +101,6 @@ web-sys = { version = "0.3.107", features = [
     "OffscreenCanvasRenderingContext2d",
     "Pbkdf2Params",
     "PointerEvent",
-    # Запрос пробного периода на ИНН (задача 106, `platform::site::post`):
-    # `POST` — единственный запрос окна не за файлом.
-    "RequestInit",
     "Response",
     "ResponseInit",
     "ServiceWorker",

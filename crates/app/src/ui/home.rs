@@ -47,6 +47,7 @@ pub fn Home(
         profiles,
         clients,
         documents,
+        licenses: tax.licenses,
     };
     let new_invoice = move |_| {
         documents.new_invoice(clients);

@@ -601,16 +601,16 @@ async fn first_launch_asks_for_the_language() {
     if !text.contains(t(Lang::Ru, Key::WelcomeHeadline)) || welcome_choice(&host).as_deref() != Some("ru") {
         wrong.push(format!("выбор русского не перевёл экран: {:?}", welcome_choice(&host)));
     }
-    // За сроком пробного периода — что потом без ключа (задача 98): в той
-    // же строке и на выбранном языке.
+    // За пробным ключом — что без ключа (задачи 98 и 113): в той же строке
+    // и на выбранном языке.
     let hint = host
         .query_selector(".welcome-first .hint")
         .ok()
         .flatten()
         .and_then(|hint| hint.text_content())
         .unwrap_or_default();
-    if !hint.ends_with(t(Lang::Ru, Key::WelcomeAfterTrial)) {
-        wrong.push(format!("за сроком пробного периода нет того, что потом: {hint:?}"));
+    if !hint.ends_with(t(Lang::Ru, Key::WelcomeWithoutKey)) {
+        wrong.push(format!("за пробным ключом нет того, что без ключа: {hint:?}"));
     }
     if Device::new().ui_lang() != Some(Lang::Ru) {
         wrong.push(format!("выбор не запомнен: {:?}", Device::new().ui_lang()));

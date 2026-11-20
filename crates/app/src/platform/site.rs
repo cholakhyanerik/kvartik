@@ -81,30 +81,6 @@ pub async fn optional_text(name: &str) -> Option<String> {
     response.text().ok()?.await.ok()?.as_string()
 }
 
-/// Ответ сервера своего сайта на `POST` по адресу `path` с телом `body`
-/// (задача 106, `license::TRIAL_PATH`) — текстом, когда код 2xx; иначе `None`
-/// без записи в консоль, как у [`optional_text`]: без ответа окно считает
-/// по тому, что уже знает. Тело — строкой, то есть `text/plain`: сервер
-/// читает его JSON и так, а заголовков запроса окну задавать не нужно.
-/// Service worker такой запрос не трогает — он берёт только `GET` (`sw.js`),
-/// — а кэш HTTP ответов на `POST` не хранит.
-pub async fn post(path: &str, body: &str) -> Option<String> {
-    let window = web_sys::window()?;
-    let init = web_sys::RequestInit::new();
-    init.set_method("POST");
-    init.set_body(&JsValue::from_str(body));
-    let response: Response = window
-        .fetch_with_str_and_init(path, &init)
-        .await
-        .ok()?
-        .dyn_into()
-        .ok()?;
-    if !response.ok() {
-        return None;
-    }
-    response.text().ok()?.await.ok()?.as_string()
-}
-
 fn log(name: &str, error: &JsValue) -> Unreachable {
     web_sys::console::error_2(&format!("Kvartik, файл {name}:").into(), error);
     Unreachable

@@ -55,19 +55,6 @@ pub struct Device {
     prefix: String,
 }
 
-/// Последний запрос окна к серверу о пробном периоде на ՀՎՀՀ (задача 106,
-/// [`Device::trial_asked`]).
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Asked {
-    /// ՀՎՀՀ профиля — восемь цифр.
-    pub tin: String,
-    /// Когда спросило окно.
-    pub at: Timestamp,
-    /// Что ответил сервер: первый день пробного периода на этом ՀՎՀՀ; `None`
-    /// — ещё не ответил.
-    pub first: Option<Date>,
-}
-
 /// Имя записи калькулятора — `tax::example::HANDOFF_KEY` без префикса
 /// [`Device::new`]: её пишет wasm калькулятора (`crates/calc`) под полным
 /// именем из ядра, и тест ниже держит их вместе.
@@ -142,16 +129,44 @@ impl Device {
         self.remove(SITE_LANG)
     }
 
-    /// День, когда на этом устройстве начался пробный период; `None` —
-    /// ещё не начинался или запись не читается.
+    /// День, когда на этом устройстве начался пробный период без ключа;
+    /// `None` — не начинался или запись не читается. Пишут её только версии
+    /// до 0.0.162: пробного периода без ключа после `license::LAST_TRIAL_START`
+    /// нет (задача 113), а начатый досчитывается по этой записи.
     pub fn trial_start(&self) -> Option<Date> {
         Date::from_iso(&self.get("trial")?)
     }
 
-    /// Запомнить день начала пробного периода. `false` — `localStorage`
-    /// отказал.
+    /// Запомнить день начала пробного периода — для браузерных тестов: так
+    /// его записала бы прежняя версия.
+    #[cfg(all(test, target_arch = "wasm32"))]
     pub fn set_trial_start(&self, day: Date) -> bool {
         self.set("trial", &day.iso())
+    }
+
+    /// Отправлено ли с этого устройства письмо продавцу о пробном ключе для
+    /// базы `base` (задача 113): первые шаги тогда идут дальше, не дожидаясь
+    /// ключа, — он приходит в течение рабочего дня. Что письмо дошло, окно не
+    /// знает: нажата кнопка, и только.
+    pub fn trial_key_asked(&self, base: &str) -> bool {
+        self.get(&per_base("trial_key_asked", base)).is_some()
+    }
+
+    /// Запомнить, что письмо о пробном ключе для базы `base` открыто.
+    /// `false` — `localStorage` отказал: первые шаги подождут ключа.
+    pub fn set_trial_key_asked(&self, base: &str) -> bool {
+        self.set(&per_base("trial_key_asked", base), "1")
+    }
+
+    /// Стереть записи сверки ՀՎՀՀ с сервером до 0.0.162 (задача 106) —
+    /// согласия и последний вопрос: сервера пробного периода больше нет
+    /// (политика конфиденциальности, п. 2, редакция от 21.11.2026). Ответ
+    /// сервера ([`Self::trial_tin`]) остаётся: по нему досчитывается начатый
+    /// пробный период. И запись окна о его конце (задача 93): окна больше нет.
+    pub fn forget_trial_server(&self) {
+        for name in ["trial_consent", "trial_asked", "trial_told"] {
+            self.remove(name);
+        }
     }
 
     /// Первый день данных, открытых на этом устройстве (задача 99,
@@ -234,21 +249,6 @@ impl Device {
     /// снова.
     pub fn set_key_told(&self, base: &str, last: Date) -> bool {
         self.set(&per_base("license_told", base), &last.iso())
-    }
-
-    /// Последний день пробного периода, о конце которого окно уже сказало
-    /// окном поверх программы (задача 93); `None` — не говорило или запись не
-    /// читается. Одна на устройство, а не на базу: пробный период у всех ИП
-    /// устройства общий, как и день его начала ([`Self::trial_start`]).
-    pub fn trial_told(&self) -> Option<Date> {
-        Date::from_iso(&self.get("trial_told")?)
-    }
-
-    /// Запомнить, что о конце пробного периода с последним днём `last`
-    /// сказано. `false` — `localStorage` отказал: окно встанет при следующем
-    /// запуске снова.
-    pub fn set_trial_told(&self, last: Date) -> bool {
-        self.set("trial_told", &last.iso())
     }
 
     /// Последний день ключа «Pro», о конце которого окно уже сказало окном
@@ -459,92 +459,21 @@ impl Device {
         self.set("rates_at", &at.unix_millis().to_string())
     }
 
-    /// День начала пробного периода на ՀՎՀՀ по серверу сайта (задача 106,
-    /// `license::TRIAL_PATH`): самый ранний из ответов о ՀՎՀՀ профилей этого
-    /// устройства. Пишет его часть окна, когда сервер ответил днём раньше
-    /// прежнего, а читает главный wasm при запуске — как день данных
-    /// ([`Self::trial_data`]): метке срока и экрану лицензии не ждать сервера,
-    /// и без сети срок тот же. Один на устройство: пробный период у всех ИП
-    /// устройства общий. `None` — сервер ещё не отвечал или запись не читается.
+    /// День начала пробного периода на ՀՎՀՀ по серверу сайта (задача 106):
+    /// самый ранний из ответов о ՀՎՀՀ профилей этого устройства, который
+    /// запомнили версии до 0.0.162 — сервера пробного периода больше нет
+    /// (задача 113), — а читает главный wasm при запуске, как день данных
+    /// ([`Self::trial_data`]): по нему досчитывается начатый пробный период.
+    /// `None` — сервер не отвечал или запись не читается.
     pub fn trial_tin(&self) -> Option<Date> {
         Date::from_iso(&self.get("trial_tin")?)
     }
 
-    /// Запомнить день начала пробного периода на ՀՎՀՀ. `false` —
-    /// `localStorage` отказал: метка при следующем запуске скажет срок по
-    /// устройству, пока сервер не ответит снова.
+    /// Запомнить ответ сервера — для браузерных тестов: так его записала бы
+    /// прежняя версия.
+    #[cfg(all(test, target_arch = "wasm32"))]
     pub fn set_trial_tin(&self, day: Date) -> bool {
         self.set("trial_tin", &day.iso())
-    }
-
-    /// О каком ՀՎՀՀ и когда окно в последний раз спрашивало сервер о пробном
-    /// периоде и что он ответил (задача 106): спрашивает оно не чаще раза
-    /// в час на ՀՎՀՀ и после перезагрузки тоже, а новый ՀՎՀՀ — сразу. `None` —
-    /// не спрашивало или запись не читается.
-    pub fn trial_asked(&self) -> Option<Asked> {
-        let text = self.get("trial_asked")?;
-        let mut parts = text.split(' ');
-        let (tin, millis, first) = (parts.next()?, parts.next()?, parts.next());
-        let millis: i64 = millis.parse().ok()?;
-        if parts.next().is_some() || millis.unsigned_abs() > Timestamp::MAX_MILLIS.unsigned_abs() {
-            return None;
-        }
-        let first = match first {
-            Some(day) => Some(Date::from_iso(day)?),
-            None => None,
-        };
-        Some(Asked {
-            tin: tin.to_owned(),
-            at: Timestamp::from_unix_millis(millis),
-            first,
-        })
-    }
-
-    /// Запомнить запрос о пробном периоде — до ответа: не ответил сервер —
-    /// следующий раз через час, а не на каждое открытие. `false` —
-    /// `localStorage` отказал.
-    pub fn set_trial_asked(&self, asked: &Asked) -> bool {
-        let text = match asked.first {
-            Some(day) => format!("{} {} {}", asked.tin, asked.at.unix_millis(), day.iso()),
-            None => format!("{} {}", asked.tin, asked.at.unix_millis()),
-        };
-        self.set("trial_asked", &text)
-    }
-
-    /// Забыть последний запрос о пробном периоде: только что данное согласие
-    /// спрашивает сервер сразу, а не через час. `false` — `localStorage`
-    /// отказал.
-    pub fn clear_trial_asked(&self) -> bool {
-        self.remove("trial_asked")
-    }
-
-    /// На какие ՀՎՀՀ на этом устройстве согласились сверять пробный период
-    /// с сервером сайта и под какой версией слов согласия (задача 106,
-    /// `license::TRIAL_CONSENT`): ՀՎՀՀ и версия. Согласие — на устройстве, а не
-    /// в базе: его дал человек за этим устройством, и в копию, открытую
-    /// бухгалтером, оно не едет. Пусто — согласий нет или запись не
-    /// читается: тогда окно спросит снова.
-    pub fn trial_consents(&self) -> Vec<(String, String)> {
-        self.get("trial_consent")
-            .map(|text| {
-                text.lines()
-                    .filter_map(|line| {
-                        let (tin, version) = line.split_once(' ')?;
-                        Some((tin.to_owned(), version.to_owned()))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    /// Запомнить согласия — строками «ՀՎՀՀ версия». `false` — `localStorage`
-    /// отказал: согласие окно спросит при следующем выпуске снова.
-    pub fn set_trial_consents(&self, list: &[(String, String)]) -> bool {
-        if list.is_empty() {
-            return self.remove("trial_consent");
-        }
-        let lines: Vec<String> = list.iter().map(|(tin, version)| format!("{tin} {version}")).collect();
-        self.set("trial_consent", &lines.join("\n"))
     }
 
     /// Момент под этим именем — как у [`Self::last_backup`].
@@ -601,7 +530,6 @@ impl Device {
                 "colors",
                 "license",
                 "license_told",
-                "trial_told",
                 "trial_data",
                 "pro_told",
                 "rates",

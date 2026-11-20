@@ -6,7 +6,7 @@
 //! Пишет их сборка из таблицы строк ядра: то, что видит человек, — ключ
 //! `Key::…`, как в окне (CLAUDE.md, «Общее»), и ключ без перевода не
 //! соберётся. Числа — тоже из ядра: срок пробного периода
-//! (`license::TRIAL_DAYS`), день сверки правил (`Rules::checked`), адрес
+//! (`license::TRIAL_KEY_DAYS`), день сверки правил (`Rules::checked`), адрес
 //! общего календаря (`tax::calendar::path`). Страница, обещающая не то, что
 //! делает программа, разошлась бы с ней молча.
 //!
@@ -49,11 +49,12 @@ use std::fs;
 use std::path::Path;
 
 use kvartik_core::i18n::{self, Key, Lang, fill, plural, t};
-use kvartik_core::license::TRIAL_DAYS;
+use kvartik_core::license::TRIAL_KEY_DAYS;
 use kvartik_core::model::date::Date;
 use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::release::{
     ACCOUNT, BANK, EMAIL, HOLDER, LICENSES, Legal, PRICE, PRO_PRICE, PRO_SEATS, SELLER_TIN, TELEGRAM, buy_path,
+    mailto,
 };
 use kvartik_core::tax::{calendar, example, rules, turnover};
 
@@ -423,7 +424,7 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
         headline = text(Key::WelcomeHeadline),
         lead = text(Key::LandingLead),
         open = text(Key::LandingOpen),
-        after_trial = text(Key::WelcomeAfterTrial),
+        after_trial = text(Key::WelcomeWithoutKey),
         features_title = text(Key::LandingFeaturesTitle),
         calendar_title = text(Key::LandingCalendarTitle),
         calendar_text = text(Key::LandingCalendarText),
@@ -487,10 +488,10 @@ fn legal_page(
     )
 }
 
-/// Срок пробного периода словами — «14 дней бесплатно, без регистрации.» —
-/// из ядра (`license::TRIAL_DAYS`), экранирован.
+/// Пробный ключ словами — «Пробный ключ на 30 дней — бесплатно…» (задача
+/// 113), — срок из ядра (`license::TRIAL_KEY_DAYS`), экранирован.
 fn trial(lang: Lang) -> String {
-    let days = u64::from(TRIAL_DAYS.unsigned_abs());
+    let days = u64::from(TRIAL_KEY_DAYS.unsigned_abs());
     let days = fill(plural(lang, days, Key::DaysOne, Key::DaysFew, Key::DaysMany), &[&days.to_string()]);
     escape(&fill(t(lang, Key::WelcomeTrial), &[&days]))
 }
@@ -585,10 +586,9 @@ fn buy_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -
             ]
         ))
     );
-    let mail = format!(
-        "mailto:{EMAIL}?subject={}&body={}",
-        mailto_part(t(lang, Key::BuyMailSubject)),
-        mailto_part(&fill(t(lang, Key::BuyMailBody), &[standard.name(lang), pro.name(lang), t(lang, Key::BuyAccept)]))
+    let mail = mailto(
+        t(lang, Key::BuyMailSubject),
+        &fill(t(lang, Key::BuyMailBody), &[standard.name(lang), pro.name(lang), t(lang, Key::BuyAccept)]),
     );
     let write = linked(t(lang, Key::BuyStepWrite), &format!("<a href=\"mailto:{EMAIL}\">{EMAIL}</a>"));
     let pay = text(Key::BuyStepPay);
@@ -643,7 +643,7 @@ fn buy_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -
         standard_card = plan_card(lang, standard, "plan", ""),
         pro_card = plan_card(lang, pro, "plan-pro", ""),
         trial = trial(lang),
-        after_trial = text(Key::WelcomeAfterTrial),
+        after_trial = text(Key::WelcomeWithoutKey),
         faq = faq(lang),
         how = text(Key::BuyHow),
         accept = text(Key::BuyAccept),
@@ -702,7 +702,7 @@ fn faq(lang: Lang) -> String {
                 list(&i18n::LICENSE_ALWAYS)
             ),
         ),
-        (Key::BuyFaqOffice, paragraphs(&[format!("{} {} {}", text(Key::OfficeKeyEach), office_pro(lang), text(Key::OfficeTrialShared))])),
+        (Key::BuyFaqOffice, paragraphs(&[format!("{} {}", text(Key::OfficeKeyEach), office_pro(lang))])),
         (Key::BuyFaqRenew, paragraphs(&[format!("{} {}", text(Key::BuyFaqRenewWhen), text(Key::LicenseRenewKeeps))])),
     ];
     let mut out = format!("        <h2 id=\"faq\">{}</h2>\n        <div class=\"faq\">\n", text(Key::BuyFaq));
@@ -732,29 +732,6 @@ fn linked(template: &str, link: &str) -> String {
         Some((before, after)) => format!("{}{link}{}", escape(before), escape(after)),
         None => escape(template),
     }
-}
-
-/// Тема или текст письма в адресе `mailto:` (RFC 6068): всё, кроме
-/// незарезервированных знаков URI, — байтами UTF-8 через `%`, а перенос
-/// строки — `%0D%0A`, как RFC велит для текста письма (п. 5).
-fn mailto_part(text: &str) -> String {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    let mut out = String::with_capacity(text.len() * 3);
-    let mut bytes = [0; 4];
-    for c in text.chars() {
-        if c == '\n' {
-            out.push_str("%0D%0A");
-        } else if c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | '~') {
-            out.push(c);
-        } else {
-            for byte in c.encode_utf8(&mut bytes).bytes() {
-                out.push('%');
-                out.push(char::from(HEX[usize::from(byte >> 4)]));
-                out.push(char::from(HEX[usize::from(byte & 0xF)]));
-            }
-        }
-    }
-    out
 }
 
 /// Начало документа до `<body>`: язык, заголовок, та же страница на каждом
@@ -924,6 +901,7 @@ fn escape(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kvartik_core::release::mailto_part;
     use std::path::PathBuf;
 
     /// Настоящие файлы: проверка ловит правку, после которой сборка их не
@@ -933,12 +911,15 @@ mod tests {
     const LANDING_CSS: &str = include_str!("../../app/site/landing.css");
     const LANDING_JS: &str = include_str!("../../app/site/landing.js");
     /// Утверждённые юридические тексты (задача 32) и прежние редакции условий
-    /// (задачи 93, 99, 103, 106 и 102) и политики (задачи 106 и 102) — те, что
+    /// (задачи 93, 99, 103, 106, 102 и 113) и политики (задачи 106, 102 и 113) — те, что
     /// берёт сборка.
-    const LEGAL: [(&str, &str); 27] = [
+    const LEGAL: [(&str, &str); 33] = [
         ("terms.hy.md", include_str!("../../../docs/legal/terms.hy.md")),
         ("terms.ru.md", include_str!("../../../docs/legal/terms.ru.md")),
         ("terms.en.md", include_str!("../../../docs/legal/terms.en.md")),
+        ("terms.2026-11-20.hy.md", include_str!("../../../docs/legal/terms.2026-11-20.hy.md")),
+        ("terms.2026-11-20.ru.md", include_str!("../../../docs/legal/terms.2026-11-20.ru.md")),
+        ("terms.2026-11-20.en.md", include_str!("../../../docs/legal/terms.2026-11-20.en.md")),
         ("terms.2026-11-18.hy.md", include_str!("../../../docs/legal/terms.2026-11-18.hy.md")),
         ("terms.2026-11-18.ru.md", include_str!("../../../docs/legal/terms.2026-11-18.ru.md")),
         ("terms.2026-11-18.en.md", include_str!("../../../docs/legal/terms.2026-11-18.en.md")),
@@ -957,6 +938,9 @@ mod tests {
         ("privacy.hy.md", include_str!("../../../docs/legal/privacy.hy.md")),
         ("privacy.ru.md", include_str!("../../../docs/legal/privacy.ru.md")),
         ("privacy.en.md", include_str!("../../../docs/legal/privacy.en.md")),
+        ("privacy.2026-11-20.hy.md", include_str!("../../../docs/legal/privacy.2026-11-20.hy.md")),
+        ("privacy.2026-11-20.ru.md", include_str!("../../../docs/legal/privacy.2026-11-20.ru.md")),
+        ("privacy.2026-11-20.en.md", include_str!("../../../docs/legal/privacy.2026-11-20.en.md")),
         ("privacy.2026-11-18.hy.md", include_str!("../../../docs/legal/privacy.2026-11-18.hy.md")),
         ("privacy.2026-11-18.ru.md", include_str!("../../../docs/legal/privacy.2026-11-18.ru.md")),
         ("privacy.2026-11-18.en.md", include_str!("../../../docs/legal/privacy.2026-11-18.en.md")),
@@ -1078,7 +1062,7 @@ mod tests {
                     t(lang, Key::LicenseMoveKey),
                     &[t(lang, Key::NavProfile), t(lang, Key::LicenseTitle), t(lang, Key::LicenseCopy)],
                 )),
-                format!("{} {} {}", text(Key::OfficeKeyEach), office_pro(lang), text(Key::OfficeTrialShared)),
+                format!("{} {}", text(Key::OfficeKeyEach), office_pro(lang)),
                 format!("{} {}", text(Key::BuyFaqRenewWhen), text(Key::LicenseRenewKeeps)),
             ];
             for question in [Key::BuyFaqDevices, Key::BuyFaqMove, Key::BuyFaqWithout, Key::BuyFaqOffice, Key::BuyFaqRenew] {
@@ -1096,8 +1080,8 @@ mod tests {
                 }
             }
             let plan = &html[html.find("<section class=\"card plan\"").expect("карточка тарифа")..at];
-            if !plan.contains(&format!("{} {}", trial(lang), text(Key::WelcomeAfterTrial))) {
-                wrong.push(format!("{lang:?}: под тарифом не сказано, что после пробного периода"));
+            if !plan.contains(&format!("{} {}", trial(lang), text(Key::WelcomeWithoutKey))) {
+                wrong.push(format!("{lang:?}: под тарифом не сказано о пробном ключе и что без ключа"));
             }
         }
         assert!(wrong.is_empty(), "{wrong:#?}");
@@ -1300,13 +1284,13 @@ mod tests {
         assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
-    /// Числа страницы — из ядра, а не написаны ею: срок пробного периода,
+    /// Числа страницы — из ядра, а не написаны ею: срок пробного ключа,
     /// день последней сверки правил и цена ключа — у лендинга и у страницы
     /// «Купить» одна, и лендинг ведёт к ней.
     #[test]
     fn numbers_come_from_the_core() {
         let html = sample(Lang::Ru);
-        assert!(html.contains(&format!("{TRIAL_DAYS}\u{A0}дней бесплатно")), "нет срока пробного периода");
+        assert!(html.contains(&format!("Пробный ключ на {TRIAL_KEY_DAYS}\u{A0}дней")), "нет срока пробного ключа");
         let day = checked().expect("правила сверены");
         assert!(html.contains(&escape(&i18n::date(Lang::Ru, day))), "нет дня сверки правил");
         assert!(!page(Lang::Ru, "a.css", "b.js", "/app/", &CALC, None).contains("сверены с законом"));
@@ -1656,8 +1640,8 @@ mod tests {
         sources(&edition);
         fs::create_dir_all(edition.0.join("stage")).expect("папка сборки");
         let (_, terms) = LEGAL.iter().find(|(name, _)| *name == "terms.en.md").expect("текст есть");
-        assert!(terms.contains("November 20, 2026"), "в условиях — та редакция, что ждёт тест");
-        edition.put("legal/terms.en.md", &terms.replace("November 20, 2026", "December 1, 2026"));
+        assert!(terms.contains("November 21, 2026"), "в условиях — та редакция, что ждёт тест");
+        edition.put("legal/terms.en.md", &terms.replace("November 21, 2026", "December 1, 2026"));
         let error = build(&edition).expect_err("слов согласия нет в условиях");
         assert!(error.contains("terms.en.md") && error.contains("Key::BuyAccept"), "{error}");
         assert!(names(&edition.0.join("stage")).is_empty(), "в сайт что-то легло");

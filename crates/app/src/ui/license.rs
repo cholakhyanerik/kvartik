@@ -18,19 +18,27 @@
 //! ([`Licenses::access`], `license::seat`). О конце ключа «Pro» окно поверх
 //! программы говорит один раз на устройство, а не на каждого ИП.
 //!
-//! День начала пробного периода помнит устройство (`store/device.rs`),
-//! а ключ — база: ключ выдан на ИП, а не на устройство, и переезжает с копией.
-//! С копией переезжают и прошедшие дни (задача 99): пробный период — с первого
-//! дня данных, если он раньше первого запуска (`license::data_since`). Его
-//! считают части по моментам записей открытой базы ([`Licenses::access`])
-//! и запоминают на устройстве, а главный wasm только берёт запись при запуске.
+//! Пробовать программу — ключом продавца (задача 113; условия, п. 3,
+//! редакция от 21.11.2026): без ключа срока нет, и экран лицензии говорит,
+//! как получить пробный — письмом продавцу, где ИНН профиля и слова согласия
+//! уже вписаны ([`TrialKey`]). Ключ — запись базы: он выдан на ИП, а не на
+//! устройство, и переезжает с копией.
+//!
+//! Пробный период без ключа, начатый не позже `license::LAST_TRIAL_START`,
+//! идёт до конца, а новых нет (`license::trial_last`): день его начала —
+//! первый запуск, который помнит устройство (новая программа его не
+//! заводит), первый день данных (задача 99, `license::data_since`; его
+//! считают части по моментам записей открытой базы и запоминают на
+//! устройстве) и ответ сервера о ՀՎՀՀ, запомненный до 0.0.162 (задача 106;
+//! сервера больше нет).
 //!
 //! Сколько дней осталось — всегда на виду (задача 92, решение человека
 //! 2026-11-11): меткой ([`LicenseChip`]) в меню на компьютере и на главном
 //! экране телефона, а в последние [`license::SOON_DAYS`] дней и после конца срока — и
-//! над остальными экранами телефона. Кончился срок — программа открывается
-//! экраном лицензии (`Licenses::show`), а за неделю до конца ключа встаёт
-//! окно ([`RenewDialog`]). Метке нужен срок с первого кадра, а подпись
+//! над остальными экранами телефона; срока не было вовсе — метка тихо зовёт
+//! за пробным ключом. Кончился срок — программа открывается экраном
+//! лицензии (`Licenses::show`), а за неделю до конца ключа встаёт окно
+//! ([`RenewDialog`]). Метке нужен срок с первого кадра, а подпись
 //! проверяет часть, поэтому главный wasm берёт срок без проверки
 //! ([`Licenses::shown`]): у пустой базы ключей нет, а иначе — какой ключ
 //! в прошлый раз нашла часть, помнит устройство. Часть, проверив подписи,
@@ -71,7 +79,10 @@ use crate::store::device::{self, Device};
 use crate::store::{Store, StoreError, Writes};
 
 /// За столько дней до конца ключа окно напоминает его продлить: месяц —
-/// время написать автору и получить новый ключ, не прерывая выпуск.
+/// время написать автору и получить новый ключ, не прерывая выпуск. У ключа
+/// короче двух таких сроков — пробного (задача 113, `license::TRIAL_KEY_DAYS`)
+/// — только в последние `license::SOON_DAYS` дней ([`Licenses::renew_days`]):
+/// иначе пробный ключ с первого дня стоял бы под «продлите ключ».
 const RENEW_DAYS: i32 = 30;
 
 /// Открытый ключ, которым окно проверяет подпись: ключ автора.
@@ -87,6 +98,58 @@ pub(super) fn author() -> [u8; PUBLIC_KEY_BYTES] {
     super::tests::license::signer().verifying_key().to_bytes()
 }
 
+#[cfg(all(test, target_arch = "wasm32"))]
+thread_local! {
+    /// Открыт ли выпуск и числа в браузерных тестах без ключа (задача 113):
+    /// пробного периода у свежего устройства больше нет, а тесты документов,
+    /// чисел для расчёта и конторы выпускают и считают, и ключ им писать
+    /// незачем. Тесты лицензии закрывают его ([`RealTerms`]) и проверяют
+    /// настоящий срок. Не сигнал: окно каждого теста читает его заново при
+    /// расчёте срока, а будить экраны снятых окон нечем.
+    static OPEN_FOR_TESTS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Открыт ли выпуск без ключа ([`OPEN_FOR_TESTS`]): в программе — никогда.
+#[cfg(not(all(test, target_arch = "wasm32")))]
+pub(super) const fn open_for_tests() -> bool {
+    false
+}
+
+/// Открыт ли выпуск без ключа в браузерных тестах ([`OPEN_FOR_TESTS`]).
+#[cfg(all(test, target_arch = "wasm32"))]
+pub(super) fn open_for_tests() -> bool {
+    OPEN_FOR_TESTS.with(std::cell::Cell::get)
+}
+
+/// Пока жив — у браузерного теста настоящий срок, а не открытый тестам
+/// выпуск ([`OPEN_FOR_TESTS`]); снятый, открывает его снова.
+#[cfg(all(test, target_arch = "wasm32"))]
+pub(super) struct RealTerms;
+
+#[cfg(all(test, target_arch = "wasm32"))]
+impl RealTerms {
+    /// Закрыть открытый тестам выпуск — и забыть, что о сроке помнит
+    /// устройство от прошлых тестов: дни пробного периода (их пишет и окно
+    /// с открытым выпуском, по данным теста) и найденный частью ключ базы —
+    /// у окна с открытым выпуском он тестовый.
+    pub(super) fn new() -> Self {
+        OPEN_FOR_TESTS.with(|open| open.set(false));
+        if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
+            for name in ["kvartik.trial", "kvartik.trial_data", "kvartik.trial_tin", "kvartik.license"] {
+                let _ = storage.remove_item(name);
+            }
+        }
+        Self
+    }
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+impl Drop for RealTerms {
+    fn drop(&mut self) {
+        OPEN_FOR_TESTS.with(|open| open.set(true));
+    }
+}
+
 /// Введённые ключи и пробный период — одни на окно.
 #[derive(Clone, Copy)]
 pub struct Licenses {
@@ -97,11 +160,12 @@ pub struct Licenses {
     /// кто позвал `watch` первым, — первой может позвать форма, а она
     /// закрывается (ревью задачи 25).
     root: StoredValue<Option<Owner>>,
-    /// День начала пробного периода на этом устройстве — первый запуск или
-    /// первый день данных, которые устройство помнит (`Device::trial_data`),
-    /// если он раньше; `None` — устройство не помнит ни того, ни другого,
-    /// а часы без даты. Данные, открытые в этом окне, части добавляют сами
-    /// ([`Licenses::access`]).
+    /// День начала пробного периода без ключа на этом устройстве — первый
+    /// запуск, первый день данных (`Device::trial_data`) или ответ сервера
+    /// о ՀՎՀՀ до 0.0.162 (`Device::trial_tin`), самый ранний из тех, что
+    /// устройство помнит; `None` — не помнит ни одного. Данные, открытые в
+    /// этом окне, части добавляют сами ([`Licenses::access`]); начатый позже
+    /// `license::LAST_TRIAL_START` срока не даёт.
     trial: Option<Date>,
     /// Открытый ключ, которым проверяется подпись: в программе —
     /// [`PUBLIC_KEY`], в тестах — ключ проб.
@@ -161,34 +225,10 @@ pub struct OfficeKeys {
     own: Vec<String>,
 }
 
-/// О конце какого срока говорит окно поверх программы: ключа (задача 92) или
-/// пробного периода (задача 93).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Ending {
-    /// Ключ: тариф и последний день.
-    Key(Paid),
-    /// Пробный период: последний день.
-    Trial(Date),
-}
-
-impl Ending {
-    /// Последний день срока.
-    const fn last(self) -> Date {
-        match self {
-            Ending::Key((_, last)) | Ending::Trial(last) => last,
-        }
-    }
-
-    /// Сколько дней срока осталось в день `today`, считая его; `None` —
-    /// кончился.
-    fn days_left(self, today: Date) -> Option<i32> {
-        let access = match self {
-            Ending::Key(key) => Access::known(None, Some(key)),
-            Ending::Trial(last) => Access::known(Some(last), None),
-        };
-        access.days_left(today)
-    }
-}
+/// О конце какого ключа говорит окно поверх программы (задача 92): тариф
+/// и последний день. О конце пробного периода без ключа окна больше нет
+/// (задача 113): новых таких периодов нет, а о сроке говорит метка.
+type Ending = Paid;
 
 /// Где ключи.
 #[derive(Clone, PartialEq, Debug)]
@@ -203,23 +243,20 @@ enum State {
 }
 
 impl Licenses {
-    /// Ключи окна и пробный период: начат ли он на этом устройстве, а нет —
-    /// начинается сегодня; а были на устройстве данные раньше — с первого их
-    /// дня (задача 99, `Device::trial_data`), и сервер сайта ответил днём на
-    /// ՀՎՀՀ раньше — с него (задача 106, `Device::trial_tin`). Не запомнилось
-    /// (`localStorage` отказал) — период начнётся заново при следующем
-    /// открытии, пока сервер не ответит: бороться с этим не нужно
-    /// (`kvartik_core::license`). Документы и клиенты — базы, которую откроет
-    /// окно: по моментам их записей части считают день данных
+    /// Ключи окна и пробный период без ключа, начатый до задачи 113: с первого
+    /// запуска, который помнит устройство, а были на устройстве данные раньше —
+    /// с первого их дня (задача 99, `Device::trial_data`), и сервер сайта
+    /// ответил днём на ՀՎՀՀ раньше — с него (задача 106, `Device::trial_tin`).
+    /// Нового дня первого запуска окно не заводит: пробного периода без ключа
+    /// после `license::LAST_TRIAL_START` нет. Документы и клиенты — базы,
+    /// которую откроет окно: по моментам их записей части считают день данных
     /// ([`Licenses::data_since`]).
     pub fn start(today: Option<Date>, around: Around) -> Self {
         let device = Device::new();
-        let first = device.trial_start().or_else(|| {
-            let today = today?;
-            device.set_trial_start(today);
-            Some(today)
-        });
-        let trial = license::trial_start(license::trial_start(first, device.trial_data()), device.trial_tin());
+        let trial = license::trial_start(
+            license::trial_start(device.trial_start(), device.trial_data()),
+            device.trial_tin(),
+        );
         Self {
             state: RwSignal::new(State::Loading),
             watched: StoredValue::new(false),
@@ -280,7 +317,10 @@ impl Licenses {
         }
         if self.launch.get_value() {
             self.launch.set_value(false);
-            let ended = self.today.is_some_and(|today| !access.issue(today));
+            // Кончился — не «срока не было»: без ключа вовсе (задача 113) каждый
+            // запуск на экране лицензии мешал бы смотреть программу, а о
+            // пробном ключе зовёт метка.
+            let ended = self.today.is_some_and(|today| access.term().is_some() && !access.issue(today));
             let calm = self.around.get_value();
             // Адресом, а не `Router::go`: окно идёт за адресом само, и «Назад»
             // вернёт прежний экран.
@@ -294,6 +334,13 @@ impl Licenses {
     /// только для показа (шапка модуля); `None` — ещё неизвестен.
     pub(super) fn shown(&self) -> Option<Access> {
         self.shown.get()
+    }
+
+    /// Идёт ли сегодня срок, который окно показывает ([`Licenses::shown`]), —
+    /// без проверки подписи: шагу пробного ключа первых шагов (задача 113),
+    /// а запирает выпуск по-прежнему [`Licenses::access`]. Отслеживаемое.
+    pub(super) fn open_now(&self) -> bool {
+        open_for_tests() || self.today.zip(self.shown()).is_some_and(|(today, access)| access.issue(today))
     }
 
     /// Читать ключи, когда база открылась и когда её заменило
@@ -349,25 +396,24 @@ impl Licenses {
                 // пробный период, — запомнить их первый день: со следующего
                 // запуска метка срока и экран лицензии знают его сразу, без
                 // части (задача 99). Только раньше прежнего: день данных
-                // устройства не «молодеет», когда открыт другой ИП.
+                // устройства не «молодеет», когда открыт другой ИП. И только
+                // день, с которого пробный период ещё мог начаться (задача 113):
+                // свежие данные нового человека срока не дают, и писать их
+                // незачем.
                 if let Some(day) = licenses.data_since(profiles)
+                    && day <= license::LAST_TRIAL_START
                     && licenses.trial.is_none_or(|start| day < start)
                     && device.trial_data().is_none_or(|known| day < known)
                 {
                     device.set_trial_data(day);
                 }
-                // С какого дня идёт пробный период на ՀՎՀՀ профиля, знает сервер
-                // сайта (задача 106): спросить его, когда ответ что-то решает, —
-                // ՀՎՀՀ есть, а ни своего ключа, ни места в ключе «Pro» сегодня
-                // нет, — и только с согласия на сверку этого ՀՎՀՀ (ՀՕ-49-Ն, ст. 8
-                // ч. 1 п. 1). Купившему — ни одного запроса.
-                let keyed = licenses
-                    .today
-                    .zip(access.key())
-                    .is_some_and(|(today, (_, last))| today <= last);
-                let tin = profiles.with(|data| data.and_then(|data| data.tin.clone()));
-                super::trial::want(tin.filter(|tin| !keyed && super::trial::consented(tin)));
             });
+            // Записи сверки ՀՎՀՀ с сервером до 0.0.162 (задача 106): сервера
+            // больше нет, а согласие и время вопроса устройству ни к чему
+            // (политика конфиденциальности, п. 2, редакция от 21.11.2026).
+            // Ответ сервера (`Device::trial_tin`) остаётся: по нему досчитывается
+            // начатый пробный период.
+            Device::new().forget_trial_server();
         };
         match self.root.get_value() {
             Some(root) => root.with(follow),
@@ -375,12 +421,10 @@ impl Licenses {
         }
     }
 
-    /// Срок, о конце которого пора сказать окном поверх программы, — ключ или
-    /// пробный период, — по сроку `access`, проверенному частью, если о нём
-    /// ещё не сказано: в этом окне (`told`) или раньше, по записи устройства.
-    /// Не по сроку метки ([`Licenses::shown`]): запись устройства могла
-    /// отстать — «ключа нет», а в базе ключ на год, — и у купившего встало бы
-    /// окно о конце пробного периода (задача 93). Отслеживаемое.
+    /// Ключ, о конце которого пора сказать окном поверх программы, — по сроку
+    /// `access`, проверенному частью, если о нём ещё не сказано: в этом окне
+    /// (`told`) или раньше, по записи устройства. Не по сроку метки
+    /// ([`Licenses::shown`]): запись устройства могла отстать. Отслеживаемое.
     fn ending(&self, access: Access, told: RwSignal<Option<Ending>>) -> Option<Ending> {
         let today = self.today?;
         let base = self.base_name.get_untracked();
@@ -388,32 +432,25 @@ impl Licenses {
             return None;
         }
         let device = Device::new();
-        let ending = match (access.ending_key(today), access.ending_trial(today)) {
-            (Some(key), _) => {
-                let told = match key.0 {
-                    Plan::Pro => device.pro_told(),
-                    Plan::Standard => device.key_told(&base),
-                };
-                (told != Some(key.1)).then_some(Ending::Key(key))
-            }
-            (None, Some(last)) => (device.trial_told() != Some(last)).then_some(Ending::Trial(last)),
-            (None, None) => None,
-        }?;
-        (told.get() != Some(ending)).then_some(ending)
+        let key = access.ending_key(today)?;
+        let said = match key.0 {
+            Plan::Pro => device.pro_told(),
+            Plan::Standard => device.key_told(&base),
+        };
+        (said != Some(key.1) && told.get() != Some(key)).then_some(key)
     }
 
-    /// Окно о конце срока `up` закрыли: о нём сказано — больше не встанет,
+    /// Окно о конце ключа `up` закрыли: о нём сказано — больше не встанет,
     /// ни в этом окне (`told`, и когда устройство не записало), ни потом.
-    /// О ключе «Стандарт» помнит запись базы, о пробном периоде и ключе «Pro» —
-    /// одна на устройство: они у всех ИП устройства общие (задачи 93 и 38).
+    /// О ключе «Стандарт» помнит запись базы, о ключе «Pro» — одна на
+    /// устройство: он у всех ИП устройства общий (задача 38).
     fn renewed(&self, up: RwSignal<Option<Ending>>, told: RwSignal<Option<Ending>>) {
         if let Some(ending) = up.get_untracked() {
             told.set(Some(ending));
             let device = Device::new();
             match ending {
-                Ending::Key((Plan::Pro, last)) => device.set_pro_told(last),
-                Ending::Key((Plan::Standard, last)) => device.set_key_told(&self.base_name.get_untracked(), last),
-                Ending::Trial(last) => device.set_trial_told(last),
+                (Plan::Pro, last) => device.set_pro_told(last),
+                (Plan::Standard, last) => device.set_key_told(&self.base_name.get_untracked(), last),
             };
         }
         self.covering.set(false);
@@ -520,17 +557,17 @@ impl Licenses {
     }
 
     /// Что открыто — по ключам на ИНН профиля, месту открытого ИП в ключе
-    /// «Pro» конторы (задача 38) и пробному периоду: с самого раннего из дней
-    /// устройства, данных открытой базы и сервера сайта о ՀՎՀՀ профиля (задача
-    /// 106, [`trial::day`](super::trial::day)). Отслеживаемое. Проверяет
-    /// подпись каждого ключа — зовут только части (шапка модуля); пока ключи
-    /// читаются, считается один пробный период.
+    /// «Pro» конторы (задача 38) и пробному периоду без ключа, начатому до
+    /// задачи 113: с самого раннего из дней устройства и данных открытой базы.
+    /// Отслеживаемое. Проверяет подпись каждого ключа — зовут только части
+    /// (шапка модуля); пока ключи читаются, считается один пробный период.
     pub(super) fn access(&self, profiles: Profiles) -> Access {
+        if open_for_tests() {
+            let until = self.today.and_then(|today| today.add_days(365));
+            return Access::known(None, until.map(|until| (Plan::Standard, until)));
+        }
         let tin = profiles.with(|data| data.and_then(|data| data.tin.clone()));
-        let trial = license::trial_start(
-            license::trial_start(self.trial, self.data_since(profiles)),
-            tin.as_ref().and_then(super::trial::day),
-        );
+        let trial = license::trial_start(self.trial, self.data_since(profiles));
         let seats = self.pro_seats();
         let own = self.state.with(|state| {
             let licenses: &[License] = match state {
@@ -596,47 +633,23 @@ impl Licenses {
         [profile, clients, documents, keys].into_iter().flatten().min()
     }
 
-    /// С какого дня идёт пробный период и почему, когда он начался раньше
-    /// первого запуска на этом устройстве: с первого дня данных (задача 99) —
-    /// слова [`Key::LicenseTrialFromData`], — или его уже начинали на ՀՎՀՀ
-    /// профиля, по ответу сервера сайта (задача 106) — [`Key::LicenseTrialFromTin`].
-    /// Экран лицензии и окно о конце пробного периода говорят, почему срок
-    /// короче 14 дней. День сервера о другом ՀՎՀՀ этого устройства
-    /// (`Device::trial_tin`) срок тоже сокращает — пробный период у всех ИП
-    /// устройства общий, — но слов «на ՀՎՀՀ из профиля» у него нет: они были
-    /// бы неправдой. Отслеживаемое; `None` — период идёт с первого запуска.
-    pub(super) fn trial_from(&self, profiles: Profiles) -> Option<(Key, Date)> {
-        let device = Device::new();
-        let tin = profiles.with(|data| data.and_then(|data| data.tin.clone()));
-        let data = license::trial_start(device.trial_data(), self.data_since(profiles));
-        let server = tin.as_ref().and_then(super::trial::day);
-        let start = license::trial_start(license::trial_start(self.trial, data), server)?;
-        if device.trial_start().is_some_and(|first| start >= first) {
-            return None;
+    /// За сколько дней до конца ключа срока `access` просить его продлить:
+    /// [`RENEW_DAYS`], а у короткого ключа — пробного — `license::SOON_DAYS`.
+    /// Короткий — по дню выпуска самого ключа среди введённых, своих и «Pro»
+    /// конторы: в сроке его нет (`Paid` — тариф и последний день, и запись
+    /// устройства о нём — договор между версиями). Отслеживаемое.
+    fn renew_days(&self, access: Access) -> i32 {
+        let Some((plan, last)) = access.key() else {
+            return RENEW_DAYS;
+        };
+        let same = |key: &license::Key| key.plan() == plan && key.until() == last;
+        let issued = self
+            .with_keys(|list| License::keys(list).find(|key| same(key)).map(license::Key::issued))
+            .or_else(|| self.office_keys().iter().find(|key| same(key)).map(license::Key::issued));
+        match issued {
+            Some(issued) if last.days_since(issued) < 2 * RENEW_DAYS => license::SOON_DAYS,
+            _ => RENEW_DAYS,
         }
-        if data == Some(start) {
-            Some((Key::LicenseTrialFromData, start))
-        } else {
-            (server == Some(start)).then_some((Key::LicenseTrialFromTin, start))
-        }
-    }
-
-    /// Нужно ли согласие на сверку ՀՎՀՀ, чтобы выпускать (задача 106; решение
-    /// человека 2026-11-18: «выпуск — только с согласием»): срок идёт, и это
-    /// пробный период — ни своего ключа, ни места в ключе «Pro» сегодня, — в
-    /// профиле есть ՀՎՀՀ, а согласия на его сверку с сервером нет. Тогда — этот
-    /// ՀՎՀՀ: о нём и спрашивает согласие ([`TrialConsent`]). Без согласия ՀՎՀՀ
-    /// на сервер не уходит, а выпуск ждёт: иначе тот, кто хочет обойти срок,
-    /// просто не согласился бы. Без ՀՎՀՀ в профиле — как до задачи 106.
-    /// Отслеживаемое.
-    pub(super) fn consent_needed(&self, profiles: Profiles, access: Access) -> Option<Tin> {
-        let today = self.today?;
-        let keyed = access.key().is_some_and(|(_, last)| today <= last);
-        if !self.ready() || keyed || !access.issue(today) {
-            return None;
-        }
-        let tin = profiles.with(|data| data.and_then(|data| data.tin.clone()))?;
-        (!super::trial::consented(&tin)).then_some(tin)
     }
 
     /// Введён ли ключ, выданный на `tin`, — по записи, без проверки
@@ -774,10 +787,66 @@ fn BuyEntry(lang: ReadSignal<Lang>) -> impl IntoView {
 }
 
 /// Ссылка на экран лицензии — из слов о запертом: «Купить или ввести ключ»
-/// (задача 93) — «Ввести ключ» тому, кто его не покупал, звучит загадкой.
+/// (задача 93) — «Ввести ключ» тому, кто его не покупал, звучит загадкой, —
+/// а срока не было вовсе (`fresh`, задача 113) — «Получить пробный ключ»:
+/// на экране лицензии письмо продавцу.
 #[component]
-pub(super) fn LicenseLink(lang: ReadSignal<Lang>) -> impl IntoView {
-    view! { <a class="button" href=Screen::License.href()><span class="label">{tr(lang, Key::LicenseBuyOrEnter)}</span></a> }
+pub(super) fn LicenseLink(lang: ReadSignal<Lang>, #[prop(optional)] fresh: bool) -> impl IntoView {
+    let label = if fresh { Key::LicenseGetTrial } else { Key::LicenseBuyOrEnter };
+    view! { <a class="button" href=Screen::License.href()><span class="label">{tr(lang, label)}</span></a> }
+}
+
+/// Письмо продавцу о пробном ключе (задача 113; условия, п. 3, редакция от
+/// 21.11.2026): сколько дней и что ключ — на ИНН, кнопка «Написать продавцу»,
+/// которая открывает почту человека с темой, ИНН и именем ИП из профиля
+/// и словами согласия с условиями (`Key::BuyAccept`: пробный ключ — тот же
+/// договор), и Telegram — для вопросов: ՀՎՀՀ и согласие — только почтой
+/// (условия, п. 2; политика, п. 5). Сама программа ничего не отправляет.
+/// Нажатие помнит устройство (`Device::trial_key_asked`): первые шаги идут
+/// дальше, не дожидаясь ключа, — он приходит в течение рабочего дня.
+#[component]
+fn TrialKey(lang: ReadSignal<Lang>, profiles: Profiles, base_name: RwSignal<String>) -> impl IntoView {
+    let tin = Memo::new(move |_| profiles.with(|data| data.and_then(|data| data.tin.clone())));
+    let mail = move || {
+        let lang = lang.get();
+        let name = profiles.with(|data| {
+            data.map(|data| {
+                // Имя на языке окна, а нет его — первое записанное.
+                std::iter::once(lang)
+                    .chain(Lang::ALL)
+                    .map(|lang| data.name.get(lang).as_str())
+                    .find(|name| !name.is_empty())
+                    .unwrap_or_default()
+                    .to_owned()
+            })
+            .unwrap_or_default()
+        });
+        let tin = tin.with(|tin| tin.as_ref().map(|tin| tin.as_str().to_owned()).unwrap_or_default());
+        release::mailto(
+            t(lang, Key::TrialMailSubject),
+            &fill(t(lang, Key::TrialMailBody), &[&tin, &name, t(lang, Key::BuyAccept)]),
+        )
+    };
+    let asked = move |_| {
+        Device::new().set_trial_key_asked(&base_name.get_untracked());
+    };
+    view! {
+        <section class="notice trial-key">
+            <p>{move || {
+                let lang = lang.get();
+                fill(t(lang, Key::LicenseTrialKeyAbout), &[&days(lang, license::TRIAL_KEY_DAYS)])
+            }}</p>
+            {move || tin.with(Option::is_none).then(|| view! { <p class="hint">{tr(lang, Key::LicenseTrialKeyNoTin)}</p> })}
+            <div class="actions">
+                <a class="button" href=mail on:click=asked>
+                    <span class="label">{tr(lang, Key::LicenseTrialKeyWrite)}</span>
+                </a>
+                <a class="button link" href=release::TELEGRAM target="_blank" rel="noopener">
+                    <span class="label">{tr(lang, Key::LicenseTrialKeyTelegram)}</span>
+                </a>
+            </div>
+        </section>
+    }
 }
 
 /// Карточка на главном экране: ключ — когда пора продлить, кончился срок —
@@ -805,8 +874,11 @@ pub(super) fn LicenseCard(ctx: tax::Ctx) -> impl IntoView {
         }
         let access = access.get();
         let left = access.days_left(today);
-        let renew = matches!(access.term(), Some(Term::Key { .. })) && left.is_some_and(|left| left <= RENEW_DAYS);
-        let over = left.is_none();
+        let renew = matches!(access.term(), Some(Term::Key { .. }))
+            && left.is_some_and(|left| left <= licenses.renew_days(access));
+        // Срока не было вовсе (задача 113) — карточки нет: о пробном ключе
+        // зовут метка срока и первые шаги, а «кончился» было бы неправдой.
+        let over = access.term().is_some() && left.is_none();
         (renew || over).then(|| view! {
             <div class="notice due" role="status">
                 {icon(Icon::Document)}
@@ -845,7 +917,8 @@ pub enum Place {
 }
 
 /// Метка срока (задача 92, решение человека 2026-11-11): сколько дней
-/// осталось — пробного периода или ключа, — а кончился — что кончился.
+/// осталось — пробного периода или ключа, — а кончился — что кончился;
+/// срока не было вовсе — «Пробный ключ — бесплатно» (задача 113).
 /// Ведёт на экран лицензии; где стоит и когда видна — [`Place`], а на
 /// компьютере ли она или на телефоне, решают стили (`.nav .chip`,
 /// `.chip.nudge`), как у метки копии. Громче — и заливкой, и словами, не
@@ -859,9 +932,11 @@ pub fn LicenseChip(lang: ReadSignal<Lang>, licenses: Licenses, place: Place) -> 
     move || {
         let today = licenses.today?;
         let access = licenses.shown()?;
-        let term = access.term()?;
+        let term = access.term();
         let left = access.days_left(today);
-        let loud = access.soon(today);
+        // Срока не было вовсе (задача 113) — тихо: ничего не кончилось, а
+        // метка зовёт за пробным ключом; над остальными экранами её нет.
+        let loud = term.is_some() && access.soon(today);
         if let Place::Screens(router) = place
             && (!loud || matches!(router.screen(), Screen::Home | Screen::License))
         {
@@ -874,13 +949,14 @@ pub fn LicenseChip(lang: ReadSignal<Lang>, licenses: Licenses, place: Place) -> 
     }
 }
 
-/// Слова метки срока.
-fn chip_words(lang: Lang, term: Term, left: Option<i32>) -> String {
+/// Слова метки срока; срока не было вовсе — о пробном ключе (задача 113).
+fn chip_words(lang: Lang, term: Option<Term>, left: Option<i32>) -> String {
     match (term, left) {
-        (Term::Trial { .. }, Some(left)) => fill(t(lang, Key::LicenseChipTrial), &[&days(lang, left)]),
-        (Term::Key { .. }, Some(left)) => fill(t(lang, Key::LicenseChipKey), &[&days(lang, left)]),
-        (Term::Trial { .. }, None) => t(lang, Key::LicenseChipTrialEnded).to_owned(),
-        (Term::Key { .. }, None) => t(lang, Key::LicenseChipKeyEnded).to_owned(),
+        (Some(Term::Trial { .. }), Some(left)) => fill(t(lang, Key::LicenseChipTrial), &[&days(lang, left)]),
+        (Some(Term::Key { .. }), Some(left)) => fill(t(lang, Key::LicenseChipKey), &[&days(lang, left)]),
+        (Some(Term::Trial { .. }), None) => t(lang, Key::LicenseChipTrialEnded).to_owned(),
+        (Some(Term::Key { .. }), None) => t(lang, Key::LicenseChipKeyEnded).to_owned(),
+        (None, _) => t(lang, Key::LicenseChipNone).to_owned(),
     }
 }
 
@@ -888,10 +964,9 @@ fn chip_words(lang: Lang, term: Term, left: Option<i32>) -> String {
 /// 2026-11-11): до конца ключа не больше [`license::SOON_DAYS`] дней — окно
 /// поверх программы, один раз на ключ: закрытое, оно больше не встаёт,
 /// а дальше говорят метка цветом напоминания и карточка «продлите ключ». Ждёт,
-/// пока стоят первый запуск или «Что нового» и пока открыта форма. Так же —
-/// за столько же дней до конца пробного периода, когда ключа дольше нет, один
-/// раз на устройстве (задача 93): ключ приходит в течение рабочего дня после
-/// оплаты, и о запертом выпуске лучше узнать заранее.
+/// пока стоят первый запуск или «Что нового» и пока открыта форма. О конце
+/// пробного периода без ключа окна больше нет (задача 113): новых таких
+/// периодов нет, а о сроке начатых говорит метка.
 ///
 /// Всё окно — в части книги, с карточками главного экрана (`Part::Card`): оно
 /// встаёт раз в срок, а часть грузится при открытии, когда в базе есть данные;
@@ -935,17 +1010,13 @@ pub(super) fn RenewDialog(ctx: tax::Ctx) -> impl IntoView {
 /// нём встаёт фокус.
 const RENEW_TITLE: &str = "renew-title";
 
-/// Само окно о конце срока — уже в части книги: сколько дней и до какого дня,
-/// что запрёт конец срока, у ключа — что дни прежнего при продлении не
-/// пропадут, у пробного периода — что ключ приходит в течение рабочего дня;
-/// «Продлить» или «Купить ключ» — на экран лицензии — и «Понятно».
-/// Закрывают его обе кнопки и Escape. Фокус — на заголовке, после кадра,
-/// как у «Что нового».
+/// Само окно о конце ключа — уже в части книги: сколько дней и до какого дня,
+/// что запрёт конец срока и что дни прежнего при продлении не пропадут;
+/// «Продлить» — на экран лицензии — и «Понятно». Закрывают его обе кнопки
+/// и Escape. Фокус — на заголовке, после кадра, как у «Что нового».
 #[component]
 fn RenewCard(ctx: tax::Ctx, up: RwSignal<Option<Ending>>, told: RwSignal<Option<Ending>>) -> impl IntoView {
-    let tax::Ctx { lang, licenses, sources, .. } = ctx;
-    // Какой срок, окно знает с первого кадра и, пока стоит, его не меняет.
-    let trial = matches!(up.get_untracked(), Some(Ending::Trial(_)));
+    let tax::Ctx { lang, licenses, .. } = ctx;
     request_animation_frame(|| {
         let title = web_sys::window()
             .and_then(|window| window.document())
@@ -967,31 +1038,17 @@ fn RenewCard(ctx: tax::Ctx, up: RwSignal<Option<Ending>>, told: RwSignal<Option<
     let words = move || {
         let lang = lang.get();
         let ending = up.get()?;
-        let left = ending.days_left(licenses.today?)?;
-        let template = if trial { Key::TrialSoonText } else { Key::LicenseSoonText };
-        Some(fill(t(lang, template), &[&days(lang, left), &i18n::date(lang, ending.last())]))
-    };
-    // Пробный период — с первого дня данных (задача 99) или с дня на ՀՎՀՀ по
-    // серверу (задача 106): почему он кончается раньше, чем через 14 дней
-    // после первого запуска.
-    let from_data = move || {
-        let (words, start) = licenses.trial_from(sources.profiles)?;
-        Some(fill(t(lang.get(), words), &[&i18n::date(lang.get(), start)]))
-    };
-    let (title, act) = if trial {
-        (Key::TrialSoonTitle, Key::LicenseBuy)
-    } else {
-        (Key::LicenseSoonTitle, Key::LicenseSoonRenew)
+        let left = Access::known(None, Some(ending)).days_left(licenses.today?)?;
+        Some(fill(t(lang, Key::LicenseSoonText), &[&days(lang, left), &i18n::date(lang, ending.1)]))
     };
     view! {
         <div class="update" role="dialog" aria-modal="true" aria-labelledby=RENEW_TITLE on:keydown=keydown>
             <div class="update-card">
-                <h2 id=RENEW_TITLE tabindex="-1">{tr(lang, title)}</h2>
+                <h2 id=RENEW_TITLE tabindex="-1">{tr(lang, Key::LicenseSoonTitle)}</h2>
                 <p class="renew-words">{words}</p>
-                {trial.then_some(move || from_data().map(|words| view! { <p class="renew-words">{words}</p> }))}
-                {(!trial).then(|| view! { <p class="renew-words">{tr(lang, Key::LicenseRenewKeeps)}</p> })}
+                <p class="renew-words">{tr(lang, Key::LicenseRenewKeeps)}</p>
                 <button type="button" class="wide" on:click=renew>
-                    <span class="label">{tr(lang, act)}</span>
+                    <span class="label">{tr(lang, Key::LicenseSoonRenew)}</span>
                 </button>
                 <button type="button" class="wide secondary" on:click=move |_| close()>
                     <span class="label">{tr(lang, Key::LicenseSoonOk)}</span>
@@ -1116,13 +1173,6 @@ pub(super) fn LicensePage(ctx: tax::Ctx) -> impl IntoView {
             return None;
         }
         let mut lines = vec![(term_words(lang, access, today), false)];
-        // Пробный период — с первого дня данных (задача 99) или с дня на ՀՎՀՀ
-        // по серверу (задача 106): почему он короче 14 дней.
-        if matches!(access.term(), Some(Term::Trial { .. }))
-            && let Some((words, start)) = licenses.trial_from(profiles)
-        {
-            lines.push((fill(t(lang, words), &[&i18n::date(lang, start)]), false));
-        }
         // Ключ «Pro» конторы идёт, а места в нём у этого ИП нет (задача 38):
         // места заняли ИП, добавленные раньше. Громко — только когда из-за
         // этого заперт выпуск. Со своим действующим ключом ИП места не нужно,
@@ -1131,7 +1181,7 @@ pub(super) fn LicensePage(ctx: tax::Ctx) -> impl IntoView {
             lines.push((t(lang, Key::LicenseProNoSeat).to_owned(), !access.issue(today)));
         }
         match access.days_left(today) {
-            Some(left) if matches!(access.term(), Some(Term::Key { .. })) && left <= RENEW_DAYS => {
+            Some(left) if matches!(access.term(), Some(Term::Key { .. })) && left <= licenses.renew_days(access) => {
                 lines.push((t(lang, Key::LicenseRenew).to_owned(), true));
                 lines.push((t(lang, Key::LicenseRenewKeeps).to_owned(), false));
             }
@@ -1148,7 +1198,7 @@ pub(super) fn LicensePage(ctx: tax::Ctx) -> impl IntoView {
         )
     };
     // «Уже купили ключ?» — пока не идёт ключ (задача 93): новое устройство
-    // купившего начинает со своего пробного периода.
+    // купившего начинает без ключа.
     let unkeyed = move || {
         known.get()
             && today.is_some_and(|today| {
@@ -1157,23 +1207,16 @@ pub(super) fn LicensePage(ctx: tax::Ctx) -> impl IntoView {
             })
     };
 
-    // Сверка ՀՎՀՀ с сервером (задача 106): нет согласия, а выпуск в пробный
-    // период его ждёт, — само согласие, наверху: это шаг, который нужен сейчас.
-    // Дано — строкой с «Отозвать согласие» ниже, у введённых ключей.
-    let withdrawn = RwSignal::new(None::<bool>);
-    let consent = move || {
-        licenses
-            .consent_needed(profiles, access.get())
-            .filter(|_| known.get())
-            .map(|tin| view! { <TrialConsent lang tin /> })
-    };
-    let given_now = move || profile_tin.get().filter(|tin| known.get() && super::trial::consented(tin));
-    let given = move || given_now().map(|tin| view! { <TrialConsentGiven lang tin withdrawn /> });
+    // Пробный ключ (задача 113) — тому, у кого ключа на ИНН профиля и места
+    // в ключе «Pro» нет и не было: купившему, у которого ключ кончился,
+    // пробный не нужен. Наверху: это шаг, который нужен сейчас.
+    let keyless = move || known.get() && access.with(|access| access.key().is_none());
+    let base_name = licenses.base_name;
 
     view! {
         {move || status().map(|lines| view! { <div class="notice" role="status">{lines}</div> })}
+        {move || keyless().then(|| view! { <TrialKey lang profiles base_name /> })}
         {move || unkeyed().then(|| view! { <p class="have-key">{tr(lang, Key::LicenseHaveKey)}</p> })}
-        {consent}
         <BuyEntry lang />
         {move || licenses.failure().map(|error| view! { <p role="alert">{tr(lang, error_key(error))}</p> })}
         {move || {
@@ -1204,13 +1247,6 @@ pub(super) fn LicensePage(ctx: tax::Ctx) -> impl IntoView {
             </button>
         </form>
         <EnteredKeys lang licenses profile_tin />
-        {given}
-        // Слова об отзыве — пока согласия снова нет: после нового «Согласен»
-        // они были бы неправдой.
-        {move || withdrawn.get().filter(|_| given_now().is_none()).map(|deleted| {
-            let words = if deleted { Key::TrialConsentWithdrawn } else { Key::TrialConsentWithdrawnHere };
-            view! { <p role="status">{tr(lang, words)}</p> }
-        })}
         <Gives lang access known today />
         <Devices lang />
     }
@@ -1505,64 +1541,8 @@ pub(super) fn IssueLocked(lang: ReadSignal<Lang>, access: Access, today: Date) -
                 let lang = lang.get();
                 format!("{} {}", term_words(lang, access, today), t(lang, Key::DocIssueLocked))
             }}</p>
-            <LicenseLink lang />
+            <LicenseLink lang fresh=access.term().is_none() />
         </div>
-    }
-}
-
-/// Согласие на сверку ՀՎՀՀ `tin` с сервером сайта (задача 106) — в форме
-/// документа вместо «Выпустить» и на экране лицензии, пока его нет, а выпуск
-/// в пробный период ждёт его ([`Licenses::consent_needed`]). Слова — те, что
-/// требует закон до согласия (ՀՕ-49-Ն, ст. 10 ч. 2 и ст. 18 ч. 3): зачем, что
-/// уходит и хранится, сколько, кому видно, кто отвечает, что будет без
-/// согласия и как его отозвать, — а целиком — политика конфиденциальности,
-/// п. 2, ссылкой. «Согласен» и есть согласие (ст. 9 ч. 7; решение человека
-/// 2026-11-18).
-#[component]
-pub(super) fn TrialConsent(lang: ReadSignal<Lang>, tin: Tin) -> impl IntoView {
-    let agree = move |_| super::trial::agree(&tin);
-    view! {
-        <section class="notice trial-consent" aria-labelledby="trial-consent-title">
-            <h3 id="trial-consent-title">{tr(lang, Key::TrialConsentTitle)}</h3>
-            <p>{tr(lang, Key::TrialConsentWhat)}</p>
-            // Кто отвечает и как отозвать — тише: главное читается первым
-            // (Правило 14), а сказано всё до «Согласен».
-            <p class="hint">{tr(lang, Key::TrialConsentTerms)}</p>
-            <p class="hint">
-                <a href=move || release::Legal::Privacy.path(lang.get()) target="_blank" rel="noopener">
-                    {tr(lang, Key::LegalPrivacy)}
-                </a>
-            </p>
-            <button type="button" class="wide" on:click=agree>
-                <span class="label">{tr(lang, Key::TrialConsentAgree)}</span>
-            </button>
-        </section>
-    }
-}
-
-/// На экране лицензии — что согласие на сверку ՀՎՀՀ `tin` дано, и «Отозвать
-/// согласие» (ՀՕ-49-Ն, ст. 9 ч. 3): запись на сервере удаляется, а выпуск
-/// в пробный период снова ждёт согласия. Удалил ли сервер запись, — в
-/// `withdrawn` экрана: этот блок с отзывом пропадает, а слова остаются.
-#[component]
-fn TrialConsentGiven(lang: ReadSignal<Lang>, tin: Tin, withdrawn: RwSignal<Option<bool>>) -> impl IntoView {
-    let number = tin.as_str().to_owned();
-    let withdraw = move |_| {
-        let tin = tin.clone();
-        leptos::task::spawn_local(async move {
-            let deleted = super::trial::withdraw(tin).await;
-            withdrawn.set(Some(deleted));
-        });
-    };
-    // Тихо и ссылкой: отзыв — редкое действие, и рядом с покупкой ключа он не
-    // спорит с ней за внимание (Правило 14).
-    view! {
-        <section class="trial-consent">
-            <p class="hint">{move || fill(t(lang.get(), Key::TrialConsentOn), &[&number])}</p>
-            <button type="button" class="link" on:click=withdraw>
-                {tr(lang, Key::TrialConsentWithdraw)}
-            </button>
-        </section>
     }
 }
 
@@ -1582,7 +1562,7 @@ pub(super) fn ReportLocked(lang: ReadSignal<Lang>, access: Access, today: Date) 
                 }
                 words
             }}</p>
-            <LicenseLink lang />
+            <LicenseLink lang fresh=access.term().is_none() />
         </div>
     }
 }

@@ -35,7 +35,6 @@ mod settings;
 mod split;
 mod storage;
 mod tax;
-mod trial;
 
 use std::rc::Rc;
 

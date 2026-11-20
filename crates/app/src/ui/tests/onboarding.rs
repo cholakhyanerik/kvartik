@@ -21,6 +21,7 @@ use crate::platform::pwa::Browser;
 use crate::platform::{clock, hash};
 use crate::store::Writes;
 use crate::store::device::Device;
+use crate::ui::license::RealTerms;
 use crate::ui::lang::WindowLang;
 use crate::ui::onboarding::Welcome;
 use crate::ui::pwa::Program;
@@ -97,6 +98,49 @@ async fn wait_step(host: &HtmlElement, lang: Lang, key: Key) -> bool {
         sleep(50).await;
     }
     false
+}
+
+/// Шаг пробного ключа (задача 113): после реквизитов, когда ключа нет, —
+/// «Пробный ключ», и его кнопка ведёт на экран лицензии; письмо продавцу,
+/// открытое там, пускает шаги дальше — к виду деятельности, не дожидаясь
+/// ключа. Срок настоящий (`RealTerms`), а момент профиля — на два дня вперёд:
+/// день данных его не берёт, и пробного периода без ключа нет в любой день
+/// запуска.
+#[wasm_bindgen_test]
+async fn the_trial_key_step_follows_the_letter() {
+    let _real = RealTerms::new();
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    super::license::forget_trial();
+    forget_steps();
+    let later = kvartik_core::model::record::Timestamp::from_unix_millis(clock::now().unix_millis() + 2 * 86_400_000);
+    let saved = Profile::save(None, profile(), later).expect("годный профиль").expect("новый");
+    let mut writes = Writes::default();
+    writes.insert(&saved);
+    commit(writes).await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at("#/");
+    let mut wrong = Vec::new();
+    if !wait_step(&host, lang, Key::StepKey).await {
+        wrong.push(format!("после реквизитов — не пробный ключ: {:?}", current_step(&host)));
+    }
+    press(&host, "home", lang, Key::LicenseGetTrial, &mut wrong);
+    if !wait_until(|| hash() == crate::ui::route::Screen::License.href()).await {
+        wrong.push(format!("шаг ведёт не на экран лицензии: {}", hash()));
+    }
+    Device::new().set_trial_key_asked(crate::store::DB_NAME);
+    crate::platform::set_hash("#/");
+    if !wait_step(&host, lang, Key::StepActivity).await {
+        wrong.push(format!("письмо отправлено, а шаг — {:?}", current_step(&host)));
+    }
+    drop(mounted);
+    host.remove();
+    crate::platform::set_hash("");
+    super::license::forget_trial();
+    forget_steps();
+    forget_device();
+    drop(_real);
+    assert!(wrong.is_empty(), "шаг пробного ключа: {wrong:#?}");
 }
 
 /// С пустой базы — до счёта: шаг за шагом, и каждый шаг открывает готовую
@@ -240,8 +284,10 @@ async fn the_last_step_opens_the_invoice_and_finishes() {
         wrong.push(format!("нет шага PDF: {:?}", current_step(&host)));
     }
     let done = host.query_selector_all("#home .first-steps li.done").map_or(0, |rows| rows.length());
-    if done != 4 {
-        wrong.push(format!("пройдено шагов: {done}, а не 4"));
+    // Шагов до PDF — пять: реквизиты, пробный ключ (задача 113), вид
+    // деятельности, клиент и счёт.
+    if done != 5 {
+        wrong.push(format!("пройдено шагов: {done}, а не 5"));
     }
     press(&host, "home", lang, Key::StepsOpenInvoice, &mut wrong);
     sleep(100).await;

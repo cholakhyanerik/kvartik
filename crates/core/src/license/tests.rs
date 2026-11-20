@@ -390,10 +390,52 @@ fn the_trial_starts_with_the_earlier_day() {
     assert!(!Access::new(&public(), [], None, trial_start(Some(device), Some(data))).issue(today));
 }
 
-/// День с сервера по ՀՎՀՀ (задача 106) — третьим днём тем же вызовом: браузер,
-/// открытый 14 ноября без данных, а на этом ՀՎՀՀ пробный период начали ещё
-/// 20 октября в другом, — и 15 ноября срок уже кончился. Поздний день сервера
-/// срок не продлевает.
+/// Пробный период без ключа (задача 113) — только начатый не позже дня
+/// редакции условий от 21.11.2026: начатый в тот день идёт 14 дней, на день
+/// позже — срока нет вовсе, и ни выпуск, ни числа он не открывает. Дни до
+/// того — первый запуск, данные, ответ сервера — считаются как прежде:
+/// копия старых данных в новом браузере приносит и прошедшие дни, а свежие
+/// данные нового человека срока не дают. Случаи — с обеих сторон края, и
+/// провалы — списком.
+#[test]
+fn no_trial_starts_after_the_edition() {
+    let mut wrong = Vec::new();
+    let edge = LAST_TRIAL_START;
+    for (start, last) in [
+        (day(2026, 11, 8), Some(day(2026, 11, 21))),
+        (edge, edge.add_days(13)),
+        (edge.add_days(1).expect("дата"), None),
+        (day(2027, 3, 1), None),
+    ] {
+        if trial_last(start) != last {
+            wrong.push(format!("начат {start:?}: последний день {:?}, а ждали {last:?}", trial_last(start)));
+        }
+        let access = Access::new(&public(), [], None, Some(start));
+        let open = access.issue(start);
+        if open != last.is_some() {
+            wrong.push(format!("начат {start:?}: выпуск в первый день — {open}"));
+        }
+    }
+    // Новый человек после редакции: устройство дня не помнит, данные — свежие.
+    let later = edge.add_days(5).expect("дата");
+    let fresh = Access::new(&public(), [], None, trial_start(None, Some(later)));
+    if fresh.term().is_some() || fresh.issue(later) || fresh.report(Quarter::new(2026, 3).expect("квартал"), later) {
+        wrong.push(format!("свежие данные дали срок: {:?}", fresh.term()));
+    }
+    // Копия данных с 10 ноября в браузере, открытом после редакции, — тот же
+    // период, и 30 ноября он уже кончился.
+    let restored = Access::new(&public(), [], None, trial_start(Some(later), Some(day(2026, 11, 10))));
+    if restored.term() != Some(Term::Trial { last: day(2026, 11, 23) }) || restored.issue(day(2026, 11, 30)) {
+        wrong.push(format!("копия старых данных: {:?}", restored.term()));
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+    assert_eq!(TRIAL_KEY_DAYS, 30, "пробный ключ — «до месяца» условий, п. 3");
+}
+
+/// День с сервера по ՀՎՀՀ (задача 106), запомненный устройством до 0.0.162, —
+/// третьим днём тем же вызовом: браузер, открытый 14 ноября без данных, а на
+/// этом ՀՎՀՀ пробный период начали ещё 20 октября в другом, — и 15 ноября срок
+/// уже кончился. Поздний день сервера срок не продлевает.
 #[test]
 fn the_server_day_of_the_tin_counts_too() {
     let device = day(2026, 11, 14);
@@ -403,34 +445,6 @@ fn the_server_day_of_the_tin_counts_too() {
     assert!(!Access::new(&public(), [], None, start).issue(day(2026, 11, 15)));
     let later = trial_start(trial_start(Some(device), Some(day(2026, 11, 1))), Some(day(2026, 11, 16)));
     assert_eq!(later, Some(day(2026, 11, 1)));
-}
-
-/// Запрос — ՀՎՀՀ профиля, ответ — первый день: образец ответа функции сайта
-/// (`tests/trial/answer.json`, его же сверяет с функцией проверка сайта),
-/// новые поля пропускаются, а не тот ответ — `None`, а не день.
-#[test]
-fn the_server_answer_is_read() {
-    assert_eq!(trial_ask(&tin("07654321")), r#"{"tin":"07654321","consent":"2026-11-18"}"#);
-    assert_eq!(trial_withdraw(&tin("07654321")), r#"{"tin":"07654321","withdraw":true}"#);
-    assert!(Date::from_iso(TRIAL_CONSENT).is_some(), "версия согласия — день редакции политики");
-    assert_eq!(trial_answer(include_str!("../../tests/trial/answer.json")), Some(day(2026, 11, 18)));
-    assert_eq!(trial_answer(r#"{"first":"2026-10-20","seen":3}"#), Some(day(2026, 10, 20)));
-    let mut failures = Vec::new();
-    for wrong in [
-        "",
-        "<!doctype html>",
-        "{}",
-        r#"{"first":20261020}"#,
-        r#"{"first":"2026-02-30"}"#,
-        r#"{"first":"20.10.2026"}"#,
-        r#"{"first":"2026-10-09"}"#,
-        r#"{"error":"not configured"}"#,
-    ] {
-        if trial_answer(wrong).is_some() {
-            failures.push(wrong);
-        }
-    }
-    assert!(failures.is_empty(), "приняты не те ответы: {failures:?}");
 }
 
 /// После срока числа для расчёта открыты за кварталы, кончившиеся в срок, —
@@ -550,46 +564,6 @@ fn the_last_week_is_said_louder() {
     }
     if !Access::default().soon(day(2026, 11, 3)) {
         wrong.push("без срока — тихо".to_owned());
-    }
-    assert!(wrong.is_empty(), "{wrong:#?}");
-}
-
-/// Окно о конце пробного периода (задача 93) — в его последние семь дней,
-/// считая последний, и только пока срок — он: при ключе дольше него и при
-/// равном последнем дне о сроке скажет окно ключа. Кончился период — окна
-/// нет: экран лицензии открывается при запуске сам.
-#[test]
-fn the_trial_end_is_said_a_week_ahead() {
-    let last = day(2026, 11, 9);
-    let trial = Access::known(trial_last(day(2026, 10, 27)), None);
-    let mut wrong = Vec::new();
-    for (today, ending) in [
-        (day(2026, 11, 2), None),
-        (day(2026, 11, 3), Some(last)),
-        (last, Some(last)),
-        (day(2026, 11, 10), None),
-    ] {
-        if trial.ending_trial(today) != ending {
-            wrong.push(format!("пробный период, {today:?}: окно — {:?}", trial.ending_trial(today)));
-        }
-        if trial.ending_key(today).is_some() {
-            wrong.push(format!("пробный период, {today:?}: окно ключа"));
-        }
-    }
-    let soon = day(2026, 11, 5);
-    let with = |until| Access::known(Some(last), Some((Plan::Standard, until)));
-    if with(day(2027, 10, 31)).ending_trial(soon).is_some() {
-        wrong.push("ключ дольше пробного периода, а окно — о пробном".to_owned());
-    }
-    if with(last).ending_trial(soon).is_some() || with(last).ending_key(soon) != Some((Plan::Standard, last)) {
-        wrong.push("при равном последнем дне окно не о ключе".to_owned());
-    }
-    // Ключ короче пробного периода: срок — пробный период, окно — его.
-    if with(day(2026, 11, 6)).ending_trial(soon) != Some(last) {
-        wrong.push("ключ короче пробного периода, а окна о пробном нет".to_owned());
-    }
-    if Access::default().ending_trial(soon).is_some() {
-        wrong.push("без срока — окно".to_owned());
     }
     assert!(wrong.is_empty(), "{wrong:#?}");
 }

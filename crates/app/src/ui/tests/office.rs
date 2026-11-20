@@ -5,6 +5,7 @@
 //! бы прогон.
 
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
+use kvartik_core::license;
 use kvartik_core::model::activity::ActivityCode;
 use kvartik_core::model::date::{Date, Quarter};
 use kvartik_core::model::ledger::{Flow, Operation, OperationData};
@@ -365,8 +366,10 @@ async fn put(name: &str, writes: Writes) {
 /// Сводка конторы (задача 38, этап 5): у каждого ИП — прошлый квартал словами
 /// карточки налога: у открытого — «к уплате», у другого, закрытого, —
 /// «расчёт подан». Квартал, закрытый, пока экран спрятан, сводка показывает
-/// при следующем показе экрана: базы она перечитывает. Без пробного периода
-/// и ключа «Pro» сводки нет — вместо неё слова, когда она открыта.
+/// при следующем показе экрана: базы она перечитывает. Открыта она здесь
+/// тестам без ключа (`OPEN_FOR_TESTS`, задача 113), а с настоящим сроком —
+/// без пробного периода и ключа «Pro» — сводки нет: вместо неё слова, когда
+/// она открыта.
 #[wasm_bindgen_test]
 async fn the_summary_names_what_each_ie_owes() {
     delete_database(DB_NAME).await;
@@ -396,7 +399,6 @@ async fn the_summary_names_what_each_ie_owes() {
     let device = Device::new();
     device.set_office();
     crate::store::office::set_tab_base(DB_NAME);
-    device.set_trial_start(today);
     let lang = Lang::Ru;
     device.set_ui_lang(lang);
 
@@ -436,8 +438,9 @@ async fn the_summary_names_what_each_ie_owes() {
     drop(mounted);
     host.remove();
 
-    // Пробный период кончился, ключа «Pro» нет — сводки нет.
-    device.set_trial_start(today.add_days(-30).expect("дата"));
+    // Настоящий срок: пробный период кончился, ключа «Pro» нет — сводки нет.
+    let real = crate::ui::license::RealTerms::new();
+    device.set_trial_start(license::LAST_TRIAL_START.add_days(-30).expect("дата"));
     let (host, mounted) = mount_at("#/office");
     let locked = t(lang, Key::OfficeSummaryLocked);
     if !wait_until(|| section_text(&host, "office").contains(locked)).await {
@@ -448,6 +451,7 @@ async fn the_summary_names_what_each_ie_owes() {
     }
     drop(mounted);
     host.remove();
+    drop(real);
     crate::platform::set_hash("");
     delete_database(second.base()).await;
     delete_database(OFFICE_DB).await;
