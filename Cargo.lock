@@ -948,8 +948,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
 
 [[package]]
+name = "kvartik-ai"
+version = "0.0.160"
+dependencies = [
+ "console_error_panic_hook",
+ "js-sys",
+ "kvartik-core",
+ "leptos",
+ "wasm-bindgen",
+ "wasm-bindgen-test",
+ "web-sys",
+]
+
+[[package]]
 name = "kvartik-app"
-version = "0.0.159"
+version = "0.0.160"
 dependencies = [
  "console_error_panic_hook",
  "ed25519-dalek",
@@ -965,7 +978,7 @@ dependencies = [
 
 [[package]]
 name = "kvartik-calc"
-version = "0.0.159"
+version = "0.0.160"
 dependencies = [
  "js-sys",
  "kvartik-core",
@@ -976,7 +989,7 @@ dependencies = [
 
 [[package]]
 name = "kvartik-core"
-version = "0.0.159"
+version = "0.0.160"
 dependencies = [
  "ed25519-dalek",
  "miniz_oxide",
@@ -988,7 +1001,7 @@ dependencies = [
 
 [[package]]
 name = "kvartik-keygen"
-version = "0.0.159"
+version = "0.0.160"
 dependencies = [
  "ed25519-dalek",
  "getrandom",
@@ -997,7 +1010,7 @@ dependencies = [
 
 [[package]]
 name = "kvartik-sw"
-version = "0.0.159"
+version = "0.0.160"
 dependencies = [
  "base64",
  "brotli",

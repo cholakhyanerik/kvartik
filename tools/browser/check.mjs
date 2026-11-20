@@ -181,7 +181,9 @@ const SCREENS = [
       && document.querySelector("#license")?.innerText.includes(${JSON.stringify(s("LicenseGives"))}) ? true : null;` },
   { name: "О программе", hash: "#/about", shown: TEXT_IN("#about", s("AboutRules")) },
   { name: "Настройки", hash: "#/settings", shown: TEXT_IN("#settings", s("SettingsCursorHint")) },
-  { name: "ИИ-помощник", hash: "#/ask", shown: TEXT_IN("#ask", s("AiAbout")) },
+  // На адресе проверки пары у рамки нет, и окно говорит, где помощник;
+  // саму рамку проверяет шаг «ИИ-помощник» — под своими адресами.
+  { name: "ИИ-помощник", hash: "#/ask", shown: TEXT_IN("#ask", s("AiFrameAlone")) },
 ];
 
 async function screens(page, when) {
@@ -267,19 +269,77 @@ async function settings(page) {
     `${JSON.stringify(plain)}, после запуска — ${background}`);
 }
 
-/// ИИ-помощник (задача 102) на собранном сайте — с настоящим CSP из
-/// `_headers` (его отдаёт свой сервер) и поставщиком-подменой: запрос
-/// к четырём адресам перехватывает протокол DevTools (`Fetch.enable`) — уже
-/// после того, как браузер сверил его с CSP, — и отвечает потоком SSE, как
-/// Anthropic; в сеть не уходит ничего, ни вопрос, ни ключ. Ключ подключается,
-/// ответ встаёт по мере прихода, запрос несёт ключ, версию API, заголовок
-/// прямого доступа и вопрос, а запрос на другой путь того же поставщика и на
-/// чужой адрес CSP не пускает. Предварительный запрос CORS (`OPTIONS`) —
-/// тоже подменой: Chrome показывает его перехвату (по протоколу DevTools,
-/// «Fetch.requestPaused»), а не прошёл бы перехват — его ответил бы сам
-/// поставщик, без ключа и вопроса.
+/// ИИ-помощник (задачи 102 и 111) на собранном сайте — рамкой своего
+/// происхождения, с настоящими CSP обоих: окно `https://kvartik.com/app/`
+/// и рамка `https://ai.kvartik.com/` — подменой протокола DevTools
+/// (`Fetch.enable`): их файлы отдают свои серверы проверки из `dist/`
+/// и `dist-ai/` с заголовками из своих `_headers`, а в сеть не уходит ничего.
+/// Так и пары происхождений — те, что в выкладке: окно знает свою рамку,
+/// а рамка — своё окно (`ai::frame`). Service worker у окна здесь нет —
+/// `navigator.serviceWorker` снят до первого скрипта, и окно работает, как
+/// в браузере без него (`platform::pwa::container`): скрипт service worker
+/// браузер берёт мимо перехвата страницы, и встал бы настоящий `sw.js`
+/// с настоящего сайта, а с ним и запросы частей туда (2026-11-20).
+/// Поставщик — подменой тоже: запрос к четырём адресам перехватывается уже
+/// после того, как браузер сверил его с CSP, и получает поток SSE, как от
+/// Anthropic. Предварительный запрос CORS (`OPTIONS`) — подменой: Chrome
+/// показывает его перехвату (по протоколу DevTools, «Fetch.requestPaused»).
+/// Что проверяется: ключ 0.0.158 из окна переезжает в рамку и в окне
+/// стирается; ответ встаёт в рамке со ссылкой цветом программы; запрос несёт
+/// ключ, версию API и вопрос; CSP рамки не пускает другой путь поставщика
+/// и чужой адрес, а CSP окна — и самого поставщика: дверь из окна закрыта;
+/// «Убрать ключ» стирает ключ в рамке, и строка налога это знает; рамка,
+/// открытая сама по себе, говорит, где помощник.
 const AI_ANSWER = "Срок — до 20 января. Подробнее: https://www.arlis.am/hy/acts/230455";
-async function assistant(page) {
+const DIST_AI = path.resolve(DIST, "../dist-ai");
+const SITE = "https://kvartik.com";
+const FRAME = "https://ai.kvartik.com";
+
+/// Тело функции — в рамке помощника, в отдельном мире
+/// (`Page.createIsolatedWorld`): DOM и хранилище рамки, а переменных её
+/// скриптов там не видно. Ошибка — `{ error }`.
+async function inFrame(page, code) {
+  try {
+    const { frameTree } = await page.send("Page.getFrameTree");
+    const frame = (frameTree.childFrames ?? []).find((child) => child.frame.url.startsWith(`${FRAME}/`));
+    if (!frame) return { error: "нет рамки помощника" };
+    const { executionContextId } = await page.send("Page.createIsolatedWorld", { frameId: frame.frame.id, worldName: "check" });
+    const r = await page.send("Runtime.evaluate", {
+      expression: `(async () => { ${code} })()`, contextId: executionContextId, awaitPromise: true, returnByValue: true,
+    });
+    if (r.exceptionDetails) return { error: r.exceptionDetails.exception?.description ?? r.exceptionDetails.text };
+    return r.result.value;
+  } catch (e) { return { error: String(e) }; }
+}
+
+async function inFrameWait(page, code, ms = 20000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    const v = await inFrame(page, code);
+    if (v && !v.error) return v;
+    await sleep(200);
+  }
+  return null;
+}
+
+/// Ввести текст в поле рамки по подписи.
+const FRAME_TYPE = (label, text) => `const el = [...document.querySelectorAll("label")]
+  .find((l) => (l.firstChild?.textContent ?? "").trim() === ${JSON.stringify(label)})?.querySelector("input, textarea");
+  if (!el) return null;
+  el.value = ${JSON.stringify(text)};
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  return true;`;
+
+async function assistant(browser) {
+  if (!fs.existsSync(path.join(DIST_AI, "index.html"))) {
+    checks.check("ИИ-помощник: сайт рамки собран", false, `${DIST_AI} — нет index.html`);
+    return;
+  }
+  const frameServer = own(DIST_AI, PORT + 9, { extra: {} });
+  // Своя вкладка в своём контексте: хранилище `kvartik.com` — с чистого
+  // листа, а первая вкладка браузера остаётся следующим шагам.
+  const page = await browser.page({ context: true });
+  const misses = [];
   const sse = [
     `event: message_start\ndata: {"type":"message_start","message":{}}\n\n`,
     `event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: AI_ANSWER } })}\n\n`,
@@ -292,44 +352,78 @@ async function assistant(page) {
     { name: "Access-Control-Allow-Headers", value: "*, authorization, x-api-key" },
     { name: "Access-Control-Allow-Methods", value: "POST" },
   ];
+  // Своё — со своих серверов проверки, с их заголовками: тело — уже
+  // разжатое, поэтому без `content-encoding` и длины.
+  const proxied = async (requestId, request, base) => {
+    const url = new URL(request.url);
+    const response = await fetch(`${base}${url.pathname}${url.search}`, { method: request.method, redirect: "manual" });
+    if (response.status !== 200) misses.push(`${response.status} ${request.url}`);
+    const body = Buffer.from(await response.arrayBuffer());
+    const responseHeaders = [...response.headers]
+      .filter(([name]) => !["content-encoding", "content-length", "transfer-encoding", "connection"].includes(name))
+      .map(([name, value]) => ({ name, value }));
+    return page.send("Fetch.fulfillRequest", {
+      requestId, responseCode: response.status, responseHeaders, body: body.toString("base64"),
+    });
+  };
   page.on((msg) => {
     if (msg.method !== "Fetch.requestPaused") return;
     const { requestId, request } = msg.params;
-    seen.push({ url: request.url, method: request.method, headers: request.headers, body: request.postData ?? "" });
-    const answer = request.method === "OPTIONS"
-      ? { requestId, responseCode: 204, responseHeaders: cors }
-      : { requestId, responseCode: 200, responseHeaders: [...cors, { name: "Content-Type", value: "text/event-stream" }],
-        body: Buffer.from(sse).toString("base64") };
-    page.send("Fetch.fulfillRequest", answer).catch(() => {});
+    const origin = new URL(request.url).origin;
+    let answering;
+    if (origin === SITE) answering = proxied(requestId, request, ORIGIN);
+    else if (origin === FRAME) answering = proxied(requestId, request, `http://127.0.0.1:${PORT + 9}`);
+    else {
+      seen.push({ url: request.url, method: request.method, headers: request.headers, body: request.postData ?? "" });
+      answering = page.send("Fetch.fulfillRequest", request.method === "OPTIONS"
+        ? { requestId, responseCode: 204, responseHeaders: cors }
+        : { requestId, responseCode: 200, responseHeaders: [...cors, { name: "Content-Type", value: "text/event-stream" }],
+          body: Buffer.from(sse).toString("base64") });
+    }
+    answering.catch(() => page.send("Fetch.failRequest", { requestId, errorReason: "Failed" }).catch(() => {}));
   });
-  await page.send("Fetch.enable", { patterns: ["api.anthropic.com", "api.openai.com", "generativelanguage.googleapis.com", "api.x.ai"]
-    .map((host) => ({ urlPattern: `https://${host}/*`, requestStage: "Request" })) });
+  await page.send("Fetch.enable", { patterns: [SITE, FRAME, "https://api.anthropic.com", "https://api.openai.com",
+    "https://generativelanguage.googleapis.com", "https://api.x.ai"].map((origin) => ({ urlPattern: `${origin}/*`, requestStage: "Request" })) });
+  await page.send("Page.addScriptToEvaluateOnNewDocument", { source: "delete Navigator.prototype.serviceWorker;" });
   try {
-    await go(page, "#/ask");
-    checks.check("ИИ-помощник: экран и форма ключа", await page.waitFor(`return ${SHOWN_IN("#ask", s("AiAbout"))}
-      && document.querySelector("#ask .ai-setup input") ? true : null;`));
-    await page.type(s("AiKey"), "sk-ant-check-0123abcd");
-    checks.check("ИИ-помощник: «Сохранить ключ»", await press(page, "#ask", s("AiSave")));
+    await page.emulate(360);
+    // Ключ, подключённый в 0.0.158 ещё в окне, и язык окна — записи
+    // устройства `kvartik.com`.
+    await page.go(`${SITE}/app/`);
+    await page.eval(`localStorage.setItem("kvartik.lang", ${JSON.stringify(opt.lang)});
+      localStorage.setItem("kvartik.ai", JSON.stringify({ provider: "claude", key: "sk-ant-check-0123abcd", model: "claude-opus-5-5" }));
+      return true;`);
+    // С `/app/` на `/app/#/ask` — переход внутри документа, без запуска:
+    // окно не прочло бы записанное. Поэтому — через пустую страницу.
+    await page.fresh(`${SITE}/app/#/ask`);
+    checks.check("ИИ-помощник: рамка своего происхождения встала в окне",
+      await page.waitFor(`const f = document.querySelector("#ask iframe.ai-frame.ready");
+        return f && f.src.startsWith(${JSON.stringify(`${FRAME}/?lang=${opt.lang}`)}) && f.getBoundingClientRect().height > 100 ? true : null;`));
+    checks.check("ИИ-помощник: рамка — на языке окна", await inFrameWait(page,
+      `return document.documentElement.lang === ${JSON.stringify(opt.lang === "hy" ? "hy" : opt.lang)}
+        && document.body.innerText.includes(${JSON.stringify(s("AiAbout"))}) ? true : null;`));
     const connected = t("AiConnected", opt.lang).replace("{}", "Claude").replace("{}", "claude-opus-5-5").replace("{}", "abcd");
-    checks.check("ИИ-помощник: ключ подключён и в записи устройства", await page.waitFor(TEXT_IN("#ask", connected))
-      && JSON.parse(await page.eval(`return localStorage.getItem("kvartik.ai");`) ?? "{}").key === "sk-ant-check-0123abcd");
-    await page.type(s("AiQuestion"), "Когда срок расчёта за IV квартал?");
+    checks.check("ИИ-помощник: ключ 0.0.158 переехал из окна в рамку",
+      await inFrameWait(page, `return document.body.innerText.includes(${JSON.stringify(connected)})
+        && JSON.parse(localStorage.getItem("kvartik.ai") ?? "{}").key === "sk-ant-check-0123abcd" ? true : null;`)
+      && await page.waitFor(`return localStorage.getItem("kvartik.ai") === null && localStorage.getItem("kvartik.ai_by") === "claude" ? true : null;`));
+    checks.check("ИИ-помощник: вопрос вписан в рамке", await inFrame(page, FRAME_TYPE(s("AiQuestion"), "Когда срок расчёта за IV квартал?")) === true);
     // Кнопку включает привязка поля своей задачей — ждать её, а не паузу.
-    checks.check("ИИ-помощник: «Спросить»", await page.waitFor(`const b = ${BUTTON("#ask", s("AiAsk"))};
-      return b && !b.disabled ? true : null;`) && await press(page, "#ask", s("AiAsk")));
-    checks.check("ИИ-помощник: ответ встал, адрес закона — ссылкой", await page.waitFor(`return ${SHOWN_IN("#ask", AI_ANSWER)}
-      && document.querySelector('#ask .ai-a a[href="https://www.arlis.am/hy/acts/230455"]') ? true : null;`));
-    // Ссылка в ответе — цветом ссылок программы, а не синим браузера
-    // (глазной прогон задачи 102: ответ лежал в `div`, мимо `main p a`).
-    const tint = await page.eval(`const a = document.querySelector("#ask .ai-a a");
+    checks.check("ИИ-помощник: «Спросить»", await inFrameWait(page, `const b = [...document.querySelectorAll("button")]
+      .find((b) => b.textContent.trim() === ${JSON.stringify(s("AiAsk"))});
+      if (!b || b.disabled) return null; b.click(); return true;`));
+    checks.check("ИИ-помощник: ответ встал в рамке, адрес закона — ссылкой", await inFrameWait(page,
+      `return document.body.innerText.includes(${JSON.stringify(AI_ANSWER)})
+        && document.querySelector('.ai-a a[href="https://www.arlis.am/hy/acts/230455"][target="_blank"]') ? true : null;`));
+    // Ссылка в ответе — цветом ссылок программы, а не синим браузера.
+    const tint = await inFrame(page, `const a = document.querySelector(".ai-a a");
       const probe = document.createElement("span");
       probe.style.color = getComputedStyle(document.documentElement).getPropertyValue("--accent-text").trim();
       document.body.append(probe);
       const want = getComputedStyle(probe).color;
       probe.remove();
       return { want, got: a ? getComputedStyle(a).color : null };`);
-    checks.check("ИИ-помощник: ссылка в ответе — цветом ссылок программы", tint?.got && tint.got === tint.want,
-      JSON.stringify(tint));
+    checks.check("ИИ-помощник: ссылка в ответе — цветом ссылок программы", tint?.got && tint.got === tint.want, JSON.stringify(tint));
     const posts = seen.filter((r) => r.method === "POST");
     const sent = posts[0];
     const header = (name) => Object.entries(sent?.headers ?? {}).find(([key]) => key.toLowerCase() === name)?.[1];
@@ -338,30 +432,47 @@ async function assistant(page) {
         && header("anthropic-version") === "2026-10-21" && header("anthropic-dangerous-direct-browser-access") === "true"
         && !header("cookie") && !header("referer") && JSON.parse(sent.body).messages.at(-1).content === "Когда срок расчёта за IV квартал?",
       JSON.stringify(seen.map((r) => `${r.method} ${r.url}`)));
-    // Другой путь того же поставщика и чужой адрес — мимо CSP не уйти.
-    const refused = await page.eval(`const blocked = [];
+    // Мимо CSP не уйти: из рамки — на другой путь поставщика и чужой адрес,
+    // из окна — и на сам адрес поставщика.
+    const tryOut = (urls) => `const blocked = [];
       const listen = (event) => blocked.push(event.blockedURI);
       document.addEventListener("securitypolicyviolation", listen);
       const tries = [];
-      for (const url of ["https://api.anthropic.com/v1/files", "https://kvartik-check.invalid/collect"]) {
+      for (const url of ${JSON.stringify(urls)}) {
         try { await fetch(url, { method: "POST", body: "x" }); tries.push("ушёл"); } catch { tries.push("не пущен"); }
       }
       await new Promise((r) => setTimeout(r, 200));
       document.removeEventListener("securitypolicyviolation", listen);
-      return { tries, blocked };`);
-    checks.check("ИИ-помощник: CSP не пускает другой путь поставщика и чужой адрес",
-      refused?.tries?.every((r) => r === "не пущен") && refused.blocked.some((u) => u.startsWith("https://api.anthropic.com/v1/files"))
-        && refused.blocked.some((u) => u.startsWith("https://kvartik-check.invalid")) && !seen.some((r) => r.url.includes("/v1/files")),
-      JSON.stringify(refused));
+      return { tries, blocked };`;
+    const fromFrame = await inFrame(page, tryOut(["https://api.anthropic.com/v1/files", "https://kvartik-check.invalid/collect"]));
+    checks.check("ИИ-помощник: CSP рамки не пускает другой путь поставщика и чужой адрес",
+      fromFrame?.tries?.every((r) => r === "не пущен") && fromFrame.blocked.some((u) => u.startsWith("https://api.anthropic.com/v1/files"))
+        && fromFrame.blocked.some((u) => u.startsWith("https://kvartik-check.invalid")) && !seen.some((r) => r.url.includes("/v1/files")),
+      JSON.stringify(fromFrame));
+    const before = seen.length;
+    const fromWindow = await page.eval(tryOut(["https://api.anthropic.com/v1/messages", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"]));
+    checks.check("ИИ-помощник: CSP окна не пускает к поставщикам ИИ — дверь закрыта",
+      fromWindow?.tries?.every((r) => r === "не пущен") && fromWindow.blocked.length === 2 && seen.length === before,
+      JSON.stringify(fromWindow));
     // Отказы CSP, которые проверка вызвала сама, — не ошибки программы.
     for (let i = page.errors.length - 1; i >= 0; i--) {
-      if (/v1\/files|kvartik-check\.invalid/.test(page.errors[i])) page.errors.splice(i, 1);
+      if (/v1\/files|kvartik-check\.invalid|api\.anthropic\.com|generativelanguage/.test(page.errors[i])) page.errors.splice(i, 1);
     }
-    checks.check("ИИ-помощник: «Убрать ключ» стирает его с устройства", await press(page, "#ask", s("AiRemove"))
-      && await page.waitFor(`return localStorage.getItem("kvartik.ai") === null
-        && document.querySelector("#ask .ai-setup input") ? true : null;`));
+    checks.check("ИИ-помощник: «Убрать ключ» стирает его в рамке, а строка налога это знает", await inFrameWait(page,
+      `const b = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === ${JSON.stringify(s("AiRemove"))});
+      if (!b) return null; b.click(); return true;`)
+      && await inFrameWait(page, `return localStorage.getItem("kvartik.ai") === null && document.querySelector(".ai-setup input") ? true : null;`)
+      && await page.waitFor(`return localStorage.getItem("kvartik.ai_by") === null ? true : null;`));
+    checks.check("ИИ-помощник: свои файлы окна и рамки под подменой отданы", misses.length === 0, misses.join("; "));
+    checks.check("ИИ-помощник: без ошибок в консоли", page.errors.length === 0, page.errors.join("; "));
+    // Рамка сама по себе — не в окне программы — говорит, где помощник.
+    await page.go(`${FRAME}/?lang=${opt.lang}`);
+    checks.check("ИИ-помощник: рамка, открытая сама, говорит, где помощник",
+      await page.waitFor(TEXT_IN("main", s("AiFrameAlone"))) && await page.eval(`return document.querySelector(".ai-setup") ? null : true;`));
   } finally {
     await page.send("Fetch.disable").catch(() => {});
+    await page.close?.();
+    frameServer.stop();
   }
 }
 
@@ -1571,6 +1682,7 @@ async function main() {
     await landing(browser);
     await office(browser);
     await motion(browser);
+    await assistant(browser);
 
     const page = await browser.page();
     await page.emulate(360);
@@ -1589,7 +1701,6 @@ async function main() {
     await forms(page, "с сетью");
     await screens(page, "с сетью");
     await settings(page);
-    await assistant(page);
     await card(page, "с сетью");
     await cardClose(page);
     await exported(page, "с сетью");

@@ -17,10 +17,10 @@ FEATURE_TASKS.md ссылаются сюда, а не копируют его �
 ```
 cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p kvartik-app --target wasm32-unknown-unknown --all-targets -- -D warnings
+cargo clippy -p kvartik-app -p kvartik-ai --target wasm32-unknown-unknown --all-targets -- -D warnings
 cargo test --workspace
-cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app   # браузерные, Chrome
-GECKODRIVER=~/.cargo/drivers/geckodriver.exe cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app   # они же в Firefox
+cargo test -p kvartik-app -p kvartik-ai --target wasm32-unknown-unknown --bins   # браузерные, Chrome: окно и рамка помощника
+GECKODRIVER=~/.cargo/drivers/geckodriver.exe cargo test -p kvartik-app -p kvartik-ai --target wasm32-unknown-unknown --bins   # они же в Firefox
 trunk build --release          # в crates/app
 node tools/browser/check.mjs   # собранный сайт в браузере; на машине — с --work C:/tmp/k<номер>
 cargo deny check               # в CI всегда, на машине — по желанию
@@ -36,7 +36,8 @@ cargo deny check               # в CI всегда, на машине — по 
   формы, копия, PDF, работа без сети (задача 60) и новая версия — включается
   сама и показывает окно «Что нового» (задача 67). Около минуты; провалы —
   в конце списком, код выхода 1.
-- Браузерные тесты: число прошедших больше нуля — раннер при нуле тестов
+- Браузерные тесты — двумя раннерами, окна и рамки ИИ-помощника
+  (`crates/ai`, задача 111): у каждого число прошедших больше нуля — раннер при нуле тестов
   выходит с кодом 0 («no tests to run!»), — и браузер тот: строка
   «Running headless tests in Firefox» (или «in Chrome»). Упали с «session
   not created» — Chrome обновился, а chromedriver нет: skill `update-deps`.

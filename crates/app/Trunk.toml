@@ -49,4 +49,4 @@ serve_base = "/"
 [[hooks]]
 stage = "post_build"
 command = "cargo"
-command_arguments = ["run", "--quiet", "--package", "kvartik-sw", "--", "--root", "public/root", "--site", "site", "--style", "style", "--legal", "../../docs/legal", "--calc", "kvartik-calc", "--wasm", "kvartik-app", "public/sw.js"]
+command_arguments = ["run", "--quiet", "--package", "kvartik-sw", "--", "--root", "public/root", "--site", "site", "--style", "style", "--legal", "../../docs/legal", "--calc", "kvartik-calc", "--ai", "kvartik-ai", "../ai", "dist-ai", "--wasm", "kvartik-app", "public/sw.js"]

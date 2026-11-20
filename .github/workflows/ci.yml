@@ -165,20 +165,21 @@ jobs:
       # `finish-task`).
       - run: cargo build --workspace --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo clippy -p kvartik-app --target wasm32-unknown-unknown --all-targets --locked -- -D warnings
+      - run: cargo clippy -p kvartik-app -p kvartik-ai --target wasm32-unknown-unknown --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
       # Браузерные тесты — в headless Chrome образа. Драйвер — явно: иначе
       # раннер первым найдёт в PATH geckodriver, и тесты уйдут в Firefox.
       # При нуле тестов раннер выходит с кодом 0 («no tests to run!») —
       # тесты, выключенные `cfg` по ошибке, дали бы зелёный прогон, поэтому
-      # число прошедших проверяется. `shell: bash` — ради `pipefail`: без
+      # число прошедших проверяется — у каждого из двух: окна и рамки
+      # ИИ-помощника (задача 111). `shell: bash` — ради `pipefail`: без
       # него `tee` проглотил бы код ошибки `cargo`.
-      - name: cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app
+      - name: cargo test -p kvartik-app -p kvartik-ai --target wasm32-unknown-unknown --bins
         shell: bash
         run: |
           CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver" \
-            cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app --locked 2>&1 | tee browser-tests.log
-          grep -E "test result: ok\. [1-9][0-9]* passed" browser-tests.log
+            cargo test -p kvartik-app -p kvartik-ai --target wasm32-unknown-unknown --bins --locked 2>&1 | tee browser-tests.log
+          [ "$(grep -cE "test result: ok\. [1-9][0-9]* passed" browser-tests.log)" -eq 2 ]
       # Те же тесты — в headless Firefox образа (задача 54): хранилище
       # держится на поведении движка — жива ли транзакция после `await`, где
       # приходит `QuotaExceededError`, — и поломка в одном движке прошла бы
@@ -187,13 +188,13 @@ jobs:
       # из `crates/app/webdriver.json` (раннер читает файл из каталога
       # пакета; по исходникам wasm-bindgen-cli 0.2.130, `headless.rs`).
       # Драйвер — явно, а что тесты шли в Firefox, проверяет строка раннера.
-      - name: cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app (Firefox)
+      - name: cargo test -p kvartik-app -p kvartik-ai --target wasm32-unknown-unknown --bins (Firefox)
         shell: bash
         run: |
           GECKODRIVER="$GECKOWEBDRIVER/geckodriver" \
-            cargo test -p kvartik-app --target wasm32-unknown-unknown --bin kvartik-app --locked 2>&1 | tee browser-tests-firefox.log
-          grep -q "Running headless tests in Firefox" browser-tests-firefox.log
-          grep -E "test result: ok\. [1-9][0-9]* passed" browser-tests-firefox.log
+            cargo test -p kvartik-app -p kvartik-ai --target wasm32-unknown-unknown --bins --locked 2>&1 | tee browser-tests-firefox.log
+          [ "$(grep -c "Running headless tests in Firefox" browser-tests-firefox.log)" -eq 2 ]
+          [ "$(grep -cE "test result: ok\. [1-9][0-9]* passed" browser-tests-firefox.log)" -eq 2 ]
       - run: trunk build --release
         working-directory: crates/app
       # Сборка сайта зовёт cargo и без `--locked`, и флаг туда не передать
@@ -239,6 +240,14 @@ jobs:
           path: crates/app/dist
           if-no-files-found: error
           retention-days: 1
+      # И сайт рамки ИИ-помощника — своей папкой рядом (задача 111): свой
+      # проект Pages на своём происхождении, не часть сайта программы.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist-ai
+          path: crates/app/dist-ai
+          if-no-files-found: error
+          retention-days: 1
 
   # Выкладка на Cloudflare Pages — только после зелёной проверки и только
   # тем, что она собрала (задача 50). Push в main — сайт всем; pull request
@@ -275,6 +284,10 @@ jobs:
         with:
           name: dist
           path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist-ai
+          path: dist-ai
 
       # wrangler и всё его дерево — из замка `tools/deploy/package-lock.json`,
       # каждый пакет со своей суммой. Скрипты установки не запускаются:
@@ -322,6 +335,31 @@ jobs:
           URL: ${{ steps.preview.outputs.url }}
         run: bash tools/deploy/check.sh "$URL" dist
 
+      # Рамка ИИ-помощника (задача 111) — своим проектом Pages `kvartik-ai`
+      # той же веткой: окно предпросмотра `<ветка>.kvartik.pages.dev`
+      # встраивает рамку `<ветка>.kvartik-ai.pages.dev` (`ai::frame`).
+      # Без настроек сайта программы (`PAGES_PLAIN`): ни функции, ни баз
+      # у рамки нет.
+      - name: Выкладка предпросмотра рамки
+        id: preview_ai
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAGES_PROJECT: kvartik-ai
+          PAGES_PLAIN: "1"
+          BRANCH: ${{ github.event_name == 'pull_request' && github.head_ref || 'ci-check' }}
+          COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          [ "$BRANCH" != main ] || { echo "ветка pull request — main: его выкладка стала бы рамкой всем"; exit 1; }
+          url="$(bash tools/deploy/deploy.sh "$BRANCH" dist-ai "$COMMIT")"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Предпросмотр рамки: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Проверка предпросмотра рамки
+        env:
+          URL: ${{ steps.preview_ai.outputs.url }}
+        run: bash tools/deploy/check-ai.sh "$URL" dist-ai
+
       # Сайт, который сейчас уйдёт всем, — выкладке курсов по расписанию
       # (`rates.yml`): она выкладывает ровно его с новыми курсами, без
       # пересборки. До выкладки, а не после: отменённая или упавшая после
@@ -346,6 +384,29 @@ jobs:
           path: site
           if-no-files-found: error
           retention-days: 7
+
+      # Рамка всем — раньше сайта: окно новой сборки ждёт новую рамку, а
+      # прежнее окно (из кэша service worker) с новой рамкой говорит по
+      # договору сообщений между версиями (`ai::frame`).
+      - name: Выкладка рамки всем
+        id: site_ai
+        if: github.event_name == 'push'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAGES_PROJECT: kvartik-ai
+          PAGES_PLAIN: "1"
+          COMMIT: ${{ github.sha }}
+        run: |
+          url="$(bash tools/deploy/deploy.sh main dist-ai "$COMMIT")"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Рамка: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Проверка рамки
+        if: github.event_name == 'push'
+        env:
+          URL: ${{ steps.site_ai.outputs.url }}
+        run: bash tools/deploy/check-ai.sh "$URL" dist-ai
 
       - name: Выкладка всем
         id: site
@@ -373,3 +434,8 @@ jobs:
       - name: Проверка своего домена
         if: github.event_name == 'push'
         run: bash tools/deploy/check.sh "$SITE_URL" dist
+
+      # И домена рамки: зона та же, и её настройки — те же правила.
+      - name: Проверка домена рамки
+        if: github.event_name == 'push'
+        run: bash tools/deploy/check-ai.sh https://ai.kvartik.com dist-ai

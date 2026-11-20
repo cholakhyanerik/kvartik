@@ -202,6 +202,18 @@ struct Text {
 /// Записать файл лицензий в папку программы `app`. `compiled` — `package_id`
 /// крейтов, скомпилированных в wasm. Возвращает число крейтов в файле.
 pub fn write(app: &Path, compiled: &BTreeSet<String>) -> Result<usize, String> {
+    write_checked(app, compiled, true)
+}
+
+/// Файл лицензий рамки ИИ-помощника (задача 111) в её папку `dir`: рамка
+/// раздаёт копию своего кода со своего домена, и тексты идут с ней. Её
+/// крейты — часть программы, поэтому проверку, что каждый крейт `NO_FILES`
+/// в программе есть, делает файл программы ([`write`]).
+pub fn write_part(dir: &Path, compiled: &BTreeSet<String>) -> Result<usize, String> {
+    write_checked(dir, compiled, false)
+}
+
+fn write_checked(app: &Path, compiled: &BTreeSet<String>, whole: bool) -> Result<usize, String> {
     let packages = metadata()?;
     let fonts_path = app.join(FONTS_LICENSE);
     let fonts = fs::read_to_string(&fonts_path).map_err(|error| format!("{}: {error}", fonts_path.display()))?;
@@ -209,7 +221,9 @@ pub fn write(app: &Path, compiled: &BTreeSet<String>) -> Result<usize, String> {
     for package in crates(compiled, &packages)? {
         notices.push(notice(package, &files(&package.dir)?)?);
     }
-    unused_stored(&notices)?;
+    if whole {
+        unused_stored(&notices)?;
+    }
     let text = render(env!("CARGO_PKG_VERSION"), &fonts, &notices)?;
     let path = app.join(LICENSES);
     fs::write(&path, text).map_err(|error| format!("{}: {error}", path.display()))?;

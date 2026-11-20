@@ -1,0 +1,54 @@
+[package]
+name = "kvartik-ai"
+description = "ИИ-помощник Kvartik на своём происхождении ai.kvartik.com — рамкой в окне программы"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# Рамка ИИ-помощника (задача 111): своё происхождение, свой CSP и своя запись
+# ключа — весь помощник, а окно kvartik.com встраивает его рамкой и в сеть
+# ходит только к себе (CLAUDE.md, Правило 13). Собирает её программа сборки
+# (`crates/sw/src/frame.rs`) в свою папку `dist-ai/` — свой проект Pages.
+# Новых авторов нет: все крейты — те же, что у окна, тех же версий и фич;
+# причина каждого — рядом, а размер — время первого открытия помощника
+# (Правило 1).
+[dependencies]
+# Что спросить, как прочесть ответ, сообщения окну и слова — ядро. `js` —
+# случайность `uuid` на wasm32: без неё ядро не соберётся (Правило 3).
+kvartik-core = { path = "../core", features = ["js"] }
+# Экран помощника — тот же компонент Leptos, что жил в окне до 0.0.160:
+# переписанный без Leptos был бы вторым экраном того же вида (Правило 14).
+leptos = { version = "0.8.23", features = ["csr"] }
+# Причина паники — в консоль: без хука wasm пишет только `unreachable`
+# (Правило 6).
+console_error_panic_hook = "0.1.7"
+wasm-bindgen = "0.2.130"
+# Поток ответа — `Response.body` через `Reflect`, будущее Rust из `Promise`
+# (с 0.3.106 оно в самом `js-sys`).
+js-sys = "0.3.107"
+# Фичи — ровно нужные интерфейсы: сообщения окну, запись ключа, свои цвета
+# на `<html>`, высота содержимого для рамки и запрос поставщику.
+web-sys = { version = "0.3.107", features = [
+    "CssStyleDeclaration",
+    "Document",
+    "DomRect",
+    "Element",
+    "HtmlCollection",
+    "HtmlElement",
+    "Location",
+    "MessageEvent",
+    "RequestInit",
+    "ResizeObserver",
+    "Response",
+    "Storage",
+    "Window",
+] }
+
+# Браузерные тесты рамки (`src/tests.rs`): только под wasm32, в сайт не
+# попадают. Версия `wasm-bindgen-test` — в паре с `wasm-bindgen`, как у окна
+# (Правило 3); фичи `web-sys` — поля и кнопки экрана в тестах.
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3.80"
+web-sys = { version = "0.3.107", features = ["Event", "Node", "NodeList"] }

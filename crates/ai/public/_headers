@@ -1,0 +1,35 @@
+# Заголовки рамки ИИ-помощника — своего проекта Cloudflare Pages
+# `kvartik-ai` на своём домене `ai.kvartik.com` (задача 111). Программа
+# сборки кладёт этот файл в корень папки рамки (`dist-ai/`,
+# crates/sw/src/frame.rs), а что дошло до людей, сверяет выкладка
+# (tools/deploy/check-ai.sh). Как Pages сводит правила и почему каждый
+# заголовок — в одном правиле, — шапка `crates/app/public/root/_headers`.
+#
+# CSP рамки — единственный, что пускает к поставщикам ИИ: `connect-src` —
+# свой сайт (wasm рамки) и ровно четыре адреса, куда помощник шлёт вопрос
+# человека его ключом (задача 102, решение человека 2026-11-17;
+# `kvartik_core::ai::Provider::url`, их сверяет тест `crates/ai/tests/csp.rs`):
+# с путём, а не весь сервер, — путь без `/` в конце CSP сравнивает целиком
+# (CSP3, «path-part match»), и ни файлов, ни пакетов вопросов поставщика
+# отсюда не достать. Данных программы здесь нет: у рамки своё происхождение
+# и своё хранилище (CLAUDE.md, Правило 13, «ИИ-помощник»).
+# `frame-ancestors` — встроить рамку может только окно программы и окна
+# предпросмотров (`*.kvartik.pages.dev`); а принимает рамка сообщения только
+# от окна своей пары (`kvartik_core::ai::frame::parent_origin`). Без
+# `X-Frame-Options`: он запретил бы рамку и программе.
+# `'wasm-unsafe-eval'` — без него wasm не запустится (Правило 6).
+# `form-action 'none'` — формы рамки никуда не отправляются (на каждой
+# preventDefault). Без `'unsafe-inline'`: встроенных скриптов и атрибутов
+# `style` в рамке нет.
+#
+# `Referrer-Policy: no-referrer` — ни поставщик ИИ, ни сайт закона по ссылке
+# из ответа не узнают адреса рамки.
+/*
+  Content-Security-Policy: default-src 'self'; connect-src 'self' https://api.anthropic.com/v1/messages https://api.openai.com/v1/chat/completions https://generativelanguage.googleapis.com/v1beta/openai/chat/completions https://api.x.ai/v1/chat/completions; script-src 'self' 'wasm-unsafe-eval'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors https://kvartik.com https://*.kvartik.pages.dev
+  Referrer-Policy: no-referrer
+  X-Content-Type-Options: nosniff
+
+# Файлы с хэшем в имени — на год: новая сборка — новое имя. Страница,
+# шрифты и тексты лицензий — с проверкой (по умолчанию Pages).
+/ai-*
+  Cache-Control: public, max-age=31536000, immutable

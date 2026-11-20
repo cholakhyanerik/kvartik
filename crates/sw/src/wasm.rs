@@ -125,11 +125,24 @@ pub struct Calculator {
     pub crates: BTreeSet<String>,
 }
 
+/// Имя клея и wasm рамки ИИ-помощника без хэша (задача 111): с него
+/// начинается правило долгого кэша в `_headers` рамки (`/ai-*`).
+pub const FRAME: &str = "ai";
+
 /// Собрать wasm калькулятора лендинга (задача 34) из пакета `package`
 /// в корень сайта `root`: тот же путь, что у окна, — cargo, wasm-bindgen,
 /// wasm-opt, имена с хэшем, — но без разреза: калькулятор — одна функция,
 /// и грузится он весь. Файл корня на его месте — ошибка.
 pub fn calculator(package: &str, root: &Path) -> Result<Calculator, String> {
+    page(package, root, CALC, false)
+}
+
+/// Собрать wasm без разреза из пакета `package` в папку `root` под именем
+/// `name` с хэшем — калькулятор лендинга или рамку ИИ-помощника (задача
+/// 111). `start` — дописать запуск в конец клея, как у окна: страница
+/// подключает клей модулем, а встроенного скрипта запуска CSP не пускает.
+/// Файл на месте клея или wasm — ошибка.
+pub fn page(package: &str, root: &Path, name: &str, start: bool) -> Result<Calculator, String> {
     let release = release()?;
     let bindgen = Tool::wasm_bindgen()?;
     let opt = if release {
@@ -138,23 +151,23 @@ pub fn calculator(package: &str, root: &Path) -> Result<Calculator, String> {
         None
     };
     let (raw, crates) = cargo_build(package, release)?;
-    let work = raw.parent().ok_or("у wasm нет папки")?.join(CALC);
+    let work = raw.parent().ok_or("у wasm нет папки")?.join(name);
     let _ = fs::remove_dir_all(&work);
     fs::create_dir_all(&work).map_err(|error| format!("{}: {error}", work.display()))?;
     bindgen.run(
         Command::new(&bindgen.path)
-            .args(["--target", "web", "--no-typescript", "--out-name", CALC])
+            .args(["--target", "web", "--no-typescript", "--out-name", name])
             .arg("--out-dir")
             .arg(&work)
             .arg(&raw),
     )?;
-    let glue = text(&work.join(format!("{CALC}.js")))?;
-    let stripped = work.join(format!("{CALC}-stripped.wasm"));
-    let bound = without_linking(&read(&work.join(format!("{CALC}_bg.wasm")))?)?;
+    let glue = text(&work.join(format!("{name}.js")))?;
+    let stripped = work.join(format!("{name}-stripped.wasm"));
+    let bound = without_linking(&read(&work.join(format!("{name}_bg.wasm")))?)?;
     fs::write(&stripped, bound).map_err(|error| format!("{}: {error}", stripped.display()))?;
     let wasm_path = match &opt {
         Some(opt) => {
-            let out = work.join(format!("{CALC}-opt.wasm"));
+            let out = work.join(format!("{name}-opt.wasm"));
             opt.optimize(&stripped, &out)?;
             out
         }
@@ -162,16 +175,24 @@ pub fn calculator(package: &str, root: &Path) -> Result<Calculator, String> {
     };
     let wasm = read(&wasm_path)?;
     if Module::parse(&wasm)?.imports.iter().any(|(module, _)| module == PLACEHOLDER) {
-        return Err(format!("{package}: в калькуляторе точка разреза, а его никто не режет"));
+        return Err(format!("{package}: в wasm точка разреза, а его никто не режет"));
     }
-    let (glue_plain, wasm_plain) = (format!("{CALC}.js"), format!("{CALC}_bg.wasm"));
-    let hash = digest([(glue_plain.as_str(), glue.as_bytes()), (wasm_plain.as_str(), wasm.as_slice())]);
-    let (glue_name, wasm_name) = (format!("{CALC}-{hash}.js"), format!("{CALC}-{hash}_bg.wasm"));
-    let glue = replace(&glue, &format!("'{wasm_plain}'"), &format!("'{wasm_name}'"), true)?;
+    let (glue_plain, wasm_plain) = (format!("{name}.js"), format!("{name}_bg.wasm"));
+    // Запуск входит в хэш имён: другой запуск — другой клей (как у окна).
+    let mut entries = vec![(glue_plain.as_str(), glue.as_bytes()), (wasm_plain.as_str(), wasm.as_slice())];
+    if start {
+        entries.push(("start", START.as_bytes()));
+    }
+    let hash = digest(entries);
+    let (glue_name, wasm_name) = (format!("{name}-{hash}.js"), format!("{name}-{hash}_bg.wasm"));
+    let mut glue = replace(&glue, &format!("'{wasm_plain}'"), &format!("'{wasm_name}'"), true)?;
+    if start {
+        glue = replace(&glue, GLUE_END, &format!("{GLUE_END}{}", START.replace("{wasm}", &wasm_name)), true)?;
+    }
     for (name, bytes) in [(&glue_name, glue.as_bytes()), (&wasm_name, wasm.as_slice())] {
         let path = root.join(name);
         if path.exists() {
-            return Err(format!("{}: файл корня лёг бы на калькулятор", path.display()));
+            return Err(format!("{}: файл лёг бы на клей или wasm «{name}»", path.display()));
         }
         fs::write(&path, bytes).map_err(|error| format!("{}: {error}", path.display()))?;
     }
@@ -809,7 +830,7 @@ fn with_start(page: &str, links: &Start) -> Result<String, String> {
 }
 
 /// `integrity` по SRI: SHA-384 в base64, как у Trunk.
-fn sri(bytes: &[u8]) -> String {
+pub fn sri(bytes: &[u8]) -> String {
     format!("sha384-{}", STANDARD.encode(Sha384::digest(bytes)))
 }
 

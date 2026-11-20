@@ -6,7 +6,6 @@
 //! странице и тема устройства (таблица слоёв CLAUDE.md). Бизнес-логики здесь
 //! нет: что шифровать и что сохранять, решают ядро и хранилище.
 
-pub mod ai;
 pub mod autobackup;
 pub mod clipboard;
 pub mod clock;

@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.160",
+      "date": "2026-11-20",
+      "hy": [
+        "ԱԲ օգնականն այժմ բացվում է ծրագրի ներսում՝ իր առանձին էջով. բանալին և զրույցը նրանում են, և միայն այն է դիմում ԱԲ մատակարարին, իսկ ծրագիրը՝ ձեր տվյալներով, միայն իր կայքին։ Արդեն միացված բանալին կտեղափոխվի ինքնաբերաբար։"
+      ],
+      "ru": [
+        "ИИ-помощник теперь открывается своей страницей внутри программы: ключ и разговор — в ней, и только она обращается к поставщику ИИ, а сама программа с вашими данными — только к своему сайту. Подключённый ключ переедет сам."
+      ],
+      "en": [
+        "The AI assistant now opens as its own page inside the app: the key and the conversation live there, and only it talks to the AI provider, while the app with your data talks only to its own site. A key you already connected moves over by itself."
+      ]
+    },
+    {
       "version": "0.0.159",
       "date": "2026-11-20",
       "hy": [
@@ -266,19 +279,6 @@
         "Expenses have a new seller's document: “Foreign supplier's document with all the details the law requires”. Subscriptions, hosting, advertising and software licenses count as supplied in Armenia, and an invoice with a payment isn't enough to deduct them: the form says so when a foreign supplier's document is chosen.",
         "If you recorded a subscription as “Foreign supplier's invoice and payment”, check which document you have.",
         "An expense of rent, interest, royalty or asset-sale income can now go to its row even in a quarter without that income: in the expense form, press “This is an expense of income: rent, interest, royalties or a sale of assets”. Such an expense isn't deducted."
-      ]
-    },
-    {
-      "version": "0.0.140",
-      "date": "2026-11-16",
-      "hy": [
-        "Ծրագրում ոչինչ չի փոխվել. այս տարբերակն ուղղում է մշակման ընթացքում կատարվող ստուգումներից մեկը։"
-      ],
-      "ru": [
-        "В программе ничего не изменилось: эта версия чинит одну из проверок, которые идут при разработке программы."
-      ],
-      "en": [
-        "Nothing changed in the app: this version fixes one of the checks run while the app is developed."
       ]
     }
   ]

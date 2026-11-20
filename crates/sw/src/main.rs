@@ -8,7 +8,8 @@
 //! Папку она берёт из переменной `TRUNK_STAGING_DIR`, адрес программы —
 //! из `TRUNK_PUBLIC_URL`, а остальное — из аргументов:
 //! `kvartik-sw [--root <папка> [--site <папка> --style <папка> --legal <папка>
-//! --calc <пакет>]] [--wasm <пакет>] <шаблон sw.js>`.
+//! --calc <пакет> [--ai <пакет> <папка крейта> <папка вывода>]]] [--wasm <пакет>]
+//! <шаблон sw.js>`.
 //!
 //! Программа живёт в папке сайта — `/app/`, `public_url` в `Trunk.toml`, —
 //! а корень отдан лендингу (задача 65). Trunk кладёт всё собранное в корень
@@ -22,7 +23,10 @@
 //! стили и скрипт — из `--site`, оформление окна, на котором он стоит, — из
 //! `--style`, текст — из таблицы строк ядра, юридические тексты — из
 //! утверждённых файлов в `--legal` (задача 32, `legal.rs`), а wasm
-//! калькулятора — из пакета `--calc` (`wasm::calculator`).
+//! калькулятора — из пакета `--calc` (`wasm::calculator`). С `--ai` рядом,
+//! в свою папку, ложится сайт рамки ИИ-помощника — своё происхождение
+//! `ai.kvartik.com` и свой проект Pages (задача 111, `frame.rs`): его
+//! файлов нет ни в сайте программы, ни в `sw.js`.
 //!
 //! С `--wasm` она собирает wasm пакета и вписывает его запуск в страницу,
 //! рядом кладёт тексты лицензий всего, из чего wasm собран, и шрифтов
@@ -50,6 +54,7 @@ use kvartik_core::i18n::Lang;
 use kvartik_core::release::LICENSES;
 use kvartik_core::tax::calendar;
 
+mod frame;
 mod landing;
 mod legal;
 mod licenses;
@@ -91,6 +96,7 @@ fn run() -> Result<String, String> {
     let app = app_folder(&public_url)?;
     let (mut root, mut package, mut template_path) = (None, None, None);
     let (mut site, mut style, mut legal, mut calc) = (None, None, None, None);
+    let mut ai = None;
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -99,6 +105,12 @@ fn run() -> Result<String, String> {
             "--style" => style = Some(PathBuf::from(args.next().ok_or("после --style ожидалась папка")?)),
             "--legal" => legal = Some(PathBuf::from(args.next().ok_or("после --legal ожидалась папка")?)),
             "--calc" => calc = Some(args.next().ok_or("после --calc ожидалось имя пакета")?),
+            "--ai" => {
+                let package = args.next().ok_or("после --ai ожидалось имя пакета")?;
+                let dir = PathBuf::from(args.next().ok_or("после пакета --ai ожидалась папка крейта")?);
+                let out = PathBuf::from(args.next().ok_or("после папки крейта --ai ожидалась папка вывода")?);
+                ai = Some((package, dir, out));
+            }
             "--wasm" => package = Some(args.next().ok_or("после --wasm ожидалось имя пакета")?),
             _ if template_path.is_none() => template_path = Some(PathBuf::from(arg)),
             _ => return Err(format!("лишний аргумент «{arg}»")),
@@ -132,6 +144,16 @@ fn run() -> Result<String, String> {
         }
         None => String::new(),
     };
+    // Рамка ИИ-помощника — своей папкой рядом (задача 111): оформление то же,
+    // что у окна, а шрифты — файлы окна (`public/fonts` от папки Trunk.toml).
+    let frame = match (&ai, &style) {
+        (Some((package, dir, out)), Some(style)) => {
+            let built = frame::write(out, package, dir, style, Path::new("public/fonts"))?;
+            format!(", рамка помощника {} в {}, крейтов в её {LICENSES}: {}", built.module, out.display(), built.crates)
+        }
+        (Some(_), None) => return Err("--ai идёт вместе с --style".to_owned()),
+        (None, _) => String::new(),
+    };
     let app_dir = staging.join(app);
     let wasm = match &package {
         Some(package) => {
@@ -156,7 +178,7 @@ fn run() -> Result<String, String> {
     let output = app_dir.join(OUTPUT);
     fs::write(&output, sw).map_err(|error| format!("{}: {error}", output.display()))?;
     Ok(format!(
-        "kvartik-sw: сборка {build}, программа в {public_url}, файлов в кэше {}{wasm}{site}",
+        "kvartik-sw: сборка {build}, программа в {public_url}, файлов в кэше {}{wasm}{site}{frame}",
         precached(&files, app).count() + 1
     ))
 }

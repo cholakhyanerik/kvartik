@@ -1,9 +1,10 @@
 //! CSP сайта (`public/root/_headers`) пускает запросы окна только к своему
-//! сайту и к четырём адресам ИИ-помощника (задача 102): ровно тем, куда
-//! ядро шлёт вопрос (`kvartik_core::ai::Provider::url`), — с путём, не весь
-//! сервер и без звёздочек. Новый адрес поставщика без правки CSP браузер
-//! отверг бы молча, а лишний адрес в CSP — дверь наружу мимо ИИ-помощника
-//! (CLAUDE.md, Правило 13).
+//! сайту, а рамку — только рамку ИИ-помощника на её происхождении
+//! (задача 111): `ai.kvartik.com` и рамки предпросмотров — те, что ядро
+//! ставит окну в пару (`kvartik_core::ai::frame::frame_origin`). Адрес
+//! поставщика ИИ в CSP окна — снова дверь наружу для данных человека
+//! (CLAUDE.md, Правило 13, «ИИ-помощник»); к поставщикам пускает только CSP
+//! рамки (`crates/ai/tests/csp.rs`).
 //!
 //! Тест машинный: читает файл с диска. Под wasm32 его нет — там нечего
 //! читать.
@@ -14,6 +15,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use kvartik_core::ai::Provider;
+use kvartik_core::ai::frame;
 
 /// Строка CSP у правила `/*` — единственная в файле (шапка `_headers`).
 fn policy() -> String {
@@ -36,22 +38,42 @@ fn directive(policy: &str, name: &str) -> Option<Vec<String>> {
 }
 
 #[test]
-fn connect_src_is_own_site_and_the_four_ai_addresses() {
+fn requests_go_only_to_the_own_site() {
     let policy = policy();
-    let connect: BTreeSet<String> = directive(&policy, "connect-src")
-        .expect("в CSP есть connect-src")
+    // Без `connect-src` действует `default-src` — свой сайт; есть — тоже
+    // только он.
+    let connect = directive(&policy, "connect-src").unwrap_or_else(|| vec!["'self'".to_owned()]);
+    assert_eq!(connect, vec!["'self'".to_owned()], "connect-src окна — только свой сайт");
+    let mut failures = Vec::new();
+    for provider in Provider::ALL {
+        let host = provider.url().trim_start_matches("https://").split('/').next().unwrap_or_default();
+        if policy.contains(host) {
+            failures.push(format!("в CSP окна адрес поставщика {host}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn the_only_frame_is_the_assistant_of_its_pair() {
+    let policy = policy();
+    let frames: BTreeSet<String> = directive(&policy, "frame-src")
+        .expect("в CSP окна есть frame-src")
         .into_iter()
         .collect();
-    let mut want: BTreeSet<String> = Provider::ALL.into_iter().map(|provider| provider.url().to_owned()).collect();
-    want.insert("'self'".to_owned());
-    assert_eq!(connect, want, "connect-src в _headers и адреса ai::Provider::url");
-    let loose: Vec<&String> = connect
-        .iter()
-        .filter(|source| {
-            source.contains('*') || (source.starts_with("https://") && source.trim_start_matches("https://").split_once('/').is_none_or(|(_, path)| path.is_empty() || path.ends_with('/')))
-        })
+    let want: BTreeSet<String> = ["https://ai.kvartik.com", "https://*.kvartik-ai.pages.dev"]
+        .into_iter()
+        .map(str::to_owned)
         .collect();
-    assert!(loose.is_empty(), "адрес без точного пути пускает весь сервер: {loose:?}");
+    assert_eq!(frames, want, "frame-src окна");
+    // Те же адреса, что пара ядра: своему домену — рамка своего домена,
+    // предпросмотру — рамка той же ветки.
+    assert_eq!(frame::frame_origin("kvartik.com").as_deref(), Some("https://ai.kvartik.com"));
+    let preview = frame::frame_origin("ci-check.kvartik.pages.dev").unwrap_or_default();
+    assert!(
+        preview.starts_with("https://") && preview.ends_with(".kvartik-ai.pages.dev"),
+        "рамка предпросмотра {preview} — вне frame-src"
+    );
 }
 
 #[test]

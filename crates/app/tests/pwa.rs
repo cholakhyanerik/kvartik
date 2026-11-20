@@ -258,7 +258,8 @@ fn page_links_the_manifest_and_icons() {
     );
 }
 
-/// Раскладку сайта, лендинг, wasm окна и `sw.js` собирает хук сборки
+/// Раскладку сайта, лендинг, wasm окна, `sw.js` и рядом сайт рамки
+/// ИИ-помощника (задача 111) собирает хук сборки
 /// (`Trunk.toml`), а не Trunk. Шаблон service worker лежит там, откуда его
 /// берёт хук, и сам в сайт не копируется: в сайте должен оказаться только
 /// `sw.js`, написанный `kvartik-sw`, — шаблон с `"dev"` выключил бы
@@ -271,13 +272,17 @@ fn wasm_and_service_worker_go_through_the_hook() {
     let trunk = fs::read_to_string(app_dir().join("Trunk.toml")).expect("Trunk.toml читается");
     assert!(
         trunk.contains(
-            r#"command_arguments = ["run", "--quiet", "--package", "kvartik-sw", "--", "--root", "public/root", "--site", "site", "--style", "style", "--legal", "../../docs/legal", "--calc", "kvartik-calc", "--wasm", "kvartik-app", "public/sw.js"]"#
+            r#"command_arguments = ["run", "--quiet", "--package", "kvartik-sw", "--", "--root", "public/root", "--site", "site", "--style", "style", "--legal", "../../docs/legal", "--calc", "kvartik-calc", "--ai", "kvartik-ai", "../ai", "dist-ai", "--wasm", "kvartik-app", "public/sw.js"]"#
         ),
         "хук kvartik-sw в Trunk.toml не найден"
     );
     assert!(app_dir().join("public/sw.js").is_file());
     for source in ["site/landing.css", "site/landing.js", "style/tokens.css", "style/fonts.css", "../../docs/legal/terms.ru.md"] {
         assert!(app_dir().join(source).is_file(), "нет {source}: лендинг из него собирается");
+    }
+    // Рамка ИИ-помощника (задача 111) — своей папкой рядом с сайтом.
+    for source in ["../ai/public/_headers", "../ai/style/frame.css", "style/base.css", "public/fonts/OFL.txt"] {
+        assert!(app_dir().join(source).is_file(), "нет {source}: рамка помощника из него собирается");
     }
     let page = fs::read_to_string(app_dir().join("index.html")).expect("index.html читается");
     assert!(

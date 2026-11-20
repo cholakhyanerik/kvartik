@@ -1052,5 +1052,7 @@ pub fn about_me(lang: Lang, profile: &ProfileData, today: Date) -> String {
     lines.join("\n- ")
 }
 
+pub mod frame;
+
 #[cfg(test)]
 mod tests;

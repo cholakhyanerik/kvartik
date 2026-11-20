@@ -2652,6 +2652,19 @@ ul.gives > li + li {
   margin-top: var(--space-4);
 }
 
+/* Сам помощник — рамкой своего происхождения (`ai.kvartik.com`, задача
+   111): классы ниже `.ai-…` берёт и она — это `base.css` и в её оформлении.
+   Высоту рамки окно ставит по её слову (CSSOM), а до первого слова её не
+   видно. Шире экрана на поле с каждой стороны: поле внутри рамки — под
+   кольцо фокуса у края (`crates/ai/style/frame.css`). */
+.ai-frame {
+  display: block;
+  width: calc(100% + 2 * var(--space-2));
+  height: 0;
+  margin-inline: calc(-1 * var(--space-2));
+  border: 0;
+}
+
 .ai-setup,
 .ai-key,
 .ai-ask {

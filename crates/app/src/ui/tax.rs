@@ -45,7 +45,7 @@ use leptos::prelude::*;
 
 use super::about::AboutPage;
 use super::annual::{AnnualCard, AnnualEntry, AnnualPage};
-use super::assistant::{AssistantEntry, AssistantPage};
+use super::assistant::{AssistantEntry, AssistantFrame};
 use super::deadlines::{ApplicationCard, DeadlineReminder, DeadlinesEntry, DeadlinesPage};
 use super::backup::{AutoCards, BackupChip, Backups};
 use super::documents::{Documents, SettlementReminder};
@@ -665,7 +665,7 @@ pub(super) fn content(ctx: Ctx, part: Part) -> AnyView {
         Part::Report => view! { <ReportPage ctx /> }.into_any(),
         Part::License => view! { <LicensePage ctx /> }.into_any(),
         Part::About => view! { <AboutPage ctx /> }.into_any(),
-        Part::Assistant(router) => view! { <AssistantPage ctx router /> }.into_any(),
+        Part::Assistant(router) => view! { <AssistantFrame ctx router /> }.into_any(),
     }
 }
 
