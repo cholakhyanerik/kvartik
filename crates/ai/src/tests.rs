@@ -465,6 +465,11 @@ async fn the_window_gives_language_day_colors_and_my_data() {
     if surface.trim() != "#1a1b1c" {
         wrong.push(format!("свой цвет окна у <html>: «{surface}»"));
     }
+    // «Мои данные», о которых рамка не просила, — мимо поля вопроса.
+    inbox.take(ToFrame::Me { text: "Unasked".to_owned() });
+    if inbox.incoming.get_untracked().is_some() {
+        wrong.push("рамка взяла «мои данные», о которых не просила".to_owned());
+    }
     if !press_when_ready(&host, t(Lang::En, Key::AiAddMe)).await {
         wrong.push("нет «Add my details» с профилем окна".to_owned());
     }
@@ -476,6 +481,11 @@ async fn the_window_gives_language_day_colors_and_my_data() {
     });
     if !until(|| value(&host, t(Lang::En, Key::AiQuestion), "textarea").as_deref() == Some("Regime: turnover tax")).await {
         wrong.push("«мои данные» окна не встали в поле".to_owned());
+    }
+    // Ответ — один на нажатие: второй — мимо.
+    inbox.take(ToFrame::Me { text: "Again".to_owned() });
+    if inbox.incoming.get_untracked().is_some() {
+        wrong.push("рамка взяла «мои данные» второй раз на одно нажатие".to_owned());
     }
     plan(&format!(r#"{{"status":200,"chunks":{}}}"#, claude_chunks(true)));
     press_when_ready(&host, t(Lang::En, Key::AiAsk)).await;
@@ -497,35 +507,47 @@ async fn the_window_gives_language_day_colors_and_my_data() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
-/// Ключ, подключённый в 0.0.158 ещё в окне, переезжает в рамку один раз:
-/// рамка его запоминает и говорит окну стереть свой; а свой ключ рамки
-/// важнее — второй от окна его не заменяет.
+/// Ключ у рамки — только вписанный в ней: ключ от окна 0.0.160 (`setup`)
+/// она пропускает, а сохранённый в другой её вкладке берёт, когда к ней
+/// возвращаются, — и пустая форма закрывается, как после «Сохранить».
 #[wasm_bindgen_test]
-async fn a_key_from_the_window_moves_in_once_and_the_frames_own_stays() {
+async fn a_key_comes_only_from_the_frame_itself() {
     bridge::reset();
     store::clear();
     let (host, inbox, mounted) = mount(Lang::Ru);
     let mut wrong = Vec::new();
-    let old = Setup::new(Provider::Claude, "sk-ant-old-9999", "").expect("годится");
-    inbox.take(ToFrame::Setup { text: old.to_text() });
-    if store::stored().as_ref() != Some(&old) {
-        wrong.push(format!("ключ окна не встал в рамку: {:?}", store::stored()));
+    if !wait_for(&host, t(Lang::Ru, Key::AiAbout)).await {
+        wrong.push("экран не встал".to_owned());
     }
-    if !said(&FromFrame::SetupTaken) {
-        wrong.push("окну не сказано стереть свой ключ".to_owned());
+    let planted = Setup::new(Provider::ChatGpt, "sk-proj-planted-1111", "").expect("годится");
+    let text = JSON::stringify(&JsValue::from_str(&planted.to_text()))
+        .ok()
+        .and_then(|text| text.as_string())
+        .unwrap_or_default();
+    match ToFrame::parse(&format!(r#"{{"kind":"setup","text":{text}}}"#)) {
+        Some(message) => inbox.take(message),
+        None => wrong.push("ключ окна 0.0.160 не разобран".to_owned()),
     }
+    if store::stored().is_some() {
+        wrong.push(format!("ключ от окна встал в рамку: {:?}", store::stored()));
+    }
+    // Другая вкладка рамки сохранила ключ — эта берёт его, когда к ней
+    // возвращаются.
+    let mine = Setup::new(Provider::Claude, "sk-ant-mine-9999", "").expect("годится");
+    store::save(&mine);
+    let _ = window().dispatch_event(&web_sys::Event::new("focus").expect("событие создаётся"));
     let connected = fill(t(Lang::Ru, Key::AiConnected), &["Claude", "claude-opus-5-5", "9999"]);
     if !wait_for(&host, &connected).await {
-        wrong.push(format!("нет строки «{connected}»"));
+        wrong.push(format!("ключ другой вкладки не закрыл форму: нет строки «{connected}»"));
     }
-    bridge::reset();
-    let other = Setup::new(Provider::ChatGpt, "sk-proj-other-1111", "").expect("годится");
-    inbox.take(ToFrame::Setup { text: other.to_text() });
-    if store::stored().as_ref() != Some(&old) {
-        wrong.push(format!("второй ключ окна заменил свой ключ рамки: {:?}", store::stored()));
-    }
-    if !said(&FromFrame::SetupTaken) {
-        wrong.push("о втором ключе окну не сказано стереть".to_owned());
+    if !until(|| {
+        said(&FromFrame::Connected {
+            provider: Some("claude".to_owned()),
+        })
+    })
+    .await
+    {
+        wrong.push("окну не сказано, какой ИИ подключён".to_owned());
     }
     drop(mounted);
     host.remove();

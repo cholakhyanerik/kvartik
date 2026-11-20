@@ -1,16 +1,29 @@
 {
   "notes": [
     {
+      "version": "0.0.161",
+      "date": "2026-11-20",
+      "hy": [
+        "Եթե ԱԲ օգնականը կրկին բանալի է խնդրում, մուտքագրեք այն նորից. ծրագիրն այլևս ինքը չի փոխանցում բանալին օգնականին, ուստի ծրագրի ոչ մի կոդ չի կարող նրան ուրիշի բանալի տալ։"
+      ],
+      "ru": [
+        "Если ИИ-помощник снова просит ключ, впишите его заново: программа больше не передаёт помощнику ключ сама, поэтому никакой её код не подставит ему чужой ключ."
+      ],
+      "en": [
+        "If the AI assistant asks for your key again, enter it once more: the app no longer hands the key to the assistant itself, so no code in the app can slip it someone else's key."
+      ]
+    },
+    {
       "version": "0.0.160",
       "date": "2026-11-20",
       "hy": [
-        "ԱԲ օգնականն այժմ բացվում է ծրագրի ներսում՝ իր առանձին էջով. բանալին և զրույցը նրանում են, և միայն այն է դիմում ԱԲ մատակարարին, իսկ ծրագիրը՝ ձեր տվյալներով, միայն իր կայքին։ Արդեն միացված բանալին կտեղափոխվի ինքնաբերաբար։"
+        "ԱԲ օգնականն այժմ բացվում է ծրագրի ներսում՝ իր առանձին էջով. բանալին և զրույցը նրանում են, և միայն այն է դիմում ԱԲ մատակարարին, իսկ ծրագիրը՝ ձեր տվյալներով, միայն իր կայքին։"
       ],
       "ru": [
-        "ИИ-помощник теперь открывается своей страницей внутри программы: ключ и разговор — в ней, и только она обращается к поставщику ИИ, а сама программа с вашими данными — только к своему сайту. Подключённый ключ переедет сам."
+        "ИИ-помощник теперь открывается своей страницей внутри программы: ключ и разговор — в ней, и только она обращается к поставщику ИИ, а сама программа с вашими данными — только к своему сайту."
       ],
       "en": [
-        "The AI assistant now opens as its own page inside the app: the key and the conversation live there, and only it talks to the AI provider, while the app with your data talks only to its own site. A key you already connected moves over by itself."
+        "The AI assistant now opens as its own page inside the app: the key and the conversation live there, and only it talks to the AI provider, while the app with your data talks only to its own site."
       ]
     },
     {
@@ -260,25 +273,6 @@
       ],
       "en": [
         "The app opens faster the first time: the “Backup” screen loads only when you open it. Everything on the screen stays as it was."
-      ]
-    },
-    {
-      "version": "0.0.141",
-      "date": "2026-11-17",
-      "hy": [
-        "Ծախսի համար նոր փաստաթուղթ՝ «Օտարերկրյա մատակարարի փաստաթուղթ՝ օրենքով պահանջվող բոլոր տվյալներով»։ Բաժանորդագրությունները, հոսթինգը, գովազդը և ծրագրերի լիցենզիաները համարվում են ՀՀ-ում մատուցված, և դրանց նվազեցման համար հաշիվն ու վճարումը բավարար չեն. ձևը դա ասում է, երբ ընտրված է օտարերկրյա մատակարարի փաստաթուղթը։",
-        "Եթե բաժանորդագրությունը գրանցել եք «Օտարերկրյա մատակարարի հաշիվ և վճարում»-ով, ստուգեք, թե ինչ փաստաթուղթ ունեք։",
-        "Վարձակալական վճարի, տոկոսի, ռոյալթիի կամ ակտիվների օտարման եկամտի ծախսը կարելի է վերագրել նրա տողին նաև այն եռամսյակում, որտեղ այդ եկամուտը չկա. ծախսի ձևում սեղմեք «Սա եկամտի ծախս է՝ վարձակալական վճար, տոկոս, ռոյալթի կամ ակտիվների օտարում»։ Այդ ծախսը չի նվազեցվում։"
-      ],
-      "ru": [
-        "У расхода — новый документ продавца «Документ иностранного поставщика со всеми данными по закону». Подписки, хостинг, реклама и лицензии на программы считаются оказанными в Армении, и счёта с платежом для их вычета мало: форма говорит это, когда выбран документ иностранного поставщика.",
-        "Если подписку вы записали «Счётом иностранного поставщика и платежом», проверьте, какой у вас документ.",
-        "Расход дохода от аренды, процентов, роялти или продажи имущества можно отнести к его строке и в квартале, где самого дохода нет: в форме расхода нажмите «Это расход дохода: аренда, проценты, роялти или продажа имущества». Такой расход не вычитается."
-      ],
-      "en": [
-        "Expenses have a new seller's document: “Foreign supplier's document with all the details the law requires”. Subscriptions, hosting, advertising and software licenses count as supplied in Armenia, and an invoice with a payment isn't enough to deduct them: the form says so when a foreign supplier's document is chosen.",
-        "If you recorded a subscription as “Foreign supplier's invoice and payment”, check which document you have.",
-        "An expense of rent, interest, royalty or asset-sale income can now go to its row even in a quarter without that income: in the expense form, press “This is an expense of income: rent, interest, royalties or a sale of assets”. Such an expense isn't deducted."
       ]
     }
   ]

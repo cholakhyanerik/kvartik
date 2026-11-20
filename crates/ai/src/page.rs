@@ -31,8 +31,8 @@ use crate::store;
 const MAX_ERROR_BYTES: usize = 16 * 1024;
 
 thread_local! {
-    /// Подключённый ИИ — сигналом: его меняют экран и ключ, пришедший от
-    /// окна (`bridge`).
+    /// Подключённый ИИ — сигналом: его меняют экран и запись рамки,
+    /// сменённая в другой вкладке.
     static SETUP: ArcRwSignal<Option<Setup>> = ArcRwSignal::new(store::stored());
 }
 
@@ -48,7 +48,7 @@ fn connected_untracked() -> Option<Setup> {
 
 /// Сигнал — к записи, только когда она другая: запись того же будила бы
 /// всех, кто за ним следит (CLAUDE.md, Правило 2, «Общий сигнал»).
-pub fn follow(next: Option<Setup>) {
+fn follow(next: Option<Setup>) {
     SETUP.with(|shared| {
         if shared.get_untracked() != next {
             shared.set(next);
@@ -259,11 +259,10 @@ pub fn Page(inbox: Inbox) -> impl IntoView {
     let model = RwSignal::new(start.as_ref().map_or_else(|| Provider::Claude.model().to_owned(), |setup| setup.model.clone()));
     let key = RwSignal::new(String::new());
     let tried = RwSignal::new(false);
-    // Ключ пришёл не из этой формы — от окна (ключ 0.0.158) или из другой
-    // вкладки, — а в форму ничего не вписано: она закрывается, как после
-    // «Сохранить» (найдено браузерным тестом переезда, задача 111). Прежнее —
-    // с создания экрана: эффект впервые идёт следующей задачей, и ключ,
-    // пришедший до неё, он иначе принял бы за бывший всегда.
+    // Ключ пришёл не из этой формы — из другой вкладки, — а в форму ничего
+    // не вписано: она закрывается, как после «Сохранить» (задача 111).
+    // Прежнее — с создания экрана: эффект впервые идёт следующей задачей,
+    // и ключ, пришедший до неё, он иначе принял бы за бывший всегда.
     let had = start.is_some();
     Effect::new(move |was: Option<bool>| {
         let now = connected().is_some();
@@ -447,8 +446,9 @@ pub fn Page(inbox: Inbox) -> impl IntoView {
         });
     };
     // «Мои данные» знает окно — у него профиль: рамка просит их нажатием
-    // и вписывает в поле, когда они пришли, — до отправки их видно.
-    let add_me = move || bridge::post(&FromFrame::WantMe);
+    // и вписывает в поле, когда они пришли, — до отправки их видно, а без
+    // просьбы ответа окна не берёт (`Inbox::want_me`).
+    let add_me = move || inbox.want_me();
     Effect::new(move |_| {
         let Some(words) = inbox.incoming.get() else {
             return;

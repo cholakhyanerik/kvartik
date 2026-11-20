@@ -284,8 +284,8 @@ async function settings(page) {
 /// после того, как браузер сверил его с CSP, и получает поток SSE, как от
 /// Anthropic. Предварительный запрос CORS (`OPTIONS`) — подменой: Chrome
 /// показывает его перехвату (по протоколу DevTools, «Fetch.requestPaused»).
-/// Что проверяется: ключ 0.0.158 из окна переезжает в рамку и в окне
-/// стирается; ответ встаёт в рамке со ссылкой цветом программы; запрос несёт
+/// Что проверяется: ключ 0.0.158 окно стирает, а рамке не отдаёт, и ключ
+/// вписывают в самой рамке; ответ встаёт в рамке со ссылкой цветом программы; запрос несёт
 /// ключ, версию API и вопрос; CSP рамки не пускает другой путь поставщика
 /// и чужой адрес, а CSP окна — и самого поставщика: дверь из окна закрыта;
 /// «Убрать ключ» стирает ключ в рамке, и строка налога это знает; рамка,
@@ -391,7 +391,7 @@ async function assistant(browser) {
     // устройства `kvartik.com`.
     await page.go(`${SITE}/app/`);
     await page.eval(`localStorage.setItem("kvartik.lang", ${JSON.stringify(opt.lang)});
-      localStorage.setItem("kvartik.ai", JSON.stringify({ provider: "claude", key: "sk-ant-check-0123abcd", model: "claude-opus-5-5" }));
+      localStorage.setItem("kvartik.ai", JSON.stringify({ provider: "claude", key: "sk-ant-old-0000", model: "claude-opus-5-5" }));
       return true;`);
     // С `/app/` на `/app/#/ask` — переход внутри документа, без запуска:
     // окно не прочло бы записанное. Поэтому — через пустую страницу.
@@ -402,11 +402,20 @@ async function assistant(browser) {
     checks.check("ИИ-помощник: рамка — на языке окна", await inFrameWait(page,
       `return document.documentElement.lang === ${JSON.stringify(opt.lang === "hy" ? "hy" : opt.lang)}
         && document.body.innerText.includes(${JSON.stringify(s("AiAbout"))}) ? true : null;`));
+    // Ключ у рамки — только вписанный в ней (с 0.0.161).
+    checks.check("ИИ-помощник: ключ 0.0.158 окно стёрло, а рамке не отдало",
+      await page.waitFor(`return localStorage.getItem("kvartik.ai") === null ? true : null;`)
+      && await inFrameWait(page, `return document.querySelector(".ai-setup input")
+        && localStorage.getItem("kvartik.ai") === null ? true : null;`));
     const connected = t("AiConnected", opt.lang).replace("{}", "Claude").replace("{}", "claude-opus-5-5").replace("{}", "abcd");
-    checks.check("ИИ-помощник: ключ 0.0.158 переехал из окна в рамку",
-      await inFrameWait(page, `return document.body.innerText.includes(${JSON.stringify(connected)})
+    checks.check("ИИ-помощник: ключ вписан и сохранён в рамке, а строка налога это знает",
+      await inFrame(page, FRAME_TYPE(s("AiKey"), "sk-ant-check-0123abcd")) === true
+      && await inFrameWait(page, `const b = [...document.querySelectorAll("button")]
+        .find((b) => b.textContent.trim() === ${JSON.stringify(s("AiSave"))});
+        if (!b || b.disabled) return null; b.click(); return true;`)
+      && await inFrameWait(page, `return document.body.innerText.includes(${JSON.stringify(connected)})
         && JSON.parse(localStorage.getItem("kvartik.ai") ?? "{}").key === "sk-ant-check-0123abcd" ? true : null;`)
-      && await page.waitFor(`return localStorage.getItem("kvartik.ai") === null && localStorage.getItem("kvartik.ai_by") === "claude" ? true : null;`));
+      && await page.waitFor(`return localStorage.getItem("kvartik.ai_by") === "claude" ? true : null;`));
     checks.check("ИИ-помощник: вопрос вписан в рамке", await inFrame(page, FRAME_TYPE(s("AiQuestion"), "Когда срок расчёта за IV квартал?")) === true);
     // Кнопку включает привязка поля своей задачей — ждать её, а не паузу.
     checks.check("ИИ-помощник: «Спросить»", await inFrameWait(page, `const b = [...document.querySelectorAll("button")]

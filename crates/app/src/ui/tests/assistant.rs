@@ -68,9 +68,9 @@ fn say(window: &JsValue, text: &str) {
     run_in(window, "text", "parent.postMessage(text, '*');", &[JsValue::from_str(text)]);
 }
 
-/// Рамка встаёт, окно говорит ей язык и день и отдаёт ключ 0.0.158; на
-/// «запомнила» — стирает свой, на «подключён Gemini» — пишет это строкой
-/// экрана налога, на высоту — растит рамку; сообщение не из рамки — мимо.
+/// Рамка встаёт, окно говорит ей язык и день, а ключ 0.0.158 стирает и рамке
+/// не отдаёт; на «подключён Gemini» — пишет это строкой экрана налога, на
+/// высоту — растит рамку; сообщение не из рамки — мимо.
 #[wasm_bindgen_test]
 async fn the_assistant_is_a_frame_of_its_own_origin_and_the_window_answers_it() {
     let lang = Lang::Ru;
@@ -117,15 +117,11 @@ async fn the_assistant_is_a_frame_of_its_own_origin_and_the_window_answers_it() 
     {
         wrong.push(format!("рамка не получила состояние окна: {}", got(&window)));
     }
-    if !until(|| got(&window).contains("sk-ant-old-1")).await {
-        wrong.push("ключ 0.0.158 не ушёл рамке".to_owned());
+    if device.ai().is_some() {
+        wrong.push("ключ 0.0.158 остался в окне".to_owned());
     }
     if !until(|| !host.text_content().unwrap_or_default().contains(t(lang, Key::PartLoading))).await {
         wrong.push("встала рамка, а «Загрузка…» осталась".to_owned());
-    }
-    say(&window, r#"{"kind":"setup_taken"}"#);
-    if !until(|| device.ai().is_none()).await {
-        wrong.push("запомнила рамка ключ, а окно своего не стёрло".to_owned());
     }
     say(&window, r#"{"kind":"connected","provider":"gemini"}"#);
     if !until(|| device.ai_by().as_deref() == Some("gemini")).await {
@@ -134,6 +130,11 @@ async fn the_assistant_is_a_frame_of_its_own_origin_and_the_window_answers_it() 
     say(&window, r#"{"kind":"height","px":640}"#);
     if !until(|| element.style().get_property_value("height").ok().as_deref() == Some("640px")).await {
         wrong.push(format!("высота рамки — {:?}", element.style().get_property_value("height")));
+    }
+    // Всё, что окно послало рамке до высоты, к ней уже пришло: ключа среди
+    // этого нет.
+    if got(&window).contains("sk-ant-old-1") {
+        wrong.push(format!("ключ 0.0.158 ушёл рамке: {}", got(&window)));
     }
     // Сообщение не от рамки — от самого окна — мимо, сколько бы оно ни
     // называло себя рамкой.

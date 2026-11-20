@@ -119,9 +119,7 @@ fn wire_format_is_the_contract() {
             .to_text(),
             r#"{"kind":"connected","provider":"gemini"}"#,
         ),
-        (FromFrame::SetupTaken.to_text(), r#"{"kind":"setup_taken"}"#),
         (ToFrame::Me { text: "ԱՁ".to_owned() }.to_text(), r#"{"kind":"me","text":"ԱՁ"}"#),
-        (ToFrame::Setup { text: "{}".to_owned() }.to_text(), r#"{"kind":"setup","text":"{}"}"#),
         (
             ToFrame::state(Lang::En, Date::new(2026, 1, 2), false, None).to_text(),
             r#"{"kind":"state","lang":"en","today":"2026-01-02","me":false,"colors":null}"#,
@@ -162,6 +160,20 @@ fn messages_of_a_newer_version_are_read_or_skipped() {
     );
 }
 
+/// Ключа окно рамке не передаёт ничем (с 0.0.161): ключ от окна 0.0.160 и
+/// «запомнила» рамки 0.0.160 — незнакомые виды, и обе стороны их пропускают.
+/// Вернуть их — снова дать заражённому коду окна подставить рамке ключ
+/// злоумышленника (шапка модуля).
+#[test]
+fn the_window_has_no_way_to_hand_the_frame_a_key() {
+    let key = r#"{\"provider\":\"chatgpt\",\"key\":\"sk-proj-planted-1\",\"model\":\"gpt-5.5\"}"#;
+    assert_eq!(
+        ToFrame::parse(&format!(r#"{{"kind":"setup","text":"{key}"}}"#)),
+        Some(ToFrame::Unknown)
+    );
+    assert_eq!(FromFrame::parse(r#"{"kind":"setup_taken"}"#), Some(FromFrame::Unknown));
+}
+
 #[test]
 fn foreign_input_is_bounded_and_checked() {
     let long = "я".repeat(MAX_QUESTION_CHARS + 1);
@@ -186,7 +198,6 @@ fn foreign_input_is_bounded_and_checked() {
         ("чужой язык", r#"{"kind":"state","lang":"de"}"#.to_owned()),
         ("не день", r#"{"kind":"state","lang":"ru","today":"2026-13-01"}"#.to_owned()),
         ("«мои данные» длиннее вопроса", ToFrame::Me { text: long }.to_text()),
-        ("запись ключа длиннее предела", ToFrame::Setup { text: "k".repeat(MAX_SETUP_BYTES + 1) }.to_text()),
         ("цвет словом", with(vec![("--surface", "red")])),
         ("цвет короче", with(vec![("--surface", "#12345")])),
         ("цвет с альфой", with(vec![("--surface", "#12345678")])),

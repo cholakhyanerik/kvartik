@@ -7,7 +7,9 @@
 //!
 //! Окно рамке не командует: оно сообщает ей язык, сегодняшний день, есть ли
 //! профиль и свои цвета, а по её просьбе — текст «моих данных» (`ai::about_me`,
-//! из профиля и кодов: поэтому рамка — из части книги, как налог). Рамка
+//! из профиля и кодов: поэтому рамка — из части книги, как налог). Ключа окно
+//! рамке не передаёт: ключ, подключённый в 0.0.158 ещё в окне, оно стирает,
+//! и его вписывают в рамке заново (с 0.0.161; шапка `ai::frame`). Рамка
 //! окну — что начато в ней (новая версия ждёт), свою высоту и какой ИИ
 //! подключён. Сообщения и пары происхождений — ядро (`ai::frame`): от рамки
 //! окно принимает только её окно (`event.source`) с её происхождения.
@@ -187,6 +189,9 @@ fn online() -> bool {
 #[component]
 pub fn AssistantFrame(ctx: tax::Ctx, router: Router) -> impl IntoView {
     let lang = ctx.lang;
+    // Ключ 0.0.158 окну больше ни к чему: рамка его не берёт, а в окне его
+    // прочёл бы любой код программы.
+    Device::new().clear_ai();
     let Some(origin) = origin() else {
         return view! { <p>{tr(lang, Key::AiFrameAlone)}</p> }.into_any();
     };
@@ -224,10 +229,6 @@ pub fn AssistantFrame(ctx: tax::Ctx, router: Router) -> impl IntoView {
                 FromFrame::Ready => {
                     load.set(Load::Ready);
                     state();
-                    // Ключ 0.0.158 — рамке: запомнив его, она скажет стереть.
-                    if let Some(text) = Device::new().ai() {
-                        send(&frame, &origin, &ToFrame::Setup { text });
-                    }
                 }
                 FromFrame::Busy { busy: now, talk: talking } => {
                     if busy.get_untracked() != now {
@@ -251,9 +252,6 @@ pub fn AssistantFrame(ctx: tax::Ctx, router: Router) -> impl IntoView {
                     let by = provider.as_deref().and_then(Provider::from_code);
                     Device::new().set_ai_by(by.map(Provider::code));
                     follow_by(by);
-                }
-                FromFrame::SetupTaken => {
-                    Device::new().clear_ai();
                 }
                 FromFrame::Unknown => {}
             }

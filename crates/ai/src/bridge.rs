@@ -7,12 +7,13 @@
 //! только `kvartik.com` и предпросмотры (`frame-ancestors`), — не услышит
 //! и не скажет ничего. Окно рамке не командует: поставщику уходит только то,
 //! что человек отправил нажатием в самой рамке, а от окна приходят язык, день,
-//! свои цвета, текст «моих данных» по нажатию «Добавить мои данные» и ключ
-//! 0.0.158 — один раз.
+//! свои цвета и текст «моих данных» — только в ответ на нажатие «Добавить мои
+//! данные» в рамке. Ключа от окна рамка не берёт ничем (с 0.0.161): иначе
+//! заражённый код окна подставил бы ей ключ злоумышленника (шапка
+//! `kvartik_core::ai::frame`).
 
 use std::cell::{Cell, RefCell};
 
-use kvartik_core::ai::Setup;
 use kvartik_core::ai::frame::{FromFrame, ToFrame};
 use kvartik_core::i18n::Lang;
 use kvartik_core::model::date::Date;
@@ -22,8 +23,8 @@ use wasm_bindgen::JsValue;
 use wasm_bindgen::closure::Closure;
 use web_sys::MessageEvent;
 
-use crate::page::{self, Page};
-use crate::{look, store};
+use crate::look;
+use crate::page::Page;
 
 thread_local! {
     /// Происхождение окна — кому рамка пишет; `None` — рамка не в окне.
@@ -86,6 +87,9 @@ pub struct Inbox {
     pub me: RwSignal<bool>,
     /// Текст «моих данных», пришедший по нажатию; экран берёт его в поле.
     pub incoming: RwSignal<Option<String>>,
+    /// Рамка просила «мои данные» и ответа ещё не было: только тогда текст
+    /// окна встаёт в поле — один раз на нажатие.
+    asked: RwSignal<bool>,
 }
 
 impl Inbox {
@@ -95,7 +99,14 @@ impl Inbox {
             today: RwSignal::new(None),
             me: RwSignal::new(false),
             incoming: RwSignal::new(None),
+            asked: RwSignal::new(false),
         }
+    }
+
+    /// Нажали «Добавить мои данные»: попросить их у окна.
+    pub fn want_me(self) {
+        self.asked.set(true);
+        post(&FromFrame::WantMe);
     }
 
     /// Сообщение окна. Сигнал — к записи, только когда значение другое:
@@ -118,26 +129,17 @@ impl Inbox {
                 }
                 look::put(state.colors.as_ref());
             }
-            ToFrame::Me { text } => self.incoming.set(Some(text)),
-            ToFrame::Setup { text } => migrate(&text),
+            // Без просьбы рамки — мимо: окно не впишет в поле вопроса того,
+            // о чём человек не просил.
+            ToFrame::Me { text } => {
+                if self.asked.get_untracked() {
+                    self.asked.set(false);
+                    self.incoming.set(Some(text));
+                }
+            }
             ToFrame::Unknown => {}
         }
     }
-}
-
-/// Ключ, подключённый в 0.0.158 ещё в окне: рамка его запоминает, если
-/// своего у неё нет, — свой важнее, — и говорит окну стереть его запись.
-/// Не запомнилось — окну ни слова: его запись остаётся до следующего раза.
-fn migrate(text: &str) {
-    if store::stored().is_none()
-        && let Some(setup) = Setup::parse(text)
-    {
-        if !store::save(&setup) {
-            return;
-        }
-        page::follow(Some(setup));
-    }
-    post(&FromFrame::SetupTaken);
 }
 
 /// Сообщение окна: от окна-родителя, с происхождения пары — иначе `None`.
