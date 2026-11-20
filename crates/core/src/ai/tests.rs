@@ -113,8 +113,13 @@ fn a_key_tells_whose_it_looks_like() {
     assert_eq!(Provider::guess("sk-ant-api03-x"), Some(Provider::Claude));
     assert_eq!(Provider::guess(" sk-proj-x"), Some(Provider::ChatGpt));
     assert_eq!(Provider::guess("AIzaSyX"), Some(Provider::Gemini));
+    // Ключи Gemini, которые AI Studio выдаёт теперь, — вида `AQ.…`: такой
+    // ключ человека получил окно 0.0.158 и назвал «не похожим на ключ»
+    // (2026-11-20).
+    assert_eq!(Provider::guess("AQ.Ab8RN6x"), Some(Provider::Gemini));
     assert_eq!(Provider::guess("xai-x"), Some(Provider::Grok));
     assert_eq!(Provider::guess("abc"), None);
+    assert_eq!(Provider::guess("AQ"), None);
 }
 
 /// Тело запроса — JSON, разобранный обратно.

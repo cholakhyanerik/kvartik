@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.159",
+      "date": "2026-11-20",
+      "hy": [
+        "ԱԲ օգնականն այժմ ճանաչում է Gemini-ի նոր տեսակի բանալին, որը սկսվում է «AQ.»-ով, և այլևս չի գրում, որ այն նման չէ API բանալու։"
+      ],
+      "ru": [
+        "ИИ-помощник теперь узнаёт ключ Gemini нового вида, который начинается с «AQ.», и больше не пишет, что он не похож на ключ API."
+      ],
+      "en": [
+        "The AI assistant now recognizes the new kind of Gemini key, which starts with “AQ.”, and no longer says it doesn't look like an API key."
+      ]
+    },
+    {
       "version": "0.0.158",
       "date": "2026-11-20",
       "hy": [
@@ -266,19 +279,6 @@
       ],
       "en": [
         "Nothing changed in the app: this version fixes one of the checks run while the app is developed."
-      ]
-    },
-    {
-      "version": "0.0.139",
-      "date": "2026-11-16",
-      "hy": [
-        "Թողարկված փաստաթղթի քարտում այժմ կա «Ֆայլ ՊԵԿ համակարգի համար (XML)»: ներբեռնեք այն ՊԵԿ համակարգում («Սևագրեր», «Ներբեռնել»), և հաշվարկային փաստաթուղթը կպահվի որպես սևագիր. այնտեղ ընտրեք գործարքի տեսակը, ստուգեք և դուրս գրեք՝ փաստաթուղթը կրկին չմուտքագրելով։"
-      ],
-      "ru": [
-        "В карточке выпущенного документа — «Файл для системы ՊԵԿ (XML)»: загрузите его в системе ՊԵԿ («Սևագրեր», «Ներբեռնել»), и расчётный документ ляжет черновиком: выберите там вид сделки, проверьте и выпишите — вводить документ второй раз не нужно."
-      ],
-      "en": [
-        "An issued document's card now has “File for the SRC system (XML)”: upload it in the SRC system (“Սևագրեր”, “Ներբեռնել”), and the settlement document becomes a draft there: choose the deal type, check it and issue it — no need to enter the document twice."
       ]
     }
   ]

@@ -147,14 +147,17 @@ impl Provider {
 
     /// Чей это ключ по его началу; `None` — не узнать. Только подсказка
     /// человеку, вставившему не тот ключ: запрет по чужому соглашению об
-    /// именах отказал бы и верному ключу нового вида.
+    /// именах отказал бы и верному ключу нового вида. У Gemini видов два:
+    /// прежний `AIza…` и `AQ.…`, который AI Studio выдаёт теперь (форум
+    /// Google AI для разработчиков, 2026; такой ключ ответил и на адресе,
+    /// совместимом с OpenAI, — проверено вживую 2026-11-20).
     pub fn guess(key: &str) -> Option<Self> {
         let key = key.trim();
         if key.starts_with("sk-ant-") {
             Some(Provider::Claude)
         } else if key.starts_with("xai-") {
             Some(Provider::Grok)
-        } else if key.starts_with("AIza") {
+        } else if key.starts_with("AIza") || key.starts_with("AQ.") {
             Some(Provider::Gemini)
         } else if key.starts_with("sk-") {
             Some(Provider::ChatGpt)
