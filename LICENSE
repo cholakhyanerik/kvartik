@@ -1,0 +1,68 @@
+Kvartik
+
+Copyright (c) 2026 Erik Cholakhyan, individual entrepreneur
+(TIN (ՀՎՀՀ) 58111423, Yerevan, Armenia). All rights reserved.
+
+The source code in this repository is published so that anyone can read it
+and check what the app does - for example, that your data stays on your
+device. Publishing it grants no license: you may not copy, modify,
+distribute, host or otherwise use this code or any part of it without the
+author's written permission, except where the law allows it or the GitHub
+Terms of Service grant it (viewing and forking on GitHub).
+
+Using the Kvartik app at https://kvartik.com is governed by its license
+terms: https://kvartik.com/en/terms/
+
+Third-party code and fonts included in the app keep their own licenses: see
+crates/sw/licenses/ and the licenses.txt file served with the app
+(https://kvartik.com/app/licenses.txt).
+
+Contact: cholakhyanerik@gmail.com
+
+-------------------------------------------------------------------------------
+
+Kvartik
+
+Авторское право (c) 2026 Эрик Чолахян, индивидуальный предприниматель
+(ИНН (ՀՎՀՀ) 58111423, Ереван, Армения). Все права защищены.
+
+Исходный код в этом репозитории опубликован, чтобы любой мог прочитать его
+и проверить, что делает программа, — например, что ваши данные остаются на
+вашем устройстве. Публикация не даёт лицензии: без письменного разрешения
+автора нельзя копировать, изменять, распространять, размещать на своём
+сервере или иначе использовать этот код или любую его часть, кроме случаев,
+которые разрешает закон или условия использования GitHub (просмотр и форк
+на GitHub).
+
+Пользование программой Kvartik на https://kvartik.com регулируют её условия
+лицензии: https://kvartik.com/ru/terms/
+
+Чужой код и шрифты в программе остаются под своими лицензиями: см. папку
+crates/sw/licenses/ и файл licenses.txt рядом с программой
+(https://kvartik.com/app/licenses.txt).
+
+Связь: cholakhyanerik@gmail.com
+
+-------------------------------------------------------------------------------
+
+Kvartik
+
+Հեղինակային իրավունք (c) 2026 Էրիկ Չոլախյան, անհատ ձեռնարկատեր
+(ՀՎՀՀ 58111423, Երևան, Հայաստան)։ Բոլոր իրավունքները պաշտպանված են։
+
+Այս պահոցի ելակետային կոդը հրապարակված է, որպեսզի յուրաքանչյուրը կարողանա
+կարդալ այն և ստուգել, թե ինչ է անում ծրագիրը, օրինակ՝ որ ձեր տվյալները
+մնում են ձեր սարքում։ Հրապարակումը լիցենզիա չի տալիս. առանց հեղինակի
+գրավոր թույլտվության չի կարելի պատճենել, փոփոխել, տարածել, սեփական
+սերվերում տեղադրել կամ այլ կերպ օգտագործել այս կոդը կամ դրա որևէ մասը,
+բացառությամբ այն դեպքերի, որոնք թույլ է տալիս օրենքը կամ GitHub-ի
+օգտագործման պայմանները (դիտում և պատճենում՝ fork, GitHub-ում)։
+
+Kvartik ծրագրի օգտագործումը https://kvartik.com կայքում կարգավորվում է նրա
+լիցենզիայի պայմաններով՝ https://kvartik.com/terms/
+
+Ծրագրում ներառված երրորդ անձանց կոդը և տառատեսակները պահպանում են իրենց
+լիցենզիաները. տե՛ս crates/sw/licenses/ թղթապանակը և ծրագրի կողքին դրված
+licenses.txt ֆայլը (https://kvartik.com/app/licenses.txt)։
+
+Կապ՝ cholakhyanerik@gmail.com
