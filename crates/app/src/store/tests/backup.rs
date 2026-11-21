@@ -4,7 +4,7 @@
 //! к файлу и обратно.
 
 use kvartik_core::format::backup::{
-    DeviceKey, Entry, FILE_KINDS, Header, KDF_ITERATIONS, KINDS, Kind, SALT_BYTES, is_full, open,
+    DeviceKey, Entry, FILE_KINDS, Files, Header, KDF_ITERATIONS, KINDS, Kind, SALT_BYTES, is_full, open,
 };
 use kvartik_core::model::office::Ip;
 use kvartik_core::i18n::Lang;
@@ -224,6 +224,36 @@ async fn backup_carries_the_whole_base() {
     target.delete().await;
 }
 
+/// Копия знает, сколько в ней весят файлы книги и убранные из записей
+/// (задача 64): экран копии говорит это под днём последней копии, а отказ
+/// «больше предела» — с этими числами.
+#[wasm_bindgen_test]
+async fn a_backup_counts_its_ledger_files() {
+    use kvartik_core::model::attachment::{Attachment, FileBytes};
+    let probe = Probe::new();
+    let store = probe.open(DB_VERSION).await.expect("база открыта");
+    let pdf = |len: usize| {
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        bytes.resize(len, b' ');
+        FileBytes::new(bytes).expect("годный PDF")
+    };
+    let owner = RecordId::random();
+    let kept = Attachment::create(owner, "чек.pdf", pdf(3_000), at(1_000));
+    let removed = Attachment::create(owner, "лишний.pdf", pdf(2_000), at(1_000))
+        .remove(at(2_000))
+        .expect("убран");
+    let mut writes = Writes::default();
+    writes.insert(&kept);
+    writes.insert(&removed);
+    store.write().expect("транзакция").commit(writes).await.expect("записано");
+    let salt = crypto::random(SALT_BYTES).expect("соль");
+    let key = key_for(PASSWORD, &salt).await;
+    let made = make_with(&store, KINDS, &key, &salt).await.expect("копия собрана");
+    assert_eq!(made.files, Files { bytes: 5_000, removed: 2_000 }, "файлы книги в копии");
+    drop(store);
+    probe.delete().await;
+}
+
 /// Чужой пароль — копия не открывается, и в базу ничего не ложится.
 #[wasm_bindgen_test]
 async fn wrong_password_restores_nothing() {
@@ -435,6 +465,17 @@ fn device_remembers_backups() {
     }
     assert_eq!(device.last_backup(), None);
     assert_eq!(device.backup_key(), None);
+    // Размер последней копии и файлов книги в ней (задача 64): что записано,
+    // то и читается; испорченная запись — «нет», а не нули.
+    let files = Files { bytes: 7_000_000, removed: 1_500 };
+    assert!(device.set_last_size(9_000_000, files));
+    assert_eq!(device.last_size(), Some((9_000_000, files)));
+    for spoiled in ["9000000 7000000", "9000000 7000000 1500 4", "много 7000000 1500", "9000000 1500 7000000"] {
+        storage.set_item(&format!("{prefix}last_size"), spoiled).expect("записано");
+        assert_eq!(device.last_size(), None, "прочитано испорченное: {spoiled}");
+    }
+    assert!(device.forget_last_size());
+    assert_eq!(device.last_size(), None);
     device.clear();
 }
 

@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.168",
+      "date": "2026-11-21",
+      "hy": [
+        "Պատճենի էկրանում՝ վերջին պատճենի օրվա տակ, երևում է, թե որքան են կշռում դրանում մատյանի ֆայլերը, և որքանն է գրառումներից հեռացված ֆայլերից. հեռացված ֆայլը նույնպես պահվում է և մտնում է պատճենի մեջ։ 128 ՄԲ-ից մեծ պատճենի դեպքում ծրագիրն այլևս չի խորհուրդ տալիս հեռացնել ֆայլերը. դա պատճենը չէր փոքրացնում։"
+      ],
+      "ru": [
+        "На экране копии под днём последней копии видно, сколько весят в ней файлы книги и сколько из них — убранные из записей: убранный файл тоже хранится и идёт в копию. Когда копия выходит больше 128 МБ, программа больше не советует убрать файлы — копию это не уменьшало."
+      ],
+      "en": [
+        "The backup screen now shows, under the day of the last backup, how much its ledger files weigh and how much of that is files removed from entries: a removed file is kept too and goes into the backup. When a backup comes out over 128 MB, the app no longer suggests removing files — that never made it smaller."
+      ]
+    },
+    {
       "version": "0.0.167",
       "date": "2026-11-21",
       "hy": [
@@ -260,22 +273,6 @@
       ],
       "en": [
         "The warning about a settlement document issued in a quarter before the service no longer shows on a cancelled document, and it names the exceptions: subscriptions, rent and utilities have their own moment of supply."
-      ]
-    },
-    {
-      "version": "0.0.148",
-      "date": "2026-11-17",
-      "hy": [
-        "ՊԵԿ համակարգում հաշվարկային փաստաթղթի փոխարեն կարող եք նշել, որ տրվել է ՀԴՄ կտրոն. եթե աշխատում եք ՀԴՄ-ով, և գնորդը «հաշիվ վավերագիր» չի պահանջում, փաստաթուղթն այլևս չի մնում հիշեցման մեջ։",
-        "Հաշվապահի համար արտահանման մեջ փաստաթղթերի թերթում նոր սյունակ կա՝ հաշվարկային փաստաթղթի տեսակը։"
-      ],
-      "ru": [
-        "Вместо расчётного документа в системе ՊԵԿ можно отметить, что выдан чек ККМ: если вы работаете с ККМ, а покупатель не требует «հաշիվ վավերագիր», документ больше не висит в напоминании.",
-        "В выгрузке для бухгалтера на листе документов — новый столбец: вид расчётного документа."
-      ],
-      "en": [
-        "Instead of a settlement document in the SRC system, you can mark that a cash register receipt was given: if you use a cash register and the buyer doesn't ask for a “հաշիվ վավերագիր”, the document no longer sits in the reminder.",
-        "The export for your accountant has a new column on the documents sheet: the type of settlement document."
       ]
     }
   ]

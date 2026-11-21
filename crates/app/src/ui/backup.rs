@@ -35,10 +35,11 @@ use std::time::Duration;
 
 use kvartik_core::format::autobackup::{self, DeviceTag};
 use kvartik_core::format::backup::{
-    self, BackupError, DeviceKey, Entry, FILE_KINDS, Header, KDF_ITERATIONS, KINDS, MAX_FILE_BYTES,
+    self, BackupError, DeviceKey, Entry, FILE_KINDS, Files, Header, KDF_ITERATIONS, KINDS, MAX_FILE_BYTES,
     MIN_PASSWORD_CHARS, Owner, PasswordProblem, SALT_BYTES, Sealed,
 };
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
+use kvartik_core::release::EMAIL;
 use kvartik_core::model::date::Date;
 use kvartik_core::model::office::{Ip, MAX_IPS};
 use kvartik_core::model::profile::Profile;
@@ -119,8 +120,8 @@ enum Hitch {
     Damaged,
     /// Хранилище отказало.
     Store(StoreError),
-    /// Копия вышла больше `MAX_FILE_BYTES`.
-    TooLarge,
+    /// Копия вышла больше `MAX_FILE_BYTES` — вот сколько в ней файлов книги.
+    TooLarge(Files),
     /// Шифра нет: страница открыта не по HTTPS.
     NoCrypto,
     /// Прочее; подробность — в консоли.
@@ -145,7 +146,7 @@ impl Hitch {
             Self::PasswordChanged => Key::AutoPasswordChanged,
             Self::Damaged => Key::AutoDamaged,
             Self::Store(error) => error_key(error),
-            Self::TooLarge => return Problem::Oversized,
+            Self::TooLarge(files) => return Problem::Oversized(files),
             Self::NoCrypto => Key::BackupNoCrypto,
             Self::Failed => Key::AutoFailed,
         })
@@ -179,7 +180,7 @@ impl From<Failure> for Hitch {
             Failure::Store(error) => Self::Store(error),
             Failure::Crypto(CryptoError::Unavailable) => Self::NoCrypto,
             Failure::Crypto(_) | Failure::File(_) | Failure::TooManyIps(_) | Failure::TooManyKeys => Self::Failed,
-            Failure::TooLarge => Self::TooLarge,
+            Failure::TooLarge(files) => Self::TooLarge(files),
         }
     }
 }
@@ -689,6 +690,35 @@ pub fn BackupEntry(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
     }
 }
 
+/// Мегабайты целыми — вверх: файл в 30 КБ — «1 МБ», а не ноль. Целыми,
+/// а не с десятыми: запись дробного (`i18n::decimal`) легла бы общим куском
+/// и в части копии и кода передачи — новый файл wasm в 16 КБ (замер
+/// задачи 64), — а целое у них уже есть.
+fn megabytes(lang: Lang, bytes: u64) -> String {
+    i18n::integer(lang, i64::try_from(bytes.div_ceil(1 << 20)).unwrap_or(i64::MAX))
+}
+
+/// Копия заняла три четверти предела и больше — слова о файлах книги
+/// предупреждением: до отказа недалеко (задача 64).
+fn near_limit(size: u64) -> bool {
+    size.saturating_mul(4) >= MAX_FILE_BYTES.saturating_mul(3)
+}
+
+/// Слова о файлах книги в последней копии: сколько весят, вся копия
+/// и предел, а убранные из записей — если они есть.
+fn files_words(lang: Lang, size: u64, files: Files) -> String {
+    let limit = i18n::integer(lang, (MAX_FILE_BYTES >> 20) as i64);
+    let mut words = fill(
+        t(lang, Key::BackupFiles),
+        &[&megabytes(lang, files.bytes), &megabytes(lang, size), &limit],
+    );
+    if files.removed > 0 {
+        words.push(' ');
+        words.push_str(&fill(t(lang, Key::BackupFilesRemoved), &[&megabytes(lang, files.removed)]));
+    }
+    words
+}
+
 /// Что сказать человеку, кроме простых строк: шаблоны с числами. Слова
 /// пароля, шифра и хранилища — и у экрана «Другое устройство» (`ui/sync.rs`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -697,7 +727,8 @@ pub(super) enum Problem {
     TooShort,
     TooLarge,
     /// Сделанная копия вышла больше предела: такую программа не откроет.
-    Oversized,
+    /// Сколько в ней файлов книги и убранных — то, что её раздуло (задача 64).
+    Oversized(Files),
     /// С копией ИП в программе стало бы больше `MAX_IPS` (задача 38).
     TooManyIps,
     /// Копия всех ИП легла не вся — вот почему (задача 38): повтор
@@ -717,9 +748,14 @@ impl Problem {
                 t(lang, Key::BackupTooLarge),
                 &[&i18n::integer(lang, (MAX_FILE_BYTES >> 20) as i64)],
             ),
-            Self::Oversized => fill(
+            Self::Oversized(files) => fill(
                 t(lang, Key::BackupOversized),
-                &[&i18n::integer(lang, (MAX_FILE_BYTES >> 20) as i64)],
+                &[
+                    &i18n::integer(lang, (MAX_FILE_BYTES >> 20) as i64),
+                    &megabytes(lang, files.bytes),
+                    &megabytes(lang, files.removed),
+                    EMAIL,
+                ],
             ),
             Self::TooManyIps => fill(t(lang, Key::OfficeTooMany), &[&i18n::integer(lang, MAX_IPS as i64)]),
             Self::Partly(why) => fill(t(lang, Key::BackupPartly), &[t(lang, why)]),
@@ -775,7 +811,7 @@ impl From<Failure> for Problem {
             Failure::Store(error) => Self::Say(error_key(error)),
             Failure::Crypto(error) => error.into(),
             Failure::File(error) => error.into(),
-            Failure::TooLarge => Self::Oversized,
+            Failure::TooLarge(files) => Self::Oversized(files),
             Failure::TooManyIps(_) => Self::TooManyIps,
             // Больше `license::MAX_KEYS` записей ключей — «Pro» в конторе или
             // ключей одного ИП — программа не пишет (с 0.0.135), значит, и файл
@@ -798,6 +834,9 @@ struct Ready {
     download: Download,
     records: usize,
     unreadable: usize,
+    /// Сколько весит файл копии и файлы книги в нём (задача 64).
+    size: u64,
+    files: Files,
 }
 
 /// Где копия.
@@ -910,6 +949,20 @@ fn BackupBody(ctx: Ctx) -> impl IntoView {
                     }
                 }}
             </p>
+            // Сколько весят файлы книги в последней копии (задача 64): предел
+            // файла копии ближе всего тому, у кого их много, а убранный из
+            // записи файл тоже хранится и идёт в копию. Запись устройства
+            // перечитывается вслед за днём последней копии.
+            // Класс — строкой, а не `class:warning=`: строка и так строится
+            // заново, а булев класс развернул бы в части копии обобщённый код
+            // Leptos, общий с другими частями, — новый файл wasm (замер
+            // задачи 64).
+            {move || {
+                backups.last.track();
+                let (size, files) = Device::new().last_size().filter(|(_, files)| files.bytes > 0)?;
+                let class = if near_limit(size) { "hint backup-files warning" } else { "hint backup-files" };
+                Some(view! { <p class=class>{move || files_words(lang.get(), size, files)}</p> })
+            }}
             {if backups.has_data.get_untracked() {
                 view! {
                     <MakeBackup lang backups forms router quiet />
@@ -1457,7 +1510,13 @@ fn MakeBackup(
     // ли они файл, они не говорят.
     let handed = move |said: Key| {
         let now = clock::now();
-        Device::new().set_last_backup(now);
+        let device = Device::new();
+        device.set_last_backup(now);
+        // Сколько весит отданная копия (задача 64): экран говорит это под
+        // меткой последней копии и перечитывает по её сигналу.
+        if let Making::Ready(ready) = making.get_untracked() {
+            device.set_last_size(ready.size, ready.files);
+        }
         backups.last.set(clock::local_date(now));
         saved.set(Some(said));
     };
@@ -1795,6 +1854,8 @@ async fn make(backups: Backups, typed: &str, repeat: Option<&str>) -> Result<Rea
         download,
         records: made.records,
         unreadable: made.unreadable,
+        size: made.file.len() as u64,
+        files: made.files,
     })
 }
 
@@ -1829,6 +1890,8 @@ async fn make_client(backups: Backups, typed: &str, repeat: &str) -> Result<Read
         download,
         records: made.records,
         unreadable: made.unreadable,
+        size: made.file.len() as u64,
+        files: made.files,
     })
 }
 
@@ -1982,6 +2045,7 @@ async fn write_file(backups: Backups) -> Result<Option<Wrote>, Hitch> {
     // человека 2026-11-03).
     device.set_last_auto(at);
     device.set_last_backup(at);
+    device.set_last_size(made.file.len() as u64, made.files);
     Ok(Some(Wrote {
         at,
         unreadable: made.unreadable,
@@ -2575,6 +2639,9 @@ fn restored_from(
         )
     {
         device.set_last_backup(at);
+        // Последней стала восстановленная копия, а её файлов окно не считало:
+        // размер прежней о ней говорил бы неправду (задача 64).
+        device.forget_last_size();
         backups.last.set(clock::local_date(at));
     }
     if landed.data {

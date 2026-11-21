@@ -2809,3 +2809,47 @@ fn a_pro_key_sits_in_the_office_of_a_full_backup() {
     }
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
+
+/// Файлы книги в копии (задача 64): байты всех вложений — по base64 в записи,
+/// с любым дополнением, — и среди них убранных из записей; записи других
+/// видов не считаются.
+#[test]
+fn files_count_the_ledger_attachments_and_the_removed_ones() {
+    use crate::model::attachment::{Attachment, FileBytes};
+    let owner = RecordId::random();
+    let pdf = |len: usize| {
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        bytes.resize(len, b' ');
+        FileBytes::new(bytes).expect("годный PDF")
+    };
+    let kept = Attachment::create(owner, "чек.pdf", pdf(10), at(1_000));
+    let other = Attachment::create(owner, "договор.pdf", pdf(11), at(1_000));
+    let removed = Attachment::create(owner, "лишний.pdf", pdf(12), at(1_000))
+        .remove(at(2_000))
+        .expect("убран");
+    let texts: Vec<(String, String)> = [&kept, &other, &removed]
+        .iter()
+        .map(|attachment| (attachment.id().to_string(), encode(*attachment)))
+        .collect();
+    let profile = Profile::save(None, ProfileData::default(), at(1_000))
+        .expect("годный")
+        .expect("новый");
+    let profile_id = profile.id().to_string();
+    let profile_text = encode(&profile);
+    let raws: Vec<Raw<'_>> = texts
+        .iter()
+        .map(|(id, text)| raw(Attachment::KIND, id, text))
+        .chain([raw(Profile::KIND, &profile_id, &profile_text)])
+        .collect();
+    let entries = collect(KINDS, raws).expect("собрано").entries;
+    assert_eq!(files(&entries), Files { bytes: 33, removed: 12 });
+    assert_eq!(files(&[]), Files::default());
+    let mut wrong = Vec::new();
+    for len in 1..=9 {
+        let text = crate::format::base64::encode(&vec![7; len]);
+        if base64_bytes(&text) != len as u64 {
+            wrong.push(format!("{len} байтов — {text}: {}", base64_bytes(&text)));
+        }
+    }
+    assert!(wrong.is_empty(), "длина base64: {wrong:#?}");
+}

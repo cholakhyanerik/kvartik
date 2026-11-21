@@ -18,8 +18,8 @@
 
 use kvartik_core::format::FormatError;
 use kvartik_core::format::backup::{
-    self, BackupError, Entry, Header, IV_BYTES, KINDS, Kind, Lock, MAX_FILE_BYTES, Merge, OFFICE_KINDS, Owner,
-    Relation, Sealed,
+    self, BackupError, Entry, Files, Header, IV_BYTES, KINDS, Kind, Lock, MAX_FILE_BYTES, Merge, OFFICE_KINDS,
+    Owner, Relation, Sealed,
 };
 use kvartik_core::format::Stored;
 use kvartik_core::format::office::{self as route, RouteError};
@@ -43,8 +43,9 @@ pub enum Failure {
     /// Файл копии не открывается.
     File(BackupError),
     /// Копия вышла больше `MAX_FILE_BYTES`: такую программа не откроет,
-    /// и отдавать её человеку — обещать то, чего она не вернёт.
-    TooLarge,
+    /// и отдавать её человеку — обещать то, чего она не вернёт. Сколько
+    /// в ней весят файлы книги — то, что её раздуло (задача 64).
+    TooLarge(Files),
     /// С копией ИП в программе стало бы больше `MAX_IPS`: столько.
     TooManyIps(usize),
     /// С копией записей ключей — «Pro» в конторе или в базе ИП — стало бы
@@ -78,6 +79,8 @@ pub struct Made {
     pub records: usize,
     /// Сколько записей не читается и в копию не вошло.
     pub unreadable: usize,
+    /// Сколько в ней весят файлы книги и убранные из записей (задача 64).
+    pub files: Files,
 }
 
 /// Ключ копии и откуда он: соль и число итераций, из которых его получили,
@@ -154,18 +157,20 @@ async fn collect_dumped(dumped: &[Dumped], kinds: &[Kind]) -> Result<(Vec<Entry>
 
 /// Сжать, зашифровать и запечатать записи копии.
 async fn seal(entries: Vec<Entry>, unreadable: usize, sealing: &Sealing<'_>) -> Result<Made, Failure> {
+    let files = backup::files(&entries);
     let packed = backup::pack_sliced(sealing.header, &entries, &mut breathe).await;
     let iv = crypto::random(IV_BYTES)?;
     let lock = Lock::new(sealing.iterations, sealing.salt.to_vec(), iv).ok_or(CryptoError::Failed)?;
     let ciphertext = crypto::encrypt(sealing.key, lock.iv(), &packed).await?;
     let file = backup::seal_sliced(sealing.header, &lock, &ciphertext, &mut breathe).await;
     if file.len() as u64 > MAX_FILE_BYTES {
-        return Err(Failure::TooLarge);
+        return Err(Failure::TooLarge(files));
     }
     Ok(Made {
         file,
         records: entries.len(),
         unreadable,
+        files,
     })
 }
 

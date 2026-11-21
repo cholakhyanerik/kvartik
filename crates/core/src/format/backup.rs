@@ -1273,6 +1273,52 @@ pub fn ahead(incoming: &[Entry], now: Timestamp) -> bool {
     incoming.iter().any(|entry| entry.meta.modified().unix_millis() > limit)
 }
 
+/// Сколько весят в копии файлы книги (задача 64): байты всех вложений
+/// (`model::attachment`) и среди них — убранных из записей. Убранный файл
+/// помечен удалённым, а не стёрт (CLAUDE.md, «Записи не стираются»), и копия
+/// несёт его тоже: убрать файл из записи её не уменьшит. Больше всего места
+/// в копии — у них, и предел файла копии ([`MAX_FILE_BYTES`]) ближе всего
+/// тому, у кого их много.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Files {
+    /// Байты всех файлов книги.
+    pub bytes: u64,
+    /// Из них — убранных из записей.
+    pub removed: u64,
+}
+
+/// Файлы книги в записях копии ([`Files`]). Байты — по длине base64 в записи,
+/// без разбора самих файлов: они уже проверены при сборке
+/// (`model::attachment::FileBytes`), а разбирать десятки мегабайт ради
+/// числа незачем (Правило 1).
+pub fn files(entries: &[Entry]) -> Files {
+    /// Из записи вложения — только base64 файла, без копии.
+    #[derive(Deserialize)]
+    struct Only<'a> {
+        #[serde(borrow)]
+        file: std::borrow::Cow<'a, str>,
+    }
+    let mut files = Files::default();
+    for entry in entries.iter().filter(|entry| entry.kind == Attachment::KIND) {
+        let Ok(Only { file }) = serde_json::from_str::<Only<'_>>(entry.record.get()) else {
+            continue;
+        };
+        let bytes = base64_bytes(&file);
+        files.bytes = files.bytes.saturating_add(bytes);
+        if entry.meta.is_deleted() {
+            files.removed = files.removed.saturating_add(bytes);
+        }
+    }
+    files
+}
+
+/// Сколько байтов в base64 `text` с дополнением `=` (RFC 4648, §4): из
+/// четырёх знаков — три байта, без знаков дополнения.
+fn base64_bytes(text: &str) -> u64 {
+    let padding = text.bytes().rev().take(2).take_while(|&byte| byte == b'=').count();
+    ((text.len() / 4 * 3).saturating_sub(padding)) as u64
+}
+
 /// Чей ИП в копии или в базе — чтобы показать человеку, что с чем он
 /// сливает: имя и ՀՎՀՀ живого профиля, изменённого последним, — того, с
 /// которым работает окно (`Profile::current`).

@@ -4,7 +4,8 @@
 //! человек уже знает и какую окно уже пробовало включить, — скрыты ли
 //! первые шаги на главном экране (задача 28) и что с автокопией (задача 29):
 //! когда была последняя, когда в последний раз менялись данные, метка
-//! устройства и когда вводили пароль, — настройки окна (задача 88): включён
+//! устройства и когда вводили пароль, сколько весила последняя копия и файлы
+//! книги в ней (задача 64), — настройки окна (задача 88): включён
 //! ли кружок у курсора и свои цвета, у каких ИП здесь выключен выпуск счетов
 //! и актов (задачи 41 и 116), — и срок ключа каждой базы с днём, о конце
 //! которого окно уже сказало (задача 92), а о конце пробного периода и ключа
@@ -44,7 +45,7 @@
 //! страниц кружок тот же.
 
 use kvartik_core::format::autobackup::DeviceTag;
-use kvartik_core::format::backup::DeviceKey;
+use kvartik_core::format::backup::{DeviceKey, Files};
 use kvartik_core::format::sync::Received;
 use kvartik_core::i18n::Lang;
 use kvartik_core::license::{self, Paid};
@@ -78,6 +79,9 @@ const SITE_LANG: &str = "site_lang";
 const ISSUE_ALL: &str = "issue_elsewhere";
 const ISSUE_AT: &str = "issue_at";
 
+/// Имя записи размера последней копии (задача 64).
+const LAST_SIZE: &str = "last_size";
+
 impl Device {
     /// Записи программы.
     pub fn new() -> Self {
@@ -99,6 +103,32 @@ impl Device {
     /// Запомнить момент копии. `false` — `localStorage` отказал.
     pub fn set_last_backup(&self, at: Timestamp) -> bool {
         self.set("last_backup", &at.unix_millis().to_string())
+    }
+
+    /// Сколько весила последняя копия программы — ручная или автокопия — и
+    /// файлы книги в ней (задача 64): экран копии говорит это, пока не сделана
+    /// следующая. `None` — копии с 0.0.168 не было, последней стала
+    /// восстановленная, чьих файлов окно не считало, или запись не читается.
+    pub fn last_size(&self) -> Option<(u64, Files)> {
+        let text = self.get(LAST_SIZE)?;
+        let mut numbers = text.split(' ').map(|number| number.parse::<u64>().ok());
+        let (Some(Some(copy)), Some(Some(bytes)), Some(Some(removed)), None) =
+            (numbers.next(), numbers.next(), numbers.next(), numbers.next())
+        else {
+            return None;
+        };
+        (removed <= bytes).then_some((copy, Files { bytes, removed }))
+    }
+
+    /// Запомнить, сколько весит сделанная копия и файлы книги в ней. `false` —
+    /// `localStorage` отказал: экран скажет о прежней копии или ни о какой.
+    pub fn set_last_size(&self, copy: u64, files: Files) -> bool {
+        self.set(LAST_SIZE, &format!("{copy} {} {}", files.bytes, files.removed))
+    }
+
+    /// Забыть размер: последней копией стала восстановленная.
+    pub fn forget_last_size(&self) -> bool {
+        self.remove(LAST_SIZE)
     }
 
     /// Пароль копий этого устройства; `None` — не задан или запись не
@@ -630,6 +660,7 @@ impl Device {
                 "sync_arrived",
                 ISSUE_ALL,
                 ISSUE_AT,
+                LAST_SIZE,
             ] {
                 let _ = storage.remove_item(&format!("{}{name}", self.prefix));
             }

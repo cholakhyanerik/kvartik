@@ -1742,6 +1742,58 @@ fn shown_button(host: &HtmlElement, label: &str) -> bool {
     button(host, &[label]).is_some_and(|found| found.offset_width() > 0)
 }
 
+/// Сколько весят файлы книги в последней копии (задача 64): строка под днём
+/// последней копии — мегабайты по правилам языка, вся копия и предел,
+/// убранные из записей, — а копия в три четверти предела и больше —
+/// предупреждением. Без файлов строки нет.
+#[wasm_bindgen_test]
+async fn the_backup_screen_names_the_weight_of_ledger_files() {
+    use kvartik_core::format::backup::Files;
+    use kvartik_core::i18n;
+    documents::fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let device = Device::new();
+    let mut wrong = Vec::new();
+    assert!(device.set_last_size(100 << 20, Files { bytes: 37 << 20, removed: 12 << 20 }));
+    let (host, mounted) = mount_at("#/backup");
+    let mb = |n: i64| i18n::integer(lang, n);
+    let words = fill(t(lang, Key::BackupFiles), &[&mb(37), &mb(100), "128"]);
+    if !wait_for(&host, &words).await {
+        wrong.push(format!("нет «{words}»"));
+    }
+    let removed = fill(t(lang, Key::BackupFilesRemoved), &[&mb(12)]);
+    if !wait_for(&host, &removed).await {
+        wrong.push(format!("нет «{removed}»"));
+    }
+    let near = host
+        .query_selector("p.backup-files")
+        .ok()
+        .flatten()
+        .is_some_and(|line| line.class_list().contains("warning"));
+    if !near {
+        wrong.push("копия в 100 МБ из 128 — а не предупреждением".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+
+    // Без файлов книги — ни слова о них.
+    assert!(device.set_last_size(1 << 20, Files::default()));
+    let (host, mounted) = mount_at("#/backup");
+    if !wait_for(&host, t(lang, Key::BackupChooseFile)).await {
+        wrong.push("раздела копии нет".to_owned());
+    }
+    sleep(300).await;
+    if host.query_selector("p.backup-files").ok().flatten().is_some() {
+        wrong.push("файлов в копии нет — а строка о них есть".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    device.forget_last_size();
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    assert!(wrong.is_empty(), "файлы книги на экране копии: {wrong:#?}");
+}
+
 /// Восстановление не путается с новой копией (полный прогон 2026-11-10,
 /// п. 12): в пустой базе на экране копии — только восстановление, без
 /// «Сделать копию»; с данными она есть, а пока выбран файл копии и спрошен
