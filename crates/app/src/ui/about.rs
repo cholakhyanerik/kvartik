@@ -1,13 +1,16 @@
 //! О программе (задача 31): версия программы и формат данных, срок
 //! лицензии, правила налога с актами, на которых они стоят, оговорка
-//! о расчёте, как написать продавцу и где условия лицензии и политика
+//! о расчёте, как написать продавцу — и страница сайта «Отзывы и
+//! предложения» (задача 114), — где условия лицензии и политика
 //! конфиденциальности (задача 32), и тексты лицензий чужого кода и шрифтов
 //! (задача 51).
 //!
-//! Условия и политика — ссылками на страницы сайта (`release::Legal`),
-//! в новой вкладке, а не текстом в окне: их пишет сборка из утверждённых
-//! файлов, и копия в wasm разошлась бы с ними. Без сети страницы сайта не
-//! открываются — они вне папки программы, и service worker их не хранит.
+//! Отзывы, условия и политика — ссылками на страницы сайта
+//! (`release::feedback_path`, `release::Legal`), в новой вкладке, а не
+//! текстом в окне: условия и политику пишет сборка из утверждённых файлов,
+//! и копия в wasm разошлась бы с ними, а слова страницы отзывов окну не
+//! нужны — только её адрес. Без сети страницы сайта не открываются — они вне
+//! папки программы, и service worker их не хранит.
 //!
 //! Экран — внутри профиля, а его содержимое — в части книги, как у экрана
 //! лицензии (`ui/license.rs`): правила разбирает и подпись ключа проверяет
@@ -19,7 +22,7 @@
 
 use kvartik_core::format::FORMAT_VERSION;
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
-use kvartik_core::release::{EMAIL, LICENSES, Legal, TELEGRAM};
+use kvartik_core::release::{EMAIL, LICENSES, Legal, TELEGRAM, feedback_path};
 use kvartik_core::tax::rules;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -139,6 +142,7 @@ pub(super) fn AboutPage(ctx: tax::Ctx) -> impl IntoView {
                     {icon(Icon::Forward)}
                 </a>
             </li>
+            <SiteEntry lang path=feedback_path title=Key::FeedbackTitle />
         </ul>
         <p class="hint">{tr(lang, Key::AboutReport)}</p>
         <p class="hint contacts">
@@ -162,8 +166,8 @@ pub(super) fn AboutPage(ctx: tax::Ctx) -> impl IntoView {
         <p>{tr(lang, Key::AboutDisclaimer)}</p>
         <h2>{tr(lang, Key::AboutLegal)}</h2>
         <ul class="list">
-            <LegalEntry lang doc=Legal::Terms title=Key::LegalTerms />
-            <LegalEntry lang doc=Legal::Privacy title=Key::LegalPrivacy />
+            <SiteEntry lang path=|lang| Legal::Terms.path(lang) title=Key::LegalTerms />
+            <SiteEntry lang path=|lang| Legal::Privacy.path(lang) title=Key::LegalPrivacy />
         </ul>
         <h2>{tr(lang, Key::AboutLicenses)}</h2>
         <p>{tr(lang, Key::AboutLicensesText)}</p>
@@ -171,13 +175,14 @@ pub(super) fn AboutPage(ctx: tax::Ctx) -> impl IntoView {
     }
 }
 
-/// Строка юридического текста: ссылка на его страницу сайта на языке окна —
-/// в новой вкладке, и программа остаётся на своём экране.
+/// Строка страницы сайта — юридического текста или «Отзывов и предложений»
+/// (задача 114): ссылка на неё на языке окна (`path`) — в новой вкладке,
+/// и программа остаётся на своём экране.
 #[component]
-fn LegalEntry(lang: ReadSignal<Lang>, doc: Legal, title: Key) -> impl IntoView {
+fn SiteEntry(lang: ReadSignal<Lang>, path: fn(Lang) -> &'static str, title: Key) -> impl IntoView {
     view! {
         <li>
-            <a class="entry" href=move || doc.path(lang.get()) target="_blank" rel="noopener">
+            <a class="entry" href=move || path(lang.get()) target="_blank" rel="noopener">
                 <span class="entry-main">
                     <span class="entry-title">{tr(lang, title)}</span>
                 </span>

@@ -27,6 +27,11 @@
 //! согласия, которые она просит написать, сборка сверяет с условиями своего
 //! языка: новая редакция условий без новых слов на странице сайт не соберёт.
 //!
+//! И страница «Отзывы и предложения» (задача 114), `feedback/` там же
+//! (`release::feedback_path`): что написать об ошибке или улучшении, письмо
+//! продавцу с уже вписанными строками и его Telegram. Сама она ничего не
+//! отправляет.
+//!
 //! Рядом — оформление и скрипт, одним файлом каждый, с хэшем содержимого
 //! в имени (`kvartik-site-<хэш>.css` и `.js`): они кэшируются на год
 //! (`_headers`), а новая сборка — новое имя. CSS — это `tokens.css`
@@ -54,7 +59,7 @@ use kvartik_core::model::date::Date;
 use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::release::{
     ACCOUNT, BANK, EMAIL, HOLDER, LICENSES, Legal, PRICE, PRO_PRICE, PRO_SEATS, SELLER_TIN, TELEGRAM, buy_path,
-    mailto,
+    feedback_path, mailto,
 };
 use kvartik_core::tax::{calendar, example, rules, turnover};
 
@@ -164,6 +169,7 @@ pub fn write(staging: &Path, site: &Path, style: &Path, legal: &Path, app: &str,
     }
     for lang in Lang::ALL {
         files.push((page_file(buy_path(lang)), buy_page(lang, &css_name, &js_name, app, checked)));
+        files.push((page_file(feedback_path(lang)), feedback_page(lang, &css_name, &js_name, app, checked)));
     }
     files.push(("robots.txt".to_owned(), robots()));
     files.push(("sitemap.xml".to_owned(), sitemap()));
@@ -180,7 +186,8 @@ pub fn write(staging: &Path, site: &Path, style: &Path, legal: &Path, app: &str,
         fs::write(&target, text).map_err(|error| format!("{}: {error}", target.display()))?;
     }
     Ok(format!(
-        "лендинг: страниц {}, «Купить» {}, юридических текстов {}",
+        "лендинг: страниц {}, «Купить» {}, отзывов {}, юридических текстов {}",
+        Lang::ALL.len(),
         Lang::ALL.len(),
         Lang::ALL.len(),
         editions * Lang::ALL.len()
@@ -666,6 +673,60 @@ fn buy_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -
     )
 }
 
+/// Страница «Отзывы и предложения» на языке `lang` (задача 114) — рядом со
+/// страницей языка, с её шапкой, оформлением и подвалом: зачем писать,
+/// «Написать письмо» — почта человека открывается с темой и строками,
+/// которые он дополнит (версия программы, устройство и браузер, что
+/// случилось), — Telegram продавца, что приложить и чего не присылать. Сама
+/// страница ничего не отправляет. Адрес почты — и словами под кнопками:
+/// без почтовой программы `mailto:` не открывает ничего.
+fn feedback_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -> String {
+    let text = |key: Key| escape(t(lang, key));
+    let where_version = [t(lang, Key::NavProfile), t(lang, Key::AboutTitle)];
+    let meta = format!("    <meta name=\"description\" content=\"{}\" />\n", text(Key::FeedbackAbout));
+    let mail = mailto(t(lang, Key::FeedbackMailSubject), &fill(t(lang, Key::FeedbackMailBody), &where_version));
+    let items: String = [
+        escape(&fill(t(lang, Key::FeedbackVersion), &where_version)),
+        text(Key::FeedbackDevice),
+        text(Key::FeedbackSteps),
+        text(Key::FeedbackScreenshot),
+    ]
+    .iter()
+    .map(|item| format!("          <li>{item}</li>\n"))
+    .collect();
+    format!(
+        r#"{head}  <body>
+{top}    <main>
+      <article class="legal feedback">
+        <h1>{title}</h1>
+        <p>{about}</p>
+        <p class="actions"><a class="button" href="{mail}"><span class="label">{write}</span></a> <a class="button secondary" href="{TELEGRAM}"><span class="label">{telegram}</span></a></p>
+        <p class="hint">{mail_hint}</p>
+        <h2>{what}</h2>
+        <ul>
+{items}        </ul>
+        <h2>{not}</h2>
+        <p>{not_text}</p>
+      </article>
+    </main>
+{footer}  </body>
+</html>
+"#,
+        head = head(lang, &text(Key::FeedbackTitle), feedback_path, &meta, css, js, app),
+        top = top(lang, url(lang), feedback_path),
+        footer = footer(lang, app, checked),
+        title = text(Key::FeedbackTitle),
+        about = text(Key::FeedbackAbout),
+        mail = escape(&mail),
+        write = text(Key::BuyWrite),
+        telegram = text(Key::FeedbackTelegram),
+        mail_hint = linked(t(lang, Key::FeedbackMailHint), &format!("<a href=\"mailto:{EMAIL}\">{EMAIL}</a>")),
+        what = text(Key::FeedbackWhat),
+        not = text(Key::FeedbackNot),
+        not_text = text(Key::FeedbackNotText),
+    )
+}
+
 /// «Вопросы» страницы «Купить» (задача 93): сколько устройств, как перенести
 /// ключ, что без него, несколько ИП и когда продлевать — каждый раскрывается
 /// сам, без скрипта (`<details>`: CSP встроенных скриптов не пускает). Ответы
@@ -811,8 +872,9 @@ fn top<P: std::fmt::Display>(lang: Lang, home: &str, path: impl Fn(Lang) -> P) -
 /// Подвал каждой страницы: оговорка о расчёте, день сверки правил (нет его —
 /// нет и строки), страница «Купить» и юридические тексты своего языка —
 /// условия зовут её по имени, и с их страницы до неё один шаг (задача 35), —
-/// тексты лицензий рядом с программой и как написать продавцу — почтой
-/// и в Telegram (`release::EMAIL`, `release::TELEGRAM`).
+/// тексты лицензий рядом с программой и как написать продавцу — почтой,
+/// в Telegram (`release::EMAIL`, `release::TELEGRAM`) и страницей «Отзывы
+/// и предложения» (задача 114).
 fn footer(lang: Lang, app: &str, checked: Option<Date>) -> String {
     let text = |key: Key| escape(t(lang, key));
     let rules = checked
@@ -825,10 +887,12 @@ fn footer(lang: Lang, app: &str, checked: Option<Date>) -> String {
         r#"    <footer>
       <p>{disclaimer}</p>
 {rules}      <p class="links"><a href="{buy}">{buy_label}</a> <a href="{terms}">{terms_label}</a> <a href="{privacy}">{privacy_label}</a> <a href="{app}{LICENSES}">{licenses}</a></p>
-      <p class="links"><span>{contact}</span> <a href="mailto:{EMAIL}">{EMAIL}</a> <a href="{TELEGRAM}">{telegram}</a></p>
+      <p class="links"><span>{contact}</span> <a href="mailto:{EMAIL}">{EMAIL}</a> <a href="{TELEGRAM}">{telegram}</a> <a href="{feedback}">{feedback_label}</a></p>
     </footer>
 "#,
         buy = buy_path(lang),
+        feedback = feedback_path(lang),
+        feedback_label = text(Key::FeedbackTitle),
         buy_label = text(Key::BuyLink),
         telegram = text(Key::ContactTelegram),
         disclaimer = text(Key::LandingDisclaimer),
@@ -848,8 +912,9 @@ fn robots() -> String {
     format!("User-agent: *\nAllow: /\n\nSitemap: {SITE}/sitemap.xml\n")
 }
 
-/// Карта сайта: страницы трёх языков, страница «Купить» и юридические тексты
-/// к ним, у каждой — она же на всех трёх и «по умолчанию» армянская (как
+/// Карта сайта: страницы трёх языков, страницы «Купить» и «Отзывы
+/// и предложения» и юридические тексты к ним, у каждой — она же на всех
+/// трёх и «по умолчанию» армянская (как
 /// `hreflang` в самих страницах). Без `lastmod`: дня сборки в ней нет, иначе
 /// одна и та же сборка давала бы разные байты.
 fn sitemap() -> String {
@@ -859,7 +924,7 @@ fn sitemap() -> String {
     );
     let terms = |lang: Lang| Legal::Terms.path(lang);
     let privacy = |lang: Lang| Legal::Privacy.path(lang);
-    let pages: [&dyn Fn(Lang) -> &'static str; 4] = [&url, &buy_path, &terms, &privacy];
+    let pages: [&dyn Fn(Lang) -> &'static str; 5] = [&url, &buy_path, &feedback_path, &terms, &privacy];
     for path in pages {
         for lang in Lang::ALL {
             out.push_str(&format!("  <url>\n    <loc>{SITE}{}</loc>\n", path(lang)));
@@ -959,13 +1024,14 @@ mod tests {
         legal_page(lang, doc, &text, edition, "kvartik-site-a.css", "kvartik-site-b.js", "/app/", checked())
     }
 
-    /// Все страницы сайта: три страницы языков, три «Купить», шесть
-    /// юридических и прежние редакции.
+    /// Все страницы сайта: три страницы языков, три «Купить», три страницы
+    /// отзывов, шесть юридических и прежние редакции.
     fn every_page() -> Vec<(String, String)> {
         let mut out = Vec::new();
         for lang in Lang::ALL {
             out.push((format!("{lang:?} {}", url(lang)), sample(lang)));
             out.push((format!("{lang:?} {}", buy_path(lang)), buy_sample(lang)));
+            out.push((format!("{lang:?} {}", feedback_path(lang)), feedback_sample(lang)));
             for doc in Legal::ALL {
                 out.push((format!("{lang:?} {}", doc.path(lang)), legal_sample(doc, lang, None)));
                 for &day in doc.earlier() {
@@ -1090,6 +1156,85 @@ mod tests {
     /// Страница «Купить».
     fn buy_sample(lang: Lang) -> String {
         buy_page(lang, "kvartik-site-a.css", "kvartik-site-b.js", "/app/", checked())
+    }
+
+    /// Страница «Отзывы и предложения» (задача 114).
+    fn feedback_sample(lang: Lang) -> String {
+        feedback_page(lang, "kvartik-site-a.css", "kvartik-site-b.js", "/app/", checked())
+    }
+
+    /// Страница «Отзывы и предложения» (задача 114) — на своём языке, рядом
+    /// со страницей языка: зачем писать, письмо продавцу с темой и строками,
+    /// которые человек дополнит, — версия программы с тем, где её найти, —
+    /// Telegram продавца, адрес почты словами, что приложить и чего не
+    /// присылать.
+    #[test]
+    fn the_feedback_page_leads_to_the_seller_with_the_version() {
+        let mut wrong = Vec::new();
+        for lang in Lang::ALL {
+            let html = feedback_sample(lang);
+            let text = |key: Key| escape(t(lang, key));
+            let where_version = [t(lang, Key::NavProfile), t(lang, Key::AboutTitle)];
+            let mut need = vec![
+                format!("<html lang=\"{}\">", lang.code()),
+                format!("<title>{}</title>", text(Key::FeedbackTitle)),
+                format!("<h1>{}</h1>", text(Key::FeedbackTitle)),
+                format!("<meta name=\"description\" content=\"{}\" />", text(Key::FeedbackAbout)),
+                format!("<link rel=\"canonical\" href=\"https://kvartik.com{}\" />", feedback_path(lang)),
+                "<link rel=\"alternate\" hreflang=\"x-default\" href=\"https://kvartik.com/feedback/\" />".to_owned(),
+                format!("<a class=\"brand\" href=\"{}\">", url(lang)),
+                "<article class=\"legal feedback\">".to_owned(),
+                format!("<p>{}</p>", text(Key::FeedbackAbout)),
+                format!(
+                    "<a class=\"button secondary\" href=\"{TELEGRAM}\"><span class=\"label\">{}</span></a>",
+                    text(Key::FeedbackTelegram)
+                ),
+                linked(t(lang, Key::FeedbackMailHint), &format!("<a href=\"mailto:{EMAIL}\">{EMAIL}</a>")),
+                format!("<h2>{}</h2>", text(Key::FeedbackWhat)),
+                format!("<li>{}</li>", escape(&fill(t(lang, Key::FeedbackVersion), &where_version))),
+                format!("<li>{}</li>", text(Key::FeedbackDevice)),
+                format!("<li>{}</li>", text(Key::FeedbackSteps)),
+                format!("<li>{}</li>", text(Key::FeedbackScreenshot)),
+                format!("<h2>{}</h2>", text(Key::FeedbackNot)),
+                format!("<p>{}</p>", text(Key::FeedbackNotText)),
+            ];
+            for other in Lang::ALL {
+                need.push(format!(
+                    "<link rel=\"alternate\" hreflang=\"{}\" href=\"https://kvartik.com{}\" />",
+                    other.code(),
+                    feedback_path(other)
+                ));
+                need.push(format!("<a href=\"{}\" hreflang=\"{}\"", feedback_path(other), other.code()));
+            }
+            for piece in need {
+                if !html.contains(&piece) {
+                    wrong.push(format!("{lang:?}: нет {piece}"));
+                }
+            }
+            if html.matches("aria-current=\"page\"").count() != 1 {
+                wrong.push(format!("{lang:?}: текущий язык не один"));
+            }
+            // Письмо — адресом продавца, с темой и строками, первая из
+            // которых — версия и где её найти; `&` между ними — ссылкой на
+            // знак (Правило 13).
+            let mail = format!(
+                "<a class=\"button\" href=\"mailto:{EMAIL}?subject={}&amp;body={}\"><span class=\"label\">{}</span></a>",
+                mailto_part(t(lang, Key::FeedbackMailSubject)),
+                mailto_part(&fill(t(lang, Key::FeedbackMailBody), &where_version)),
+                text(Key::BuyWrite)
+            );
+            if !html.contains(&mail) {
+                wrong.push(format!("{lang:?}: нет письма {mail}"));
+            }
+            let body = fill(t(lang, Key::FeedbackMailBody), &where_version);
+            if !body.contains(t(lang, Key::NavProfile)) || !body.contains(t(lang, Key::AboutTitle)) || body.lines().count() != 3 {
+                wrong.push(format!("{lang:?}: в письме не три строки или не сказано, где версия: {body}"));
+            }
+            if html.contains("og:") || html.contains("{}") || html.contains("<form") {
+                wrong.push(format!("{lang:?}: разметка лендинга, незаполненный шаблон или форма"));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
     /// Модуль калькулятора в тестах страниц.
@@ -1256,8 +1401,8 @@ mod tests {
     }
 
     /// Подвал каждой страницы ведёт на страницу «Купить» и оба юридических
-    /// текста своего языка, на тексты лицензий и к продавцу — почтой
-    /// и в Telegram.
+    /// текста своего языка, на тексты лицензий и к продавцу — почтой,
+    /// в Telegram и страницей отзывов (задача 114).
     #[test]
     fn every_footer_leads_to_the_terms_and_the_seller() {
         let mut wrong = Vec::new();
@@ -1274,6 +1419,7 @@ mod tests {
                 format!("<a href=\"/app/{LICENSES}\">"),
                 format!("<a href=\"mailto:{EMAIL}\">{EMAIL}</a>"),
                 format!("<a href=\"{TELEGRAM}\">{}</a>", escape(t(lang, Key::ContactTelegram))),
+                format!("<a href=\"{}\">{}</a>", feedback_path(lang), escape(t(lang, Key::FeedbackTitle))),
                 escape(t(lang, Key::LandingDisclaimer)),
             ] {
                 if !footer.contains(&piece) {
@@ -1472,11 +1618,12 @@ mod tests {
         for lang in Lang::ALL {
             assert!(map.contains(&format!("<loc>https://kvartik.com{}</loc>", url(lang))), "{lang:?}");
             assert!(map.contains(&format!("<loc>https://kvartik.com{}</loc>", buy_path(lang))), "«Купить» {lang:?}");
+            assert!(map.contains(&format!("<loc>https://kvartik.com{}</loc>", feedback_path(lang))), "отзывы {lang:?}");
             for doc in Legal::ALL {
                 assert!(map.contains(&format!("<loc>https://kvartik.com{}</loc>", doc.path(lang))), "{doc:?} {lang:?}");
             }
         }
-        assert_eq!(map.matches("<url>").count(), Lang::ALL.len() * (2 + Legal::ALL.len()));
+        assert_eq!(map.matches("<url>").count(), Lang::ALL.len() * (3 + Legal::ALL.len()));
         assert!(robots().contains("Sitemap: https://kvartik.com/sitemap.xml\n"));
     }
 
@@ -1538,8 +1685,9 @@ mod tests {
         out
     }
 
-    /// Лендинг ложится в корень сборки: три страницы, три «Купить», шесть
-    /// юридических, карта, `robots.txt` и по одному файлу оформления
+    /// Лендинг ложится в корень сборки: три страницы, три «Купить», три
+    /// страницы отзывов, шесть юридических, карта, `robots.txt` и по одному
+    /// файлу оформления
     /// и скрипта, на которые страницы ссылаются. Та же сборка — те же имена
     /// и байты. Файл на месте файла лендинга — ошибка, а не молча затёртый
     /// файл.
@@ -1556,6 +1704,7 @@ mod tests {
         assert_eq!((css.len(), js.len()), (1, 1), "{written:?}");
         let mut pages: Vec<String> = Lang::ALL.into_iter().map(|lang| page_file(url(lang))).collect();
         pages.extend(Lang::ALL.into_iter().map(|lang| page_file(buy_path(lang))));
+        pages.extend(Lang::ALL.into_iter().map(|lang| page_file(feedback_path(lang))));
         for doc in Legal::ALL {
             pages.extend(Lang::ALL.into_iter().map(|lang| page_file(doc.path(lang))));
             for &day in doc.earlier() {
@@ -1595,6 +1744,11 @@ mod tests {
         sources(&clash);
         clash.put("stage/buy/index.html", "root page");
         let error = build(&clash).expect_err("файл корня на месте страницы «Купить»");
+        assert!(error.contains("лёг бы на файл лендинга"), "{error}");
+        let clash = Temp::new("clash-feedback");
+        sources(&clash);
+        clash.put("stage/en/feedback/index.html", "root page");
+        let error = build(&clash).expect_err("файл корня на месте страницы отзывов");
         assert!(error.contains("лёг бы на файл лендинга"), "{error}");
     }
 

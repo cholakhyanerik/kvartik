@@ -101,12 +101,19 @@ const checks = new Checks();
 // а цена и счёт продавца — константы `release.rs`: проверка читает их оттуда
 // же, откуда их берёт сборка, а не держит свою копию.
 const buyPath = (lang) => (lang === "hy" ? "/buy/" : `/${lang}/buy/`);
+// Страница «Отзывы и предложения» (задача 114) — `release::feedback_path`,
+// а почта и Telegram продавца — `release::EMAIL` и `TELEGRAM`.
+const feedbackPath = (lang) => (lang === "hy" ? "/feedback/" : `/${lang}/feedback/`);
 const RELEASE = fs.readFileSync(path.join(REPO, "crates/core/src/release.rs"), "utf8");
 const ACCOUNT = RELEASE.match(/pub const ACCOUNT: &str = "(\d+)";/)?.[1];
 const PRICE = RELEASE.match(/pub const PRICE: Money = Money::new\(([\d_]+), Currency::Amd\);/)?.[1]?.replaceAll("_", "");
 // Цена «Pro» (задача 103) — вторая карточка той же страницы.
 const PRO_PRICE = RELEASE.match(/pub const PRO_PRICE: Money = Money::new\(([\d_]+), Currency::Amd\);/)?.[1]?.replaceAll("_", "");
-if (!ACCOUNT || !PRICE || !PRO_PRICE) throw new Error("в crates/core/src/release.rs не нашлись ACCOUNT, PRICE и PRO_PRICE");
+const EMAIL = RELEASE.match(/pub const EMAIL: &str = "([^"]+)";/)?.[1];
+const TELEGRAM = RELEASE.match(/pub const TELEGRAM: &str = "([^"]+)";/)?.[1];
+if (!ACCOUNT || !PRICE || !PRO_PRICE || !EMAIL || !TELEGRAM) {
+  throw new Error("в crates/core/src/release.rs не нашлись ACCOUNT, PRICE, PRO_PRICE, EMAIL и TELEGRAM");
+}
 
 // Рабочий экран: база открыта, разделы прочитаны — под экраном копии встают
 // слова о хранении на языке окна (с 0.0.142; так же в skill browser-run).
@@ -170,7 +177,7 @@ const FORMS = [
 /// (задача 88). «Сверьте расчёт с бухгалтером» части годовых платежей
 /// и сроков, слова о полях формы — часть чисел, о ключе и ссылку на
 /// страницу «Купить» своего языка (задача 35) — часть лицензии, правила
-/// налога — часть «О программе», а слова о кружке у курсора — часть
+/// налога и ссылку на отзывы (задача 114) — часть «О программе», а слова о кружке у курсора — часть
 /// настроек рисуют всегда, и с профилем, и без него.
 const SCREENS = [
   { name: "Налог", hash: "#/tax", shown: TEXT_IN("#tax", s("TaxTurnover")) },
@@ -179,7 +186,10 @@ const SCREENS = [
   { name: "Числа для расчёта", hash: "#/report", shown: TEXT_IN("#report", s("ReportAbout")) },
   { name: "Лицензия", hash: "#/license", shown: `return document.querySelector('#license a[href="${buyPath(opt.lang)}"]')
       && document.querySelector("#license")?.innerText.includes(${JSON.stringify(s("LicenseGives"))}) ? true : null;` },
-  { name: "О программе", hash: "#/about", shown: TEXT_IN("#about", s("AboutRules")) },
+  // «О программе» ведёт на «Отзывы и предложения» своего языка (задача 114)
+  // новой вкладкой — как на условия.
+  { name: "О программе", hash: "#/about", shown: `return document.querySelector('#about a[href="${feedbackPath(opt.lang)}"][target="_blank"]')
+      && document.querySelector("#about")?.innerText.includes(${JSON.stringify(s("AboutRules"))}) ? true : null;` },
   { name: "Настройки", hash: "#/settings", shown: TEXT_IN("#settings", s("SettingsCursorHint")) },
   // На адресе проверки пары у рамки нет, и окно говорит, где помощник;
   // саму рамку проверяет шаг «ИИ-помощник» — под своими адресами.
@@ -883,6 +893,24 @@ async function landing(browser) {
         return e.scrollWidth <= e.clientWidth
           && document.querySelector("article.buy .faq")?.innerText.includes(${JSON.stringify(t("LicenseDevicesData", lang))}) ? true : null;`));
     }
+    // «Отзывы и предложения» (задача 114): своего языка, с письмом продавцу,
+    // в котором первая строка — версия программы и где её найти, и Telegram
+    // продавца, без прокрутки вбок на 360.
+    for (const lang of ["hy", "ru", "en"]) {
+      const at = feedbackPath(lang);
+      await page.go(`${ORIGIN}${at}`);
+      checks.check(`отзывы ${at}: свой язык, письмо продавцу с версией и Telegram`, await page.waitFor(`return document.documentElement.lang
+        === ${JSON.stringify(lang)} && document.querySelector("article.feedback h1")?.textContent === ${JSON.stringify(t("FeedbackTitle", lang))}
+        && decodeURIComponent(document.querySelector('article.feedback a.button[href^="mailto:${EMAIL}?subject="]')?.href ?? "")
+          .includes(${JSON.stringify(t("FeedbackMailSubject", lang))})
+        && decodeURIComponent(document.querySelector('article.feedback a.button[href^="mailto:"]')?.href ?? "")
+          .includes(${JSON.stringify(t("AboutTitle", lang))})
+        && document.querySelector('article.feedback a.button[href="${TELEGRAM}"]')
+        && document.querySelector('article.feedback .hint a[href="mailto:${EMAIL}"]')
+        && getComputedStyle(document.querySelector("h1")).fontFamily.includes("Kvartik Serif") ? true : null;`));
+      checks.check(`отзывы ${at}: без прокрутки вбок на 360`, await page.eval(`const d = document.documentElement;
+        return d.clientWidth === 360 && d.scrollWidth <= d.clientWidth ? true : null;`));
+    }
     // Юридические тексты (задача 32): у каждого языка — свои условия
     // и политика, страницами из утверждённых файлов docs/legal/*.md, с тем же
     // оформлением, а подвал страницы языка ведёт к ним.
@@ -935,6 +963,10 @@ async function landing(browser) {
     await page.eval(`document.querySelector('footer a[href="/ru/buy/"]').click(); return true;`);
     checks.check("условия: подвал ведёт на «Купить» своего языка", await page.waitFor(`return location.pathname
       === "/ru/buy/" && document.querySelector("article.buy") ? true : null;`));
+    // И к отзывам (задача 114) — ссылкой подвала каждой страницы.
+    await page.eval(`document.querySelector('footer a[href="/ru/feedback/"]').click(); return true;`);
+    checks.check("«Купить»: подвал ведёт на отзывы своего языка", await page.waitFor(`return location.pathname
+      === "/ru/feedback/" && document.querySelector("article.feedback") ? true : null;`));
     // Калькулятор (задача 34, этап 2): wasm ядра грузится при первом касании
     // формы и отвечает словами страницы. IT 1 000 000 ֏ — 1 % (НК, ст. 258,
     // ч. 1, строка 8): 10 000 ֏; поля, нужные не всегда, не видны, пока ответ

@@ -4511,6 +4511,62 @@ strings! {
         "Kvartik is sold only to individual entrepreneurs and organizations and only for their business.",
         "Kvartik-ը վաճառվում է միայն անհատ ձեռնարկատերերին և կազմակերպություններին և միայն նրանց ձեռնարկատիրական գործունեության համար։";
 
+    /// Страница «Отзывы и предложения» (задача 114): её пишет сборка рядом
+    /// со страницей языка (`release::feedback_path`,
+    /// `crates/sw/src/landing.rs`), а ведут на неё подвал каждой страницы
+    /// сайта и экран «О программе». Что пришлют, правится в следующих
+    /// версиях, а без версии программы воспроизводить нечего (CLAUDE.md,
+    /// Правило 5) — поэтому она первой строкой и в письме, и в списке.
+    /// Страница сама ничего не отправляет: письмо пишет и шлёт почта
+    /// человека (Правило 13).
+    FeedbackTitle = "Отзывы и предложения", "Feedback and suggestions", "Կարծիքներ և առաջարկներ";
+    FeedbackAbout =
+        "Если нашли ошибку или знаете, как сделать Kvartik удобнее, напишите. Каждое письмо читает автор программы, а исправления и улучшения приходят в следующих версиях: программа обновляется сама.",
+        "If you've found a bug or know how to make Kvartik better, please write. The app's author reads every message, and fixes and improvements arrive in the next versions: the app updates itself.",
+        "Եթե սխալ եք գտել կամ գիտեք, ինչպես Kvartik-ը դարձնել ավելի հարմար, գրեք։ Յուրաքանչյուր նամակ կարդում է ծրագրի հեղինակը, իսկ ուղղումներն ու բարելավումները գալիս են հաջորդ տարբերակներում. ծրագիրը թարմացվում է ինքնուրույն։";
+    FeedbackTelegram = "Написать в Telegram", "Message on Telegram", "Գրել Telegram-ով";
+    /// Шаблон: почта продавца (`release::EMAIL`) — ссылкой. Без почтовой
+    /// программы на устройстве (частый случай на Windows) `mailto:` не
+    /// открывает ничего, и адрес нужен словами.
+    FeedbackMailHint =
+        "Письмо откроется в вашей почте со строками, которые останется дополнить. Если почта не открылась, напишите на {}.",
+        "The email opens in your mail app with lines left for you to fill in. If it doesn't open, write to {}.",
+        "Նամակը կբացվի ձեր փոստում՝ լրացնելու տողերով։ Եթե փոստը չբացվի, գրեք {} հասցեով։";
+    FeedbackWhat = "Что написать", "What to include", "Ինչ գրել";
+    /// Шаблоны: «Профиль» и «О программе» — как их зовут меню и экран
+    /// (`NavProfile`, `AboutTitle`).
+    FeedbackVersion =
+        "Версию программы: в программе откройте «{}», затем «{}».",
+        "The app version: in the app, open “{}”, then “{}”.",
+        "Ծրագրի տարբերակը. ծրագրում բացեք «{}», ապա «{}»։";
+    FeedbackDevice =
+        "Устройство и браузер: например, iPhone и Safari или компьютер с Windows и Chrome.",
+        "Your device and browser: for example, an iPhone and Safari, or a Windows computer and Chrome.",
+        "Սարքը և դիտարկիչը. օրինակ՝ iPhone և Safari կամ Windows-ով համակարգիչ և Chrome։";
+    FeedbackSteps =
+        "Что случилось и после каких шагов\u{A0}— или что вы предлагаете и зачем.",
+        "What happened and after which steps, or what you suggest and why.",
+        "Ինչ է պատահել և ինչ քայլերից հետո, կամ ինչ եք առաջարկում և ինչու։";
+    FeedbackScreenshot =
+        "Снимок экрана, если ошибку на нём видно. На снимке всё, что на экране: лишнее можно обрезать.",
+        "A screenshot, if the problem shows on screen. It shows everything on the screen, so crop out what you'd rather not send.",
+        "Էկրանի նկար, եթե սխալը երևում է էկրանին։ Նկարում երևում է այն ամենը, ինչ էկրանին է. ավելորդը կարող եք կտրել։";
+    FeedbackNot = "Чего не присылать", "What not to send", "Ինչ չուղարկել";
+    /// Файл копии — все данные человека (CLAUDE.md, Правило 13), а пароль
+    /// копий открывает его и любую прежнюю копию.
+    FeedbackNotText =
+        "Пароль копий и сам файл копии: в файле все ваши данные\u{A0}— клиенты, счета, книга и налог. Чтобы разобраться в ошибке, хватит слов и снимка экрана.",
+        "Your backup password or a backup file: the file holds all your data, including clients, invoices, the ledger and taxes. Words and a screenshot are enough to look into a problem.",
+        "Պատճենների գաղտնաբառը և պատճենի ֆայլը. ֆայլում ձեր բոլոր տվյալներն են՝ հաճախորդները, հաշիվները, մատյանը և հարկը։ Սխալը հասկանալու համար բավական են բառերն ու էկրանի նկարը։";
+    /// Тема и текст письма по «Написать письмо» (адрес `mailto:`): строки,
+    /// которые человек дополнит. Шаблоны текста: «Профиль» и «О программе»
+    /// (`NavProfile`, `AboutTitle`).
+    FeedbackMailSubject = "Отзыв о Kvartik", "Kvartik feedback", "Կարծիք Kvartik-ի մասին";
+    FeedbackMailBody =
+        "Версия программы («{}», затем «{}»):\nУстройство и браузер:\nЧто случилось или что вы предлагаете:",
+        "App version (“{}”, then “{}”):\nDevice and browser:\nWhat happened, or what you suggest:",
+        "Ծրագրի տարբերակը («{}», ապա «{}»)՝\nՍարքը և դիտարկիչը՝\nԻնչ է պատահել կամ ինչ եք առաջարկում՝";
+
     /// Калькулятор лендинга (задача 34, `tax::example`): пример расчёта тем
     /// же кодом, что в программе. Число в нём — пример, а не расчёт человека
     /// (Правило 2, «Образец назван образцом»): поэтому «пример» в каждом

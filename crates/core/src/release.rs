@@ -209,6 +209,21 @@ pub const fn buy_path(lang: Lang) -> &'static str {
     }
 }
 
+/// Страница «Отзывы и предложения» (задача 114) на языке `lang` от корня
+/// сайта — рядом со страницей лендинга того же языка, как [`buy_path`]: что
+/// написать об ошибке или улучшении, письмо продавцу ([`EMAIL`]) с уже
+/// вписанными строками и [`TELEGRAM`]. Её пишет программа сборки
+/// (`crates/sw/src/landing.rs`), а ведут на неё подвал каждой страницы сайта
+/// и экран «О программе». Адрес — навсегда: прежние версии программы
+/// открывают его годами.
+pub const fn feedback_path(lang: Lang) -> &'static str {
+    match lang {
+        Lang::Am => "/feedback/",
+        Lang::Ru => "/ru/feedback/",
+        Lang::En => "/en/feedback/",
+    }
+}
+
 /// Цена ключа «Стандарт» на год (решение человека 2026-11-09, была задача
 /// 42): на старте продаётся только он, а помесячный — потом, с выдачей без
 /// рук, и так, чтобы год помесячно выходил дороже. Число одно на страницу
@@ -539,22 +554,30 @@ mod tests {
         assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
-    /// Страница «Купить» — у каждого языка своя, в папке страницы этого
-    /// языка, рядом с его юридическими текстами, и ни одна не ложится на
-    /// юридический текст.
+    /// Страницы «Купить» и «Отзывы и предложения» (задача 114) — у каждого
+    /// языка свои, в папке страницы этого языка, рядом с его юридическими
+    /// текстами, и ни одна не ложится на юридический текст или на другую.
     #[test]
-    fn buy_pages_sit_next_to_the_legal_texts() {
+    fn buy_and_feedback_pages_sit_next_to_the_legal_texts() {
+        /// Адрес страницы на языке.
+        type Path = fn(Lang) -> &'static str;
         let mut wrong = Vec::new();
-        for lang in Lang::ALL {
-            let buy = buy_path(lang);
-            for doc in Legal::ALL {
-                let path = doc.path(lang);
-                if buy == path || buy.trim_end_matches("buy/") != path.trim_end_matches(&format!("{}/", doc.name())) {
-                    wrong.push(format!("{lang:?}: {buy} и {path}"));
+        let pages: [(Path, &str); 2] = [(buy_path, "buy/"), (feedback_path, "feedback/")];
+        for (page, name) in pages {
+            for lang in Lang::ALL {
+                let own = page(lang);
+                for doc in Legal::ALL {
+                    let path = doc.path(lang);
+                    if own == path || own.trim_end_matches(name) != path.trim_end_matches(&format!("{}/", doc.name())) {
+                        wrong.push(format!("{lang:?}: {own} и {path}"));
+                    }
                 }
-            }
-            if Lang::ALL.iter().filter(|other| buy_path(**other) == buy).count() != 1 {
-                wrong.push(format!("{buy} — у двух языков"));
+                if Lang::ALL.iter().filter(|other| page(**other) == own).count() != 1 {
+                    wrong.push(format!("{own} — у двух языков"));
+                }
+                if buy_path(lang) == feedback_path(lang) {
+                    wrong.push(format!("{lang:?}: «Купить» и отзывы — один адрес"));
+                }
             }
         }
         assert!(wrong.is_empty(), "{wrong:#?}");

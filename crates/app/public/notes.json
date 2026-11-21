@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.164",
+      "date": "2026-11-21",
+      "hy": [
+        "Կայքում նոր էջ է՝ «Կարծիքներ և առաջարկներ». ինչ գրել սխալի կամ բարելավման մասին և նամակ, որում արդեն կան ծրագրի տարբերակի, սարքի և պատահածի տողերը, ինչպես նաև Telegram։ Այն բացվում է «Ծրագրի մասին» էկրանից և կայքի յուրաքանչյուր էջի ներքևից։"
+      ],
+      "ru": [
+        "На сайте — страница «Отзывы и предложения»: что написать об ошибке или улучшении и письмо, где уже есть строки для версии программы, устройства и того, что случилось, а рядом — Telegram. Она открывается с экрана «О программе» и внизу каждой страницы сайта."
+      ],
+      "en": [
+        "The site has a new “Feedback and suggestions” page: what to include about a bug or an improvement and an email with lines for the app version, your device and what happened, plus Telegram. It opens from the About screen and from the bottom of every page of the site."
+      ]
+    },
+    {
       "version": "0.0.163",
       "date": "2026-11-21",
       "hy": [
@@ -263,22 +276,6 @@
       ],
       "en": [
         "In the Armenian window, the Settings screen now says “Վերականգնել” under your own color instead of “Վերակայել”: the old word was a calque."
-      ]
-    },
-    {
-      "version": "0.0.144",
-      "date": "2026-11-17",
-      "hy": [
-        "«Գնել» էջում երկրորդ սակագինն է՝ «Pro»․ մեկ տարվա բանալի 10 ԱՁ-ի համար՝ 120 000 ֏, մի քանի ԱՁ վարող հաշվապահի համար։ Սեփական «Ստանդարտ» բանալի ունեցող ԱՁ-ն դրանում տեղ չի զբաղեցնում։",
-        "Լիցենզիայի պայմանները՝ նոր խմբագրությամբ, 17.11.2026։ Դրանում «Pro» սակագինն է, և բանալիներ կարող են գնել նաև կազմակերպությունները։"
-      ],
-      "ru": [
-        "На странице «Купить» — второй тариф, «Pro»: ключ на год на 10 ИП за 120 000 ֏ для бухгалтера, который ведёт несколько ИП. ИП со своим ключом «Стандарт» места в нём не занимает.",
-        "Условия лицензии — в новой редакции, от 17.11.2026: в ней тариф «Pro», и ключи могут покупать и организации."
-      ],
-      "en": [
-        "The “Buy” page has a second plan, “Pro”: a one-year key for 10 entrepreneurs at AMD 120,000 for a bookkeeper who keeps several of them. An entrepreneur with their own “Standard” key takes no seat in it.",
-        "The license terms have a new edition of November 17, 2026: it adds the “Pro” plan, and organizations can buy keys too."
       ]
     }
   ]

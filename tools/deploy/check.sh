@@ -120,7 +120,8 @@ check_page
 
 # Корень и страницы языков — лендинг (задача 34, с 0.0.82), юридические
 # тексты к каждой (задача 32, с 0.0.94), страница «Купить» (задача 35,
-# с 0.0.96) и прежние редакции текстов по своим адресам (задача 93,
+# с 0.0.96), страница «Отзывы и предложения» (задача 114, с 0.0.164)
+# и прежние редакции текстов по своим адресам (задача 93,
 # с 0.0.123; условия, п. 11) — какие собраны, а у условий одна есть
 # точно: 200 и байт в байт та
 # страница, что собрана, — с CSP и без долгого кэша. Зона вписывает свой
@@ -132,7 +133,7 @@ check_landing() {
     | sed 's|^\./||; s|index\.html$||' | sort)"
   [ -n "$earlier" ] || fail "в сборке нет прежних редакций условий (terms/<день>/)"
   # shellcheck disable=SC2086 # адреса без пробелов: делить их по строкам и нужно
-  for path in "" ru/ en/ buy/ ru/buy/ en/buy/ terms/ ru/terms/ en/terms/ privacy/ ru/privacy/ en/privacy/ $earlier; do
+  for path in "" ru/ en/ buy/ ru/buy/ en/buy/ feedback/ ru/feedback/ en/feedback/ terms/ ru/terms/ en/terms/ privacy/ ru/privacy/ en/privacy/ $earlier; do
     while :; do
       code="$(curl -sS --compressed -o "$work/landing" -D "$work/landing-head" -w '%{http_code}' \
         -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' "$site/$path" || true)"
