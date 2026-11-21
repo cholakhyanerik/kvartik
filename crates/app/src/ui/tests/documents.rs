@@ -15,6 +15,7 @@ use kvartik_core::model::document::{
 use kvartik_core::doc::image::Picture;
 use kvartik_core::model::logo::{self, Image, IssuedLogo, Logo};
 use kvartik_core::model::money::{Currency, Money};
+use kvartik_core::model::office::{Ip, Issuing};
 use kvartik_core::model::profile::{Profile, ProfileData};
 use kvartik_core::model::record::{RecordId, Timestamp};
 use kvartik_core::model::recurring::Recurring;
@@ -37,7 +38,7 @@ use crate::ui::profile::fitted;
 use crate::ui::route::Screen;
 use crate::platform::clock;
 use crate::store::device::Device;
-use crate::store::{Store, Writes};
+use crate::store::{DB_NAME, Store, Writes};
 
 pub(super) fn line(text: &str) -> Line {
     Line::new(text).expect("в тесте — годный текст")
@@ -604,7 +605,7 @@ async fn restoring_a_backup_shows_its_documents() {
         Some(there) => there.click(),
         None => wrong.push(format!("нет «{}»", t(lang, Key::BackupIssuerThere))),
     }
-    if !wait_for(&host, t(lang, Key::BackupIssuerThereDone)).await || !Device::new().issue_elsewhere() {
+    if !wait_for(&host, t(lang, Key::BackupIssuerThereDone)).await || !Device::new().issue_elsewhere(DB_NAME) {
         wrong.push("ответ «там» не выключил выпуск здесь".to_owned());
     }
     // Повтор образца (с 13 октября 2026 года) ждёт черновика за ноябрь, но
@@ -616,7 +617,7 @@ async fn restoring_a_backup_shows_its_documents() {
     if documents.iter().any(|document| document.data().recurring.is_some()) {
         wrong.push("восстановление создало черновик повтора до ответа, где выпускать".to_owned());
     }
-    crate::ui::settings::set_issue_elsewhere(false);
+    crate::ui::settings::set_issue_elsewhere(None, false);
     drop(mounted);
     host.remove();
     if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten())
@@ -768,7 +769,7 @@ async fn a_device_without_issuing_keeps_drafts_and_names_repeated_numbers() {
     }
     writes.insert(&recurring);
     commit(writes).await;
-    assert!(crate::ui::settings::set_issue_elsewhere(true), "устройство не записало выпуск");
+    assert!(crate::ui::settings::set_issue_elsewhere(None, true), "устройство не записало выпуск");
 
     let (host, mounted) = mount_at("#/documents");
     let mut wrong = Vec::new();
@@ -813,17 +814,25 @@ async fn a_device_without_issuing_keeps_drafts_and_names_repeated_numbers() {
         }
         input.click();
     }
-    if !wait_until(|| !Device::new().issue_elsewhere()).await {
+    if !wait_until(|| !Device::new().issue_elsewhere(DB_NAME)).await {
         wrong.push("включили выпуск — устройство не помнит".to_owned());
     }
     crate::platform::set_hash("#/documents");
     if !wait_until(|| button(&host, &[t(lang, Key::DocIssue)]).is_some()).await {
         wrong.push("выпуск включили — «Выпустить» не вернулось".to_owned());
     }
-    // Выпуск выключили в другой вкладке — запись устройства есть, а сигнал
-    // этой вкладки о ней не знает: «Выпустить» здесь не выпускает, а форма
-    // встаёт со словами (ревью задачи 41).
-    Device::new().set_issue_elsewhere(true);
+    // Выпуск выключен у другого ИП устройства (задача 116) — у этого форма
+    // по-прежнему выпускает: она спрашивает о своей базе.
+    let other = Ip::new(clock::today().expect("часы с датой"), clock::now());
+    assert!(crate::ui::settings::set_issue_elsewhere(Some(other.base()), true), "устройство не записало выпуск");
+    sleep(100).await;
+    if button(&host, &[t(lang, Key::DocIssue)]).is_none() {
+        wrong.push("выпуск выключили у другого ИП — а «Выпустить» пропало у этого".to_owned());
+    }
+    // Выпуск этого ИП выключили в другой вкладке — запись устройства есть,
+    // а сигнал этой вкладки о ней не знает: «Выпустить» здесь не выпускает,
+    // а форма встаёт со словами (ревью задачи 41).
+    Device::new().set_issuing(&Issuing::default().with(other.base(), true).with(DB_NAME, true));
     match button(&host, &[t(lang, Key::DocIssue)]) {
         Some(issue) => issue.click(),
         None => wrong.push("нет «Выпустить»".to_owned()),
@@ -838,7 +847,7 @@ async fn a_device_without_issuing_keeps_drafts_and_names_repeated_numbers() {
     }
     drop(mounted);
     host.remove();
-    crate::ui::settings::set_issue_elsewhere(false);
+    crate::ui::settings::set_issue_elsewhere(None, false);
     forget_device();
     assert!(wrong.is_empty(), "устройство без выпуска: {wrong:#?}");
 }

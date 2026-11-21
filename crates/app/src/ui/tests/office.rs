@@ -18,7 +18,7 @@ use kvartik_core::tax::turnover::{self, Books};
 use wasm_bindgen_test::wasm_bindgen_test;
 use web_sys::HtmlElement;
 
-use super::documents::wait_until;
+use super::documents::{wait_selector, wait_until};
 use super::{button, mount_at, section_text, sleep, wait_for};
 use crate::platform::{RELOADS, clock};
 use crate::store::device::Device;
@@ -271,6 +271,97 @@ async fn the_tab_opens_its_ie_and_switches_only_when_free() {
     delete_database(OFFICE_DB).await;
     forget_office();
     assert!(wrong.is_empty(), "переход между ИП: {wrong:#?}");
+}
+
+/// Переключатель выпуска на экране настроек.
+fn issue_switch(host: &HtmlElement) -> Option<web_sys::HtmlInputElement> {
+    let found = host.query_selector("#settings li.issuing input[role=switch]").ok().flatten()?;
+    Some(wasm_bindgen::JsCast::unchecked_into(found))
+}
+
+/// Выпуск у каждого ИП свой (задача 116): при двух ИП переключатель
+/// настроек выключает выпуск только открытого, слова говорят, что у каждого
+/// ИП выбор свой и что сейчас он не у всех одинаков, а «Сделать у всех ИП
+/// так же» отдаёт выбор открытого всем; включённый снова — опять только у
+/// открытого.
+#[wasm_bindgen_test]
+async fn issuing_is_switched_per_ie() {
+    delete_database(DB_NAME).await;
+    delete_database(OFFICE_DB).await;
+    forget_office();
+    crate::ui::settings::set_issue_elsewhere(None, false);
+    let aram = named("ИП Арам Петросян");
+    let anna = named("ИП Анна Акопян");
+    let today = clock::today().expect("сегодня");
+    let first = {
+        let mut ip = Ip::first(Some(&aram), today, clock::now());
+        ip.copy_profile(&aram, clock::now());
+        ip
+    };
+    let mut second = Ip::new(today, clock::now());
+    second.copy_profile(&anna, clock::now());
+    seed(DB_NAME, &aram).await;
+    seed(second.base(), &anna).await;
+    seed_office(&[&first, &second]).await;
+    Device::new().set_office();
+    crate::store::office::set_tab_base(second.base());
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at("#/settings");
+    let mut wrong = Vec::new();
+    let bar = fill(t(lang, Key::OfficeBar), &["ИП Анна Акопян"]);
+    if !wait_for(&host, &bar).await {
+        wrong.push("над экраном не назван открытый ИП".to_owned());
+    }
+    if !wait_selector(&host, "#settings li.issuing input[role=switch]").await {
+        wrong.push("на экране настроек нет переключателя выпуска".to_owned());
+    }
+    if !wait_for(&host, t(lang, Key::SettingsIssueEach)).await {
+        wrong.push("при двух ИП не сказано, что выбор у каждого свой".to_owned());
+    }
+    if button(&host, &[t(lang, Key::SettingsIssueAll)]).is_some() {
+        wrong.push("«так же у всех», а выпуск и так у всех одинаков".to_owned());
+    }
+    match issue_switch(&host) {
+        Some(switch) => switch.click(),
+        None => wrong.push("переключатель выпуска не нажать".to_owned()),
+    }
+    let device = Device::new();
+    if !wait_until(|| device.issue_elsewhere(second.base())).await {
+        wrong.push("выпуск открытого ИП не выключился".to_owned());
+    }
+    if device.issue_elsewhere(DB_NAME) {
+        wrong.push("выпуск выключился и у другого ИП".to_owned());
+    }
+    if !wait_for(&host, t(lang, Key::SettingsIssueMixed)).await {
+        wrong.push("не сказано, что выпуск не у всех одинаков".to_owned());
+    }
+    match button(&host, &[t(lang, Key::SettingsIssueAll)]) {
+        Some(all) => all.click(),
+        None => wrong.push(format!("нет «{}»", t(lang, Key::SettingsIssueAll))),
+    }
+    if !wait_until(|| device.issue_elsewhere(DB_NAME)).await || !device.issue_elsewhere(second.base()) {
+        wrong.push("«так же у всех» не выключило выпуск у другого ИП".to_owned());
+    }
+    if !wait_for(&host, t(lang, Key::SettingsIssueEach)).await {
+        wrong.push("выпуск у всех одинаков — а слова прежние".to_owned());
+    }
+    // Включить снова — только у открытого: у другого он остаётся выключенным.
+    match issue_switch(&host) {
+        Some(switch) if !switch.checked() => switch.click(),
+        Some(_) => wrong.push("выпуск выключен, а переключатель включён".to_owned()),
+        None => wrong.push("переключатель выпуска не нажать".to_owned()),
+    }
+    if !wait_until(|| !device.issue_elsewhere(second.base())).await || !device.issue_elsewhere(DB_NAME) {
+        wrong.push("включили у открытого — а у другого выпуск включился тоже".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    crate::ui::settings::set_issue_elsewhere(None, false);
+    delete_database(second.base()).await;
+    delete_database(OFFICE_DB).await;
+    forget_office();
+    assert!(wrong.is_empty(), "выпуск по ИП: {wrong:#?}");
 }
 
 /// Экран списка, открытый вместе со страницей, строится раньше, чем окно

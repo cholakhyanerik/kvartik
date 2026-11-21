@@ -549,7 +549,8 @@ struct Accepted {
     got: Option<Date>,
     /// Правки позже «сейчас» этого устройства (`backup::ahead`).
     ahead: bool,
-    /// Легло в пустую программу: так заводят устройство — где выпускать.
+    /// Легло в пустую программу, а выпуск здесь не выключен: так заводят
+    /// устройство — где выпускать.
     fresh: bool,
 }
 
@@ -755,8 +756,7 @@ fn AcceptedWords(lang: ReadSignal<Lang>, accepted: Rc<Accepted>) -> impl IntoVie
         }}</p>
         {flow}
         {accepted.ahead.then(|| view! { <p class="warning">{tr(lang, Key::BackupAhead)}</p> })}
-        {(accepted.fresh && restored.added > 0 && !super::settings::issue_elsewhere_untracked())
-            .then(|| view! { <IssuerAsk lang /> })}
+        {(accepted.fresh && restored.added > 0).then(|| view! { <IssuerAsk lang /> })}
     }
 }
 
@@ -884,7 +884,8 @@ async fn accept(ctx: Ctx, sealed: &Sealed, typed: &str) -> Result<Accepted, Say>
         since,
         got: got.and_then(sync::day_covering),
         ahead,
-        fresh,
+        // Выпуск уже выключен — спрашивать не о чем.
+        fresh: fresh && !super::settings::issue_elsewhere_untracked(store.name()),
     })
 }
 

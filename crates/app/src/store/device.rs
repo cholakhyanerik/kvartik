@@ -5,8 +5,8 @@
 //! первые шаги на главном экране (задача 28) и что с автокопией (задача 29):
 //! когда была последняя, когда в последний раз менялись данные, метка
 //! устройства и когда вводили пароль, — настройки окна (задача 88): включён
-//! ли кружок у курсора и свои цвета, выключен ли здесь выпуск счетов и актов
-//! (задача 41), — и срок ключа каждой базы с днём, о конце
+//! ли кружок у курсора и свои цвета, у каких ИП здесь выключен выпуск счетов
+//! и актов (задачи 41 и 116), — и срок ключа каждой базы с днём, о конце
 //! которого окно уже сказало (задача 92), а о конце пробного периода и ключа
 //! «Pro» — одним днём на устройство (задачи 93 и 38), — последние курсы ЦБ
 //! с сайта (задача 43): копия файла сайта, а не данные, — что сервер сайта
@@ -49,6 +49,7 @@ use kvartik_core::format::sync::Received;
 use kvartik_core::i18n::Lang;
 use kvartik_core::license::{self, Paid};
 use kvartik_core::model::date::Date;
+use kvartik_core::model::office::Issuing;
 use kvartik_core::model::record::{RecordId, Timestamp};
 use kvartik_core::release::Version;
 
@@ -71,6 +72,11 @@ const CURSOR: &str = "cursor";
 /// лендинг (`site/landing.js`) под полным именем, и тест ниже держит их
 /// вместе.
 const SITE_LANG: &str = "site_lang";
+
+/// Имена двух записей выпуска (задачи 41 и 116, `model::office::Issuing`):
+/// первую читают и версии до 0.0.167 — имя навсегда.
+const ISSUE_ALL: &str = "issue_elsewhere";
+const ISSUE_AT: &str = "issue_at";
 
 impl Device {
     /// Записи программы.
@@ -329,20 +335,36 @@ impl Device {
         self.set("office", "1")
     }
 
-    /// Выключен ли на устройстве выпуск счетов и актов (задача 41): номера
-    /// выдаёт другое устройство человека, а здесь — черновики, оплаты, доходы
-    /// и расходы, которые туда переносит копия. По умолчанию — нет: запись
-    /// есть, только пока выпуск выключили. Запись устройства, а не базы:
-    /// копия, восстановленная на основном устройстве, не выключила бы выпуск
-    /// на нём самом.
-    pub fn issue_elsewhere(&self) -> bool {
-        self.get("issue_elsewhere").is_some()
+    /// Где устройство выпускает счета и акты каждого ИП (задачи 41 и 116):
+    /// номера выдаёт другое устройство человека, а здесь — черновики,
+    /// оплаты, доходы и расходы, которые туда переносит копия. По умолчанию
+    /// выпуск включён у всех. Запись устройства, а не базы: копия,
+    /// восстановленная на основном устройстве, не выключила бы выпуск на нём
+    /// самом. Две записи и почему — шапка `model::office::Issuing`.
+    pub fn issuing(&self) -> Issuing {
+        Issuing::read(self.get(ISSUE_ALL).as_deref(), self.get(ISSUE_AT).as_deref())
     }
 
-    /// Выключить или включить выпуск на устройстве. `false` — `localStorage`
-    /// отказал: при следующем открытии выпуск будет прежним.
-    pub fn set_issue_elsewhere(&self, on: bool) -> bool {
-        if on { self.set("issue_elsewhere", "1") } else { self.remove("issue_elsewhere") }
+    /// Выключен ли выпуск у ИП базы `base` — без списка исключений в памяти:
+    /// это зовёт главный wasm при открытии базы (Правило 1).
+    pub fn issue_elsewhere(&self, base: &str) -> bool {
+        Issuing::elsewhere_of(self.get(ISSUE_ALL).as_deref(), self.get(ISSUE_AT).as_deref(), base)
+    }
+
+    /// Запомнить, где выпускать. Первая запись — раньше второй: выключенный
+    /// выпуск она выключает и у прежних версий, даже если вторая не легла.
+    /// `false` — `localStorage` отказал: при следующем открытии выпуск может
+    /// быть прежним.
+    pub fn set_issuing(&self, issuing: &Issuing) -> bool {
+        let all = match issuing.all_text() {
+            Some(value) => self.set(ISSUE_ALL, value),
+            None => self.remove(ISSUE_ALL),
+        };
+        let at = match issuing.at_text() {
+            Some(value) => self.set(ISSUE_AT, &value),
+            None => self.remove(ISSUE_AT),
+        };
+        all && at
     }
 
     /// Идентификатор этого устройства в кодах передачи изменений
@@ -606,6 +628,8 @@ impl Device {
                 "sync_made",
                 "sync_received",
                 "sync_arrived",
+                ISSUE_ALL,
+                ISSUE_AT,
             ] {
                 let _ = storage.remove_item(&format!("{}{name}", self.prefix));
             }

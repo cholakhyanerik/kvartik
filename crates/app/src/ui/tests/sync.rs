@@ -29,6 +29,7 @@ fn other_device() {
             "last_backup",
             "password_entered",
             "issue_elsewhere",
+            "issue_at",
         ] {
             let _ = storage.remove_item(&format!("kvartik.{name}"));
         }

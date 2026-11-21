@@ -1,5 +1,5 @@
-//! Настройки (задача 88): выпуск на этом устройстве (задача 41), кружок
-//! у курсора и свои цвета окна.
+//! Настройки (задача 88): выпуск на этом устройстве (задача 41) — у каждого
+//! ИП свой (задача 116), — кружок у курсора и свои цвета окна.
 //!
 //! Все — на устройстве (`store/device.rs`), а не в базе: это не данные
 //! человека, и в копию они не идут, как язык окна. Выпуск — потому что
@@ -38,15 +38,18 @@
 use std::cell::RefCell;
 
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
+use kvartik_core::model::office::Issuing;
 use kvartik_core::theme::{self, Choice, Low, Paint, Pair, Palette, Pick, Record, Rgb, Sheet};
 use leptos::prelude::*;
 use web_sys::HtmlInputElement;
 
 use crate::platform::look;
+use crate::store::DB_NAME;
 use crate::store::device::Device;
 
 use super::backup::{BackupChip, Backups};
 use super::icon::{Icon, icon};
+use super::office::Office;
 use super::route::{Router, Screen};
 use super::split::{screen, split};
 use super::tr;
@@ -119,7 +122,7 @@ pub fn SettingsScreen(lang: ReadSignal<Lang>, look: Look, backups: Backups, rout
     view! {
         <h1 tabindex="-1">{tr(lang, Key::SettingsTitle)}</h1>
         <BackupChip lang backups nudge=true />
-        {screen(lang, router, Screen::Settings, move || settings_part(Job::Page(lang, look)))}
+        {screen(lang, router, Screen::Settings, move || settings_part(Job::Page(lang, look, backups)))}
     }
 }
 
@@ -136,8 +139,10 @@ pub async fn refresh() {
 /// Что делает часть настроек.
 #[derive(Clone, Copy)]
 pub(super) enum Job {
-    /// Нарисовать экран.
-    Page(ReadSignal<Lang>, Look),
+    /// Нарисовать экран; контора из `Backups` — у какого ИП выпуск
+    /// (задача 116): своим параметром она стоила бы оболочке экрана в главном
+    /// wasm байтов (замер задачи 116).
+    Page(ReadSignal<Lang>, Look, Backups),
     /// Пересчитать палитру записи по выбору (`repaint`) и сверить с ней
     /// копию, с которой пришла страница.
     Refresh,
@@ -149,7 +154,7 @@ split! {
     /// тому, кто открыл настройки или выбрал свои цвета.
     pub(super) fn settings_part(job: Job) -> AnyView, preload preload_settings {
         match job {
-            Job::Page(lang, look) => view! { <SettingsPage lang look /> }.into_any(),
+            Job::Page(lang, look, backups) => view! { <SettingsPage lang look backups /> }.into_any(),
             Job::Refresh => {
                 let page = look::take_copy();
                 if page.is_some() || Device::new().colors().is_some() {
@@ -185,51 +190,66 @@ struct Copier {
 
 thread_local! {
     static COPIER: RefCell<Copier> = RefCell::default();
-    /// Выключен ли выпуск на этом устройстве (задача 41) — сигналом: его
-    /// меняют экран настроек и вопрос после восстановления копии, а форма
+    /// Где выпускать счета и акты каждого ИП (задачи 41 и 116) — сигналом:
+    /// его меняют экран настроек и вопрос после восстановления копии, а форма
     /// документа, даже спрятанная, следит за ним.
-    static ELSEWHERE: ArcRwSignal<bool> = ArcRwSignal::new(Device::new().issue_elsewhere());
+    static ELSEWHERE: ArcRwSignal<Issuing> = ArcRwSignal::new(Device::new().issuing());
 }
 
-/// Выключен ли выпуск счетов и актов на этом устройстве (задача 41): номера
-/// выдаёт другое устройство человека. Отслеживаемое.
-pub(super) fn issue_elsewhere() -> bool {
-    ELSEWHERE.with(|shared| shared.get())
+/// Выключен ли выпуск счетов и актов ИП базы `base` на этом устройстве
+/// (задачи 41 и 116): номера выдаёт другое устройство человека.
+/// Отслеживаемое.
+pub(super) fn issue_elsewhere(base: &str) -> bool {
+    ELSEWHERE.with(|shared| shared.with(|issuing| issuing.elsewhere(base)))
 }
 
 /// То же — без слежения: для решения, которое принимают один раз.
-pub(super) fn issue_elsewhere_untracked() -> bool {
-    ELSEWHERE.with(|shared| shared.get_untracked())
+pub(super) fn issue_elsewhere_untracked(base: &str) -> bool {
+    ELSEWHERE.with(|shared| shared.with_untracked(|issuing| issuing.elsewhere(base)))
+}
+
+/// Одинаков ли выпуск у всех ИП устройства. Отслеживаемое.
+fn issuing_uniform() -> bool {
+    ELSEWHERE.with(|shared| shared.with(Issuing::uniform))
 }
 
 /// Выключен ли выпуск — по записи устройства сейчас, а не по сигналу
 /// вкладки: его могли выключить в другой вкладке, а сигнал берёт запись один
 /// раз (ревью задачи 41). Разошлись — сигнал догоняет запись, и форма
 /// вместо «Выпустить» показывает слова. Зовёт выпуск перед записью.
-pub(super) fn issue_elsewhere_now() -> bool {
-    let now = Device::new().issue_elsewhere();
+pub(super) fn issue_elsewhere_now(base: &str) -> bool {
+    let now = Device::new().issuing();
+    let elsewhere = now.elsewhere(base);
     follow(now);
-    now
+    elsewhere
 }
 
-/// Выключить или включить выпуск здесь — на устройстве и, если запись легла,
-/// в окне. `false` — `localStorage` отказал: сигнал остаётся прежним,
-/// иначе вкладка говорила бы «выключен», а после перезагрузки выпуск снова
-/// был бы включён без единого слова (ревью задачи 41).
-pub(super) fn set_issue_elsewhere(on: bool) -> bool {
-    let saved = Device::new().set_issue_elsewhere(on);
+/// Выключить (`true`) или включить выпуск здесь — у ИП базы `base` или,
+/// без базы, у всех ИП устройства — на устройстве и, если запись легла,
+/// в окне. Прочее берётся из записи устройства, а не из сигнала: выбор
+/// у других ИП могли сменить в другой вкладке. `false` — `localStorage`
+/// отказал: сигнал остаётся прежним, иначе вкладка говорила бы «выключен»,
+/// а после перезагрузки выпуск снова был бы включён без единого слова
+/// (ревью задачи 41).
+pub(super) fn set_issue_elsewhere(base: Option<&str>, elsewhere: bool) -> bool {
+    let device = Device::new();
+    let next = match base {
+        Some(base) => device.issuing().with(base, elsewhere),
+        None => Issuing::everywhere(elsewhere),
+    };
+    let saved = device.set_issuing(&next);
     if saved {
-        follow(on);
+        follow(next);
     }
     saved
 }
 
-/// Сигнал — к значению `on`, только когда оно другое: запись того же будила
+/// Сигнал — к выбору `next`, только когда он другой: запись того же будила
 /// бы всех, кто за ним следит (CLAUDE.md, Правило 2, «Общий сигнал»).
-fn follow(on: bool) {
+fn follow(next: Issuing) {
     ELSEWHERE.with(|shared| {
-        if shared.get_untracked() != on {
-            shared.set(on);
+        if shared.with_untracked(|issuing| *issuing != next) {
+            shared.set(next);
         }
     });
 }
@@ -326,7 +346,13 @@ const fn label_of(pick: Pick) -> Key {
 
 /// Содержимое экрана — из части: кружок у курсора и свои цвета.
 #[component]
-fn SettingsPage(lang: ReadSignal<Lang>, look: Look) -> impl IntoView {
+fn SettingsPage(lang: ReadSignal<Lang>, look: Look, backups: Backups) -> impl IntoView {
+    // Контора заведена при запуске (`ui/mod.rs`); нет её — ИП один, база
+    // первая.
+    let office = backups.office();
+    let several = move || office.is_some_and(Office::several);
+    let base = move || office.map_or_else(|| DB_NAME.to_owned(), Office::base);
+    let open_name = move || office.map_or_else(|| DB_NAME.to_owned(), Office::open_name);
     // Запись после обновления могла остаться от прежней версии: экран
     // показывает то, что стоит на странице.
     let themes = StoredValue::new(themes());
@@ -451,23 +477,51 @@ fn SettingsPage(lang: ReadSignal<Lang>, look: Look) -> impl IntoView {
                     <span class="entry-main">
                         <span class="entry-title">{tr(lang, Key::SettingsIssue)}</span>
                         <span class="entry-meta">{tr(lang, Key::SettingsIssueHint)}</span>
+                        // ИП несколько — у каждого свой выбор (задача 116):
+                        // бухгалтер выключает выпуск ИП, который выпускает
+                        // сам, и оставляет у остальных. Открытый ИП назван
+                        // над экраном.
+                        {move || several().then(|| view! {
+                            <span class="entry-meta">
+                                {move || t(lang.get(), if issuing_uniform() { Key::SettingsIssueEach } else { Key::SettingsIssueMixed })}
+                            </span>
+                        })}
                     </span>
                     <input
                         type="checkbox"
                         role="switch"
                         class="visually-hidden"
-                        prop:checked=move || !issue_elsewhere()
+                        prop:checked=move || !issue_elsewhere(&base())
                         on:change=move |event| {
                             let here = event_target_checked(&event);
+                            // Один ИП — выбор у всех: добавленный потом ИП
+                            // возьмёт его, как было до задачи 116.
+                            let base = open_name();
+                            let only = untrack(several).then_some(base.as_str());
                             // Запись не легла — переключатель назад: выпуск
                             // остался прежним.
-                            if !set_issue_elsewhere(!here) {
+                            if !set_issue_elsewhere(only, !here) {
                                 event_target::<HtmlInputElement>(&event).set_checked(!here);
                             }
                         }
                     />
                     <span class="switch" aria-hidden="true"></span>
                 </label>
+                // Выбор открытого ИП — всем: у бухгалтера на втором
+                // компьютере выпуск выключают у всех разом, а не открывая
+                // каждого ИП.
+                {move || (several() && !issuing_uniform()).then(|| view! {
+                    <button
+                        type="button"
+                        class="link"
+                        on:click=move |_| {
+                            let elsewhere = issue_elsewhere_untracked(&open_name());
+                            set_issue_elsewhere(None, elsewhere);
+                        }
+                    >
+                        <span class="label">{tr(lang, Key::SettingsIssueAll)}</span>
+                    </button>
+                })}
             </li>
         </ul>
         <h2>{tr(lang, Key::SettingsMouse)}</h2>

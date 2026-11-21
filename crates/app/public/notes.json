@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.167",
+      "date": "2026-11-21",
+      "hy": [
+        "Եթե ծրագրում մի քանի ԱՁ ունեք, «Կարգավորումներում» հաշիվների և ակտերի թողարկումն այժմ միացվում և անջատվում է յուրաքանչյուր ԱՁ-ի համար առանձին, իսկ «Բոլոր ԱՁ-ների մոտ դարձնել նույնը»-ն այդ ընտրությունը տալիս է բոլորին։ Բոլոր ԱՁ-ների պատճենը, որը դատարկ ծրագրում վերականգնվել է ոչ ամբողջությամբ, նույնպես հարցնում է, թե որտեղ թողարկել այսուհետ։"
+      ],
+      "ru": [
+        "У кого в программе несколько ИП, выпуск счетов и актов в «Настройках» теперь включают и выключают у каждого ИП отдельно, а «Сделать у всех ИП так же» отдаёт этот выбор всем. Копия всех ИП, легшая в пустую программу не целиком, тоже спрашивает, где выпускать дальше."
+      ],
+      "en": [
+        "If you keep several entrepreneurs in the app, issuing invoices and acts in Settings is now turned on and off for each entrepreneur separately, and “Make it the same for all entrepreneurs” gives that choice to all. A backup of all entrepreneurs that landed in an empty app only in part also asks where to issue from now on."
+      ]
+    },
+    {
       "version": "0.0.166",
       "date": "2026-11-21",
       "hy": [
@@ -263,19 +276,6 @@
       "en": [
         "Instead of a settlement document in the SRC system, you can mark that a cash register receipt was given: if you use a cash register and the buyer doesn't ask for a “հաշիվ վավերագիր”, the document no longer sits in the reminder.",
         "The export for your accountant has a new column on the documents sheet: the type of settlement document."
-      ]
-    },
-    {
-      "version": "0.0.147",
-      "date": "2026-11-17",
-      "hy": [
-        "ԿԲ փոխարժեքի հուշման տակ՝ «Երբ օրենքը վերցնում է այլ օր». վարձակալության, բաժանորդագրությունների, տոկոսների, ապրանքների ներմուծման և արտահանման դեպքում օրենքը փոխարժեքը հաշվում է ոչ թե ձևի ամսաթվից, և բացատրությունը նշում է՝ որ օրվանից։"
-      ],
-      "ru": [
-        "Под подсказкой курса ЦБ — «Когда закон берёт другой день»: у аренды, подписок, процентов, ввоза и вывоза товаров закон считает курс не от даты в форме, и слова говорят, от какого дня."
-      ],
-      "en": [
-        "Under the CBA rate hint there's now “When the law takes another day”: for rent, subscriptions, interest and importing or exporting goods the law counts the rate from a different day than the one in the form, and the words tell you which."
       ]
     }
   ]

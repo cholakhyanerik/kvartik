@@ -321,5 +321,151 @@ pub fn choose<'a>(ips: &'a [Ip], remembered: &[Option<&str>]) -> &'a str {
         .map_or(FIRST_BASE, |ip| ip.base())
 }
 
+/// Где это устройство выпускает счета и акты каждого ИП (задачи 41 и 116).
+/// Номера выдаёт одно устройство — `Document::next_number` знает только свою
+/// базу, — а у бухгалтера с конторой одного ИП выпускает сам ИП на своём
+/// устройстве, а остальных — бухгалтер: выпуск выключают у одного ИП,
+/// оставляя у других (ревью задачи 41). Запись устройства, а не базы: копия,
+/// восстановленная на основном устройстве, не выключила бы выпуск на нём
+/// самом (`store/device.rs`).
+///
+/// Лежит двумя записями устройства. Первая — прежняя `issue_elsewhere`
+/// (с 0.0.157): её одну читают версии до 0.0.167, и для них она есть —
+/// выпуск выключен у всех ИП. Значение — выбор по умолчанию: [`ALL`] —
+/// выключен у всех, кроме исключений, [`SOME`] — включён, но у кого-то
+/// выключен, нет записи — включён у всех. Вторая — `issue_at`: исключения,
+/// `<база>=there` и `<база>=here` через пробел ([`Issuing::at_text`]). Так
+/// прежняя версия в соседней вкладке выключает выпуск всегда, когда его
+/// выключила новая хоть у одного ИП, — у всех разом, и её номера не
+/// повторят номеров другого устройства, — а включает только там, где он
+/// включён у всех. Незнакомое значение первой записи — «выключен у всех»,
+/// как и для прежних версий: строже, а не мягче.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct Issuing {
+    /// Выключен ли выпуск у ИП без исключения.
+    all: bool,
+    /// Исключения: база и выключен ли у неё выпуск — всегда не то, что
+    /// у всех ([`Issuing::all`]): исключение, равное правилу, не хранится.
+    at: Vec<(String, bool)>,
+}
+
+/// Значение первой записи: выпуск выключен у всех ИП, кроме исключений, —
+/// то самое, что писали версии 0.0.157–0.0.166.
+pub const ALL: &str = "1";
+
+/// Значение первой записи: выпуск включён, но у кого-то из ИП выключен.
+pub const SOME: &str = "some";
+
+/// Слова исключения во второй записи.
+const THERE: &str = "there";
+const HERE: &str = "here";
+
+impl Issuing {
+    /// Выбор из двух записей устройства, как они лежат. Испорченное
+    /// исключение — не той формы, не имя базы ИП, второе у той же базы —
+    /// пропускается: выпуск у той базы — по умолчанию. Исключений — не больше
+    /// [`MAX_IPS`]: накопители ограничены (Правило 1).
+    pub fn read(all: Option<&str>, at: Option<&str>) -> Self {
+        let all = all_of(all);
+        let mut issuing = Self { all, at: Vec::new() };
+        for (base, elsewhere) in tokens(at) {
+            if elsewhere != all && !issuing.at.iter().any(|(known, _)| known == base) {
+                issuing.at.push((base.to_owned(), elsewhere));
+            }
+        }
+        issuing
+    }
+
+    /// Выключен ли выпуск у ИП базы `base` — то же, что [`Issuing::read`]
+    /// и [`Issuing::elsewhere`], но без списка в памяти: его зовёт
+    /// главный wasm при каждом открытии (Правило 1).
+    pub fn elsewhere_of(all: Option<&str>, at: Option<&str>, base: &str) -> bool {
+        tokens(at)
+            .find(|(known, _)| *known == base)
+            .map_or_else(|| all_of(all), |(_, elsewhere)| elsewhere)
+    }
+
+    /// Выпуск выключен (`true`) или включён у всех ИП — без исключений.
+    pub const fn everywhere(elsewhere: bool) -> Self {
+        Self {
+            all: elsewhere,
+            at: Vec::new(),
+        }
+    }
+
+    /// Выключен ли выпуск у ИП базы `base`.
+    pub fn elsewhere(&self, base: &str) -> bool {
+        self.at
+            .iter()
+            .find(|(known, _)| known == base)
+            .map_or(self.all, |(_, elsewhere)| *elsewhere)
+    }
+
+    /// Выпуск у всех ИП одинаков: исключений нет.
+    pub fn uniform(&self) -> bool {
+        self.at.is_empty()
+    }
+
+    /// Тот же выбор, но у ИП базы `base` выпуск выключен (`true`) или
+    /// включён. Не имя базы ИП — выбор прежний.
+    pub fn with(&self, base: &str, elsewhere: bool) -> Self {
+        let mut next = self.clone();
+        if !is_base_name(base) {
+            return next;
+        }
+        next.at.retain(|(known, _)| known != base);
+        if elsewhere != next.all && next.at.len() < MAX_IPS {
+            next.at.push((base.to_owned(), elsewhere));
+        }
+        next
+    }
+
+    /// Значение первой записи; `None` — записи не быть (шапка [`Issuing`]).
+    pub fn all_text(&self) -> Option<&'static str> {
+        if self.all {
+            Some(ALL)
+        } else if self.at.iter().any(|(_, elsewhere)| *elsewhere) {
+            Some(SOME)
+        } else {
+            None
+        }
+    }
+
+    /// Значение второй записи; `None` — исключений нет, и записи не быть.
+    pub fn at_text(&self) -> Option<String> {
+        let words: Vec<String> = self
+            .at
+            .iter()
+            .map(|(base, elsewhere)| format!("{base}={}", if *elsewhere { THERE } else { HERE }))
+            .collect();
+        (!words.is_empty()).then(|| words.join(" "))
+    }
+}
+
+/// Выключен ли выпуск у всех по первой записи: нет её или [`SOME`] — нет,
+/// иначе — да (шапка [`Issuing`]).
+fn all_of(all: Option<&str>) -> bool {
+    all.is_some_and(|value| value != SOME)
+}
+
+/// Годные исключения второй записи по порядку, не больше [`MAX_IPS`].
+/// Делит по пробелу, как пишет [`Issuing::at_text`], а не по любым
+/// пробельным знакам: их таблица Unicode легла бы в главный wasm (замер
+/// задачи 116).
+fn tokens(at: Option<&str>) -> impl Iterator<Item = (&str, bool)> {
+    at.unwrap_or_default()
+        .split(' ')
+        .filter_map(|word| {
+            let (base, value) = word.split_once('=')?;
+            let elsewhere = match value {
+                THERE => true,
+                HERE => false,
+                _ => return None,
+            };
+            is_base_name(base).then_some((base, elsewhere))
+        })
+        .take(MAX_IPS)
+}
+
 #[cfg(test)]
 mod tests;

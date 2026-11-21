@@ -157,13 +157,13 @@ impl Documents {
     /// Прочитать документы и повторы: когда база открылась и когда её
     /// заменило восстановление из копии. Повторам, которым к дню `today`
     /// пора, — создать черновики: транзакция записи открывается, только
-    /// когда пора. На устройстве, где выпуск выключен (задача 41), — нет:
+    /// когда пора. Где выпуск этого ИП выключен (задачи 41 и 116), — нет:
     /// черновик месяца создаст устройство, которое выпускает, а созданный
     /// и там, и здесь лёг бы после слияния копий вторым — и счёт за месяц
     /// выпустили бы дважды. Запись устройства — напрямую, а не сигналом
     /// настроек: этот код в главном wasm (Правило 1).
     pub async fn load(&self, store: &Store, today: Option<Date>) {
-        let today = today.filter(|_| !crate::store::device::Device::new().issue_elsewhere());
+        let today = today.filter(|_| !crate::store::device::Device::new().issue_elsewhere(store.name()));
         let read = async {
             let tx = store.read()?;
             Ok::<_, StoreError>((tx.list::<Document>().await?, tx.list::<Recurring>().await?))
@@ -1637,10 +1637,12 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
     ctx.licenses.watch(ctx.base, ctx.profiles);
     let access = Memo::new(move |_| ctx.licenses.access(ctx.profiles));
     let locked = Memo::new(move |_| license::issue_locked(ctx.licenses, access.get(), ctx.today));
-    // На этом устройстве выпуск выключен (задача 41): номера выдаёт другое,
-    // а черновик туда перенесёт копия. Тогда о сроке — ни слова: выпускать
-    // будут там.
-    let elsewhere = Memo::new(move |_| super::settings::issue_elsewhere());
+    // На этом устройстве выпуск этого ИП выключен (задачи 41 и 116): номера
+    // выдаёт другое, а черновик туда перенесёт копия. Тогда о сроке — ни
+    // слова: выпускать будут там. Пока база не открыта, выпускать нечем.
+    let elsewhere = Memo::new(move |_| {
+        ctx.base.is_open() && ctx.base.get().is_some_and(|store| super::settings::issue_elsewhere(store.name()))
+    });
     let blocked = Memo::new(move |_| elsewhere.get() || locked.get().is_some());
     // Выбранный клиент — из живых.
     let chosen = move || {
@@ -1693,9 +1695,8 @@ fn DocForm(ctx: Ctx, existing: Option<Document>, start: Start) -> impl IntoView 
     let submit = move |issue: bool| {
         // Выпуск выключен — и в другой вкладке тоже: запись устройства
         // читается заново (ревью задачи 41).
-        if form.busy.get_untracked()
-            || (issue && (locked.get_untracked().is_some() || super::settings::issue_elsewhere_now()))
-        {
+        let elsewhere_now = || ctx.base.get().is_some_and(|store| super::settings::issue_elsewhere_now(store.name()));
+        if form.busy.get_untracked() || (issue && (locked.get_untracked().is_some() || elsewhere_now())) {
             return;
         }
         form.tried.set(true);

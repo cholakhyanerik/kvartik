@@ -158,6 +158,8 @@ pub enum Persistence {
 /// а вместе с ним пропадут и обработчики `versionchange` и `close`.
 pub struct Store {
     db: IdbDatabase,
+    /// Имя базы: по нему выпуск знает, у какого ИП он выключен (задача 116).
+    name: String,
     shared: Rc<Shared>,
     _on_versionchange: Closure<dyn FnMut()>,
     _on_close: Closure<dyn FnMut()>,
@@ -300,10 +302,17 @@ impl Store {
 
         Ok(Self {
             db,
+            name: name.to_owned(),
             shared,
             _on_versionchange: on_versionchange,
             _on_close: on_close,
         })
+    }
+
+    /// Имя базы — без `IDBDatabase.name`: свой импорт JS лёг бы в главный
+    /// wasm (CLAUDE.md, Правило 6).
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     /// Записывается ли сейчас какое-нибудь действие.

@@ -265,3 +265,130 @@ fn an_own_key_gives_its_seat_to_the_next() {
     }
     assert!(wrong.is_empty(), "места со своими ключами: {wrong:#?}");
 }
+
+/// Две базы ИП для выбора выпуска.
+fn two_bases() -> (String, String) {
+    (FIRST_BASE.to_owned(), Ip::new(day(2026, 11, 2), at(2_000)).base().to_owned())
+}
+
+/// Записи версий 0.0.157–0.0.166 читаются, как они их писали: есть
+/// `issue_elsewhere` — выпуск выключен у всех ИП, нет — включён у всех.
+#[test]
+fn the_old_record_still_means_every_ie() {
+    let (first, second) = two_bases();
+    let mut wrong = Vec::new();
+    for (all, elsewhere) in [(None, false), (Some(ALL), true), (Some("yes"), true), (Some(""), true)] {
+        let read = Issuing::read(all, None);
+        if (read.elsewhere(&first), read.elsewhere(&second)) != (elsewhere, elsewhere) || !read.uniform() {
+            wrong.push(format!("{all:?}: {read:?}"));
+        }
+        for base in [&first, &second] {
+            if Issuing::elsewhere_of(all, None, base) != elsewhere {
+                wrong.push(format!("{all:?} у {base}: без списка — не то"));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "прежняя запись: {wrong:#?}");
+}
+
+/// Выпуск выключают и включают у одного ИП: у другого он прежний, записи
+/// читаются обратно тем же выбором, а исключение, равное правилу, не
+/// хранится — выпуск у всех снова одинаков.
+#[test]
+fn issuing_is_chosen_per_ie() {
+    let (first, second) = two_bases();
+    let mut wrong = Vec::new();
+    let back = |issuing: &Issuing| {
+        Issuing::read(issuing.all_text(), issuing.at_text().as_deref())
+    };
+    let off_second = Issuing::default().with(&second, true);
+    if (off_second.elsewhere(&first), off_second.elsewhere(&second)) != (false, true) {
+        wrong.push(format!("выключили у второго: {off_second:?}"));
+    }
+    if off_second.all_text() != Some(SOME) || back(&off_second) != off_second {
+        wrong.push(format!("выключен у второго — записи: {:?} {:?}", off_second.all_text(), off_second.at_text()));
+    }
+    let on_first = Issuing::everywhere(true).with(&first, false);
+    if (on_first.elsewhere(&first), on_first.elsewhere(&second)) != (false, true) {
+        wrong.push(format!("включили у первого из выключенных у всех: {on_first:?}"));
+    }
+    if on_first.all_text() != Some(ALL) || back(&on_first) != on_first {
+        wrong.push(format!("включён у первого — записи: {:?} {:?}", on_first.all_text(), on_first.at_text()));
+    }
+    let undone = off_second.with(&second, false);
+    if !undone.uniform() || undone.all_text().is_some() || undone.at_text().is_some() {
+        wrong.push(format!("вернули как было — остались записи: {undone:?}"));
+    }
+    if Issuing::everywhere(false).with("kvartik-ip-x", true) != Issuing::everywhere(false) {
+        wrong.push("исключение у не имени базы записалось".to_owned());
+    }
+    for base in [&first, &second] {
+        for issuing in [&on_first, &off_second] {
+            let at = issuing.at_text();
+            if Issuing::elsewhere_of(issuing.all_text(), at.as_deref(), base) != issuing.elsewhere(base) {
+                wrong.push(format!("без списка у {base} — не то, что со списком: {issuing:?}"));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "выпуск по ИП: {wrong:#?}");
+}
+
+/// Прежняя версия видит только первую запись — и выпуск в её вкладке
+/// никогда не включён там, где новая его выключила: номера не повторятся
+/// (шапка `Issuing`). Перебором выборов у двух баз.
+#[test]
+fn an_old_version_is_never_looser() {
+    let (first, second) = two_bases();
+    let mut wrong = Vec::new();
+    for all in [false, true] {
+        for at_first in [None, Some(false), Some(true)] {
+            for at_second in [None, Some(false), Some(true)] {
+                let mut issuing = Issuing::everywhere(all);
+                if let Some(off) = at_first {
+                    issuing = issuing.with(&first, off);
+                }
+                if let Some(off) = at_second {
+                    issuing = issuing.with(&second, off);
+                }
+                let old_off = issuing.all_text().is_some();
+                let any_off = issuing.elsewhere(&first) || issuing.elsewhere(&second);
+                if any_off && !old_off {
+                    wrong.push(format!("прежняя выпускает, а новая выключила: {issuing:?}"));
+                }
+                if !any_off && old_off && issuing.at_text().is_none() && !all {
+                    wrong.push(format!("прежняя выключила без причины: {issuing:?}"));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "прежняя версия: {wrong:#?}");
+}
+
+/// Испорченная вторая запись не ломает выбора: не той формы, не имя базы,
+/// незнакомое слово — пропускаются, второе исключение той же базы — тоже,
+/// а исключений не больше `MAX_IPS`.
+#[test]
+fn a_spoiled_exception_is_skipped() {
+    let (first, second) = two_bases();
+    let at = format!("мусор {first} =there {first}=maybe kvartik-ip-x=there {second}=there {second}=here");
+    let read = Issuing::read(None, Some(&at));
+    let mut wrong = Vec::new();
+    if (read.elsewhere(&first), read.elsewhere(&second)) != (false, true) {
+        wrong.push(format!("прочитано: {read:?}"));
+    }
+    if !Issuing::elsewhere_of(None, Some(&at), &second) {
+        wrong.push("без списка второе исключение той же базы взяло верх".to_owned());
+    }
+    let many: Vec<String> = (0..MAX_IPS + 5)
+        .map(|n| format!("{}=there", Ip::new(day(2026, 11, 2), at_ms(n)).base()))
+        .collect();
+    let read = Issuing::read(None, Some(&many.join(" ")));
+    if read.at.len() != MAX_IPS {
+        wrong.push(format!("исключений прочитано {}", read.at.len()));
+    }
+    assert!(wrong.is_empty(), "испорченное: {wrong:#?}");
+}
+
+fn at_ms(n: usize) -> Timestamp {
+    at(i64::try_from(n).expect("малое число") + 10_000)
+}

@@ -262,7 +262,7 @@ impl Backups {
     }
 
     /// Контора; `None` — ещё не заведена.
-    fn office(&self) -> Option<Office> {
+    pub(super) fn office(&self) -> Option<Office> {
         self.auto.with_value(|parts| parts.office)
     }
 
@@ -1696,8 +1696,10 @@ pub(super) enum Recovered {
     AsNew,
     /// Копия ИП из списка, а открыт другой: ничего не записано.
     Elsewhere(Arc<Ip>),
-    /// Легла не вся — вот почему; повтор безвреден.
-    Partial(Key),
+    /// Легла не вся — вот почему; повтор безвреден. `true` — копия всех ИП
+    /// легла в пустую программу: где выпускать, спросить и так, и после
+    /// повтора (задача 116).
+    Partial(Key, bool),
 }
 
 /// Что сказать после восстановления, кроме итога (задача 41).
@@ -2013,6 +2015,33 @@ fn RestoreBackup(
     picked: RwSignal<bool>,
 ) -> impl IntoView {
     let restoring = RwSignal::new_local(Restoring::Idle);
+    // Копия всех ИП легла в пустую программу частью (ревью задачи 41,
+    // задача 116): спросить, где выпускать, — и сразу, под словами о сбое,
+    // и после повтора: к повтору список ИП уже записан, и программа для
+    // него не пустая.
+    let fresh_partly = RwSignal::new(false);
+    // Переход к ответу: частичная копия запоминает, что программа была
+    // пуста, а легшая после неё — спрашивает и тогда.
+    let landed = move |outcome: Recovered| -> Option<Restoring> {
+        Some(match outcome {
+            Recovered::Done(restored, after) => Restoring::Done(
+                restored,
+                After {
+                    fresh: after.fresh || fresh_partly.get_untracked(),
+                    ..after
+                },
+            ),
+            Recovered::AsNew => Restoring::AsNew,
+            Recovered::Elsewhere(ip) => Restoring::Elsewhere(ip),
+            Recovered::Partial(why, fresh) => {
+                if fresh {
+                    fresh_partly.set(true);
+                }
+                Restoring::Failed(Problem::Partly(why))
+            }
+            Recovered::Other(_) => return None,
+        })
+    };
     Effect::new(move |_| {
         picked.set(restoring.with(|state| {
             matches!(state, Restoring::Busy | Restoring::Password(..) | Restoring::Other(..))
@@ -2062,11 +2091,8 @@ fn RestoreBackup(
                 password.set(String::new());
             }
             restoring.set(match outcome {
-                Ok(Recovered::Done(restored, after)) => Restoring::Done(restored, after),
                 Ok(Recovered::Other(asked)) => Restoring::Other(asked),
-                Ok(Recovered::AsNew) => Restoring::AsNew,
-                Ok(Recovered::Elsewhere(ip)) => Restoring::Elsewhere(ip),
-                Ok(Recovered::Partial(why)) => Restoring::Failed(Problem::Partly(why)),
+                Ok(outcome) => landed(outcome).unwrap_or(Restoring::Failed(Problem::Say(Key::BackupFailed))),
                 // Пароль не подошёл — спросить снова, а не выбирать файл
                 // заново.
                 Err(problem @ Problem::Say(Key::BackupWrongFilePassword)) => {
@@ -2090,11 +2116,8 @@ fn RestoreBackup(
                 Err(_) => Err(Problem::Say(Key::PartFailed)),
             };
             restoring.set(match outcome {
-                Ok(Recovered::Done(restored, after)) => Restoring::Done(restored, after),
-                Ok(Recovered::AsNew) => Restoring::AsNew,
-                Ok(Recovered::Elsewhere(ip)) => Restoring::Elsewhere(ip),
-                Ok(Recovered::Partial(why)) => Restoring::Failed(Problem::Partly(why)),
-                Ok(Recovered::Other(_)) => Restoring::Failed(Problem::Say(Key::BackupFailed)),
+                // С ответом хранилище второй раз не спрашивает.
+                Ok(outcome) => landed(outcome).unwrap_or(Restoring::Failed(Problem::Say(Key::BackupFailed))),
                 Err(problem) => Restoring::Failed(problem),
             });
         });
@@ -2212,7 +2235,7 @@ fn RestoreBackup(
                         </p>
                         {after.ahead.then(|| view! { <p class="warning">{tr(lang, Key::BackupAhead)}</p> })}
                         // Выпуск уже выключен — спрашивать не о чем.
-                        {(after.fresh && restored.added > 0 && !super::settings::issue_elsewhere_untracked())
+                        {(after.fresh && restored.added > 0 && !issued_elsewhere(backups))
                             .then(|| view! { <IssuerAsk lang /> })}
                     }.into_any()),
                     // Другой ИП открывается на экране списка: переход
@@ -2234,6 +2257,8 @@ fn RestoreBackup(
                     }.into_any()),
                     Restoring::Failed(problem) => Some(view! {
                         <p role="alert">{move || problem.text(lang.get())}</p>
+                        {(matches!(problem, Problem::Partly(_)) && fresh_partly.get_untracked() && !issued_elsewhere(backups))
+                            .then(|| view! { <IssuerAsk lang /> })}
                     }.into_any()),
                     _ => None,
                 }}
@@ -2253,9 +2278,10 @@ fn RestoreBackup(
 #[component]
 pub(super) fn IssuerAsk(lang: ReadSignal<Lang>) -> impl IntoView {
     let answered = RwSignal::new(None::<bool>);
+    // Ответ — у всех ИП устройства: копия всех ИП легла целиком сюда.
     // Запись не легла — вопрос остаётся: ответа устройство не помнит.
     let answer = move |elsewhere: bool| {
-        if super::settings::set_issue_elsewhere(elsewhere) {
+        if super::settings::set_issue_elsewhere(None, elsewhere) {
             answered.set(Some(elsewhere));
         }
     };
@@ -2286,6 +2312,15 @@ pub(super) fn IssuerAsk(lang: ReadSignal<Lang>) -> impl IntoView {
             }}
         </div>
     }
+}
+
+/// Выключен ли здесь выпуск у открытого ИП (задачи 41 и 116): тогда
+/// спрашивать, где выпускать, не о чем.
+fn issued_elsewhere(backups: Backups) -> bool {
+    backups
+        .base
+        .get()
+        .is_some_and(|store| super::settings::issue_elsewhere_untracked(store.name()))
 }
 
 /// ИП словами: имя и ՀՎՀՀ через запятую — или что их нет.
@@ -2429,10 +2464,16 @@ async fn restore_full(
     let fresh = spare.is_some();
     Ok(match done.failed {
         None => Recovered::Done(restored, After { fresh, ahead }),
-        Some(failure) => Recovered::Partial(match Problem::from(failure) {
-            Problem::Say(why) => why,
-            _ => Key::BackupFailed,
-        }),
+        Some(failure) => Recovered::Partial(
+            match Problem::from(failure) {
+                Problem::Say(why) => why,
+                _ => Key::BackupFailed,
+            },
+            // Пуста была — и тогда, когда сбой на первой же базе ничего
+            // в базы не положил: список уже записан, и повтор пустой
+            // программы не увидит.
+            fresh,
+        ),
     })
 }
 
@@ -2813,6 +2854,107 @@ mod tests {
         forget_device();
         forget_office();
         assert!(wrong.is_empty(), "копия всех ИП на свежем устройстве: {wrong:#?}");
+    }
+
+    /// Завести базу `name` версии новее программы: открыть её программа не
+    /// сможет (`VersionError`), и копия всех ИП ляжет частью.
+    async fn newer_base(name: &str) {
+        use wasm_bindgen::JsCast;
+        use wasm_bindgen::closure::Closure;
+        let factory = web_sys::window()
+            .and_then(|window| window.indexed_db().ok().flatten())
+            .expect("IndexedDB есть");
+        let request = factory
+            .open_with_u32(name, crate::store::DB_VERSION + 1)
+            .expect("база открывается");
+        let opened = js_sys::Promise::new(&mut |resolve, _| {
+            let request = request.clone();
+            let done = request.clone();
+            let on_success = Closure::once_into_js(move || {
+                if let Ok(db) = done.result() {
+                    db.unchecked_into::<web_sys::IdbDatabase>().close();
+                }
+                let _ = resolve.call0(&wasm_bindgen::JsValue::NULL);
+            });
+            request.set_onsuccess(Some(on_success.unchecked_ref()));
+        });
+        let _ = opened.await;
+    }
+
+    /// Копия всех ИП легла в пустую программу частью (задача 116): база
+    /// второго ИП не открылась. Восстановление говорит, что программа была
+    /// пуста, — где выпускать, окно спросит и тут, — а повтор, легший весь,
+    /// пустой её уже не видит: список ИП записан первой попыткой. Поэтому
+    /// вопрос после повтора помнит экран (`fresh_partly`).
+    #[wasm_bindgen_test]
+    async fn a_full_backup_landing_in_part_still_knows_the_app_was_empty() {
+        use crate::store::DB_NAME;
+        use crate::store::office::OFFICE_DB;
+        crate::store::delete_database(DB_NAME).await;
+        crate::store::delete_database(OFFICE_DB).await;
+        forget_device();
+        forget_office();
+        let (today, now) = (clock::today().expect("сегодня"), clock::now());
+        let aram = named("IE Aram");
+        let anna = named("IE Anna");
+        let first = Ip::first(Some(&aram), today, now);
+        let mut second = Ip::new(today, now);
+        second.copy_profile(&anna, now);
+        seed(DB_NAME, &aram).await;
+        seed(second.base(), &anna).await;
+        let office_store = Store::open_office(|_| {}).await.expect("контора открыта");
+        let mut writes = Writes::default();
+        writes.insert(&first);
+        writes.insert(&second);
+        office_store.write().expect("транзакция").commit(writes).await.expect("записано");
+        let file = {
+            let base = Store::open_base(DB_NAME, |_| {}).await.expect("база открыта");
+            let salt = crypto::random(SALT_BYTES).expect("соль");
+            let key = crypto::derive(&crypto::normalize(PASSWORD), &salt, KDF_ITERATIONS).await.expect("ключ");
+            let header = Header::new("0.0.166", clock::now());
+            let sealing = Sealing {
+                header: &header,
+                key: &key,
+                salt: &salt,
+                iterations: KDF_ITERATIONS,
+            };
+            let made = stored::make_all(&base, DB_NAME, &office_store, &sealing).await.expect("копия всех ИП");
+            Rc::new(open(&made.file).expect("файл открывается"))
+        };
+        drop(office_store);
+        for name in [DB_NAME, second.base(), OFFICE_DB] {
+            crate::store::delete_database(name).await;
+        }
+        forget_office();
+        newer_base(second.base()).await;
+        let open = Rc::new(Store::open_base(DB_NAME, |_| {}).await.expect("база открыта"));
+        let backups = backups_over(Rc::clone(&open));
+        backups.attach(Office::new(backups));
+        let mut wrong = Vec::new();
+        match restore(backups, RestoreJob::Open(Rc::clone(&file), PASSWORD.to_owned())).await {
+            Ok(Recovered::Partial(_, true)) => {}
+            Ok(Recovered::Partial(_, false)) => wrong.push("легла частью — а что программа была пуста, не сказано".to_owned()),
+            Ok(_) => wrong.push("копия всех ИП легла вся, хотя база второго ИП не открывается".to_owned()),
+            Err(problem) => wrong.push(format!("копия всех ИП: {}", problem.text(Lang::Ru))),
+        }
+        crate::store::delete_database(second.base()).await;
+        match restore(backups, RestoreJob::Open(file, PASSWORD.to_owned())).await {
+            Ok(Recovered::Done(_, after)) if !after.fresh => {}
+            Ok(Recovered::Done(..)) => wrong.push("повтор видит программу пустой — тогда экрану помнить незачем".to_owned()),
+            Ok(_) => wrong.push("повтор лёг не весь".to_owned()),
+            Err(problem) => wrong.push(format!("повтор: {}", problem.text(Lang::Ru))),
+        }
+        let office_store = Store::open_office(|_| {}).await.expect("контора открыта");
+        let ips = office_list(&office_store).await.expect("список").records;
+        drop((open, office_store));
+        for ip in &ips {
+            crate::store::delete_database(ip.base()).await;
+        }
+        crate::store::delete_database(second.base()).await;
+        crate::store::delete_database(OFFICE_DB).await;
+        forget_device();
+        forget_office();
+        assert!(wrong.is_empty(), "копия всех ИП частью: {wrong:#?}");
     }
 
     /// Окно копий над базой программы.

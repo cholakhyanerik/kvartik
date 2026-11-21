@@ -379,6 +379,20 @@ strings! {
         "Выпускайте на одном устройстве: два порознь выдадут одинаковые номера. Без выпуска здесь остаются черновики, оплаты, доходы и расходы, а на устройство, которое выпускает, они попадут с копией.",
         "Issue on one device only: two devices working separately will give out the same numbers. Without issuing, you still have drafts, payments, income and expenses here, and a backup carries them to the device that issues.",
         "Թողարկեք մեկ սարքում. առանձին աշխատող երկու սարքերը կտան նույն համարները։ Առանց թողարկման այստեղ մնում են սևագրերը, վճարումները, եկամուտներն ու ծախսերը, իսկ թողարկող սարքին դրանք կհասնեն պատճենով։";
+    /// ИП на устройстве несколько (задача 116): выпуск у каждого свой —
+    /// бухгалтер выключает его у ИП, который выпускает сам, и оставляет
+    /// у остальных. Сейчас он у всех одинаков.
+    SettingsIssueEach =
+        "Только у открытого ИП: у каждого ИП на этом устройстве выбор свой. Сейчас он у всех одинаков.",
+        "For the open entrepreneur only: each entrepreneur on this device has their own setting. Right now it's the same for all.",
+        "Միայն բաց ԱՁ-ի համար. այս սարքի յուրաքանչյուր ԱՁ ունի իր ընտրությունը։ Հիմա այն բոլորի մոտ նույնն է։";
+    /// То же, а выпуск у ИП устройства не одинаков.
+    SettingsIssueMixed =
+        "Только у открытого ИП: у каждого ИП на этом устройстве выбор свой, и сейчас он не у всех одинаков.",
+        "For the open entrepreneur only: each entrepreneur on this device has their own setting, and right now it isn't the same for all.",
+        "Միայն բաց ԱՁ-ի համար. այս սարքի յուրաքանչյուր ԱՁ ունի իր ընտրությունը, և հիմա այն բոլորի մոտ նույնը չէ։";
+    /// Выбор открытого ИП — всем ИП устройства.
+    SettingsIssueAll = "Сделать у всех ИП так же", "Make it the same for all entrepreneurs", "Բոլոր ԱՁ-ների մոտ դարձնել նույնը";
     SettingsMouse = "Мышь", "Mouse", "Մկնիկ";
     SettingsCursor = "Кружок у курсора", "Circle by the cursor", "Շրջանիկ կուրսորի մոտ";
     SettingsCursorHint =
