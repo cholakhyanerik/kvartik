@@ -35,6 +35,18 @@ for (const link of document.querySelectorAll(".langs a[hreflang]")) {
   });
 }
 
+// Подписку `webcal:` на Windows открывает Outlook, а он, по жалобам людей,
+// переписывает её в `http://` (задача 75, 2026-11-21): в чужом Wi-Fi ответ
+// подменят, и в календаре встанут чужие события от имени Kvartik. Там
+// кнопки нет, а адрес `https:` под ней выделяется целиком — им Outlook
+// и подписывается. Тот же выбор, что у экрана сроков программы
+// (crates/app/src/ui/deadlines.rs, `platform::pwa::windows`).
+if (navigator.userAgent.includes("Windows NT")) {
+  for (const link of document.querySelectorAll('a[href^="webcal:"]')) {
+    (link.closest(".actions") ?? link).hidden = true;
+  }
+}
+
 // Калькулятор: форма — в разметке страницы, а считает и пишет ответ wasm
 // ядра (crates/calc, `tax::example`) — тот же расчёт, что у программы.
 // Здесь ни чисел, ни слов: поля уходят в wasm строкой JSON, а ответ — уже

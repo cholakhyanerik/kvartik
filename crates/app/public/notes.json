@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.163",
+      "date": "2026-11-21",
+      "hy": [
+        "«Ժամկետներ» էկրանին ընդհանուր օրացույցի մոտ հայտնվել է «Պատճենել հասցեն» կոճակը. այդ հասցեով բաժանորդագրվում են Google Calendar-ում և Outlook-ում։",
+        "Windows-ում բաժանորդագրման կոճակ այլևս չկա. այդ հղումը բացում է Outlook-ը, որը կարող է օրացույցը վերցնել չպաշտպանված կապով։ Այնտեղ բաժանորդագրվում են https://-ով սկսվող հասցեով։"
+      ],
+      "ru": [
+        "На экране «Сроки» у общего календаря появилась кнопка «Скопировать адрес»: им подписываются в Google Календаре и Outlook.",
+        "На Windows кнопки подписки больше нет: такую ссылку там открывает Outlook, а он может взять календарь по незащищённому соединению. Подписываются там адресом, который начинается с https://."
+      ],
+      "en": [
+        "The shared calendar on the Deadlines screen now has a “Copy the address” button: use the address to subscribe in Google Calendar and Outlook.",
+        "On Windows there is no subscribe button anymore: Outlook opens such links there and may fetch the calendar over an unprotected connection. Subscribe there with the address that starts with https://."
+      ]
+    },
+    {
       "version": "0.0.162",
       "date": "2026-11-21",
       "hy": [
@@ -263,19 +279,6 @@
       "en": [
         "The “Buy” page has a second plan, “Pro”: a one-year key for 10 entrepreneurs at AMD 120,000 for a bookkeeper who keeps several of them. An entrepreneur with their own “Standard” key takes no seat in it.",
         "The license terms have a new edition of November 17, 2026: it adds the “Pro” plan, and organizations can buy keys too."
-      ]
-    },
-    {
-      "version": "0.0.143",
-      "date": "2026-11-17",
-      "hy": [
-        "«Pro» բանալին այլևս տեղ չի ծախսում այն ԱՁ-ի վրա, որն ունի իր գործող «Ստանդարտ» բանալին. տեղերը նախ ստանում են առանց բանալու ԱՁ-ները, իսկ «ԱՁ-ները ծրագրում» էկրանում այդպիսի ԱՁ-ի մոտ գրված է «սեփական բանալի»։"
-      ],
-      "ru": [
-        "Ключ «Pro» больше не тратит место на ИП, у которого свой действующий ключ «Стандарт»: места сначала получают ИП без своего ключа, а на экране «ИП в программе» у такого ИП написано «свой ключ»."
-      ],
-      "en": [
-        "A “Pro” key no longer spends a seat on an entrepreneur who has their own valid “Standard” key: entrepreneurs without a key of their own get seats first, and the “Entrepreneurs in the app” screen marks such an entrepreneur “own key”."
       ]
     }
   ]

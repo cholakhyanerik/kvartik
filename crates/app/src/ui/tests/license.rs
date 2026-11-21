@@ -1540,12 +1540,17 @@ async fn a_key_over_the_limit_is_refused() {
     let lang = Lang::Ru;
     Device::new().set_ui_lang(lang);
     let today = clock::today().expect("часы с датой");
+    // Моменты записей — на два дня вперёд, как у `base_with_draft`: со
+    // «сейчас» день данных в день `license::LAST_TRIAL_START` давал тесту
+    // пробный период без ключа, и экран лицензии был открыт, а не закрыт
+    // (2026-11-21: тест краснел только в этот день).
+    let later = Timestamp::from_unix_millis(clock::now().unix_millis() + 2 * 86_400_000);
     let mut writes = Writes::default();
     for n in 0..license::MAX_KEYS {
         let until = today.add_days(i32::try_from(n).expect("число") + 1).expect("дата");
         let tin = Tin::parse("07654321").expect("годный ՀՎՀՀ");
         let key = license::Key::signed(tin, Plan::Standard, today, until, None, [0; 64]).expect("ключ");
-        writes.insert(&License::enter(key, &[], clock::now()).expect("ключ"));
+        writes.insert(&License::enter(key, &[], later).expect("ключ"));
     }
     commit(writes).await;
     let (host, mounted) = mount_at("#/license");

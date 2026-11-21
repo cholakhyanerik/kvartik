@@ -775,6 +775,49 @@ async function trialKeyLinks(browser) {
   }
 }
 
+/// Подписка на общий календарь (задача 75): на Windows кнопки `webcal:` нет
+/// ни у лендинга, ни у экрана сроков — её открыл бы Outlook, а он, по
+/// жалобам людей, берёт её по `http`, — а адрес `https:` и «Скопировать
+/// адрес» на месте; на Mac кнопка остаётся. Строка браузера — своя у каждого
+/// случая: проверка бежит и на Windows, и в CI на Linux.
+const AGENTS = {
+  Windows: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36",
+  Mac: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36",
+};
+
+async function calendarScheme(browser) {
+  for (const [system, userAgent] of Object.entries(AGENTS)) {
+    const page = await browser.page({ context: true });
+    const shown = system !== "Windows";
+    try {
+      await page.send("Emulation.setUserAgentOverride", { userAgent });
+      await page.emulate(360);
+      await page.go(`${ORIGIN}/ru/`);
+      const site = await page.waitFor(`if (!(${SCRIPTED})) return null;
+        const link = document.querySelector('a[href^="webcal:"]');
+        const address = document.querySelector('section[aria-labelledby="calendar"] .address')?.textContent ?? "";
+        return link && { seen: link.getClientRects().length > 0, address };`);
+      checks.check(`календарь, ${system}: на лендинге кнопка webcal ${shown ? "есть" : "спрятана"}, адрес https на месте`,
+        site && site.seen === shown && site.address.startsWith("https://"), JSON.stringify(site));
+      await page.go(`${ORIGIN}/app/`);
+      await page.setLang(opt.lang);
+      checks.check(`календарь, ${system}: рабочий экран`, await page.waitFor(WORKING));
+      await go(page, "#/deadlines");
+      const app = await page.waitFor(`const section = document.querySelector("#deadlines section.calendar");
+        const copy = section && [...section.querySelectorAll("button")]
+          .find((b) => b.textContent.trim() === ${JSON.stringify(s("CalendarCopy"))});
+        if (!copy || copy.getClientRects().length === 0) return null;
+        return { webcal: section.querySelectorAll('a[href^="webcal:"]').length,
+          address: section.querySelector(".calendar-address")?.textContent ?? "" };`);
+      checks.check(`календарь, ${system}: на экране сроков кнопка webcal ${shown ? "есть" : "убрана"}, «Скопировать адрес» и адрес — на месте`,
+        app && app.webcal === (shown ? 1 : 0) && app.address === `${ORIGIN}/calendar/${opt.lang}.ics`, JSON.stringify(app));
+      checks.check(`календарь, ${system}: без плашки сбоя`, await page.eval(NO_PANIC));
+    } finally {
+      await page.close();
+    }
+  }
+}
+
 /// Лендинг (задача 34): страницы языков — готовым HTML с оформлением окна,
 /// ссылка в программу и старые адреса программы `/#/…` (до 0.0.34 она жила
 /// в корне) — в /app/ с тем же экраном. В своём контексте браузера: service
@@ -1625,6 +1668,7 @@ async function main() {
     await blocked(browser);
     await trialKeyLinks(browser);
     await landing(browser);
+    await calendarScheme(browser);
     await office(browser);
     await motion(browser);
     await assistant(browser);

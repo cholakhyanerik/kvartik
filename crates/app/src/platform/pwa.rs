@@ -575,6 +575,20 @@ fn android_agent(agent: &str, touch: bool) -> bool {
     agent.contains("Android") || (touch && agent.contains("Linux"))
 }
 
+/// Windows — в любом браузере. Ссылку `webcal:` там открывает Outlook,
+/// а он, по жалобам людей, берёт её по открытому `http` (задача 75;
+/// `ui::deadlines`).
+pub fn windows() -> bool {
+    web_sys::window().is_some_and(|window| windows_agent(&window.navigator().user_agent().unwrap_or_default()))
+}
+
+/// Windows по строке `User-Agent`: `Windows NT` пишут Chromium, Edge
+/// и Firefox на Windows (Chromium `user_agent_utils.cc`, Firefox
+/// `nsHttpHandler.cpp`; разведка задачи 55, 2026-10-20).
+fn windows_agent(agent: &str) -> bool {
+    agent.contains("Windows NT")
+}
+
 /// iPhone или iPad — в браузере или программой с экрана «Домой».
 ///
 /// `navigator.standalone` есть у WebKit на всех устройствах Apple — с Safari
@@ -768,5 +782,23 @@ mod tests {
             })
             .collect();
         assert!(wrong.is_empty(), "браузер не тот: {wrong:#?}");
+    }
+
+    /// Windows — только у браузеров на Windows: Mac, iPhone, Android
+    /// и Linux кнопку подписки `webcal:` сохраняют (задача 75).
+    #[test]
+    fn windows_is_told_apart() {
+        let cases = [
+            ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36", true),
+            ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0", true),
+            ("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0", true),
+            ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15", false),
+            ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1", false),
+            ("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36", false),
+            ("Mozilla/5.0 (X11; Linux x86_64; rv:158.0) Gecko/20100101 Firefox/158.0", false),
+        ];
+        let wrong: Vec<&str> =
+            cases.iter().filter(|&&(agent, expected)| super::windows_agent(agent) != expected).map(|&(agent, _)| agent).collect();
+        assert!(wrong.is_empty(), "Windows не узнана или узнана зря: {wrong:#?}");
     }
 }

@@ -4253,13 +4253,23 @@ strings! {
         "The browser couldn't make the calendar file. Reload the page and try again.",
         "Դիտարկիչը թույլ չտվեց պատրաստել օրացույցի ֆայլը։ Վերաբեռնեք էջը և նորից փորձեք։";
     CalendarSubscribe = "Подписаться на общий календарь", "Subscribe to the shared calendar", "Բաժանորդագրվել ընդհանուր օրացույցին";
+    /// Адрес общего календаря — в буфер (задача 75): его вставляют
+    /// в Google Календарь и Outlook.
+    CalendarCopy = "Скопировать адрес", "Copy the address", "Պատճենել հասցեն";
+    CalendarCopyFailed =
+        "Не скопировалось\u{A0}— выделите адрес ниже и скопируйте сами.",
+        "Couldn't copy\u{A0}— select the address below and copy it yourself.",
+        "Չպատճենվեց. ընտրեք հասցեն ստորև և պատճենեք ինքներդ։";
     /// Google подписывается только в браузере на компьютере
     /// (support.google.com, answer 37100, 2026-10-21); на Android ссылку
-    /// `webcal:` открыть нечем.
+    /// `webcal:` открыть нечем. Outlook — адресом `https:`, а не кнопкой:
+    /// ссылку `webcal:` он, по жалобам людей, берёт по `http` (задача 75,
+    /// 2026-11-21), и на Windows кнопки нет. Меню Outlook по-армянски нет —
+    /// армянская строка называет его по-английски, как кнопки iOS.
     CalendarSubscribeHint =
-        "Общий календарь\u{A0}— сроки всех ИП на налоге с оборота, без ваших сумм; он обновляется сам, бывает, через сутки. Кнопка открывает Календарь iOS и macOS или Outlook. В Google Календаре подписываются с компьютера: кнопкой «+» у раздела «Другие календари», затем «Добавить по URL» и этот адрес. Напоминания у подписки бывают выключены: включите их в настройках этого календаря.",
-        "The shared calendar has the deadlines of all IEs on turnover tax, without your amounts, and updates itself, sometimes a day later. The button opens Calendar on iOS and macOS, or Outlook. In Google Calendar, subscribe on a computer: “+” next to “Other calendars”, then “From URL” and this address. Subscribed calendars may have reminders turned off: turn them on in that calendar's settings.",
-        "Ընդհանուր օրացույցում շրջանառության հարկ վճարող բոլոր ԱՁ-ների ժամկետներն են՝ առանց ձեր գումարների, և այն ինքն է թարմանում, երբեմն՝ մեկ օր անց։ Կոճակը բացում է Calendar-ը iOS-ում և macOS-ում կամ Outlook-ը։ Google Calendar-ում բաժանորդագրվում են համակարգչից՝ այլ օրացույցների «+» կոճակով, URL-ով՝ այս հասցեով։ Բաժանորդագրված օրացույցում հիշեցումները կարող են անջատված լինել. միացրեք դրանք այդ օրացույցի կարգավորումներում։";
+        "Общий календарь\u{A0}— сроки всех ИП на налоге с оборота, без ваших сумм; он обновляется сам, бывает, через сутки. На iOS и macOS кнопка подписки открывает Календарь. В Google Календаре подписываются с компьютера: кнопкой «+» у раздела «Другие календари», затем «Добавить по URL» и этот адрес, а в Outlook\u{A0}— «Добавить календарь», «Подписаться из Интернета» и тот же адрес. Напоминания у подписки бывают выключены: включите их в настройках этого календаря.",
+        "The shared calendar has the deadlines of all IEs on turnover tax, without your amounts, and updates itself, sometimes a day later. On iOS and macOS, the subscribe button opens Calendar. In Google Calendar, subscribe on a computer: “+” next to “Other calendars”, then “From URL” and this address; in Outlook, “Add calendar”, “Subscribe from web” and the same address. Subscribed calendars may have reminders turned off: turn them on in that calendar's settings.",
+        "Ընդհանուր օրացույցում շրջանառության հարկ վճարող բոլոր ԱՁ-ների ժամկետներն են՝ առանց ձեր գումարների, և այն ինքն է թարմանում, երբեմն՝ մեկ օր անց։ iOS-ում և macOS-ում բաժանորդագրման կոճակը բացում է Calendar-ը։ Google Calendar-ում բաժանորդագրվում են համակարգչից՝ այլ օրացույցների «+» կոճակով, URL-ով՝ այս հասցեով, իսկ Outlook-ում՝ «Add calendar», «Subscribe from web» և նույն հասցեն։ Բաժանորդագրված օրացույցում հիշեցումները կարող են անջատված լինել. միացրեք դրանք այդ օրացույցի կարգավորումներում։";
 
     /// Курс документа в валюте — в карточке выпущенного (задача 14).
     DocRateSet = "Указать курс ЦБ", "Enter the CBA rate", "Նշել ԿԲ փոխարժեքը";

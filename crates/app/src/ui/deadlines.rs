@@ -435,6 +435,28 @@ fn Calendar(ctx: tax::Ctx, mine: Signal<bool>) -> impl IntoView {
         })
     };
     let subscribe = move || shared().map(|url| url.replacen("https://", "webcal://", 1).replacen("http://", "webcal://", 1));
+    // Ссылку `webcal:` на Windows открывает Outlook, а он, по жалобам людей,
+    // переписывает её в `http://` (Smartsheet, Mozilla bug 429061; поиск
+    // 2026-11-21): в чужом Wi-Fi ответ подменят, и в календаре встанут
+    // чужие события от имени Kvartik (задача 75, Правило 13). Там кнопки
+    // нет — подписываются адресом `https:`, его Outlook берёт как есть.
+    // У Apple и Android кнопка остаётся: подписчик на Android в журнале
+    // Cloudflare за 30 дней ходил только по TLS 1.3, а у Apple подписка
+    // одним нажатием — единственный короткий путь (2026-11-21).
+    let webcal = !platform::pwa::windows();
+    // Адрес — в буфер в самом нажатии, до первого `await`
+    // (`platform::clipboard`); не легло — словами, а адрес ниже
+    // выделяется целиком одним касанием.
+    let copied = RwSignal::new(None::<bool>);
+    let copy = move |_| {
+        let Some(url) = origin.with_value(|origin| {
+            origin.as_ref().map(|origin| format!("{origin}/{}", calendar::path(lang.get_untracked())))
+        }) else {
+            return;
+        };
+        let written = platform::clipboard::copy(&url);
+        leptos::task::spawn_local(async move { copied.set(Some(written.await.is_ok())) });
+    };
     view! {
         <section class="calendar">
             <h2>{tr(lang, Key::CalendarTitle)}</h2>
@@ -448,10 +470,23 @@ fn Calendar(ctx: tax::Ctx, mine: Signal<bool>) -> impl IntoView {
                 <p class="hint">{tr(lang, Key::CalendarMineHint)}</p>
             })}
             {move || failed.get().then(|| view! { <p role="alert">{tr(lang, Key::CalendarFailed)}</p> })}
-            <a class="button secondary" href=subscribe>
-                {icon(Icon::Calendar)}
-                <span class="label">{tr(lang, Key::CalendarSubscribe)}</span>
-            </a>
+            <div class="actions">
+                {webcal.then(|| view! {
+                    <a class="button secondary" href=subscribe>
+                        {icon(Icon::Calendar)}
+                        <span class="label">{tr(lang, Key::CalendarSubscribe)}</span>
+                    </a>
+                })}
+                <button type="button" class="secondary" on:click=copy>
+                    {icon(Icon::Copy)}
+                    <span class="label">{tr(lang, Key::CalendarCopy)}</span>
+                </button>
+            </div>
+            {move || copied.get().map(|done| view! {
+                <p class="key-status" role="status">
+                    {tr(lang, if done { Key::ReportCopied } else { Key::CalendarCopyFailed })}
+                </p>
+            })}
             <p class="hint">{tr(lang, Key::CalendarSubscribeHint)}</p>
             <p class="calendar-address">{shared}</p>
         </section>
