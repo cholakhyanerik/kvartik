@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.165",
+      "date": "2026-11-21",
+      "hy": [
+        "Թարմացվել է գաղտնիության քաղաքականությունը՝ 22.11.2026 խմբագրությամբ. 5-րդ կետում ասված է, ինչի համար է վաճառողը պահում կարծիքներով, հարցերով և առաջարկներով նամակները, և որ դրանք ջնջում է պատասխանից մեկ տարի անց։ Նախորդ խմբագրությունը մնում է կայքում՝ իր հասցեով։"
+      ],
+      "ru": [
+        "Обновлена политика конфиденциальности, редакция от 22.11.2026: в п. 5 сказано, для чего продавец держит письма с отзывами, вопросами и предложениями и что удаляет их через год после ответа. Прежняя редакция остаётся на сайте по своему адресу."
+      ],
+      "en": [
+        "The privacy policy has a new edition of November 22, 2026: section 5 now says what the seller uses letters with feedback, questions and suggestions for and that they are deleted a year after the reply. The earlier edition stays on the site at its own address."
+      ]
+    },
+    {
       "version": "0.0.164",
       "date": "2026-11-21",
       "hy": [
@@ -263,19 +276,6 @@
       ],
       "en": [
         "If the settlement document in the SRC system was issued in a quarter before the service, the invoice or act warns you: if the buyer confirmed it before the service ended, the income belongs to the quarter of the confirmation, so check with your accountant."
-      ]
-    },
-    {
-      "version": "0.0.145",
-      "date": "2026-11-17",
-      "hy": [
-        "«Կարգավորումներ» էկրանում ձեր գույնի տակ գրված է «Վերականգնել»՝ «Վերակայել»-ի փոխարեն։"
-      ],
-      "ru": [
-        "В армянском окне на экране «Настройки» под своим цветом написано «Վերականգնել» вместо «Վերակայել»: прежнее слово было калькой."
-      ],
-      "en": [
-        "In the Armenian window, the Settings screen now says “Վերականգնել” under your own color instead of “Վերակայել”: the old word was a calque."
       ]
     }
   ]

@@ -976,9 +976,9 @@ mod tests {
     const LANDING_CSS: &str = include_str!("../../app/site/landing.css");
     const LANDING_JS: &str = include_str!("../../app/site/landing.js");
     /// Утверждённые юридические тексты (задача 32) и прежние редакции условий
-    /// (задачи 93, 99, 103, 106, 102 и 113) и политики (задачи 106, 102 и 113) — те, что
-    /// берёт сборка.
-    const LEGAL: [(&str, &str); 33] = [
+    /// (задачи 93, 99, 103, 106, 102 и 113) и политики (задачи 106, 102, 113
+    /// и 115) — те, что берёт сборка.
+    const LEGAL: [(&str, &str); 36] = [
         ("terms.hy.md", include_str!("../../../docs/legal/terms.hy.md")),
         ("terms.ru.md", include_str!("../../../docs/legal/terms.ru.md")),
         ("terms.en.md", include_str!("../../../docs/legal/terms.en.md")),
@@ -1003,6 +1003,9 @@ mod tests {
         ("privacy.hy.md", include_str!("../../../docs/legal/privacy.hy.md")),
         ("privacy.ru.md", include_str!("../../../docs/legal/privacy.ru.md")),
         ("privacy.en.md", include_str!("../../../docs/legal/privacy.en.md")),
+        ("privacy.2026-11-21.hy.md", include_str!("../../../docs/legal/privacy.2026-11-21.hy.md")),
+        ("privacy.2026-11-21.ru.md", include_str!("../../../docs/legal/privacy.2026-11-21.ru.md")),
+        ("privacy.2026-11-21.en.md", include_str!("../../../docs/legal/privacy.2026-11-21.en.md")),
         ("privacy.2026-11-20.hy.md", include_str!("../../../docs/legal/privacy.2026-11-20.hy.md")),
         ("privacy.2026-11-20.ru.md", include_str!("../../../docs/legal/privacy.2026-11-20.ru.md")),
         ("privacy.2026-11-20.en.md", include_str!("../../../docs/legal/privacy.2026-11-20.en.md")),

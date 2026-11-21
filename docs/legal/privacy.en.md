@@ -1,9 +1,12 @@
 # Kvartik Privacy Policy
 
-> **Редакция от 21.11.2026** (задача 113): перевод «Коротко», п. 2, 3, 5
-> и 6 и даты русского текста той же редакции; утвердил человек
-> вместе с русским текстом 2026-11-20. Прежние редакции — от 20.11.2026
-> ([privacy.2026-11-20.en.md](privacy.2026-11-20.en.md), на сайте —
+> **Редакция от 22.11.2026** (задача 115): перевод абзаца п. 5 о письмах
+> с отзывами, вопросами и предложениями и даты русского текста той же
+> редакции; утвердил человек вместе с русским текстом 2026-11-21.
+> Прежние редакции — от 21.11.2026
+> ([privacy.2026-11-21.en.md](privacy.2026-11-21.en.md), на сайте —
+> /en/privacy/2026-11-21/), от 20.11.2026
+> ([privacy.2026-11-20.en.md](privacy.2026-11-20.en.md),
 > /en/privacy/2026-11-20/), от 18.11.2026
 > ([privacy.2026-11-18.en.md](privacy.2026-11-18.en.md),
 > /en/privacy/2026-11-18/) и от 09.11.2026
@@ -14,7 +17,7 @@
 > «Для проверки» — только в русском тексте. Квадратные скобки заполнены
 > 2026-11-09 вместе с русским текстом.
 
-**Edition of November 21, 2026.**
+**Edition of November 22, 2026.**
 
 ## In short
 
@@ -123,6 +126,12 @@ to them.
 You can also ask the seller questions in Telegram: the link is on the site
 and in “About”. Messages there go through Telegram and under its rules, so
 send your TIN (ՀՎՀՀ) and your acceptance of the terms by email.
+
+The seller uses letters and messages with feedback, questions and
+suggestions only to reply and to fix and improve the app; they are passed
+only to the mail service and to Telegram that carry them, and the seller
+deletes them a year after replying. Do not send your backup password or a
+backup file in them.
 
 ## 6. Your rights
 

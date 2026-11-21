@@ -136,7 +136,11 @@ const TERMS_EARLIER: [Date; 6] = [
 ];
 
 /// Прежние редакции политики конфиденциальности (`Legal::earlier`), от новой
-/// к старой: от 20.11.2026 — до редакции от 21.11.2026 (задача 113: ՀՎՀՀ на
+/// к старой: от 21.11.2026 — до редакции от 22.11.2026 (задача 115: абзац
+/// п. 5 о письмах с отзывами, вопросами и предложениями — их зовёт страница
+/// «Отзывы и предложения»; утверждена 2026-11-21, а днём — 22.11.2026: на
+/// день — одна редакция, и адрес прежней — её день); от 20.11.2026 — до
+/// редакции от 21.11.2026 (задача 113: ՀՎՀՀ на
 /// сервер больше не уходит, «Коротко», п. 2, 3, 5 и 6); от 18.11.2026 — до
 /// редакции от 20.11.2026 (задача 102: вопрос
 /// ИИ-помощнику уходит выбранному человеком поставщику, «Коротко» и п. 2);
@@ -144,7 +148,8 @@ const TERMS_EARLIER: [Date; 6] = [
 /// на сервер сайта ради пробного периода, п. 2). Своё место у прежней — по тому
 /// же обещанию, что у условий (п. 11 условий, п. 7 политики): человек вправе
 /// прочесть, на что соглашался.
-const PRIVACY_EARLIER: [Date; 3] = [
+const PRIVACY_EARLIER: [Date; 4] = [
+    Date::new(2026, 11, 21).expect("21 ноября 2026 года в календаре есть"),
     Date::new(2026, 11, 20).expect("20 ноября 2026 года в календаре есть"),
     Date::new(2026, 11, 18).expect("18 ноября 2026 года в календаре есть"),
     Date::new(2026, 11, 9).expect("9 ноября 2026 года в календаре есть"),
@@ -548,9 +553,10 @@ mod tests {
         assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[3]), "/ru/terms/2026-11-15/");
         assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[4]), "/ru/terms/2026-11-13/");
         assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[5]), "/ru/terms/2026-11-09/");
-        assert_eq!(Legal::Privacy.earlier_path(Lang::Am, Legal::Privacy.earlier()[0]), "/privacy/2026-11-20/");
-        assert_eq!(Legal::Privacy.earlier_path(Lang::Am, Legal::Privacy.earlier()[1]), "/privacy/2026-11-18/");
-        assert_eq!(Legal::Privacy.earlier_path(Lang::Am, Legal::Privacy.earlier()[2]), "/privacy/2026-11-09/");
+        assert_eq!(Legal::Privacy.earlier_path(Lang::Am, Legal::Privacy.earlier()[0]), "/privacy/2026-11-21/");
+        assert_eq!(Legal::Privacy.earlier_path(Lang::Am, Legal::Privacy.earlier()[1]), "/privacy/2026-11-20/");
+        assert_eq!(Legal::Privacy.earlier_path(Lang::Am, Legal::Privacy.earlier()[2]), "/privacy/2026-11-18/");
+        assert_eq!(Legal::Privacy.earlier_path(Lang::Am, Legal::Privacy.earlier()[3]), "/privacy/2026-11-09/");
         assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
