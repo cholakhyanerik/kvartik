@@ -51,6 +51,9 @@ pub enum Screen {
     /// внизу меню, а на телефоне вкладки для него нет — шестерёнка на главном
     /// экране и строка в профиле.
     Settings,
+    /// Другое устройство — экран внутри профиля (задача 110): изменения кодом
+    /// на другое устройство и с него.
+    Sync,
 }
 
 /// Начало адреса документа: дальше — его идентификатор.
@@ -58,7 +61,7 @@ const DOCUMENT: &str = "#/documents/";
 
 impl Screen {
     /// Экраны без параметров — в порядке разделов.
-    pub const PLAIN: [Screen; 15] = [
+    pub const PLAIN: [Screen; 16] = [
         Screen::Home,
         Screen::Documents,
         Screen::Ledger,
@@ -74,6 +77,7 @@ impl Screen {
         Screen::About,
         Screen::Office,
         Screen::Settings,
+        Screen::Sync,
     ];
 
     /// Адрес экрана — для ссылок. У главного — `#/`, а не пустой: пустая
@@ -96,6 +100,7 @@ impl Screen {
             Screen::About => "#/about".to_owned(),
             Screen::Office => "#/office".to_owned(),
             Screen::Settings => "#/settings".to_owned(),
+            Screen::Sync => "#/sync".to_owned(),
         }
     }
 
@@ -122,12 +127,13 @@ impl Screen {
     }
 
     /// Раздел, который подсвечен в меню на этом экране: копия, лицензия,
-    /// «О программе» и ИП в программе — часть профиля, годовые платежи, сроки,
+    /// «О программе», ИП в программе и другое устройство — часть профиля,
+    /// годовые платежи, сроки,
     /// числа для расчёта и ИИ-помощник — налога, документ — раздела
     /// документов.
     pub const fn section(self) -> Screen {
         match self {
-            Screen::Backup | Screen::License | Screen::About | Screen::Office => Screen::Profile,
+            Screen::Backup | Screen::License | Screen::About | Screen::Office | Screen::Sync => Screen::Profile,
             Screen::Annual | Screen::Deadlines | Screen::Report | Screen::Assistant => Screen::Tax,
             Screen::Document(_) => Screen::Documents,
             other => other,
@@ -152,6 +158,7 @@ impl Screen {
             Screen::About => "about",
             Screen::Office => "office",
             Screen::Settings => "settings",
+            Screen::Sync => "sync",
         }
     }
 }

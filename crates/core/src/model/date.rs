@@ -98,7 +98,7 @@ impl Date {
     /// Год считается с марта, чтобы 29 февраля было последним днём года,
     /// а 400 лет — ровно 146 097 дней. Для лет 1–9999 всё в `i32`: по модулю
     /// не больше 2,93 млн.
-    const fn day_number(self) -> i32 {
+    pub(crate) const fn day_number(self) -> i32 {
         let month = self.month as i32;
         let year = self.year as i32 - if month <= 2 { 1 } else { 0 };
         // Год с марта неотрицателен (год 1 января — это нулевой), поэтому

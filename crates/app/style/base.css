@@ -3249,3 +3249,78 @@ ul.report-fields {
     scale: 0;
   }
 }
+
+/* Другое устройство (задача 110). QR-код — на бумаге, как превью PDF: тёмные
+   модули — `--on-fill-paper` на `--fill-paper` (16.6), и свои цвета человека
+   их не трогают — сканеру нужен тёмный код на светлом, а не цвета окна.
+   Поле светлых модулей — внутри картинки (`ui/sync.rs`, `QUIET`). Ширина —
+   почти вся строка телефона и не больше 26rem на компьютере: на мониторе код
+   крупнее не читается лучше, а камере ноутбука нужен целиком в кадре.
+   `crispEdges` — края модулей без сглаживания: размытый край — лишние
+   ошибки у сканера. */
+.sync-qr {
+  max-width: 26rem;
+  margin: var(--space-4) 0 0;
+}
+
+.sync-qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  shape-rendering: crispEdges;
+}
+
+.sync-qr-paper {
+  fill: var(--fill-paper);
+}
+
+.sync-qr-ink {
+  fill: var(--on-fill-paper);
+}
+
+.sync-qr figcaption {
+  margin-top: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Видео камеры: целиком в строке, не выше трёх четвертей ширины. */
+.sync-video {
+  display: block;
+  width: 100%;
+  max-width: 26rem;
+  aspect-ratio: 4 / 3;
+  margin-top: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--surface-sunken);
+  object-fit: cover;
+}
+
+.sync-video[hidden] {
+  display: none;
+}
+
+/* Текст кода — свёрнут: его копируют кнопкой, а выделяют руками, только
+   когда буфер отказал. Длинная строка без пробелов переносится где угодно,
+   а не уезжает за край телефона. */
+.sync-text {
+  margin-top: var(--space-4);
+}
+
+.sync-text > summary {
+  min-height: var(--touch);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+.sync-text textarea,
+.sync-paste textarea {
+  overflow-wrap: anywhere;
+  font-size: var(--font-size-sm);
+}
+
+.sync-paste {
+  margin-top: var(--space-4);
+}

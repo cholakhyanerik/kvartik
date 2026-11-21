@@ -204,7 +204,9 @@ async fn backup_carries_the_whole_base() {
         Restored {
             added: 3,
             updated: 0,
-            unchanged: 0
+            unchanged: 0,
+            // Самый ранний момент легших — у заметок (задача 110).
+            oldest: Some(Timestamp::from_unix_millis(1_760_000_000_000)),
         }
     );
     let tx = store.read().expect("транзакция чтения");
@@ -216,7 +218,7 @@ async fn backup_carries_the_whole_base() {
     let again = restore_all(&store, KINDS_UNDER_TEST, &entries)
         .await
         .expect("восстановлено снова");
-    assert_eq!((again.added, again.updated, again.unchanged), (0, 0, 3));
+    assert_eq!((again.added, again.updated, again.unchanged, again.oldest), (0, 0, 3, None));
 
     drop((tx, store));
     target.delete().await;

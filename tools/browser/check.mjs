@@ -191,6 +191,9 @@ const SCREENS = [
   { name: "О программе", hash: "#/about", shown: `return document.querySelector('#about a[href="${feedbackPath(opt.lang)}"][target="_blank"]')
       && document.querySelector("#about")?.innerText.includes(${JSON.stringify(s("AboutRules"))}) ? true : null;` },
   { name: "Настройки", hash: "#/settings", shown: TEXT_IN("#settings", s("SettingsCursorHint")) },
+  // Другое устройство (задача 110): слова о нём — часть экрана. Камеру здесь
+  // не включают: у браузера проверки её нет, и отказ ушёл бы в консоль.
+  { name: "Другое устройство", hash: "#/sync", shown: TEXT_IN("#sync", s("SyncAbout")) },
   // На адресе проверки пары у рамки нет, и окно говорит, где помощник;
   // саму рамку проверяет шаг «ИИ-помощник» — под своими адресами.
   { name: "ИИ-помощник", hash: "#/ask", shown: TEXT_IN("#ask", s("AiFrameAlone")) },

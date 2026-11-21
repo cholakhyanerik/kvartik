@@ -12,7 +12,9 @@
 //! с сайта (задача 43): копия файла сайта, а не данные, — что сервер сайта
 //! ответил о пробном периоде на ՀՎՀՀ (задача 106) и какой ИИ подключён
 //! в рамке помощника (задача 111; сам ключ — в рамке, а ключ, подключённый
-//! в 0.0.158 ещё в окне, лежит здесь до переезда в неё). Папку и ключ автокопии
+//! в 0.0.158 ещё в окне, лежит здесь до переезда в неё), — и что с кодами
+//! передачи изменений (задача 110): идентификатор устройства, когда сделан
+//! прошлый код и что от кого принято. Папку и ключ автокопии
 //! `localStorage` не держит — это объекты браузера, они в своей базе
 //! (`store/autobackup.rs`).
 //!
@@ -43,10 +45,11 @@
 
 use kvartik_core::format::autobackup::DeviceTag;
 use kvartik_core::format::backup::DeviceKey;
+use kvartik_core::format::sync::Received;
 use kvartik_core::i18n::Lang;
 use kvartik_core::license::{self, Paid};
 use kvartik_core::model::date::Date;
-use kvartik_core::model::record::Timestamp;
+use kvartik_core::model::record::{RecordId, Timestamp};
 use kvartik_core::release::Version;
 
 /// Записи устройства под своим префиксом: программа — под [`Device::new`],
@@ -342,6 +345,69 @@ impl Device {
         if on { self.set("issue_elsewhere", "1") } else { self.remove("issue_elsewhere") }
     }
 
+    /// Идентификатор этого устройства в кодах передачи изменений
+    /// (задача 110): по нему принимающее устройство помнит, что от него
+    /// принято. Заводится при первом коде; не записался — у кода будет
+    /// новый, и принимающее назовёт его «впервые».
+    pub fn sync_id(&self) -> RecordId {
+        if let Some(id) = self.get("sync_id").as_deref().and_then(RecordId::parse) {
+            return id;
+        }
+        let id = RecordId::random();
+        self.set("sync_id", &id.to_string());
+        id
+    }
+
+    /// Когда на устройстве сделан прошлый код передачи для базы `base`:
+    /// с его дня по умолчанию передаётся следующий. `None` — не делали или
+    /// запись не читается.
+    pub fn sync_made(&self, base: &str) -> Option<Timestamp> {
+        self.moment(&per_base("sync_made", base))
+    }
+
+    /// Запомнить момент кода. `false` — `localStorage` отказал: следующий код
+    /// по умолчанию начнётся с прежнего дня.
+    pub fn set_sync_made(&self, base: &str, at: Timestamp) -> bool {
+        self.set(&per_base("sync_made", base), &at.unix_millis().to_string())
+    }
+
+    /// Самый ранний момент записей, легших в базу `base` копией или кодом
+    /// после прошлого кода с этого устройства; `None` — не ложилось или
+    /// запись не читается. Момент у записи — её устройства, и запись
+    /// с третьего устройства или из копии бухгалтера бывает старше прошлого
+    /// кода: день по умолчанию следующего кода отступает до неё
+    /// (`sync::default_day`), иначе она до другого устройства не дошла бы,
+    /// а оно сочло бы ряд целым (ревью задачи 110).
+    pub fn sync_arrived(&self, base: &str) -> Option<Timestamp> {
+        self.moment(&per_base("sync_arrived", base))
+    }
+
+    /// Легли записи — запомнить самый ранний их момент, если он раньше
+    /// прежнего. `false` — `localStorage` отказал.
+    pub fn note_sync_arrived(&self, base: &str, at: Timestamp) -> bool {
+        let earliest = self.sync_arrived(base).map_or(at, |known| known.min(at));
+        self.set(&per_base("sync_arrived", base), &earliest.unix_millis().to_string())
+    }
+
+    /// Код с этого устройства их взял — забыть.
+    pub fn clear_sync_arrived(&self, base: &str) -> bool {
+        self.remove(&per_base("sync_arrived", base))
+    }
+
+    /// Что база `base` приняла кодами и от каких устройств — до какого
+    /// момента их часов. Не читается — как не принимали: о дыре окно
+    /// скажет «впервые», а не промолчит.
+    pub fn sync_received(&self, base: &str) -> Received {
+        self.get(&per_base("sync_received", base))
+            .map(|text| Received::parse(&text))
+            .unwrap_or_default()
+    }
+
+    /// Запомнить принятое. `false` — `localStorage` отказал.
+    pub fn set_sync_received(&self, base: &str, received: &Received) -> bool {
+        self.set(&per_base("sync_received", base), &received.to_text())
+    }
+
     /// База ИП, открытая на устройстве последней, — для новой вкладки;
     /// `None` — не помнит.
     pub fn base(&self) -> Option<String> {
@@ -536,6 +602,10 @@ impl Device {
                 "rates_at",
                 "ai",
                 "ai_by",
+                "sync_id",
+                "sync_made",
+                "sync_received",
+                "sync_arrived",
             ] {
                 let _ = storage.remove_item(&format!("{}{name}", self.prefix));
             }

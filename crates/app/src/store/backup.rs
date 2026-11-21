@@ -194,6 +194,17 @@ pub struct Restored {
     pub updated: usize,
     /// Записей копии, которые в базе уже такие же или новее.
     pub unchanged: usize,
+    /// Самый ранний момент изменения среди записей, которые легли; `None` —
+    /// не легло ничего. Момент у записи — её устройства, и легшая сейчас
+    /// запись бывает старше прошлого кода передачи с этого устройства: по
+    /// этому моменту следующий код возьмёт и её (`Device::sync_arrived`,
+    /// ревью задачи 110).
+    pub oldest: Option<Timestamp>,
+}
+
+/// Самый ранний момент изменения записей, которые слияние запишет.
+fn oldest(merge: &Merge<'_>) -> Option<Timestamp> {
+    merge.writes().iter().map(|entry| entry.meta().modified()).min()
 }
 
 /// Копия другого ИП ([`backup::relation`]): спросить человека или сливать.
@@ -253,6 +264,7 @@ pub async fn restore(
         added: merge.added(),
         updated: merge.updated(),
         unchanged: merge.unchanged(),
+        oldest: oldest(&merge),
     }))
 }
 
@@ -284,6 +296,9 @@ pub struct RestoredAll {
     /// Список легшего уже записан, а база ИП не легла: почему. Повтор
     /// безвреден, и окно так и говорит.
     pub failed: Option<Failure>,
+    /// Базы, в которые легли записи, — с самым ранним моментом легших
+    /// ([`Restored::oldest`]).
+    pub landed: Vec<(String, Timestamp)>,
 }
 
 /// Восстановить копию всех ИП (задача 38). Куда ложится каждый ИП копии,
@@ -341,10 +356,12 @@ pub async fn restore_all(
             added: keys.added(),
             updated: keys.updated(),
             unchanged: keys.unchanged(),
+            oldest: None,
         },
         open_touched: false,
         covers_all: covers_all && route.bases.iter().any(|landing| landing.base == open_name),
         failed: None,
+        landed: Vec::new(),
     };
     for landing in &route.bases {
         let landed = if landing.base == open_name {
@@ -361,6 +378,9 @@ pub async fn restore_all(
                 done.restored.added += restored.added;
                 done.restored.updated += restored.updated;
                 done.restored.unchanged += restored.unchanged;
+                if let Some(at) = restored.oldest {
+                    done.landed.push((landing.base.clone(), at));
+                }
             }
             Err(failure) => {
                 done.failed = Some(failure);
@@ -420,6 +440,7 @@ async fn merge_into(store: &Store, entries: &[Entry]) -> Result<Restored, Failur
         added: merge.added(),
         updated: merge.updated(),
         unchanged: merge.unchanged(),
+        oldest: oldest(&merge),
     })
 }
 

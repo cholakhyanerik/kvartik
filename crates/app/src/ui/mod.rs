@@ -34,6 +34,7 @@ mod route;
 mod settings;
 mod split;
 mod storage;
+mod sync;
 mod tax;
 
 use std::rc::Rc;
@@ -64,6 +65,7 @@ use pwa::{Program, UpdateDialog, UpdateNotice};
 use report::ReportScreen;
 use route::{Router, Screen};
 use settings::{Look, SettingsEntry, SettingsScreen};
+use sync::{SyncEntry, SyncScreen};
 use storage::{Storage, StorageAlert, StorageSection};
 use tax::{Closings, Sources, TaxScreen};
 
@@ -283,6 +285,15 @@ pub fn App() -> impl IntoView {
         base,
         backups,
     };
+    let sync_ctx = sync::Ctx {
+        lang,
+        base,
+        backups,
+        office,
+        forms,
+        storage,
+        router,
+    };
 
     // Экран сменился — страница с его начала, фокус на его заголовке.
     Effect::watch(move || router.screen(), |screen, _, _| route::shown(*screen), false);
@@ -361,6 +372,9 @@ pub fn App() -> impl IntoView {
                             <BackupEntry lang backups />
                         </li>
                         <li>
+                            <SyncEntry lang />
+                        </li>
+                        <li>
                             <OfficeEntry lang />
                         </li>
                         <li>
@@ -399,6 +413,9 @@ pub fn App() -> impl IntoView {
                 </section>
                 <section id=Screen::Settings.id() class="screen" hidden=hidden(Screen::Settings)>
                     <SettingsScreen lang look backups router />
+                </section>
+                <section id=Screen::Sync.id() class="screen" hidden=hidden(Screen::Sync)>
+                    <SyncScreen ctx=sync_ctx />
                 </section>
             </main>
             {panic::debug_trigger()}

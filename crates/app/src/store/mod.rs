@@ -66,6 +66,7 @@ pub mod backup;
 pub mod device;
 pub mod office;
 mod settle;
+pub mod sync;
 
 use std::cell::Cell;
 use std::marker::PhantomData;

@@ -293,11 +293,26 @@ impl Backups {
 
     /// Пароль копий только что ввели, и он подошёл: следующая просьба его
     /// ввести — через месяц (`format::autobackup::check_due`).
-    fn password_entered(&self) {
+    pub(super) fn password_entered(&self) {
         let now = clock::now();
         Device::new().set_password_entered(now);
         let day = clock::local_date(now);
         self.auto().update(|auto| auto.entered = day);
+    }
+
+    /// Задан ли на устройстве пароль копий — отслеживаемое: без него форма
+    /// просит новый с повтором.
+    pub(super) fn key_set(&self) -> bool {
+        self.key_set.get()
+    }
+
+    /// Запомнить пароль копий устройства — новый, заданный для кода
+    /// передачи, или пароль принятого кода, когда своего не было
+    /// (`ui/sync.rs`). Запись не легла — пароль остаётся незаданным.
+    pub(super) fn password_set(&self, key: &DeviceKey) {
+        if Device::new().set_backup_key(key) {
+            self.key_set.set(true);
+        }
     }
 
     /// База открылась, и в ней есть данные — или нет.
@@ -674,9 +689,10 @@ pub fn BackupEntry(lang: ReadSignal<Lang>, backups: Backups) -> impl IntoView {
     }
 }
 
-/// Что сказать человеку, кроме простых строк: шаблоны с числами.
+/// Что сказать человеку, кроме простых строк: шаблоны с числами. Слова
+/// пароля, шифра и хранилища — и у экрана «Другое устройство» (`ui/sync.rs`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Problem {
+pub(super) enum Problem {
     Say(Key),
     TooShort,
     TooLarge,
@@ -690,7 +706,7 @@ enum Problem {
 }
 
 impl Problem {
-    fn text(self, lang: Lang) -> String {
+    pub(super) fn text(self, lang: Lang) -> String {
         match self {
             Self::Say(key) => t(lang, key).to_owned(),
             Self::TooShort => fill(
@@ -770,7 +786,7 @@ impl From<Failure> for Problem {
 }
 
 /// Шаблон с одним числом на языке окна — производное от сигнала языка.
-fn counted(lang: ReadSignal<Lang>, key: Key, n: i64) -> impl Fn() -> String + Send + 'static {
+pub(super) fn counted(lang: ReadSignal<Lang>, key: Key, n: i64) -> impl Fn() -> String + Send + 'static {
     move || {
         let lang = lang.get();
         fill(t(lang, key), &[&i18n::integer(lang, n)])
@@ -1710,7 +1726,7 @@ pub(super) struct Asked {
 /// пароль на устройстве уже задан, и введённый сверяется с ним. Вместе
 /// с ключом — пароль устройства (соль и итерации — в замок файла) и новый
 /// ли он: новый запоминает тот, кто его попросил, когда сделал своё.
-async fn key_for(
+pub(super) async fn key_for(
     backups: Backups,
     typed: &str,
     repeat: Option<&str>,
@@ -2235,7 +2251,7 @@ fn RestoreBackup(
 /// новое устройство, и после стёртых данных браузера, а у кого их два,
 /// слова после ответа просят выключить выпуск на прежнем.
 #[component]
-fn IssuerAsk(lang: ReadSignal<Lang>) -> impl IntoView {
+pub(super) fn IssuerAsk(lang: ReadSignal<Lang>) -> impl IntoView {
     let answered = RwSignal::new(None::<bool>);
     // Запись не легла — вопрос остаётся: ответа устройство не помнит.
     let answer = move |elsewhere: bool| {
@@ -2273,7 +2289,7 @@ fn IssuerAsk(lang: ReadSignal<Lang>) -> impl IntoView {
 }
 
 /// ИП словами: имя и ՀՎՀՀ через запятую — или что их нет.
-fn who(lang: Lang, owner: &Owner) -> String {
+pub(super) fn who(lang: Lang, owner: &Owner) -> String {
     let name = match owner.name(lang) {
         "" => t(lang, Key::BackupOtherIeNameless),
         name => name,
@@ -2394,6 +2410,9 @@ async fn restore_full(
     let open_name = office.open_name();
     let (first, spare) = unlisted(&office_store, store, &open_name).await?;
     let done = stored::restore_all(store, &open_name, &office_store, entries, first, spare.as_deref()).await?;
+    for (base, oldest) in &done.landed {
+        arrived(base, Some(*oldest));
+    }
     // Список уже записан — и тогда, когда база не легла: перечитать его
     // и тронутое (ревью 2026-11-06).
     office.several_now();
@@ -2425,6 +2444,7 @@ async fn restore_as_new(backups: Backups, store: &Store, asked: &Asked) -> Resul
     let (first, _) = unlisted(&office_store, store, &office.open_name()).await?;
     let today = clock::today().ok_or(Problem::Say(Key::BackupFailed))?;
     let (new, restored) = stored::restore_new(&office_store, &asked.entries, first, today, clock::now()).await?;
+    arrived(new.base(), restored.oldest);
     office.several_now();
     office.refresh(&office_store).await;
     let landed = Landed {
@@ -2485,6 +2505,10 @@ fn restored_from(
 ) -> Restored {
     if landed.touched {
         backups.base.replaced();
+        let base = backups
+            .office()
+            .map_or_else(|| crate::store::DB_NAME.to_owned(), |office| office.open_name());
+        arrived(&base, restored.oldest);
     }
     let device = Device::new();
     let lock = sealed.lock();
@@ -2516,6 +2540,15 @@ fn restored_from(
         backups.has_data.set(true);
     }
     restored
+}
+
+/// В базу `base` легли записи, самая ранняя — с моментом `oldest`: код
+/// передачи с этого устройства возьмёт их и тогда, когда они старше его
+/// прошлого кода (`Device::sync_arrived`, задача 110).
+pub(super) fn arrived(base: &str, oldest: Option<Timestamp>) {
+    if let Some(at) = oldest {
+        Device::new().note_sync_arrived(base, at);
+    }
 }
 
 /// Автокопия от базы до файла (задача 29): настоящая база программы,

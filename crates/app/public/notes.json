@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.166",
+      "date": "2026-11-21",
+      "hy": [
+        "Նոր էկրան՝ «Այլ սարք» (Պրոֆիլ). փոփոխությունները ձեր մի սարքից մյուսին են անցնում առանց ֆայլի և ինտերնետի։ Մեկը ստեղծում է կոդ պատճենների գաղտնաբառով և ցույց է տալիս QR կոդերով ու տեքստով, մյուսը սկանավորում է այն տեսախցիկով կամ տեղադրում տեքստը և ընդունում. գրառումները միավորվում են պատճենի պես։ Մատյանի ֆայլերը և լոգոտիպերը տեղափոխում է պատճենի ֆայլը։"
+      ],
+      "ru": [
+        "Новый экран «Другое устройство» (Профиль): изменения переходят с одного вашего устройства на другое без файла и без интернета. Одно делает код под паролем копий и показывает его QR-кодами и текстом, другое снимает его камерой или вставляет текст и принимает — записи ложатся, как копия. Файлы книги и логотипы переносит копия файлом."
+      ],
+      "en": [
+        "A new “Another device” screen (Profile): changes move from one of your devices to another without a file or the internet. One makes a code under the backup password and shows it as QR codes and text; the other scans it with the camera or pastes the text and receives it — records merge like a backup. Ledger files and logos travel with a backup file."
+      ]
+    },
+    {
       "version": "0.0.165",
       "date": "2026-11-21",
       "hy": [
@@ -263,19 +276,6 @@
       ],
       "en": [
         "Under the CBA rate hint there's now “When the law takes another day”: for rent, subscriptions, interest and importing or exporting goods the law counts the rate from a different day than the one in the form, and the words tell you which."
-      ]
-    },
-    {
-      "version": "0.0.146",
-      "date": "2026-11-17",
-      "hy": [
-        "Եթե ՊԵԿ համակարգում հաշվարկային փաստաթուղթը դուրս է գրվել ծառայությունից ավելի վաղ եռամսյակում, հաշվի կամ ակտի էջում ծրագիրը զգուշացնում է. եթե գնորդն այն հաստատել է մինչև ծառայության ավարտը, եկամուտը վերաբերում է հաստատման եռամսյակին՝ ստուգեք հաշվապահի հետ։"
-      ],
-      "ru": [
-        "Если расчётный документ в системе ՊԵԿ выписан в квартале раньше услуги, карточка счёта или акта предупреждает: подтвердил его покупатель до окончания услуги — доход относится к кварталу подтверждения, сверьте с бухгалтером."
-      ],
-      "en": [
-        "If the settlement document in the SRC system was issued in a quarter before the service, the invoice or act warns you: if the buyer confirmed it before the service ended, the income belongs to the quarter of the confirmation, so check with your accountant."
       ]
     }
   ]

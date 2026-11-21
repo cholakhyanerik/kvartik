@@ -194,6 +194,8 @@ pub async fn preload() {
     let _ = super::backup::preload_make().await;
     let _ = super::backup::preload_open().await;
     let _ = super::backup::preload_restore().await;
+    let _ = super::sync::preload_sync().await;
+    let _ = super::sync::preload_scanner().await;
     let _ = super::office::preload_office().await;
     let _ = super::settings::preload_settings().await;
     super::settings::refresh().await;

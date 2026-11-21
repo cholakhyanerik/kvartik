@@ -37,6 +37,7 @@ mod onboarding;
 mod report;
 mod settings;
 mod share;
+mod sync;
 mod tax;
 mod update;
 

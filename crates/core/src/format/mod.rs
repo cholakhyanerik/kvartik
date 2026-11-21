@@ -34,6 +34,8 @@ pub mod autobackup;
 pub mod backup;
 pub mod export;
 pub mod office;
+pub mod qr;
+pub mod sync;
 pub(crate) mod base64;
 
 use serde::de::DeserializeOwned;

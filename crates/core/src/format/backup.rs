@@ -150,11 +150,11 @@ pub const SLICE_BYTES: usize = 512 << 10;
 /// с её полями дороже, чем столько же байтов base64 файла, — 2 000 записей
 /// книги по полкилобайта без этого шли одним куском почти в полсекунды
 /// на телефоне (замер 0.0.28).
-const RECORD_WEIGHT: usize = 4 << 10;
+pub(super) const RECORD_WEIGHT: usize = 4 << 10;
 
 /// Работа целиком, без пауз: будущее, которое ни разу не ждёт (`no_pause`),
 /// готово с первого опроса.
-fn at_once<F: Future>(work: F) -> F::Output {
+pub(super) fn at_once<F: Future>(work: F) -> F::Output {
     let mut work = pin!(work);
     let mut context = Context::from_waker(Waker::noop());
     loop {
@@ -165,12 +165,12 @@ fn at_once<F: Future>(work: F) -> F::Output {
 }
 
 /// Пауза, которая не ждёт.
-fn no_pause() -> std::future::Ready<()> {
+pub(super) fn no_pause() -> std::future::Ready<()> {
     std::future::ready(())
 }
 
 /// Счётчик работы: набрался кусок в [`SLICE_BYTES`] — пауза.
-struct Meter<'p, P> {
+pub(super) struct Meter<'p, P> {
     pause: &'p mut P,
     done: usize,
 }
@@ -180,12 +180,12 @@ where
     P: FnMut() -> F,
     F: Future<Output = ()>,
 {
-    fn new(pause: &'p mut P) -> Self {
+    pub(super) fn new(pause: &'p mut P) -> Self {
         Self { pause, done: 0 }
     }
 
     /// Сделано ещё `bytes` байтов работы.
-    async fn add(&mut self, bytes: usize) {
+    pub(super) async fn add(&mut self, bytes: usize) {
         self.done += bytes;
         if self.done >= SLICE_BYTES {
             self.done = 0;
@@ -216,7 +216,7 @@ pub const KDF_ITERATIONS: u32 = 600_000;
 /// Больше итераций файл нести не может: иначе чужой файл с миллиардом
 /// итераций занял бы устройство на часы. Предел — 10 000 000, верх, который
 /// NIST SP 800-132 (§5.2) называет «для особо важных ключей».
-const MAX_KDF_ITERATIONS: u32 = 10_000_000;
+pub(super) const MAX_KDF_ITERATIONS: u32 = 10_000_000;
 
 /// Соль PBKDF2: 16 случайных байтов у каждого пароля — «не меньше 128 бит»
 /// (NIST SP 800-132, §5.1).
@@ -236,7 +236,7 @@ pub const CIPHER_NAME: &str = "AES-256-GCM";
 pub const IV_BYTES: usize = 12;
 
 /// Метка подлинности GCM в конце шифротекста.
-const TAG_BYTES: usize = 16;
+pub(super) const TAG_BYTES: usize = 16;
 
 /// Проверочное значение пароля на устройстве ([`DeviceKey`]) — SHA-256.
 pub const CHECK_BYTES: usize = 32;
@@ -403,6 +403,12 @@ impl Entry {
     pub(crate) fn record(&self) -> &str {
         self.record.get()
     }
+
+    /// То же — куском JSON: так запись ложится в код передачи
+    /// (`format::sync`).
+    pub(super) fn raw(&self) -> &RawValue {
+        &self.record
+    }
 }
 
 /// Запись базы как она лежит: вид и идентификатор — из ключа, текст — из
@@ -415,7 +421,7 @@ pub struct Raw<'a> {
 }
 
 /// Запись базы, разобранная своим видом и проверенная по ключу.
-fn read_stored(kinds: &[Kind], raw: Raw<'_>) -> Result<Entry, FormatError> {
+pub(super) fn read_stored(kinds: &[Kind], raw: Raw<'_>) -> Result<Entry, FormatError> {
     let text = raw
         .text
         .ok_or_else(|| FormatError::Damaged("значение не строка".to_owned()))?;
@@ -432,6 +438,20 @@ fn read_stored(kinds: &[Kind], raw: Raw<'_>) -> Result<Entry, FormatError> {
     }
     Ok(Entry {
         kind: kind.name,
+        meta: checked.meta,
+        record: checked.record,
+        base: None,
+    })
+}
+
+/// Запись вида `kind` версии формата `version` из чужого текста — разобранная
+/// своим видом и в текущей версии, без метки базы: так её читает код
+/// передачи (`format::sync`). Вид, которого нет в `kinds`, — порча.
+pub(super) fn entry_of(kinds: &[Kind], kind: &str, version: u32, record: &RawValue) -> Result<Entry, FormatError> {
+    let found = find(kinds, kind).ok_or_else(|| FormatError::Damaged(format!("вид «{kind}» программе незнаком")))?;
+    let checked = (found.check)(version, record)?;
+    Ok(Entry {
+        kind: found.name,
         meta: checked.meta,
         record: checked.record,
         base: None,
@@ -594,12 +614,13 @@ where
     P: FnMut() -> F,
     F: Future<Output = ()>,
 {
-    deflate_sliced(plaintext(header, entries).as_bytes(), pause).await
+    deflate_sliced(plaintext(header, entries).as_bytes(), PACK_LEVEL, pause).await
 }
 
-/// Сжатие DEFLATE без обёртки (RFC 1951) кусками по [`SLICE_BYTES`] —
-/// поток один, и разжимается он целиком, как сжатый одним куском.
-async fn deflate_sliced<P, F>(input: &[u8], pause: &mut P) -> Vec<u8>
+/// Сжатие DEFLATE без обёртки (RFC 1951) уровнем `level` кусками по
+/// [`SLICE_BYTES`] — поток один, и разжимается он целиком, как сжатый одним
+/// куском.
+pub(super) async fn deflate_sliced<P, F>(input: &[u8], level: u8, pause: &mut P) -> Vec<u8>
 where
     P: FnMut() -> F,
     F: Future<Output = ()>,
@@ -608,7 +629,7 @@ where
         CompressorOxide, TDEFLFlush, TDEFLStatus, compress, create_comp_flags_from_zip_params,
     };
     // Окно 0 — без обёртки zlib, как у `compress_to_vec`.
-    let flags = create_comp_flags_from_zip_params(i32::from(PACK_LEVEL), 0, 0);
+    let flags = create_comp_flags_from_zip_params(i32::from(level), 0, 0);
     let mut compressor = CompressorOxide::new(flags);
     let mut output = vec![0; input.len() / 2 + 1024];
     let mut written = 0;
@@ -925,7 +946,7 @@ const MARK_PREFIX: &str = r#"{"file":"kvartik-backup""#;
 
 /// Похоже ли на номер версии программы: `0.0.8`, `1.2.0-beta.1`. Шапку
 /// окно показывает человеку, и в ней не должно быть чего угодно.
-fn is_app_version(text: &str) -> bool {
+pub(super) fn is_app_version(text: &str) -> bool {
     (1..=32).contains(&text.len())
         && text
             .bytes()
@@ -1061,7 +1082,7 @@ fn unpack(packed: &[u8], limit: usize) -> Result<Vec<u8>, BackupError> {
 /// и с пределом: перешагнул — порча, а не гигабайты в памяти (Правило 13).
 /// Лишние байты после конца сжатого потока — тоже порча: программа их не
 /// пишет.
-async fn unpack_sliced<P, F>(packed: &[u8], limit: usize, pause: &mut P) -> Result<Vec<u8>, BackupError>
+pub(super) async fn unpack_sliced<P, F>(packed: &[u8], limit: usize, pause: &mut P) -> Result<Vec<u8>, BackupError>
 where
     P: FnMut() -> F,
     F: Future<Output = ()>,
