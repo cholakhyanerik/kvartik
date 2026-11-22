@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.172",
+      "date": "2026-11-22",
+      "hy": [
+        "Կոդն ընդունած սարքը պատասխանում ցույց է տալիս անդորրագիր. սկանավորեք այն կոդ ստեղծած սարքում — և կերևա, որ ամեն ինչ հասել է, իսկ եթե ոչ՝ որ օրվանից ստեղծել նոր կոդ։"
+      ],
+      "ru": [
+        "Устройство, принявшее код, показывает в ответ квитанцию: снимите её на устройстве, которое сделало код, — и будет видно, что всё дошло, а если нет — с какого дня сделать новый код."
+      ],
+      "en": [
+        "The device that received a code shows a receipt in return: scan it on the device that made the code to see that everything arrived or, if not, from which day to make a new code."
+      ]
+    },
+    {
       "version": "0.0.171",
       "date": "2026-11-22",
       "hy": [
@@ -257,22 +270,6 @@
       ],
       "en": [
         "The “Privacy policy” link in the “Checking the TIN for the trial” block now has the color of the program’s other links instead of blue."
-      ]
-    },
-    {
-      "version": "0.0.152",
-      "date": "2026-11-18",
-      "hy": [
-        "Փորձաշրջանն այլևս նորից չի սկսվում այլ դիտարկիչում կամ այլ սարքում. ձեր համաձայնությամբ Kvartik-ի սերվերը հիշում է դրա առաջին օրը պրոֆիլի ՀՎՀՀ-ի համար։ Համաձայնությունը խնդրվում է մեկ անգամ՝ հաշիվ թողարկելուց առաջ, և հետ է կանչվում «Լիցենզիա» էկրանում։",
-        "Թարմացվել են լիցենզիայի պայմաններն ու գաղտնիության քաղաքականությունը՝ 18.11.2026 խմբագրությամբ։"
-      ],
-      "ru": [
-        "Пробный период больше не начинается заново в другом браузере или на другом устройстве: с вашего согласия сервер Kvartik помнит его первый день на ИНН из профиля. Согласие спрашивается один раз перед выпуском счёта и отзывается на экране «Лицензия».",
-        "Обновлены условия лицензии и политика конфиденциальности: редакции от 18.11.2026."
-      ],
-      "en": [
-        "The trial no longer starts over in another browser or on another device: with your consent, the Kvartik server remembers its first day for the TIN in the profile. Consent is asked once before issuing an invoice and can be withdrawn on the License screen.",
-        "The license terms and the privacy policy are updated: editions of November 18, 2026."
       ]
     }
   ]

@@ -6,6 +6,7 @@
 //! (`format::qr`, `format::sync`).
 
 use js_sys::Reflect;
+use kvartik_core::model::record::RecordId;
 use kvartik_core::model::tin::Tin;
 use wasm_bindgen::JsCast;
 use web_sys::{HtmlElement, HtmlInputElement};
@@ -121,7 +122,7 @@ async fn make(host: &HtmlElement, lang: Lang, all: bool, wrong: &mut Vec<String>
 /// Вставить код текстом и дождаться поля пароля.
 async fn paste(host: &HtmlElement, lang: Lang, code: &str, wrong: &mut Vec<String>) -> Option<HtmlInputElement> {
     crate::platform::set_hash(&Screen::Sync.href());
-    let Some(area) = find(host, ".sync-paste textarea").await else {
+    let Some(area) = find(host, ".sync-paste:not(.sync-reply) textarea").await else {
         wrong.push("нет поля для текста кода".to_owned());
         return None;
     };
@@ -287,4 +288,153 @@ async fn changes_land_only_where_the_senders_data_is() {
     crate::platform::set_hash("");
     documents::forget_device();
     assert!(wrong.is_empty(), "изменения без данных отправителя: {wrong:#?}");
+}
+
+/// Шапка кода из его текста и ключ кода — из пароля и замка кода: так их
+/// получит принявшее устройство.
+async fn opened_code(code: &str) -> Option<(kvartik_core::format::sync::Header, crate::platform::crypto::Key)> {
+    use kvartik_core::format::sync;
+    let mut collector = sync::Collector::default();
+    for frame in sync::frames_in_text(code) {
+        collector.take(frame.ok()?);
+    }
+    let sealed = sync::open(&collector.whole()?).ok()?;
+    let lock = sealed.lock();
+    let key = crate::platform::crypto::derive(&crate::platform::crypto::normalize(PASSWORD), lock.salt(), lock.iterations())
+        .await
+        .ok()?;
+    let plain = crate::platform::crypto::decrypt(&key, lock.iv(), sealed.ciphertext()).await.ok()?;
+    Some((sync::read(&sealed, &plain).ok()?.header().clone(), key))
+}
+
+/// Квитанция `receipt` — текстом, под ключом `key`, как её покажет принявшее.
+async fn receipt_text(key: &crate::platform::crypto::Key, receipt: &kvartik_core::format::sync::Receipt) -> String {
+    use kvartik_core::format::sync;
+    let iv = crate::platform::crypto::random(kvartik_core::format::backup::IV_BYTES).expect("вектор");
+    let ciphertext = crate::platform::crypto::encrypt(key, &iv, &receipt.plain()).await.expect("шифр");
+    sync::text_parts(&sync::seal_receipt(&iv, &ciphertext), 1).join("\n")
+}
+
+/// Вставить квитанцию текстом под показанным кодом.
+async fn paste_reply(host: &HtmlElement, text: &str, wrong: &mut Vec<String>) {
+    let Some(area) = find(host, ".sync-reply textarea").await else {
+        wrong.push("нет поля для квитанции".to_owned());
+        return;
+    };
+    Reflect::set(&area, &"value".into(), &text.into()).expect("значение поставлено");
+    area.dispatch_event(&web_sys::Event::new("input").expect("событие")).expect("отправлено");
+}
+
+/// Квитанция (задача 116): принявшее устройство показывает её под ключом
+/// кода — на код этого отправителя, с целым рядом; отправитель, вставив
+/// квитанцию с дырой, слышит день и находит его в поле и в дне следующего
+/// кода, а квитанцию чужого кода и сам код вместо квитанции называет словами.
+#[wasm_bindgen_test]
+async fn a_receipt_tells_the_sender_what_arrived() {
+    use kvartik_core::format::sync::{self, Continuity, Receipt};
+    documents::fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    other_device();
+    Device::new().set_ui_lang(lang);
+    let mut wrong = Vec::new();
+
+    // Отправитель: код всех записей, а потом — квитанции под ним.
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база не открылась".to_owned());
+    }
+    let code = make(&host, lang, true, &mut wrong).await.unwrap_or_default();
+    let sender = Device::new().sync_id();
+    match opened_code(&code).await {
+        Some((header, key)) => {
+            let got = kvartik_core::model::record::Timestamp::from_unix_millis(header.created().unix_millis() - 3 * 86_400_000);
+            let day = clock::local_date(got).expect("день");
+            let other = Receipt::new(
+                &sync::Header::new("0.0.172", kvartik_core::model::record::Timestamp::from_unix_millis(header.created().unix_millis() + 1), sender, None),
+                RecordId::random(),
+                Continuity::Whole,
+            );
+            paste_reply(&host, &receipt_text(&key, &other).await, &mut wrong).await;
+            if !wait_for(&host, t(lang, Key::SyncReceiptOther)).await {
+                wrong.push(format!("квитанция чужого кода не названа: «{}»", section_text(&host, "sync")));
+            }
+            paste_reply(&host, &code, &mut wrong).await;
+            if !wait_for(&host, t(lang, Key::SyncIsCode)).await {
+                wrong.push("код вместо квитанции не назван".to_owned());
+            }
+            let gap = Receipt::new(&header, RecordId::random(), Continuity::Gap { got });
+            paste_reply(&host, &receipt_text(&key, &gap).await, &mut wrong).await;
+            let words = fill(t(lang, Key::SyncReceiptGap), &[&kvartik_core::i18n::date(lang, day)]);
+            if !wait_for(&host, &words).await {
+                wrong.push(format!("дыра не названа: «{}»", section_text(&host, "sync")));
+            }
+            let field = host
+                .query_selector("#sync form.sync input[type=date]")
+                .ok()
+                .flatten()
+                .and_then(|input| Reflect::get(&input, &"value".into()).ok())
+                .and_then(|value| value.as_string());
+            if field.as_deref() != Some(day.iso().as_str()) {
+                wrong.push(format!("в поле не день дыры: {field:?}"));
+            }
+            if Device::new().sync_made(crate::store::DB_NAME) != Some(got) {
+                wrong.push("день следующего кода не сдвинулся".to_owned());
+            }
+            let whole = Receipt::new(&header, RecordId::random(), Continuity::First);
+            paste_reply(&host, &receipt_text(&key, &whole).await, &mut wrong).await;
+            if !wait_for(&host, t(lang, Key::SyncReceiptWhole)).await {
+                wrong.push("целый ряд не назван".to_owned());
+            }
+        }
+        None => wrong.push("код не открылся".to_owned()),
+    }
+    drop(mounted);
+    host.remove();
+
+    // Получатель: пустая база — принимает код и показывает квитанцию.
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    other_device();
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база получателя не открылась".to_owned());
+    }
+    if let Some(input) = paste(&host, lang, &code, &mut wrong).await {
+        accept(&host, lang, &input, PASSWORD);
+        if !wait_for(&host, t(lang, Key::SyncReceiptTitle)).await {
+            wrong.push(format!("квитанции нет: «{}»", section_text(&host, "sync")));
+        }
+        let shown = find(&host, ".sync-receipt textarea")
+            .await
+            .and_then(|area| Reflect::get(&area, &"value".into()).ok())
+            .and_then(|value| value.as_string())
+            .unwrap_or_default();
+        let read = async {
+            let (header, key) = opened_code(&code).await?;
+            let mut collector = sync::Collector::default();
+            for frame in sync::frames_in_text(&shown) {
+                collector.take(frame.ok()?);
+            }
+            let sealed = sync::open_receipt(&collector.whole()?).ok()?;
+            let plain = crate::platform::crypto::decrypt(&key, sealed.iv(), sealed.ciphertext()).await.ok()?;
+            Some(sync::acked(&Receipt::read(&plain).ok()?, sender, header.created()))
+        };
+        if read.await != Some(sync::Acked::Whole) {
+            wrong.push(format!("квитанция получателя не та: {}", shown.chars().take(30).collect::<String>()));
+        }
+        // Квитанция вместо кода — словами, а не «это не код».
+        crate::platform::set_hash(&Screen::Sync.href());
+        if let Some(area) = find(&host, ".sync-paste:not(.sync-reply) textarea").await {
+            Reflect::set(&area, &"value".into(), &shown.into()).expect("значение поставлено");
+            area.dispatch_event(&web_sys::Event::new("input").expect("событие")).expect("отправлено");
+            if !wait_for(&host, t(lang, Key::SyncIsReceipt)).await {
+                wrong.push("квитанция вместо кода не названа".to_owned());
+            }
+        }
+    }
+    drop(mounted);
+    host.remove();
+    other_device();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "квитанция: {wrong:#?}");
 }

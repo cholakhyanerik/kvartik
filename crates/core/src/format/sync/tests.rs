@@ -380,3 +380,106 @@ fn the_default_day() {
     assert_eq!(default_day(None, Some(d(3)), d(21)), None);
     assert_eq!(default_day(None, None, d(21)), None);
 }
+
+/// Квитанция (задача 116): что принято — читается обратно той же; ряд цел
+/// или дыра с моментом — отправителю словами, а квитанция чужого кода или
+/// чужому устройству — «другая».
+#[test]
+fn a_receipt_says_what_was_taken() {
+    let (me, them) = (RecordId::random(), RecordId::random());
+    let header = Header::new("0.0.172", at(9_000), me, Some(at(5_000)));
+    let mut wrong = Vec::new();
+    for (name, continuity, expected) in [
+        ("ряд цел", Continuity::Whole, Acked::Whole),
+        ("впервые", Continuity::First, Acked::Whole),
+        ("дыра", Continuity::Gap { got: at(3_000) }, Acked::Gap { got: at(3_000) }),
+    ] {
+        let receipt = Receipt::new(&header, them, continuity);
+        let back = Receipt::read(&receipt.plain());
+        if back.as_ref() != Ok(&receipt) {
+            wrong.push(format!("{name}: не прочлась {back:?}"));
+        }
+        if acked(&receipt, me, at(9_000)) != expected {
+            wrong.push(format!("{name}: не то"));
+        }
+        if acked(&receipt, them, at(9_000)) != Acked::Other || acked(&receipt, me, at(9_001)) != Acked::Other {
+            wrong.push(format!("{name}: чужая квитанция своя"));
+        }
+    }
+    let receipt = String::from_utf8(Receipt::new(&header, them, Continuity::Whole).plain()).expect("текст");
+    for broken in [
+        receipt.replace(r#""whole":true"#, r#""whole":false"#),
+        receipt.replace("kvartik-receipt", "kvartik-sync"),
+        receipt.replace(r#""got":null"#, r#""got":null,"extra":1"#),
+        receipt.replace(r#""got":null"#, r#""got":1"#),
+        "не JSON".to_owned(),
+    ] {
+        if Receipt::read(broken.as_bytes()).is_ok() {
+            wrong.push(format!("прочитана испорченная: {broken}"));
+        }
+    }
+    assert!(wrong.is_empty(), "квитанция: {wrong:#?}");
+}
+
+/// Квитанция — один QR-код и один кусок текста: её показывают в ответ, и круга
+/// у неё нет. Конверт открывается обратно, а чужие байты и код — нет.
+#[test]
+fn a_receipt_is_one_qr_code() {
+    let header = Header::new("0.0.172", at(1_795_346_426_590), RecordId::random(), None);
+    let plain = Receipt::new(&header, RecordId::random(), Continuity::Gap { got: at(1_795_346_000_000) }).plain();
+    // «Шифротекст» — того же размера, что даст AES-GCM: текст и метка.
+    let ciphertext = vec![7u8; plain.len() + backup::TAG_BYTES];
+    let iv = [1u8; backup::IV_BYTES];
+    let sealed = seal_receipt(&iv, &ciphertext);
+    assert_eq!(sync_frames(&sealed), 1, "квитанция — не один кадр: {} Б", sealed.len());
+    assert_eq!(qr_codes(&sealed, 1).len(), 1);
+    // Своим QR-кодом — меньше кода передачи, и сканер ядра его читает.
+    let small = receipt_qr(&sealed, 1).expect("помещается");
+    let big = qr_codes(&sealed, 1).remove(0);
+    assert!(small.side() < big.side(), "квитанция не меньше кода: {} против {}", small.side(), big.side());
+    let pixels: Vec<u8> = (0..(small.side() + 8).pow(2))
+        .map(|i| {
+            let side = small.side() + 8;
+            let (x, y) = (i % side, i / side);
+            let dark = x >= 4 && y >= 4 && x - 4 < small.side() && y - 4 < small.side() && small.dark(x - 4, y - 4);
+            if dark { 0 } else { 255 }
+        })
+        .collect();
+    let side = small.side() + 8;
+    let scaled: Vec<u8> = (0..(side * 4).pow(2)).map(|i| pixels[(i / (side * 4) / 4) * side + (i % (side * 4)) / 4]).collect();
+    let found = qr::scan(&qr::Gray {
+        width: side * 4,
+        height: side * 4,
+        pixels: &scaled,
+    });
+    assert_eq!(found.len(), 1, "сканер не прочёл QR-код квитанции");
+    assert_eq!(frame(&found[0]).map(|frame| frame.chunk), Ok(sealed.clone()));
+    assert_eq!(text_parts(&sealed, 1).len(), 1);
+    assert_eq!(payload(&sealed), Payload::Receipt);
+    let opened = open_receipt(&sealed).expect("открывается");
+    assert_eq!((opened.iv(), opened.ciphertext()), (&iv[..], &ciphertext[..]));
+
+    let code = seal(&lock(), &[9; 40]);
+    assert_eq!(payload(&code), Payload::Code);
+    assert_eq!(open_receipt(&code), Err(CodeError::NotCode));
+    assert_eq!(payload(b"KV"), Payload::Other);
+    let mut newer = sealed.clone();
+    newer[3] = 2;
+    assert_eq!(open_receipt(&newer), Err(CodeError::Newer));
+    let mut wrong = Vec::new();
+    for (name, bytes) in [
+        ("без шифротекста", sealed[..4 + backup::IV_BYTES + 3].to_vec()),
+        ("версия 0", [&sealed[..3], &[0], &sealed[4..]].concat()),
+        ("длиннее предела", [sealed.clone(), vec![0; MAX_RECEIPT_BYTES]].concat()),
+    ] {
+        if !matches!(open_receipt(&bytes), Err(CodeError::Damaged(_))) {
+            wrong.push(name);
+        }
+    }
+    assert!(wrong.is_empty(), "открыта испорченная квитанция: {wrong:?}");
+}
+
+/// Сколько QR-кадров у этих байтов.
+fn sync_frames(bytes: &[u8]) -> usize {
+    frames(bytes, QR_CHUNK, 1).len()
+}

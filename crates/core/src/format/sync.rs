@@ -52,8 +52,10 @@
 //! какого момента часов отправителя от него принято ([`Received`]), и код,
 //! который начинается позже, называет: изменения между ними не пришли —
 //! прошлый код не сняли ([`continuity`]). Сервера, который знал бы, кто что
-//! принял, нет, и обратного пути у QR-кода нет: отправитель не знает,
-//! снят ли его код, — поэтому дыру видит принимающий.
+//! принял, нет, и обратного пути у QR-кода нет — поэтому принявший
+//! показывает в ответ квитанцию ([`Receipt`], с 0.0.172): принят ли код и цел
+//! ли ряд. Отправитель, снявший её, узнаёт о дыре сам и делает код с её дня;
+//! не снял — дыру по-прежнему видит принимающий.
 
 use std::future::Future;
 
@@ -850,6 +852,186 @@ pub fn continuity(since: Option<Timestamp>, got: Option<Timestamp>) -> Continuit
         (Some(since), Some(got)) if since <= got => Continuity::Whole,
         (Some(_), Some(got)) => Continuity::Gap { got },
         (Some(_), None) => Continuity::First,
+    }
+}
+
+/// Метка квитанции: первые три байта и версия её конверта (задача 116).
+const RECEIPT_MARK: &[u8; 3] = b"KVR";
+
+/// Версия конверта квитанции.
+const RECEIPT_ENVELOPE: u8 = 1;
+
+/// Метка открытого текста квитанции.
+const RECEIPT_PLAIN_MARK: &str = "kvartik-receipt";
+
+/// Больше этого квитанция не бывает: шапка, вектор, текст в пару сотен
+/// байтов и метка подлинности — один QR-кадр (тест
+/// `a_receipt_is_one_qr_code`), а длиннее — чужое.
+const MAX_RECEIPT_BYTES: usize = 512;
+
+/// Квитанция (задача 116): что устройство, принявшее код, отвечает тому,
+/// которое его сделало. Обратного пути у QR-кода нет, и без неё пропущенный
+/// код — сделанный, но не снятый, — видел только принимающий ([`continuity`]),
+/// а отправитель не знал, что дошло. Квитанция — под тем же ключом, что код
+/// ([`seal_receipt`]): сделать её может только тот, кто знает пароль, — иначе
+/// подложенная квитанция «всё дошло» спрятала бы от отправителя дыру.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Receipt {
+    file: String,
+    /// Устройство, сделавшее код.
+    sender: RecordId,
+    /// Устройство, принявшее его.
+    receiver: RecordId,
+    /// Момент принятого кода — по часам отправителя ([`Header::created`]):
+    /// по нему отправитель узнаёт свой код.
+    code: Timestamp,
+    /// Цел ли ряд: всё, что было у отправителя до кода, у принявшего есть.
+    whole: bool,
+    /// Ряд не цел — до какого момента часов отправителя от него принято
+    /// прежде ([`Continuity::Gap`]).
+    got: Option<Timestamp>,
+}
+
+impl Receipt {
+    /// Квитанция на код с шапкой `header`, принятый устройством `receiver`
+    /// с целостью ряда `continuity`.
+    pub fn new(header: &Header, receiver: RecordId, continuity: Continuity) -> Self {
+        let (whole, got) = match continuity {
+            Continuity::Whole | Continuity::First => (true, None),
+            Continuity::Gap { got } => (false, Some(got)),
+        };
+        Self {
+            file: RECEIPT_PLAIN_MARK.to_owned(),
+            sender: header.device,
+            receiver,
+            code: header.created,
+            whole,
+            got,
+        }
+    }
+
+    /// Открытый текст — то, что окно шифрует ключом кода.
+    pub fn plain(&self) -> Vec<u8> {
+        serde_json::to_vec(self).expect("квитанция в JSON не падает")
+    }
+
+    /// Квитанция из открытого текста.
+    pub fn read(plain: &[u8]) -> Result<Self, CodeError> {
+        // Из строки, а не `from_slice`: разбор байтов — свой вариант разбора
+        // идентификатора записи, и программа разреза клала его в главный wasm
+        // (+1,7 КБ кода, замер задачи 116).
+        let text = std::str::from_utf8(plain).map_err(damaged)?;
+        let receipt: Self = serde_json::from_str(text).map_err(damaged)?;
+        if receipt.file != RECEIPT_PLAIN_MARK || receipt.whole == receipt.got.is_some() {
+            return Err(damaged("квитанция не та"));
+        }
+        Ok(receipt)
+    }
+}
+
+/// Что квитанция говорит отправителю.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Acked {
+    /// Код принят, и ряд цел: на том устройстве всё, что было здесь до кода.
+    Whole,
+    /// Код принят, но между принятым прежде (`got`, по часам этого
+    /// устройства) и началом кода изменений там нет: прошлый код не сняли.
+    Gap { got: Timestamp },
+    /// Квитанция не на этот код или не этому устройству.
+    Other,
+}
+
+/// Что квитанция `receipt` значит для устройства `me`, показавшего код
+/// с моментом `code`.
+pub fn acked(receipt: &Receipt, me: RecordId, code: Timestamp) -> Acked {
+    if receipt.sender != me || receipt.code != code {
+        return Acked::Other;
+    }
+    match receipt.got {
+        Some(got) if !receipt.whole => Acked::Gap { got },
+        _ => Acked::Whole,
+    }
+}
+
+/// Квитанция целиком: метка, версия, вектор и шифротекст. Соли и итераций
+/// нет: читает её отправитель, у которого ключ кода ещё в руках.
+pub fn seal_receipt(iv: &[u8], ciphertext: &[u8]) -> Vec<u8> {
+    let mut sealed = Vec::with_capacity(4 + iv.len() + ciphertext.len());
+    sealed.extend_from_slice(RECEIPT_MARK);
+    sealed.push(RECEIPT_ENVELOPE);
+    sealed.extend_from_slice(iv);
+    sealed.extend_from_slice(ciphertext);
+    sealed
+}
+
+/// Квитанция до расшифровки.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct SealedReceipt {
+    iv: Vec<u8>,
+    ciphertext: Vec<u8>,
+}
+
+impl SealedReceipt {
+    /// Вектор шифра.
+    pub fn iv(&self) -> &[u8] {
+        &self.iv
+    }
+
+    /// Шифротекст вместе с меткой подлинности.
+    pub fn ciphertext(&self) -> &[u8] {
+        &self.ciphertext
+    }
+}
+
+/// Открыть квитанцию: метка, версия, длина.
+pub fn open_receipt(bytes: &[u8]) -> Result<SealedReceipt, CodeError> {
+    if bytes.len() < 4 || &bytes[..3] != RECEIPT_MARK {
+        return Err(CodeError::NotCode);
+    }
+    if bytes[3] > RECEIPT_ENVELOPE {
+        return Err(CodeError::Newer);
+    }
+    let rest = &bytes[4..];
+    if bytes[3] == 0 || bytes.len() > MAX_RECEIPT_BYTES || rest.len() < backup::IV_BYTES + backup::TAG_BYTES {
+        return Err(damaged("квитанция не той версии или длины"));
+    }
+    let (iv, ciphertext) = rest.split_at(backup::IV_BYTES);
+    Ok(SealedReceipt {
+        iv: iv.to_vec(),
+        ciphertext: ciphertext.to_vec(),
+    })
+}
+
+/// QR-код квитанции `sealed` — одним кадром, самой малой версии, что её
+/// вмещает, а не версией кода [`QR_VERSION`]: квитанция в пару сотен байтов,
+/// и с меньшим числом модулей каждый крупнее — камере её снять проще. `None`
+/// — квитанция длиннее одного кадра: такой программа не делает.
+pub fn receipt_qr(sealed: &[u8], id: u32) -> Option<qr::Code> {
+    let frame = frames(sealed, sealed.len(), id).into_iter().next()?;
+    (1..=QR_VERSION)
+        .find(|&version| qr::capacity(version, QR_ECC) >= frame.len())
+        .and_then(|version| qr::encode(&frame, version, QR_ECC))
+}
+
+/// Что собрано из кадров.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Payload {
+    /// Код передачи ([`open`]).
+    Code,
+    /// Квитанция ([`open_receipt`]).
+    Receipt,
+    /// Ни то, ни другое.
+    Other,
+}
+
+/// Код это или квитанция — по метке: QR-коды и текст у обоих одни, и снятое
+/// не там окно называет словами, а не «это не код программы».
+pub fn payload(bytes: &[u8]) -> Payload {
+    match bytes.get(..3) {
+        Some(mark) if mark == MARK => Payload::Code,
+        Some(mark) if mark == RECEIPT_MARK => Payload::Receipt,
+        _ => Payload::Other,
     }
 }
 

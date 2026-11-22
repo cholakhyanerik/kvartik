@@ -17,19 +17,28 @@
 //! которую человек сам начал, а не покой (Правило 1), — ушёл с экрана или
 //! нажал «Готово» — круг стоит. Камера горит, только пока сканер на экране:
 //! уход с экрана её выключает.
+//!
+//! Принявшее устройство показывает в ответ квитанцию (задача 116,
+//! `sync::Receipt`) — одним QR-кодом и текстом, под ключом кода, — а
+//! отправитель снимает её под своими QR-кодами, пока ключ ещё в руках: так он
+//! узнаёт, что код принят, а о дыре — с какого дня сделать новый, и этот день
+//! сам встаёт в поле.
 
 use std::fmt::Write as _;
 use std::rc::Rc;
 use std::time::Duration;
 
 use kvartik_core::format::Stored;
-use kvartik_core::format::backup::{self, DeviceKey, KDF_ITERATIONS, KINDS, Owner};
+use kvartik_core::format::backup::{self, DeviceKey, IV_BYTES, KDF_ITERATIONS, KINDS, Owner};
 use kvartik_core::format::office as office_route;
 use kvartik_core::format::qr::{self, Gray};
-use kvartik_core::format::sync::{self, CodeError, Collector, Continuity, FrameError, MAX_CODE_BYTES, Sealed, Took};
+use kvartik_core::format::sync::{
+    self, Acked, CodeError, Collector, Continuity, FrameError, MAX_CODE_BYTES, Payload, Receipt, Sealed, Took,
+};
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
 use kvartik_core::model::date::Date;
 use kvartik_core::model::profile::Profile;
+use kvartik_core::model::record::Timestamp;
 use leptos::ev::{MouseEvent, SubmitEvent};
 use leptos::prelude::*;
 
@@ -189,6 +198,13 @@ struct Shown {
     changed: usize,
     skipped: usize,
     unreadable: usize,
+    /// Ключ кода — им зашифрована квитанция в ответ (задача 116).
+    key: Rc<crypto::Key>,
+    /// Момент кода по часам этого устройства — по нему квитанция узнаёт
+    /// свой код.
+    created: Timestamp,
+    /// База, чей код: квитанция с дырой сдвигает день её следующего кода.
+    base: String,
 }
 
 /// Где передача.
@@ -359,7 +375,10 @@ fn Send(ctx: Ctx) -> impl IntoView {
             Sending::Failed(say) => Some(view! { <p role="alert">{move || say.text(lang.get())}</p> }.into_any()),
             // Код убран — день по умолчанию уже другой: день этого кода.
             Sending::Ready(shown) => Some(view! {
-                <ShownCode lang router shown close=move || {
+                <ShownCode lang router shown gap=Callback::new(move |chosen: Date| {
+                    day.set(chosen.iso());
+                    all.set(false);
+                }) close=move || {
                     sending.set(Sending::Idle);
                     if let Some(next) = default_day(&office.open_name()) {
                         day.set(next.iso());
@@ -419,6 +438,9 @@ async fn make(ctx: Ctx, typed: &str, repeat: Option<&str>, since: Option<Date>) 
         changed: made.changed,
         skipped: made.skipped,
         unreadable: made.unreadable,
+        key: Rc::new(key),
+        created: now,
+        base,
     })
 }
 
@@ -444,9 +466,17 @@ fn halt(running: StoredValue<bool>, timer: StoredValue<Option<TimeoutHandle>>) {
     }
 }
 
-/// Готовый код: что в нём, QR-коды по кругу и текст кусками.
+/// Готовый код: что в нём, QR-коды по кругу и текст кусками, а под ними —
+/// квитанция в ответ. `gap` — квитанция назвала дыру: день, с которого
+/// сделать новый код.
 #[component]
-fn ShownCode(lang: ReadSignal<Lang>, router: Router, shown: Rc<Shown>, close: impl Fn() + Copy + 'static) -> impl IntoView {
+fn ShownCode(
+    lang: ReadSignal<Lang>,
+    router: Router,
+    shown: Rc<Shown>,
+    gap: Callback<Date>,
+    close: impl Fn() + Copy + 'static,
+) -> impl IntoView {
     let count = shown.qr.len();
     let index = RwSignal::new(0usize);
     // Круг — сменой через `setTimeout`, пока экран на виду: таймер ставится
@@ -533,10 +563,182 @@ fn ShownCode(lang: ReadSignal<Lang>, router: Router, shown: Rc<Shown>, close: im
             <summary>{tr(lang, Key::SyncTextLabel)}</summary>
             <textarea readonly rows="5" prop:value=all_text></textarea>
         </details>
+        <Reply lang router shown gap />
         <button type="button" class="link" on:click=move |_| close()>
             <span class="label">{tr(lang, Key::SyncClose)}</span>
         </button>
     }
+}
+
+/// Где квитанция у отправителя.
+#[derive(Clone)]
+enum Replying {
+    Waiting,
+    /// Камера на экране.
+    Scanning,
+    Reading,
+    Read(Acked),
+    Failed(Say),
+}
+
+/// Квитанция в ответ на показанный код (задача 116): снять камерой или
+/// вставить текстом, расшифровать ключом кода и сказать, что она значит.
+/// Дыра — день, с которого сделать новый код, встаёт в поле формы и в день
+/// следующего кода этой базы (`Device::sync_made`).
+#[component]
+fn Reply(lang: ReadSignal<Lang>, router: Router, shown: Rc<Shown>, gap: Callback<Date>) -> impl IntoView {
+    let replying = RwSignal::new_local(Replying::Waiting);
+    let collector = StoredValue::new_local(Collector::default());
+    let key = StoredValue::new_local(Rc::clone(&shown.key));
+    let (created, base) = (shown.created, StoredValue::new(shown.base.clone()));
+    let pasted = RwSignal::new(String::new());
+    // Ушли с экрана — камера гаснет.
+    Effect::new(move |_| {
+        if !router.shows(Screen::Sync) && replying.with_untracked(|state| matches!(state, Replying::Scanning)) {
+            replying.set(Replying::Waiting);
+        }
+    });
+    let read = move |bytes: Vec<u8>| {
+        let sealed = match sync::payload(&bytes) {
+            Payload::Receipt => match sync::open_receipt(&bytes) {
+                Ok(sealed) => sealed,
+                Err(error) => return replying.set(Replying::Failed(receipt_problem(error))),
+            },
+            Payload::Code => return replying.set(Replying::Failed(Say::Key(Key::SyncIsCode))),
+            Payload::Other => return replying.set(Replying::Failed(Say::Key(Key::SyncNotCode))),
+        };
+        replying.set(Replying::Reading);
+        leptos::task::spawn_local(async move {
+            let Some(key) = key.try_get_value() else {
+                return;
+            };
+            let opened = crypto::decrypt(&key, sealed.iv(), sealed.ciphertext()).await;
+            let receipt = match opened.map(|plain| Receipt::read(&plain)) {
+                Ok(Ok(receipt)) => receipt,
+                Ok(Err(error)) => return replying.set(Replying::Failed(receipt_problem(error))),
+                Err(_) => return replying.set(Replying::Failed(Say::Key(Key::SyncReceiptDamaged))),
+            };
+            let device = Device::new();
+            let acked = sync::acked(&receipt, device.sync_id(), created);
+            if let Acked::Gap { got } = acked {
+                let base = base.get_value();
+                if device.sync_made(&base).is_none_or(|made| got < made) {
+                    device.set_sync_made(&base, got);
+                }
+                if let Some(day) = clock::local_date(got) {
+                    gap.run(day);
+                }
+            }
+            pasted.set(String::new());
+            replying.set(Replying::Read(acked));
+        });
+    };
+    let take = move |found: Result<sync::Frame, FrameError>| {
+        let frame = match found {
+            Ok(frame) => frame,
+            Err(FrameError::Newer) => return replying.set(Replying::Failed(Say::Key(Key::SyncNewer))),
+            Err(FrameError::NotFrame) => return,
+        };
+        let whole = collector
+            .try_update_value(|collector| {
+                collector.take(frame);
+                collector.whole()
+            })
+            .flatten();
+        if let Some(bytes) = whole {
+            collector.set_value(Collector::default());
+            read(bytes);
+        }
+    };
+    view! {
+        <p class="hint">{tr(lang, Key::SyncReceiptAbout)}</p>
+        {move || match replying.get() {
+            Replying::Scanning => {
+                let found = Callback::new(move |bytes: Vec<u8>| take(sync::frame(&bytes)));
+                let stop = Callback::new(move |()| replying.set(Replying::Waiting));
+                view! {
+                    {Suspend::new(async move {
+                        scanner_part(ScanView { lang, found, stop }).await.ok()
+                    })}
+                }
+                .into_any()
+            }
+            Replying::Reading => view! { <p role="status">{tr(lang, Key::SyncAccepting)}</p> }.into_any(),
+            state => view! {
+                <div class="actions">
+                    <button type="button" class="secondary" on:click=move |_| replying.set(Replying::Scanning)>
+                        <span class="label">{tr(lang, Key::SyncReceiptScan)}</span>
+                    </button>
+                </div>
+                <label class="sync-paste sync-reply">
+                    {tr(lang, Key::SyncReceiptPaste)}
+                    <textarea
+                        rows="2"
+                        autocomplete="off"
+                        spellcheck="false"
+                        prop:value=move || pasted.get()
+                        on:input=move |event| {
+                            let text = event_target_value(&event);
+                            pasted.set(text.clone());
+                            for found in sync::frames_in_text(&text) {
+                                take(found);
+                            }
+                        }
+                    ></textarea>
+                </label>
+                {match state {
+                    Replying::Read(Acked::Whole) => Some(view! { <p role="status">{tr(lang, Key::SyncReceiptWhole)}</p> }.into_any()),
+                    Replying::Read(Acked::Gap { got }) => Some(view! {
+                        <p class="warning">{move || {
+                            let lang = lang.get();
+                            let day = clock::local_date(got).map(|day| i18n::date(lang, day)).unwrap_or_default();
+                            fill(t(lang, Key::SyncReceiptGap), &[&day])
+                        }}</p>
+                    }.into_any()),
+                    Replying::Read(Acked::Other) => Some(view! { <p role="alert">{tr(lang, Key::SyncReceiptOther)}</p> }.into_any()),
+                    Replying::Failed(say) => Some(view! { <p role="alert">{move || say.text(lang.get())}</p> }.into_any()),
+                    Replying::Waiting | Replying::Scanning | Replying::Reading => None,
+                }}
+            }
+            .into_any(),
+        }}
+    }
+}
+
+/// Ошибка квитанции — словами.
+fn receipt_problem(error: CodeError) -> Say {
+    Say::Key(match error {
+        CodeError::NotCode => Key::SyncNotCode,
+        CodeError::Newer => Key::SyncNewer,
+        CodeError::Damaged(why) => {
+            web_sys::console::error_1(&format!("Kvartik, квитанция: {why}").into());
+            Key::SyncReceiptDamaged
+        }
+    })
+}
+
+/// Квитанция на принятый код — чтобы показать: QR-код и текст.
+#[derive(Clone)]
+struct ShownReceipt {
+    qr: String,
+    side: usize,
+    text: String,
+}
+
+/// Квитанция на код с шапкой `header`, принятый с целостью `continuity`, —
+/// под ключом кода, одним QR-кодом и одним куском текста. `None` — шифр
+/// отказал: код принят, а квитанции нет — отправитель её просто не снимет.
+async fn receipt(key: &crypto::Key, header: &sync::Header, continuity: Continuity) -> Option<ShownReceipt> {
+    let receipt = Receipt::new(header, Device::new().sync_id(), continuity);
+    let iv = crypto::random(IV_BYTES).ok()?;
+    let ciphertext = crypto::encrypt(key, &iv, &receipt.plain()).await.ok()?;
+    let sealed = sync::seal_receipt(&iv, &ciphertext);
+    let code = sync::receipt_qr(&sealed, sync::transfer_id())?;
+    Some(ShownReceipt {
+        qr: qr_path(&code),
+        side: code.side() + 2 * QUIET,
+        text: sync::text_parts(&sealed, sync::transfer_id()).join("\n\n"),
+    })
 }
 
 /// Принятый код.
@@ -552,6 +754,8 @@ struct Accepted {
     /// Легло в пустую программу, а выпуск здесь не выключен: так заводят
     /// устройство — где выпускать.
     fresh: bool,
+    /// Квитанция тому устройству (задача 116).
+    receipt: Option<ShownReceipt>,
 }
 
 /// Где приём.
@@ -609,9 +813,12 @@ fn Receive(ctx: Ctx) -> impl IntoView {
         }
         if let Some(code) = whole {
             collector.set_value(Collector::default());
-            receiving.set(match sync::open(&code) {
-                Ok(sealed) => Receiving::Password(Rc::new(sealed), None),
-                Err(error) => Receiving::Failed(code_problem(error)),
+            receiving.set(match sync::payload(&code) {
+                Payload::Receipt => Receiving::Failed(Say::Key(Key::SyncIsReceipt)),
+                Payload::Code | Payload::Other => match sync::open(&code) {
+                    Ok(sealed) => Receiving::Password(Rc::new(sealed), None),
+                    Err(error) => Receiving::Failed(code_problem(error)),
+                },
             });
         }
     };
@@ -757,6 +964,47 @@ fn AcceptedWords(lang: ReadSignal<Lang>, accepted: Rc<Accepted>) -> impl IntoVie
         {flow}
         {accepted.ahead.then(|| view! { <p class="warning">{tr(lang, Key::BackupAhead)}</p> })}
         {(accepted.fresh && restored.added > 0).then(|| view! { <IssuerAsk lang /> })}
+        {accepted.receipt.clone().map(|receipt| view! { <ReceiptShown lang receipt /> })}
+    }
+}
+
+/// Квитанция на принявшем устройстве: QR-код и текст со «Скопировать».
+#[component]
+fn ReceiptShown(lang: ReadSignal<Lang>, receipt: ShownReceipt) -> impl IntoView {
+    let side = receipt.side;
+    let (text, shown) = (receipt.text.clone(), receipt.text);
+    let copied = RwSignal::new(None::<bool>);
+    // В буфер — в самом нажатии, до первого `await` (Правило 6).
+    let copy = move |_: MouseEvent| {
+        let written = clipboard::copy(&text);
+        leptos::task::spawn_local(async move {
+            copied.set(Some(written.await.is_ok()));
+        });
+    };
+    view! {
+        <h3>{tr(lang, Key::SyncReceiptTitle)}</h3>
+        <p>{tr(lang, Key::SyncReceiptShow)}</p>
+        <figure class="sync-qr">
+            <svg viewBox=format!("0 0 {side} {side}") role="img" aria-label=move || t(lang.get(), Key::SyncReceiptQrLabel)>
+                <rect class="sync-qr-paper" width=side height=side />
+                <path class="sync-qr-ink" d=receipt.qr />
+            </svg>
+        </figure>
+        <div class="actions">
+            <button type="button" class="secondary" on:click=copy>
+                {icon(Icon::Copy)}
+                <span class="label">{tr(lang, Key::SyncReceiptCopy)}</span>
+            </button>
+        </div>
+        {move || copied.get().map(|done| view! {
+            <p role=if done { "status" } else { "alert" }>
+                {tr(lang, if done { Key::SyncCopied } else { Key::SyncCopyFailed })}
+            </p>
+        })}
+        <details class="sync-text sync-receipt">
+            <summary>{tr(lang, Key::SyncReceiptText)}</summary>
+            <textarea readonly rows="3" prop:value=shown></textarea>
+        </details>
     }
 }
 
@@ -878,6 +1126,7 @@ async fn accept(ctx: Ctx, sealed: &Sealed, typed: &str) -> Result<Accepted, Say>
         ctx.backups.password_set(&opened_with);
         ctx.backups.password_entered();
     }
+    let receipt = receipt(&key, &header, continuity).await;
     Ok(Accepted {
         restored,
         continuity,
@@ -886,6 +1135,7 @@ async fn accept(ctx: Ctx, sealed: &Sealed, typed: &str) -> Result<Accepted, Say>
         ahead,
         // Выпуск уже выключен — спрашивать не о чем.
         fresh: fresh && !super::settings::issue_elsewhere_untracked(store.name()),
+        receipt,
     })
 }
 
