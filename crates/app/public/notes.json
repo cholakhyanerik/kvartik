@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.173",
+      "date": "2026-11-22",
+      "hy": [
+        "Ով մի քանի ԱՁ է վարում, «Այլ սարք» էկրանի կոդը կարող է տեղափոխել բոլոր ԱՁ-ների փոփոխությունները միանգամից՝ ԱՁ-ների ցանկով և «Pro» բանալիներով, և ոչ թե յուրաքանչյուրինը հերթով։"
+      ],
+      "ru": [
+        "Кто ведёт несколько ИП, тот кодом экрана «Другое устройство» переносит изменения всех ИП разом, со списком ИП и ключами «Pro», а не по очереди."
+      ],
+      "en": [
+        "If you keep several entrepreneurs, a code on the “Another device” screen now carries the changes of all of them at once, with their list and Pro keys, instead of one by one."
+      ]
+    },
+    {
       "version": "0.0.172",
       "date": "2026-11-22",
       "hy": [
@@ -257,19 +270,6 @@
       ],
       "en": [
         "The app opens faster on the first visit, by about a quarter of a second on a slow mobile connection: the site now sends its code more tightly compressed."
-      ]
-    },
-    {
-      "version": "0.0.153",
-      "date": "2026-11-18",
-      "hy": [
-        "«ՀՎՀՀ-ի ստուգում փորձաշրջանի համար» բաժնում «Գաղտնիության քաղաքականություն» հղումն այժմ ծրագրի մյուս հղումների գույնն ունի, ոչ թե կապույտ։"
-      ],
-      "ru": [
-        "Ссылка «Политика конфиденциальности» в блоке «Сверка ИНН для пробного периода» теперь цвета остальных ссылок программы, а не синяя."
-      ],
-      "en": [
-        "The “Privacy policy” link in the “Checking the TIN for the trial” block now has the color of the program’s other links instead of blue."
       ]
     }
   ]

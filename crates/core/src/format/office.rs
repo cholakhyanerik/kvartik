@@ -51,7 +51,7 @@ use super::{FORMAT_VERSION, FormatError, Stored, decode_record};
 use crate::license::{License, MAX_KEYS, OfficeLicense};
 use crate::model::office::{self, Ip, MAX_IPS};
 use crate::model::profile::Profile;
-use crate::model::record::RecordId;
+use crate::model::record::{RecordId, Timestamp};
 
 /// Куда ложатся записи одного ИП копии.
 #[derive(Debug)]
@@ -115,21 +115,7 @@ pub fn route(incoming: Vec<Entry>, local: &[Ip], spare: Option<&str>) -> Result<
             entries.push(entry);
         }
     }
-    let ours = |theirs: &Ip| {
-        local
-            .iter()
-            .find(|ours| ours.id() == theirs.id())
-            .or_else(|| {
-                local.iter().find(|ours| {
-                    ours.profile().is_some() && ours.profile() == theirs.profile()
-                })
-            })
-            .or_else(|| {
-                local
-                    .iter()
-                    .find(|ours| ours.tin().is_some() && ours.tin() == theirs.tin())
-            })
-    };
+    let ours = |theirs: &Ip| pair(local, theirs);
     // Кому свободная база (шапка модуля, п. 3): ИП без пары здесь, у кого
     // она так и называлась, потом — чья она по идентификатору (иначе два ИП
     // легли бы в одну базу), а нет таких — живому, добавленному раньше всех.
@@ -209,6 +195,32 @@ pub fn route(incoming: Vec<Entry>, local: &[Ip], spare: Option<&str>) -> Result<
         return Err(RouteError::TooManyKeys(keys.len()));
     }
     Ok(Route { office, keys, bases })
+}
+
+/// ИП списка `local`, который и есть ИП копии `theirs` (шапка модуля, п. 1–2):
+/// та же запись, тот же профиль или тот же ՀՎՀՀ; `None` — его здесь нет.
+fn pair<'a>(local: &'a [Ip], theirs: &Ip) -> Option<&'a Ip> {
+    local
+        .iter()
+        .find(|ours| ours.id() == theirs.id())
+        .or_else(|| local.iter().find(|ours| ours.profile().is_some() && ours.profile() == theirs.profile()))
+        .or_else(|| local.iter().find(|ours| ours.tin().is_some() && ours.tin() == theirs.tin()))
+}
+
+/// ИП кода всех ИП «с дня» `since` (`format::sync`, задача 116), которого
+/// в списке этого устройства `local` нет, а добавлен он не после начала
+/// кода: изменения такого ИП легли бы новым ИП без остального, и остальное не
+/// пришло бы никогда. `None` — все ИП кода здесь есть или новые. ИП,
+/// добавленный после начала кода, отправитель кладёт всеми записями
+/// (`sync::pick_office`), а без момента добавления (`Ip::first`) он не новый.
+pub fn missing(incoming: &[Entry], local: &[Ip], since: Timestamp) -> Result<Option<Ip>, FormatError> {
+    for theirs in ips(incoming)? {
+        let new = theirs.added_at().is_some_and(|at| at >= since);
+        if !new && pair(local, &theirs).is_none() {
+            return Ok(Some(theirs));
+        }
+    }
+    Ok(None)
 }
 
 /// Одна запись — одна: из версий одной записи (вид и идентификатор) в одной

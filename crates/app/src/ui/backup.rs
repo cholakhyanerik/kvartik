@@ -2475,7 +2475,7 @@ async fn empty(store: &Store) -> Result<bool, Failure> {
 /// копия того же ИП слилась с его базой, а пустая база открытого ИП
 /// свободна: её займёт первый ИП копии (`format::office::route`). Список
 /// уже есть — ни того ни другого.
-async fn unlisted(office_store: &Store, open: &Store, open_name: &str) -> Result<(Option<Ip>, Option<String>), Failure> {
+pub(super) async fn unlisted(office_store: &Store, open: &Store, open_name: &str) -> Result<(Option<Ip>, Option<String>), Failure> {
     if !office_list(office_store).await?.records.is_empty() {
         return Ok((None, None));
     }
@@ -2652,10 +2652,13 @@ fn restored_from(
 
 /// В базу `base` легли записи, самая ранняя — с моментом `oldest`: код
 /// передачи с этого устройства возьмёт их и тогда, когда они старше его
-/// прошлого кода (`Device::sync_arrived`, задача 110).
+/// прошлого кода (`Device::sync_arrived`, задача 110), — и код этого ИП,
+/// и код всех ИП (задача 116): он помнит своё под именем базы конторы.
 pub(super) fn arrived(base: &str, oldest: Option<Timestamp>) {
     if let Some(at) = oldest {
-        Device::new().note_sync_arrived(base, at);
+        let device = Device::new();
+        device.note_sync_arrived(base, at);
+        device.note_sync_arrived(crate::store::office::OFFICE_DB, at);
     }
 }
 

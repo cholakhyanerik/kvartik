@@ -438,3 +438,184 @@ async fn a_receipt_tells_the_sender_what_arrived() {
     documents::forget_device();
     assert!(wrong.is_empty(), "квитанция: {wrong:#?}");
 }
+
+/// Сделать код на экране, где форма уже может знать пароль: выбрать, что
+/// передать (`all` — все записи), вписать пароль во все его поля и дождаться
+/// текста кода; потом убрать код с экрана. `None` — не вышло.
+async fn make_any(host: &HtmlElement, lang: Lang, all: bool, wrong: &mut Vec<String>) -> Option<String> {
+    crate::platform::set_hash(&Screen::Sync.href());
+    // Прежний код убран — дождаться, пока его нет на экране: перерисовка
+    // приходит своей задачей (CLAUDE.md, «браузерный тест ждёт состояния»).
+    for _ in 0..100 {
+        if host.query_selector("#sync .sync-text textarea").ok().flatten().is_none() {
+            break;
+        }
+        sleep(50).await;
+    }
+    let radio = find(host, "input[type=radio][name=sync-what]").await;
+    if radio.is_none() {
+        wrong.push("нет выбора, что передать".to_owned());
+        return None;
+    }
+    let radios = host.query_selector_all("#sync input[type=radio][name=sync-what]").ok()?;
+    radios.item(u32::from(all)).map(JsCast::unchecked_into::<HtmlElement>)?.click();
+    let fields = host.query_selector_all("#sync form.sync input[type=password]").ok()?;
+    for at in 0..fields.length() {
+        if let Some(input) = fields.item(at) {
+            type_into(&input.unchecked_into(), PASSWORD);
+        }
+    }
+    sync_button(host, t(lang, Key::SyncMake))?.click();
+    for _ in 0..200 {
+        let text = host
+            .query_selector("#sync .sync-text textarea")
+            .ok()
+            .flatten()
+            .and_then(|area| Reflect::get(&area, &"value".into()).ok())
+            .and_then(|value| value.as_string())
+            .filter(|text| !text.is_empty());
+        if let Some(text) = text {
+            sync_button(host, t(lang, Key::SyncClose))?.click();
+            return Some(text);
+        }
+        sleep(50).await;
+    }
+    wrong.push(format!("код не готов: «{}»", section_text(host, "sync")));
+    None
+}
+
+/// Код всех ИП (задача 116): у кого ИП несколько, код по умолчанию — всех,
+/// и в пустой программе другого устройства он заводит оба ИП со списком,
+/// как копия всех ИП. А код всех ИП «с дня» в программу, где одного из них
+/// нет, не пишет ничего и называет его: остального его сюда не придёт.
+#[wasm_bindgen_test]
+async fn an_office_code_carries_every_ie() {
+    use super::office::{forget_office, named, seed, seed_office, stored_office};
+    use crate::store::office::OFFICE_DB;
+    use kvartik_core::model::office::Ip;
+    let lang = Lang::Ru;
+    let aram = named("ИП Арам Петросян");
+    let anna = named("ИП Анна Акопян");
+    let today = clock::today().expect("сегодня");
+    let first = {
+        let mut ip = Ip::first(Some(&aram), today, clock::now());
+        ip.copy_profile(&aram, clock::now());
+        ip
+    };
+    let mut second = Ip::new(today, clock::now());
+    second.copy_profile(&anna, clock::now());
+    let fresh = || async {
+        crate::store::delete_database(crate::store::DB_NAME).await;
+        crate::store::delete_database(OFFICE_DB).await;
+        crate::store::delete_database(second.base()).await;
+        forget_office();
+        other_device();
+        Device::new().set_ui_lang(lang);
+    };
+    fresh().await;
+    seed(crate::store::DB_NAME, &aram).await;
+    seed(second.base(), &anna).await;
+    // Клиент второго ИП — заведён позавчера: код «с сегодня» несёт его, потому
+    // что сам ИП добавлен сегодня (шапка `format::sync`, «Код конторы»).
+    let old_client = Client::create(
+        documents::acme(),
+        kvartik_core::model::record::Timestamp::from_unix_millis(clock::now().unix_millis() - 2 * 86_400_000),
+    )
+    .expect("годный клиент");
+    {
+        let store = crate::store::Store::open_base(second.base(), |_| {}).await.expect("база открыта");
+        let mut writes = Writes::default();
+        writes.insert(&old_client);
+        store.write().expect("транзакция").commit(writes).await.expect("записано");
+    }
+    seed_office(&[&first, &second]).await;
+    Device::new().set_office();
+    crate::store::office::set_tab_base(crate::store::DB_NAME);
+    let mut wrong = Vec::new();
+
+    // Отправитель: контора двух ИП — код всех записей и код «с сегодня».
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база не открылась".to_owned());
+    }
+    crate::platform::set_hash(&Screen::Sync.href());
+    if !wait_for(&host, t(lang, Key::SyncWhose)).await {
+        wrong.push("нет выбора, чьи изменения".to_owned());
+    }
+    let all = make_any(&host, lang, true, &mut wrong).await.unwrap_or_default();
+    let delta = make_any(&host, lang, false, &mut wrong).await.unwrap_or_default();
+    drop(mounted);
+    host.remove();
+
+    // Получатель — пустая программа: оба ИП со списком.
+    fresh().await;
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база получателя не открылась".to_owned());
+    }
+    if let Some(input) = paste(&host, lang, &all, &mut wrong).await {
+        accept(&host, lang, &input, PASSWORD);
+        if !wait_for(&host, t(lang, Key::SyncReceiptTitle)).await {
+            wrong.push(format!("код всех ИП не лёг: «{}»", section_text(&host, "sync")));
+        }
+    }
+    let listed = stored_office().await;
+    let mut names: Vec<String> = listed.iter().map(|ip| ip.name(lang).to_owned()).collect();
+    names.sort();
+    if names != ["ИП Анна Акопян", "ИП Арам Петросян"] {
+        wrong.push(format!("в списке не оба ИП: {names:?}"));
+    }
+    if !Device::new().office() {
+        wrong.push("устройство не стало конторой".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+
+    // Получатель, у которого только второй ИП: код «с сегодня» его не пишет.
+    fresh().await;
+    seed(crate::store::DB_NAME, &anna).await;
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база второго получателя не открылась".to_owned());
+    }
+    if let Some(input) = paste(&host, lang, &delta, &mut wrong).await {
+        accept(&host, lang, &input, PASSWORD);
+        let refused = fill(t(lang, Key::SyncMissingIp), &["ИП Арам Петросян"]);
+        if !wait_for(&host, &refused).await {
+            wrong.push(format!("ИП, которого здесь нет, не назван: «{}»", section_text(&host, "sync")));
+        }
+    }
+    if !stored_office().await.is_empty() {
+        wrong.push("отказ записал список ИП".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+
+    // Получатель, у которого только первый ИП: второй — новый, и код «с
+    // сегодня» кладёт его всеми записями, с позавчерашним клиентом.
+    fresh().await;
+    seed(crate::store::DB_NAME, &aram).await;
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база третьего получателя не открылась".to_owned());
+    }
+    if let Some(input) = paste(&host, lang, &delta, &mut wrong).await {
+        accept(&host, lang, &input, PASSWORD);
+        if !wait_for(&host, t(lang, Key::SyncReceiptTitle)).await {
+            wrong.push(format!("код с новым ИП не лёг: «{}»", section_text(&host, "sync")));
+        }
+    }
+    let landed = match crate::store::Store::open_base(second.base(), |_| {}).await {
+        Ok(store) => store.read().expect("чтение").all::<Client>().await.unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+    if !landed.iter().any(|client| client.id() == old_client.id()) {
+        wrong.push("новый ИП пришёл без давних записей".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    fresh().await;
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "код всех ИП: {wrong:#?}");
+}

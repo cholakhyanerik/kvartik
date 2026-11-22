@@ -483,3 +483,93 @@ fn a_receipt_is_one_qr_code() {
 fn sync_frames(bytes: &[u8]) -> usize {
     frames(bytes, QR_CHUNK, 1).len()
 }
+
+/// Код всех ИП (задача 116): записи ИП списка — всегда, ключи «Pro» и записи
+/// баз — изменённые, у записей баз — метка своего ИП; код читается обратно
+/// теми же записями и ложится маршрутом копии всех ИП.
+#[test]
+fn an_office_code_carries_every_ip() {
+    use crate::format::office;
+    use crate::model::office::Ip;
+    let day = Date::new(2026, 11, 1).expect("дата");
+    let (first, second) = (Ip::new(day, at(500)), Ip::new(day, at(600)));
+    let mut office_base = Base(Vec::new());
+    office_base.put(&first);
+    office_base.put(&second);
+    let office_picked = pick_office(office_base.raw(), Some(at(4_000))).expect("собрано");
+    assert_eq!(office_picked.entries().len(), 2, "записи ИП — всегда");
+    assert_eq!(office_picked.changed(Some(at(4_000))), 0, "неизменённые ИП не в счёт");
+
+    let (base_one, ip_one) = sample();
+    let mut base_two = Base(Vec::new());
+    let ip_two = profile("ИП Вахе", 1_000);
+    base_two.put(&ip_two);
+    base_two.put(&client("Клиент Вахе", 7_000));
+    let mut picked = office_picked;
+    picked.absorb(pick(base_one.raw(), Some(at(4_000))).expect("собрано").in_base(first.id()));
+    picked.absorb(pick(base_two.raw(), Some(at(4_000))).expect("собрано").in_base(second.id()));
+    assert_eq!(picked.changed(Some(at(4_000))), 2, "по клиенту в каждой базе");
+    assert_eq!(picked.skipped(), 1);
+
+    let header = Header::new("0.0.173", at(9_000), RecordId::random(), Some(at(4_000)));
+    let packed = pack(&header, picked.entries()).expect("помещается");
+    let sealed = open(&seal(&lock(), &packed)).expect("открывается");
+    let code = read(&sealed, sealed.ciphertext()).expect("читается");
+    assert!(backup::is_full(code.entries()), "код всех ИП");
+    let bases: Vec<Option<RecordId>> = code.entries().iter().map(Entry::base).collect();
+    assert_eq!(bases.iter().filter(|base| base.is_none()).count(), 2, "записи ИП — без метки");
+    let route = office::route(code.into_entries(), &[], None).expect("маршрут");
+    let landed: Vec<usize> = route.bases.iter().map(|landing| landing.entries.len()).collect();
+    assert_eq!(landed, [2, 2], "в каждую базу — клиент и профиль");
+    let profiles: Vec<RecordId> = route
+        .bases
+        .iter()
+        .flat_map(|landing| landing.entries.iter().filter(|entry| entry.kind() == Profile::KIND))
+        .map(|entry| entry.meta().id())
+        .collect();
+    assert_eq!(profiles, [ip_one.id(), ip_two.id()]);
+}
+
+/// Запись с меткой ИП, которого в коде нет, и записи конторы рядом с записями
+/// без метки — порча всего кода: такие некуда положить.
+#[test]
+fn an_office_code_without_its_ips_is_refused() {
+    use crate::model::office::Ip;
+    let (base, _) = sample();
+    let header = Header::new("0.0.173", at(9_000), RecordId::random(), None);
+    let tagged = pick(base.raw(), None).expect("собрано").in_base(RecordId::random());
+    let packed = pack(&header, tagged.entries()).expect("помещается");
+    let sealed = open(&seal(&lock(), &packed)).expect("открывается");
+    assert!(matches!(read(&sealed, sealed.ciphertext()), Err(CodeError::Damaged(_))), "метка без своего ИП");
+
+    let mut office_base = Base(Vec::new());
+    office_base.put(&Ip::new(Date::new(2026, 11, 1).expect("дата"), at(500)));
+    let mut mixed = pick_office(office_base.raw(), None).expect("собрано");
+    mixed.absorb(pick(base.raw(), None).expect("собрано"));
+    let packed = pack(&header, mixed.entries()).expect("помещается");
+    let sealed = open(&seal(&lock(), &packed)).expect("открывается");
+    assert!(matches!(read(&sealed, sealed.ciphertext()), Err(CodeError::Damaged(_))), "контора с записями без метки");
+}
+
+/// ИП кода «с дня», которого здесь нет, — назван, если он не новый: новый
+/// пришёл всеми записями, а у знакомого — та же запись, профиль или ИНН.
+#[test]
+fn an_unknown_ip_of_a_delta_is_named() {
+    use crate::format::office;
+    use crate::model::office::Ip;
+    let day = Date::new(2026, 11, 1).expect("дата");
+    let old = Ip::new(day, at(500));
+    let new = Ip::new(day, at(5_000));
+    let mut office_base = Base(Vec::new());
+    office_base.put(&old);
+    office_base.put(&new);
+    let entries = pick_office(office_base.raw(), None).expect("собрано").entries().to_vec();
+    let missing = office::missing(&entries, &[], at(4_000)).expect("читается");
+    assert_eq!(missing.map(|ip| ip.id()), Some(old.id()), "старый ИП, которого здесь нет");
+    assert_eq!(office::missing(&entries, std::slice::from_ref(&old), at(4_000)).expect("читается"), None);
+    assert_eq!(
+        office::missing(&entries, &[], at(400)).expect("читается"),
+        None,
+        "оба добавлены после начала кода"
+    );
+}

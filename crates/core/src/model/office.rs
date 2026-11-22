@@ -265,6 +265,11 @@ impl Ip {
     }
 
     /// День, когда ИП завели в программе.
+    pub const fn added_at(&self) -> Option<Timestamp> {
+        self.added_at
+    }
+
+    /// День, когда ИП добавили в список.
     pub const fn added(&self) -> Date {
         self.added
     }

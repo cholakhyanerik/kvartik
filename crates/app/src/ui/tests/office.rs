@@ -43,7 +43,7 @@ fn reloads() -> u32 {
 }
 
 /// Профиль ИП с этим именем на всех языках.
-fn named(name: &str) -> Profile {
+pub(super) fn named(name: &str) -> Profile {
     let mut data = ProfileData::default();
     let line = Line::new(name).expect("годное имя");
     data.name.hy = line.clone();
@@ -53,7 +53,7 @@ fn named(name: &str) -> Profile {
 }
 
 /// Записать в базу `name` этот профиль.
-async fn seed(name: &str, profile: &Profile) {
+pub(super) async fn seed(name: &str, profile: &Profile) {
     let store = Store::open_base(name, |_| {}).await.expect("база открыта");
     let mut writes = Writes::default();
     writes.insert(profile);
@@ -61,7 +61,7 @@ async fn seed(name: &str, profile: &Profile) {
 }
 
 /// Список конторы — записать как есть.
-async fn seed_office(ips: &[&Ip]) {
+pub(super) async fn seed_office(ips: &[&Ip]) {
     let office = Store::open_office(|_| {}).await.expect("контора открыта");
     let mut writes = Writes::default();
     for ip in ips {
@@ -71,7 +71,7 @@ async fn seed_office(ips: &[&Ip]) {
 }
 
 /// Список конторы из базы.
-async fn stored_office() -> Vec<Ip> {
+pub(super) async fn stored_office() -> Vec<Ip> {
     let office = Store::open_office(|_| {}).await.expect("контора открыта");
     list(&office).await.expect("список читается").records
 }

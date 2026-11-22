@@ -26,6 +26,19 @@
 //! без профиля сверять было бы не с чем, и изменения другого ИП легли бы
 //! рядом молча.
 //!
+//! # Код конторы
+//!
+//! У кого ИП несколько, код бывает и всех ИП (с 0.0.173, задача 116): записи
+//! конторы и изменения каждой базы с меткой своего ИП — как в копии всех ИП
+//! (`backup`, `office::route`), и ложится он её маршрутом. Записи ИП списка
+//! идут в него всегда, изменённые и нет: по ним принимающее устройство
+//! раскладывает базы, а метка без своего ИП в коде — порча
+//! ([`pick_office`]). Ключи «Pro» — только изменённые. ИП, добавленный после
+//! начала кода, идёт всеми своими записями: изменения «с дня» у нового ИП —
+//! это все его записи, а принесённые копией старше дня иначе не дошли бы
+//! никогда. А ИП кода, которого у принимающего нет и который не новый, код «с
+//! дня» не кладёт ([`office::missing`]): остального его не придёт.
+//!
 //! # Под паролем
 //!
 //! Как файл копии — паролем копий, PBKDF2 и AES-GCM WebCrypto (CLAUDE.md,
@@ -62,12 +75,13 @@ use std::future::Future;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
-use super::backup::{self, BackupError, Entry, KINDS, Lock, Meter, Raw, at_once, no_pause};
+use super::backup::{self, BackupError, Entry, FILE_KINDS, KINDS, Lock, Meter, OFFICE_KINDS, Raw, at_once, no_pause};
 use super::qr::{self, Ecc};
 use super::{FIRST_VERSION, FORMAT_VERSION, FormatError, Stored, decode_record, split_raw};
 use crate::model::attachment::Attachment;
 use crate::model::date::Date;
 use crate::model::logo::{IssuedLogo, Logo};
+use crate::model::office::Ip;
 use crate::model::profile::Profile;
 use crate::model::record::{RecordId, RecordMeta, Timestamp};
 
@@ -79,8 +93,9 @@ const MARK: &[u8; 3] = b"KVS";
 
 /// Версия конверта кода — не версия формата записей: растёт, когда меняется
 /// сам конверт или шапка внутри. Код новее программа не читает и говорит
-/// «обновите программу», а не «код испорчен».
-const ENVELOPE: u8 = 1;
+/// «обновите программу», а не «код испорчен». 2 (0.0.173) — у записи кода
+/// метка базы `base`: код всех ИП (шапка модуля, «Код конторы»).
+const ENVELOPE: u8 = 2;
 
 /// Метка открытого текста кода — как `kvartik-backup` у файла копии.
 const PLAIN_MARK: &str = "kvartik-sync";
@@ -202,6 +217,21 @@ impl Picked {
         &self.entries
     }
 
+    /// Те же записи с меткой базы ИП `ip` — для кода всех ИП.
+    pub fn in_base(self, ip: RecordId) -> Self {
+        Self {
+            entries: self.entries.into_iter().map(|entry| entry.in_base(ip)).collect(),
+            ..self
+        }
+    }
+
+    /// Добавить записи другой базы — для кода всех ИП.
+    pub fn absorb(&mut self, other: Self) {
+        self.entries.extend(other.entries);
+        self.skipped += other.skipped;
+        self.unreadable += other.unreadable;
+    }
+
     /// Сколько изменённых файлов книги и логотипов в код не вошло.
     pub const fn skipped(&self) -> usize {
         self.skipped
@@ -307,6 +337,31 @@ where
     Ok(picked)
 }
 
+/// Записи базы конторы для кода всех ИП (шапка модуля, «Код конторы»):
+/// записи ИП списка — все, изменённые и нет, ключи «Pro» — изменённые не
+/// раньше `since` (`None` — все). Запись ИП, которая не читается, — отказ:
+/// база этого ИП молча выпала бы из кода, как из копии всех ИП.
+pub fn pick_office<'a>(raw: impl IntoIterator<Item = Raw<'a>>, since: Option<Timestamp>) -> Result<Picked, FormatError> {
+    let mut picked = Picked {
+        entries: Vec::new(),
+        skipped: 0,
+        unreadable: 0,
+    };
+    for item in raw {
+        match backup::read_stored(OFFICE_KINDS, item) {
+            Ok(entry) => {
+                if entry.kind() == Ip::KIND || since.is_none_or(|since| entry.meta().modified() >= since) {
+                    picked.entries.push(entry);
+                }
+            }
+            Err(FormatError::Newer { found }) => return Err(FormatError::Newer { found }),
+            Err(FormatError::Damaged(why)) if item.kind == Ip::KIND => return Err(FormatError::Damaged(why)),
+            Err(FormatError::Damaged(_)) => picked.unreadable += 1,
+        }
+    }
+    Ok(picked)
+}
+
 /// Шапка кода: кто, когда и с какого момента.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Header {
@@ -364,6 +419,9 @@ struct PlainOut<'a> {
 #[derive(Serialize)]
 struct RecordOut<'a> {
     kind: &'static str,
+    /// Чья база — у кода всех ИП (`Entry::base`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    base: Option<RecordId>,
     record: &'a RawValue,
 }
 
@@ -384,6 +442,9 @@ struct PlainIn<'a> {
 #[serde(deny_unknown_fields)]
 struct RecordIn<'a> {
     kind: String,
+    /// С конверта 2 (0.0.173); у прежних — нет.
+    #[serde(default)]
+    base: Option<RecordId>,
     #[serde(borrow)]
     record: &'a RawValue,
 }
@@ -423,6 +484,7 @@ where
             .iter()
             .map(|entry| RecordOut {
                 kind: entry.kind(),
+                base: entry.base(),
                 record: entry.raw(),
             })
             .collect(),
@@ -578,8 +640,9 @@ impl Code {
 
 /// Записи расшифрованного кода. `opened` — то, что дала расшифровка: сжатый
 /// текст. Всё или ничего, как у копии: одна испорченная запись, незнакомый
-/// вид, запись конторы или две записи с одним идентификатором — и не
-/// читается весь код.
+/// вид, запись не на своём месте (запись конторы в коде одного ИП, метка без
+/// своего ИП — `backup::whole`) или две записи с одним идентификатором
+/// в одной базе — и не читается весь код.
 pub fn read(sealed: &Sealed, opened: &[u8]) -> Result<Code, CodeError> {
     at_once(read_sliced(sealed, opened, &mut no_pause))
 }
@@ -604,12 +667,17 @@ where
     let mut meter = Meter::new(pause);
     for item in fields.records {
         meter.add(item.record.get().len().max(backup::RECORD_WEIGHT)).await;
-        let entry = backup::entry_of(KINDS, &item.kind, fields.format_version, item.record)?;
-        if !seen.insert((entry.kind(), entry.meta().id())) {
+        let entry = backup::entry_of(FILE_KINDS, &item.kind, fields.format_version, item.record)?;
+        let entry = match item.base {
+            Some(base) => entry.in_base(base),
+            None => entry,
+        };
+        if !seen.insert((entry.base(), entry.kind(), entry.meta().id())) {
             return Err(damaged(format!("запись {} {} в коде дважды", entry.kind(), entry.meta().id())));
         }
         entries.push(entry);
     }
+    backup::whole(&entries)?;
     Ok(Code {
         header: Header {
             app_version: fields.app_version,

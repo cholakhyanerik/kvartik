@@ -1077,7 +1077,7 @@ where
 /// ([`OFFICE_KINDS`]: ИП списка и ключи «Pro») без метки и все остальные
 /// с меткой своего ИП из этой же копии. Иначе — порча: запись без своего ИП
 /// некуда положить, а запись конторы в базе ИП — чужая.
-fn whole(entries: &[Entry]) -> Result<(), BackupError> {
+pub(super) fn whole(entries: &[Entry]) -> Result<(), BackupError> {
     let ips: BTreeSet<RecordId> = entries
         .iter()
         .filter(|entry| entry.kind == Ip::KIND)

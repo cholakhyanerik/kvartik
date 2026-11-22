@@ -7,7 +7,8 @@
 //! `store::backup::restore` — одной транзакцией, со сверкой ИП.
 
 use kvartik_core::format::backup::{IV_BYTES, Lock};
-use kvartik_core::format::sync::{self, Code, CodeError, Header, Sealed, TooLarge};
+use kvartik_core::format::office as route;
+use kvartik_core::format::sync::{self, Code, CodeError, Header, Picked, Sealed, TooLarge};
 
 use super::backup::{Failure, newer};
 use super::{Dumped, Store};
@@ -63,6 +64,38 @@ pub async fn make(store: &Store, sealing: &Sealing<'_>) -> Result<Made, Unmade> 
     let picked = sync::pick_sliced(dumped.iter().map(Dumped::raw), sealing.header.since(), &mut breathe)
         .await
         .map_err(newer)?;
+    seal(picked, sealing).await
+}
+
+/// Собрать код всех ИП (задача 116): записи конторы и изменения базы каждого
+/// ИП списка — и убранного, как у копии всех ИП, — с меткой своего ИП. База
+/// открытого ИП (`open_name`) читается его соединением, остальные
+/// открываются по одной; каждая — своей транзакцией. ИП, добавленный после
+/// начала кода, — всеми записями (шапка `format::sync`, «Код конторы»).
+pub async fn make_all(open: &Store, open_name: &str, office_store: &Store, sealing: &Sealing<'_>) -> Result<Made, Unmade> {
+    let since = sealing.header.since();
+    let dumped = office_store.read().map_err(Failure::from)?.dump().await.map_err(Failure::from)?;
+    let mut picked = sync::pick_office(dumped.iter().map(Dumped::raw), since).map_err(newer)?;
+    for ip in route::ips(picked.entries()).map_err(newer)? {
+        let new = since.is_some_and(|since| ip.added_at().is_some_and(|at| at >= since));
+        let other;
+        let store = if ip.base() == open_name {
+            open
+        } else {
+            other = Store::open_base(ip.base(), |_| {}).await.map_err(Failure::from)?;
+            &other
+        };
+        let dumped = store.read().map_err(Failure::from)?.dump().await.map_err(Failure::from)?;
+        let base = sync::pick_sliced(dumped.iter().map(Dumped::raw), if new { None } else { since }, &mut breathe)
+            .await
+            .map_err(newer)?;
+        picked.absorb(base.in_base(ip.id()));
+    }
+    seal(picked, sealing).await
+}
+
+/// Сжать, зашифровать и запечатать записи кода.
+async fn seal(picked: Picked, sealing: &Sealing<'_>) -> Result<Made, Unmade> {
     let packed = sync::pack_sliced(sealing.header, picked.entries(), &mut breathe)
         .await
         .map_err(Unmade::TooLarge)?;

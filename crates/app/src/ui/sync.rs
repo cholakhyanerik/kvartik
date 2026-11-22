@@ -18,6 +18,11 @@
 //! нажал «Готово» — круг стоит. Камера горит, только пока сканер на экране:
 //! уход с экрана её выключает.
 //!
+//! У кого ИП несколько, код бывает и всех ИП (задача 116, «Код конторы»
+//! в `format::sync`): ложится он маршрутом копии всех ИП
+//! (`store::backup::restore_all`), а своё о передаче помнит под именем базы
+//! конторы (`store::office::OFFICE_DB`), как код одного ИП — под именем базы.
+//!
 //! Принявшее устройство показывает в ответ квитанцию (задача 116,
 //! `sync::Receipt`) — одним QR-кодом и текстом, под ключом кода, — а
 //! отправитель снимает её под своими QR-кодами, пока ключ ещё в руках: так он
@@ -55,8 +60,8 @@ use crate::platform::crypto::{self, CryptoError};
 use crate::platform::{clipboard, clock};
 use crate::store::backup::{self as stored, Merged, OtherIe, Restored};
 use crate::store::device::Device;
-use crate::store::office::list as office_list;
-use crate::store::StoreError;
+use crate::store::office::{OFFICE_DB, list as office_list};
+use crate::store::{Store, StoreError};
 use crate::store::sync::{self as stored_sync, Sealing, Unmade, Unread};
 
 /// Что нужно экрану из окна: через границу части — одним значением.
@@ -144,6 +149,8 @@ enum Say {
     /// Код другого ИП: оба — ИП программы (`None` — профиль не читается)
     /// и ИП кода.
     OtherIe(Box<(Option<Owner>, Owner)>),
+    /// Код всех ИП «с дня» с ИП, которого здесь нет: его имя.
+    MissingIp(String),
 }
 
 impl Say {
@@ -163,6 +170,7 @@ impl Say {
                 &[&day.map(|day| i18n::date(lang, day)).unwrap_or_default()],
             ),
             Self::Elsewhere(name) => fill(t(lang, Key::SyncElsewhere), &[name]),
+            Self::MissingIp(name) => fill(t(lang, Key::SyncMissingIp), &[name]),
             Self::OtherIe(both) => {
                 let (ours, theirs) = &**both;
                 let ours = ours
@@ -246,7 +254,8 @@ fn qr_path(code: &qr::Code) -> String {
     path
 }
 
-/// День по умолчанию для поля «Изменения с этого дня» (`sync::default_day`).
+/// День по умолчанию для поля «Изменения с этого дня» (`sync::default_day`):
+/// `base` — база ИП, а у кода всех ИП — база конторы.
 fn default_day(base: &str) -> Option<Date> {
     let device = Device::new();
     let today = clock::today()?;
@@ -268,9 +277,21 @@ fn Send(ctx: Ctx) -> impl IntoView {
         router,
         ..
     } = ctx;
-    let first = default_day(&office.open_name());
+    // ИП несколько — по умолчанию код всех: бухгалтер ведёт их на двух
+    // устройствах разом (задача 116).
+    let several = Device::new().office();
+    let everyone = RwSignal::new(several);
+    let key_of = move |everyone: bool| if everyone { OFFICE_DB.to_owned() } else { office.open_name() };
+    let first = default_day(&key_of(several));
     let all = RwSignal::new(first.is_none());
     let day = RwSignal::new(first.or_else(clock::today).map(Date::iso).unwrap_or_default());
+    // Сменили, чьи изменения, — день по умолчанию того кода.
+    let whose = move |chosen: bool| {
+        everyone.set(chosen);
+        let next = default_day(&key_of(chosen));
+        all.set(next.is_none());
+        day.set(next.or_else(clock::today).map(Date::iso).unwrap_or_default());
+    };
     let password = RwSignal::new(String::new());
     let repeat = RwSignal::new(String::new());
     let sending = RwSignal::new_local(Sending::Idle);
@@ -306,7 +327,7 @@ fn Send(ctx: Ctx) -> impl IntoView {
         let (typed, again) = (password.get_untracked(), repeat.get_untracked());
         sending.set(Sending::Busy);
         leptos::task::spawn_local(async move {
-            let outcome = make(ctx, &typed, fresh.then_some(again.as_str()), since).await;
+            let outcome = make(ctx, &typed, fresh.then_some(again.as_str()), since, everyone.get_untracked()).await;
             if outcome.is_ok() {
                 password.set(String::new());
                 repeat.set(String::new());
@@ -320,6 +341,19 @@ fn Send(ctx: Ctx) -> impl IntoView {
 
     view! {
         <form class="sync" hidden=move || matches!(sending.get(), Sending::Ready(_)) on:submit=submit>
+            {several.then(|| view! {
+                <fieldset class="group">
+                    <legend>{tr(lang, Key::SyncWhose)}</legend>
+                    <label class="choice">
+                        <input type="radio" name="sync-whose" prop:checked=move || everyone.get() on:change=move |_| whose(true) />
+                        {tr(lang, Key::SyncWhoseAll)}
+                    </label>
+                    <label class="choice">
+                        <input type="radio" name="sync-whose" prop:checked=move || !everyone.get() on:change=move |_| whose(false) />
+                        {tr(lang, Key::SyncWhoseOpen)}
+                    </label>
+                </fieldset>
+            })}
             <fieldset class="group">
                 <legend>{tr(lang, Key::SyncWhat)}</legend>
                 <label class="choice">
@@ -380,7 +414,7 @@ fn Send(ctx: Ctx) -> impl IntoView {
                     all.set(false);
                 }) close=move || {
                     sending.set(Sending::Idle);
-                    if let Some(next) = default_day(&office.open_name()) {
+                    if let Some(next) = default_day(&key_of(everyone.get_untracked())) {
                         day.set(next.iso());
                         all.set(false);
                     }
@@ -391,11 +425,19 @@ fn Send(ctx: Ctx) -> impl IntoView {
 }
 
 /// Собрать код: пароль копий — сверить с устройством или задать, записи
-/// с дня `since` — в код, код — в QR-коды и куски текста.
-async fn make(ctx: Ctx, typed: &str, repeat: Option<&str>, since: Option<Date>) -> Result<Shown, Say> {
+/// с дня `since` — в код (`everyone` — всех ИП), код — в QR-коды и куски
+/// текста.
+async fn make(ctx: Ctx, typed: &str, repeat: Option<&str>, since: Option<Date>, everyone: bool) -> Result<Shown, Say> {
     let (key, device_key, fresh) = key_for(ctx.backups, typed, repeat).await?;
     let store = ctx.base.get().ok_or(Say::Key(Key::BackupFailed))?;
-    let base = ctx.office.open_name();
+    // Контору не открыть — отказ, а не код одного открытого ИП молча: человек
+    // считал бы, что в нём все.
+    let office = if everyone {
+        Some(ctx.office.full().await.map_err(|error| Say::from(Problem::from(stored::Failure::from(error))))?.ok_or(Say::Key(Key::BackupFailed))?)
+    } else {
+        None
+    };
+    let base = if office.is_some() { OFFICE_DB.to_owned() } else { ctx.office.open_name() };
     let device = Device::new();
     let now = clock::now();
     let header = sync::Header::new(env!("CARGO_PKG_VERSION"), now, device.sync_id(), since.map(sync::since_day));
@@ -405,7 +447,11 @@ async fn make(ctx: Ctx, typed: &str, repeat: Option<&str>, since: Option<Date>) 
         salt: device_key.salt(),
         iterations: device_key.iterations(),
     };
-    let made = match stored_sync::make(&store, &sealing).await {
+    let made = match &office {
+        Some((office_store, open_name)) => stored_sync::make_all(&store, open_name, office_store, &sealing).await,
+        None => stored_sync::make(&store, &sealing).await,
+    };
+    let made = match made {
         Ok(made) => made,
         Err(Unmade::Failure(failure)) => return Err(Problem::from(failure).into()),
         Err(Unmade::TooLarge(large)) => return Err(Say::TooLarge(large.bytes)),
@@ -1036,6 +1082,68 @@ async fn accept(ctx: Ctx, sealed: &Sealed, typed: &str) -> Result<Accepted, Say>
     }
     let store = ctx.base.get().ok_or(Say::Key(Key::BackupFailed))?;
     let since = header.since().and_then(sync::day_of_since);
+    // Часы отправителя впереди — и тогда, когда записи кода старые: момент
+    // самого кода позже «сейчас» (Правило 6).
+    let now = clock::now();
+    let ahead = backup::ahead(code.entries(), now)
+        || header.created().unix_millis() > now.unix_millis().saturating_add(backup::CLOCK_SLACK_MILLIS);
+    let had_office = device.office();
+    let (landed, fresh, base) = if backup::is_full(code.entries()) {
+        land_all(ctx, &store, code.into_entries(), header.since()).await?
+    } else {
+        land_one(ctx, &store, code.into_entries(), header.since(), since).await?
+    };
+    let mut received = device.sync_received(&base);
+    let got = received.until(header.device());
+    let continuity = sync::continuity(header.since(), got);
+    // Ряд цел — запомнить, до какого момента его часов от него принято;
+    // с дырой — нет: следующий код с того же дня скажет о ней снова, пока
+    // её не закроют.
+    // Момент — не позже «сейчас» этого устройства: часы отправителя, убежавшие
+    // вперёд, иначе сделали бы целым любой его следующий код, пока настоящее
+    // время их не догонит (ревью задачи 110).
+    if !matches!(continuity, Continuity::Gap { .. }) {
+        received.note(header.device(), header.created().min(now));
+        device.set_sync_received(&base, &received);
+    }
+    // Своего пароля у устройства нет — берётся пароль кода: человек только что
+    // показал, что знает его, а коды отсюда пойдут под ним же туда. Только
+    // у устройства, которое не было конторой, как у копии: у конторы пароль
+    // клиента открыл бы её копию всех ИП (ревью задачи 110).
+    // И только с полным числом итераций: код с одной итерацией иначе оставил
+    // бы устройству слабую проверку пароля (ревью задачи 110).
+    let lock = sealed.lock();
+    if device.backup_key().is_none()
+        && !had_office
+        && lock.iterations() >= KDF_ITERATIONS
+        && let Some(opened_with) = DeviceKey::new(lock.iterations(), lock.salt().to_vec(), key.check().to_vec())
+    {
+        ctx.backups.password_set(&opened_with);
+        ctx.backups.password_entered();
+    }
+    let receipt = receipt(&key, &header, continuity).await;
+    Ok(Accepted {
+        restored: landed,
+        continuity,
+        since,
+        got: got.and_then(sync::day_covering),
+        ahead,
+        // Выпуск уже выключен — спрашивать не о чем.
+        fresh: fresh && !super::settings::issue_elsewhere_untracked(store.name()),
+        receipt,
+    })
+}
+
+/// Код одного ИП — в открытую базу, как копия одного ИП: что легло, была ли
+/// база пуста и под каким именем помнить принятое (имя открытой базы).
+async fn land_one(
+    ctx: Ctx,
+    store: &Store,
+    entries: Vec<backup::Entry>,
+    from: Option<kvartik_core::model::record::Timestamp>,
+    since: Option<Date>,
+) -> Result<(Restored, bool, String), Say> {
+    let device = Device::new();
     let failure = |error| Say::from(Problem::from(stored::Failure::from(error)));
     let tx = store.read().map_err(failure)?;
     let fresh = tx.is_empty().await.map_err(failure)?;
@@ -1044,9 +1152,8 @@ async fn accept(ctx: Ctx, sealed: &Sealed, typed: &str) -> Result<Accepted, Say>
     // профиль, заведённый здесь своим, — и остальное сюда не придёт никогда,
     // а ряд выглядел бы целым (ревью задачи 110). Профиль не читается —
     // сверять не с чем, и решает слияние, как у копии.
-    if header.since().is_some() {
-        let theirs: Vec<_> = code
-            .entries()
+    if from.is_some() {
+        let theirs: Vec<_> = entries
             .iter()
             .filter(|entry| entry.kind() == Profile::KIND)
             .map(|entry| entry.meta().id())
@@ -1070,7 +1177,7 @@ async fn accept(ctx: Ctx, sealed: &Sealed, typed: &str) -> Result<Accepted, Say>
             .await
             .map_err(|error| Say::from(Problem::from(stored::Failure::from(error))))?
             .records;
-        let found = office_route::listed(code.entries(), &listed).map_err(|error| Say::from(Problem::from(stored::newer(error))))?;
+        let found = office_route::listed(&entries, &listed).map_err(|error| Say::from(Problem::from(stored::newer(error))))?;
         if let Some(ip) = found
             && ip.base() != base
         {
@@ -1081,15 +1188,7 @@ async fn accept(ctx: Ctx, sealed: &Sealed, typed: &str) -> Result<Accepted, Say>
             return Err(Say::Elsewhere(name));
         }
     }
-    let mut received = device.sync_received(&base);
-    let got = received.until(header.device());
-    let continuity = sync::continuity(header.since(), got);
-    // Часы отправителя впереди — и тогда, когда записи кода старые: момент
-    // самого кода позже «сейчас» (Правило 6).
-    let now = clock::now();
-    let ahead = backup::ahead(code.entries(), now)
-        || header.created().unix_millis() > now.unix_millis().saturating_add(backup::CLOCK_SLACK_MILLIS);
-    let restored = match stored::restore(&store, KINDS, code.entries(), OtherIe::Ask).await {
+    let restored = match stored::restore(store, KINDS, &entries, OtherIe::Ask).await {
         Ok(Merged::Done(restored)) => restored,
         Ok(Merged::Other { ours, theirs }) => return Err(Say::OtherIe(Box::new((ours, theirs)))),
         Err(failure) => return Err(Problem::from(failure).into()),
@@ -1098,45 +1197,60 @@ async fn accept(ctx: Ctx, sealed: &Sealed, typed: &str) -> Result<Accepted, Say>
         ctx.base.replaced();
     }
     super::backup::arrived(&base, restored.oldest);
-    if !code.entries().is_empty() {
+    if !entries.is_empty() {
         ctx.backups.data_saved();
     }
-    // Ряд цел — запомнить, до какого момента его часов от него принято;
-    // с дырой — нет: следующий код с того же дня скажет о ней снова, пока
-    // её не закроют.
-    // Момент — не позже «сейчас» этого устройства: часы отправителя, убежавшие
-    // вперёд, иначе сделали бы целым любой его следующий код, пока настоящее
-    // время их не догонит (ревью задачи 110).
-    if !matches!(continuity, Continuity::Gap { .. }) {
-        received.note(header.device(), header.created().min(now));
-        device.set_sync_received(&base, &received);
+    Ok((restored, fresh, base))
+}
+
+/// Код всех ИП (задача 116) — маршрутом копии всех ИП: по ИП в базы этого
+/// устройства, списка не было — он заводится (`store::backup::restore_all`).
+/// Код «с дня» (`from`) с ИП, которого здесь нет и который не новый, не пишет
+/// ничего: изменения такого ИП легли бы новым ИП без остального его
+/// (`format::office::missing`). Принятое помнится под именем базы конторы.
+async fn land_all(
+    ctx: Ctx,
+    store: &Store,
+    entries: Vec<backup::Entry>,
+    from: Option<kvartik_core::model::record::Timestamp>,
+) -> Result<(Restored, bool, String), Say> {
+    let failure = |error: stored::Failure| Say::from(Problem::from(error));
+    let office_store = ctx.office.store().await.map_err(|error| failure(error.into()))?;
+    let open_name = ctx.office.open_name();
+    let (first, spare) = super::backup::unlisted(&office_store, store, &open_name).await.map_err(failure)?;
+    if let Some(from) = from {
+        let mut local = office_list(&office_store).await.map_err(|error| failure(error.into()))?.records;
+        local.extend(first.clone());
+        if let Some(ip) = office_route::missing(&entries, &local, from).map_err(|error| failure(stored::newer(error)))? {
+            let lang = ctx.lang.get_untracked();
+            let name = match ip.name(lang) {
+                "" => t(lang, Key::OfficeNameless).to_owned(),
+                name => name.to_owned(),
+            };
+            return Err(Say::MissingIp(name));
+        }
     }
-    // Своего пароля у устройства нет — берётся пароль кода: человек только что
-    // показал, что знает его, а коды отсюда пойдут под ним же туда. Только
-    // у устройства с одним ИП, как у копии: у конторы пароль клиента открыл бы
-    // её копию всех ИП (ревью задачи 110).
-    // И только с полным числом итераций: код с одной итерацией иначе оставил
-    // бы устройству слабую проверку пароля (ревью задачи 110).
-    let lock = sealed.lock();
-    if device.backup_key().is_none()
-        && !device.office()
-        && lock.iterations() >= KDF_ITERATIONS
-        && let Some(opened_with) = DeviceKey::new(lock.iterations(), lock.salt().to_vec(), key.check().to_vec())
-    {
-        ctx.backups.password_set(&opened_with);
-        ctx.backups.password_entered();
+    let done = stored::restore_all(store, &open_name, &office_store, entries, first, spare.as_deref())
+        .await
+        .map_err(failure)?;
+    for (base, oldest) in &done.landed {
+        super::backup::arrived(base, Some(*oldest));
     }
-    let receipt = receipt(&key, &header, continuity).await;
-    Ok(Accepted {
-        restored,
-        continuity,
-        since,
-        got: got.and_then(sync::day_covering),
-        ahead,
-        // Выпуск уже выключен — спрашивать не о чем.
-        fresh: fresh && !super::settings::issue_elsewhere_untracked(store.name()),
-        receipt,
-    })
+    // Список уже записан — и тогда, когда база не легла: перечитать его
+    // и тронутое (как у копии всех ИП).
+    ctx.office.several_now();
+    ctx.office.refresh(&office_store).await;
+    if done.open_touched {
+        ctx.base.replaced();
+        ctx.backups.data_saved();
+    }
+    if let Some(failed) = done.failed {
+        return Err(Say::Backup(match Problem::from(failed) {
+            Problem::Say(why) => Problem::Partly(why),
+            _ => Problem::Partly(Key::BackupFailed),
+        }));
+    }
+    Ok((done.restored, spare.is_some(), OFFICE_DB.to_owned()))
 }
 
 /// Что нужно сканеру: язык, куда отдавать прочитанное и как остановиться.
