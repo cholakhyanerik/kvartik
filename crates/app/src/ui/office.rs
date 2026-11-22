@@ -429,11 +429,12 @@ impl Office {
         else {
             return;
         };
+        let before = ip.clone();
         if !ip.copy_profile(&profile, clock::now()) {
             return;
         }
         let mut writes = Writes::default();
-        writes.update(&ip);
+        writes.update(&before, &ip);
         if office_store::write(&store, writes).await.is_ok() {
             self.ips.update(|ips| {
                 if let Some(listed) = ips.iter_mut().find(|listed| listed.id() == ip.id()) {
@@ -506,9 +507,10 @@ impl Office {
         let tx = store.write()?;
         let ips = tx.list::<Ip>().await?.records;
         if let Some(mut ip) = ips.into_iter().find(|ip| ip.id() == id) {
+            let before = ip.clone();
             change(&mut ip, clock::now());
             let mut writes = Writes::default();
-            writes.update(&ip);
+            writes.update(&before, &ip);
             tx.commit(writes).await?;
         }
         self.read(&store).await

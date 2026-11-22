@@ -209,7 +209,7 @@ pub struct Restored {
 
 /// Самый ранний момент изменения записей, которые слияние запишет.
 fn oldest(merge: &Merge<'_>) -> Option<Timestamp> {
-    merge.writes().iter().map(|entry| entry.meta().modified()).min()
+    merge.writes().map(|entry| entry.meta().modified()).min()
 }
 
 /// Копия другого ИП ([`backup::relation`]): спросить человека или сливать.
@@ -347,7 +347,7 @@ pub async fn restore_all(
         writes.insert(first);
     }
     for ip in &route.office {
-        writes.update(ip);
+        writes.put(ip);
     }
     for entry in keys.writes() {
         writes.restore(entry);

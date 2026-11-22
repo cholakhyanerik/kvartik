@@ -591,7 +591,7 @@ async fn change(store: &Store, id: RecordId, action: Action) -> Result<Option<Cl
         return Ok(None);
     };
     let mut writes = Writes::default();
-    writes.update(&changed);
+    writes.update(&client, &changed);
     tx.commit(writes).await?;
     Ok(Some(changed))
 }
@@ -1079,7 +1079,7 @@ async fn save(store: &Store, id: Option<RecordId>, data: ClientData) -> Result<C
             let existing = tx.get::<Client>(id).await?.ok_or(StoreError::Failed)?;
             match existing.edit(data, now) {
                 Ok(Some(client)) => {
-                    writes.update(&client);
+                    writes.update(&existing, &client);
                     client
                 }
                 // Данные не изменились: записывать нечего.

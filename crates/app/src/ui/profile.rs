@@ -202,7 +202,7 @@ impl Profiles {
         let mut writes = Writes::default();
         let profile = match Profile::save(Some(existing.clone()), data, clock::now()) {
             Ok(Some(profile)) => {
-                writes.update(&profile);
+                writes.update(&existing, &profile);
                 profile
             }
             Ok(None) => existing,
@@ -1219,15 +1219,13 @@ async fn save(store: &Store, data: ProfileData, choice: &LogoChoice) -> Result<P
     let tx = store.write()?;
     let existing = Profile::current(tx.all::<Profile>().await?);
     let now = clock::now();
-    let is_new = existing.is_none();
     let unchanged = existing.clone();
     let mut writes = Writes::default();
     let profile = match Profile::save(existing, data, now) {
         Ok(Some(profile)) => {
-            if is_new {
-                writes.insert(&profile);
-            } else {
-                writes.update(&profile);
+            match &unchanged {
+                None => writes.insert(&profile),
+                Some(before) => writes.update(before, &profile),
             }
             profile
         }
@@ -1253,7 +1251,7 @@ async fn save(store: &Store, data: ProfileData, choice: &LogoChoice) -> Result<P
     // правка: нового идентификатора, который мог бы совпасть с чужим, у неё
     // не бывает.
     if let Some(logo) = &logo {
-        writes.update(logo);
+        writes.put(logo);
     }
     tx.commit(writes).await?;
     Ok(profile)

@@ -693,7 +693,7 @@ async fn apply(store: &Store, id: RecordId, command: Command) -> Result<Option<C
         return Ok(None);
     };
     let mut writes = Writes::default();
-    writes.update(&changed);
+    writes.update(closing, &changed);
     tx.commit(writes).await?;
     Ok(Some(changed))
 }

@@ -293,7 +293,12 @@ async fn create_due(
             .iter()
             .any(|client| client.id() == source.data().client && !client.is_deleted());
         if let Some((recurring, new)) = recurring.generate(source, client_alive, today, now) {
-            writes.update(&recurring);
+            // Без моментов полей, как есть: этот код — в главном wasm, а разбор
+            // моментов стоил бы первому заходу 4,6 КБ после brotli (замер задачи
+            // 116; Правило 1). Сдвигает повтор только устройство, которое
+            // выпускает (задача 41), — двух правок счётчика с двух устройств не
+            // бывает, и слияние такого повтора — прежнее, по записи целиком.
+            writes.put(&recurring);
             for draft in &new {
                 writes.insert(draft);
             }
@@ -1306,7 +1311,10 @@ async fn apply(store: &Store, id: RecordId, change: Change) -> Result<Option<(Do
         (Change::SetIncomeKind(kind), Some(basis)) => tx
             .get::<Document>(basis)
             .await?
-            .and_then(|invoice| invoice.set_income_kind(*kind, now).ok().flatten()),
+            .and_then(|invoice| {
+                let changed = invoice.set_income_kind(*kind, now).ok().flatten()?;
+                Some((invoice, changed))
+            }),
         _ => None,
     };
     let changed = match change {
@@ -1330,12 +1338,12 @@ async fn apply(store: &Store, id: RecordId, change: Change) -> Result<Option<(Do
         return Ok(None);
     };
     let mut writes = Writes::default();
-    writes.update(&changed);
-    if let Some(invoice) = &invoice {
-        writes.update(invoice);
+    writes.update(&document, &changed);
+    if let Some((before, invoice)) = &invoice {
+        writes.update(before, invoice);
     }
     tx.commit(writes).await?;
-    Ok(Some((changed, invoice)))
+    Ok(Some((changed, invoice.map(|(_, invoice)| invoice))))
 }
 
 /// С чего начинается форма.
@@ -2406,7 +2414,7 @@ pub(super) async fn save(
     };
     match &existing {
         None => writes.insert(&document),
-        Some(known) if *known != document => writes.update(&document),
+        Some(known) if *known != document => writes.update(known, &document),
         Some(_) => {}
     }
     tx.commit(writes).await?;
@@ -2452,10 +2460,10 @@ async fn issued_logo(
         Err(error) => return Err(error),
     };
     if let Some(kept) = IssuedLogo::keep(existing.as_ref(), logo.image(), now) {
-        if existing.is_none() && !damaged {
-            writes.insert(&kept);
-        } else {
-            writes.update(&kept);
+        match &existing {
+            None if !damaged => writes.insert(&kept),
+            Some(before) => writes.update(before, &kept),
+            None => writes.put(&kept),
         }
     }
     Ok(Some(Some(id)))
@@ -3722,7 +3730,7 @@ async fn start_repeat(
     if existing != Some(&recurring) {
         match existing {
             None => writes.insert(&recurring),
-            Some(_) => writes.update(&recurring),
+            Some(before) => writes.update(before, &recurring),
         }
     }
     for draft in &drafts {
@@ -3742,7 +3750,7 @@ async fn stop_repeat(store: &Store, id: RecordId) -> Result<Option<Recurring>, P
         return Ok(None);
     };
     let mut writes = Writes::default();
-    writes.update(&stopped);
+    writes.update(&recurring, &stopped);
     tx.commit(writes).await?;
     Ok(Some(stopped))
 }

@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use js_sys::Promise;
+use kvartik_core::format::fields::Moments;
 use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::model::record::{RecordMeta, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -201,6 +202,69 @@ async fn writes_and_reads_back() {
     probe.delete().await;
 }
 
+/// Правка ложится с моментами своих полей — против записи до неё
+/// (`format::fields::stamp`, задача 116): поле, ставшее другим, — моментом
+/// правки, прежние моменты остаются, а новая запись и запись поверх
+/// нечитаемой — как есть.
+#[wasm_bindgen_test]
+async fn an_edit_records_when_its_fields_changed() {
+    let probe = Probe::new();
+    let store = probe.open(DB_VERSION).await.expect("база открыта");
+    let first = note("первая");
+    let id = first.meta.id();
+    let key = key(Note::KIND, id);
+    let write = |record: Note| {
+        let store = &store;
+        async move {
+            let tx = store.write().expect("транзакция записи");
+            let before = tx.get::<Note>(record.meta.id()).await;
+            let mut writes = Writes::default();
+            match before {
+                Ok(Some(before)) => writes.update(&before, &record),
+                Ok(None) => writes.insert(&record),
+                Err(_) => writes.put(&record),
+            }
+            tx.commit(writes).await.expect("действие сохранено");
+        }
+    };
+    write(first.clone()).await;
+    assert_eq!(get_raw(&store, &key).await, Some(format::encode(&first)), "новая — как есть");
+
+    let renamed = Note {
+        meta: meta(id, 1_760_000_002_000, None),
+        text: "вторая".to_owned(),
+        ..first.clone()
+    };
+    write(renamed.clone()).await;
+    let stored = store.read().expect("чтение").get::<Note>(id).await.expect("читается").expect("есть");
+    let moments = Moments::of(&stored.meta).expect("моменты годятся");
+    assert_eq!(moments.since(), at(1_760_000_000_000));
+    assert_eq!(moments.changed("text"), at(1_760_000_002_000));
+    assert_eq!(moments.changed("sum"), at(1_760_000_000_000));
+
+    let repriced = Note {
+        meta: meta(id, 1_760_000_003_000, None),
+        sum: Money::new(200_000, Currency::Usd),
+        ..renamed
+    };
+    write(repriced.clone()).await;
+    let stored = store.read().expect("чтение").get::<Note>(id).await.expect("читается").expect("есть");
+    let moments = Moments::of(&stored.meta).expect("моменты годятся");
+    assert_eq!(moments.changed("text"), at(1_760_000_002_000), "прежний момент остался");
+    assert_eq!(moments.changed("sum"), at(1_760_000_003_000));
+
+    put_raw(&store, &key, "не JSON").await;
+    let over = Note {
+        meta: meta(id, 1_760_000_004_000, None),
+        ..first
+    };
+    write(over.clone()).await;
+    assert_eq!(get_raw(&store, &key).await, Some(format::encode(&over)), "поверх нечитаемой — как есть");
+
+    drop(store);
+    probe.delete().await;
+}
+
 /// Запись — до диска: транзакция действия открыта с `durability:
 /// "strict"`, а чтение — как решит браузер (шапка `store/mod.rs`).
 #[wasm_bindgen_test]
@@ -245,10 +309,11 @@ async fn failed_action_leaves_previous_state() {
         .expect("чтение прошло")
         .expect("запись есть");
     changed.text = "стало".to_owned();
+    let before = changed.clone();
     changed.meta = meta(first.meta.id(), 1_760_000_001_000, None);
     let second = note("лишняя");
     let mut writes = Writes::default();
-    writes.update(&changed);
+    writes.update(&before, &changed);
     writes.insert(&second);
     writes.insert(&first);
     assert_eq!(tx.commit(writes).await, Err(StoreError::Failed));
@@ -287,11 +352,12 @@ async fn waiting_on_something_else_writes_nothing() {
         .expect("чтение прошло")
         .expect("запись есть");
     sleep(10).await;
+    let before = changed.clone();
     changed.text = "стало".to_owned();
     let second = note("вторая");
     let mut writes = Writes::default();
     writes.insert(&second);
-    writes.update(&changed);
+    writes.update(&before, &changed);
     assert!(
         tx.commit(writes).await.is_err(),
         "запись после чужого ожидания прошла"
@@ -344,7 +410,7 @@ async fn newer_and_damaged_records_are_refused() {
         Err(StoreError::Newer)
     );
     let mut writes = Writes::default();
-    writes.update(&first);
+    writes.put(&first);
     assert_eq!(
         store
             .write()

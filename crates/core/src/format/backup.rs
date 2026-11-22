@@ -73,9 +73,10 @@
 //! после неё, а метка удаления переезжает вместе с записью (CLAUDE.md,
 //! «Записи не стираются»). На этом держится и второе устройство (задача 41):
 //! копия с одного, восстановленная на другом, и обратно — и у обоих все
-//! записи обоих. Из двух правок одной записи остаётся одна — позже по часам
-//! её устройства, а у документа выпущенная, а не черновик ([`issued_wins`]),
-//! — поэтому о часах, которые спешат, окно говорит
+//! записи обоих. Из двух правок одной записи каждое поле берётся с той
+//! стороны, где его правили позже по часам её устройства (`format::fields`,
+//! задача 116), а у документа — выпущенный целиком, а не черновик
+//! ([`issued_wins`]), — поэтому о часах, которые спешат, окно говорит
 //! ([`ahead`]), а номера документов выдаёт одно устройство
 //! (`model::document`).
 //!
@@ -84,6 +85,7 @@
 //! ответу ([`relation`], с 0.0.85): по идентификаторам записи двух ИП не
 //! совпадут, и слияние молча положило бы их рядом.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::pin::pin;
@@ -93,7 +95,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 use super::{
-    FIRST_VERSION, FORMAT_VERSION, FormatError, Stored, base64, decode_record, split_raw, wrap,
+    FIRST_VERSION, FORMAT_VERSION, FormatError, Stored, base64, decode_record, fields, split_raw, wrap,
 };
 use crate::i18n::Lang;
 use crate::license::{License, OfficeLicense};
@@ -258,6 +260,7 @@ pub const REMIND_AFTER_DAYS: i32 = 7;
 pub struct Kind {
     name: &'static str,
     check: fn(u32, &RawValue) -> Result<Checked, FormatError>,
+    canon: fn(&str) -> Result<Checked, FormatError>,
 }
 
 impl Kind {
@@ -266,6 +269,7 @@ impl Kind {
         Self {
             name: T::KIND,
             check: check::<T>,
+            canon: canon::<T>,
         }
     }
 
@@ -341,6 +345,7 @@ struct Checked {
 /// второй раз — у копии с файлами это была треть разбора (замер 0.0.28).
 fn check<T: Stored>(version: u32, record: &RawValue) -> Result<Checked, FormatError> {
     let parsed: T = decode_record(version, record.get())?;
+    moments_fit(parsed.meta())?;
     let json = if version == FORMAT_VERSION {
         record.to_owned()
     } else {
@@ -351,6 +356,32 @@ fn check<T: Stored>(version: u32, record: &RawValue) -> Result<Checked, FormatEr
     Ok(Checked {
         meta: parsed.meta().clone(),
         record: json,
+    })
+}
+
+/// Моменты правки полей записи годятся (`format::fields`): общие поля
+/// записи их не проверяют, а запись копии и кода — чужой ввод (Правило 13).
+fn moments_fit(meta: &RecordMeta) -> Result<(), FormatError> {
+    if fields::valid(meta) {
+        Ok(())
+    } else {
+        Err(FormatError::Damaged("моменты правки полей негодные".to_owned()))
+    }
+}
+
+/// Запись вида `T` текущей версии, собранная не программой, — слитая по
+/// полям (`format::fields`): разобрать — проверка, что такая запись бывает,
+/// а записать заново — тем же текстом, что дала бы команда: поля по порядку
+/// типа. Иначе одна запись на двух устройствах лежала бы разными строками,
+/// и слияние считало бы её изменённой.
+fn canon<T: Stored>(record: &str) -> Result<Checked, FormatError> {
+    let parsed: T = decode_record(FORMAT_VERSION, record)?;
+    moments_fit(parsed.meta())?;
+    Ok(Checked {
+        meta: parsed.meta().clone(),
+        record: serde_json::value::to_raw_value(&parsed).expect(
+            "запись в JSON не падает: в типах записей нет ни словарей с ключами-структурами, ни своих ошибок",
+        ),
     })
 }
 
@@ -1119,16 +1150,18 @@ where
 /// Что слияние копии с базой запишет.
 #[derive(Debug)]
 pub struct Merge<'a> {
-    writes: Vec<&'a Entry>,
+    /// Записи копии как есть — или слитые по полям с записями базы
+    /// (`format::fields`): таких копия не несёт, они новые.
+    writes: Vec<Cow<'a, Entry>>,
     added: usize,
     updated: usize,
     unchanged: usize,
 }
 
-impl<'a> Merge<'a> {
+impl Merge<'_> {
     /// Записи, которые лягут в базу.
-    pub fn writes(&self) -> &[&'a Entry] {
-        &self.writes
+    pub fn writes(&self) -> impl Iterator<Item = &Entry> {
+        self.writes.iter().map(|entry| &**entry)
     }
 
     /// Сколько записей копии в базе не было.
@@ -1150,8 +1183,12 @@ impl<'a> Merge<'a> {
 
 /// Слить записи копии с тем, что в базе.
 ///
-/// Из двух записей с одним видом и идентификатором остаётся изменённая
-/// позже (`RecordMeta::modified`); при равенстве — та, что в базе.
+/// Из двух записей с одним видом и идентификатором каждое поле берётся
+/// с той стороны, где его правили позже (`format::fields`, задача 116); при
+/// равенстве — у той, что в базе. У записей без моментов полей все поля
+/// правлены в момент изменения записи, и остаётся целиком изменённая позже
+/// (`RecordMeta::modified`), как до 0.0.171; так же — у файлов книги
+/// и логотипов (`fields::WHOLE`) и когда слитую запись её вид не читает.
 /// Выпущенный документ остаётся и против черновика, изменённого позже
 /// ([`issued_wins`]). Нечитаемую запись базы копия чинит: «восстановите из резервной копии» —
 /// ровно то, что окно советует при `StoreError::Damaged`. Запись базы новее
@@ -1182,7 +1219,7 @@ pub fn merge<'a, 'b>(
         let id = entry.meta.id().to_string();
         let Some(&raw) = existing.get(&(entry.kind, id.as_str())) else {
             merge.added += 1;
-            merge.writes.push(entry);
+            merge.writes.push(Cow::Borrowed(entry));
             continue;
         };
         // Слово в слово та же запись — без изменений, без разбора: разбор
@@ -1198,19 +1235,52 @@ pub fn merge<'a, 'b>(
             merge.unchanged += 1;
             continue;
         }
-        let newer = match read_stored(kinds, raw) {
-            Ok(stored) => issued_wins(entry, &stored).unwrap_or(entry.meta.modified() > stored.meta.modified()),
+        let chosen = match read_stored(kinds, raw) {
+            Ok(stored) => match issued_wins(entry, &stored) {
+                Some(true) => Some(Cow::Borrowed(entry)),
+                Some(false) => None,
+                None => by_fields(kinds, &stored, entry).unwrap_or_else(|| {
+                    (entry.meta.modified() > stored.meta.modified()).then_some(Cow::Borrowed(entry))
+                }),
+            },
             Err(FormatError::Newer { found }) => return Err(FormatError::Newer { found }),
-            Err(FormatError::Damaged(_)) => true,
+            Err(FormatError::Damaged(_)) => Some(Cow::Borrowed(entry)),
         };
-        if newer {
-            merge.updated += 1;
-            merge.writes.push(entry);
-        } else {
-            merge.unchanged += 1;
+        match chosen {
+            Some(write) => {
+                merge.updated += 1;
+                merge.writes.push(write);
+            }
+            None => merge.unchanged += 1,
         }
     }
     Ok(merge)
+}
+
+/// Запись копии `incoming`, слитая по полям с записью базы `stored`
+/// (`format::fields`): `Some(None)` — в базе уже то же, `Some(Some(…))` —
+/// что записать: запись копии как есть или слитую; `None` — по полям не
+/// слить, и решают моменты записей целиком (шапка `fields`, «Чего слияние по
+/// полям не делает»).
+fn by_fields<'a>(kinds: &[Kind], stored: &Entry, incoming: &'a Entry) -> Option<Option<Cow<'a, Entry>>> {
+    if fields::WHOLE.contains(&incoming.kind) {
+        return None;
+    }
+    let kind = find(kinds, incoming.kind)?;
+    let (_, text) = fields::merge(incoming.kind, stored.record(), &stored.meta, incoming.record(), &incoming.meta)?;
+    let merged = (kind.canon)(&text).ok()?;
+    Some(if merged.record.get() == stored.record() {
+        None
+    } else if merged.record.get() == incoming.record() {
+        Some(Cow::Borrowed(incoming))
+    } else {
+        Some(Cow::Owned(Entry {
+            kind: kind.name,
+            meta: merged.meta,
+            record: merged.record,
+            base: incoming.base,
+        }))
+    })
 }
 
 /// Выпущенный документ против того же документа черновиком (задача 41):
@@ -1220,8 +1290,11 @@ pub fn merge<'a, 'b>(
 /// правят или удаляют дальше, и его поздний момент вернул бы выпущенный счёт
 /// в черновики — без номера, копии реквизитов и дохода, а номер выдался бы
 /// снова (ревью задачи 41). Правки черновика после выпуска тогда пропадают:
-/// выпущенный не правится (Правило 2). Два выпуска одного черновика решают
-/// моменты: с выпуском на одном устройстве так не бывает (задача 110).
+/// выпущенный не правится (Правило 2). Два разных выпуска одного черновика —
+/// на двух устройствах, где выпуск не выключили, — решают моменты записи
+/// целиком (ревью 0.0.171): номер и реквизиты одного выпуска со строками
+/// другого были бы документом, которого никто не выпускал. Один и тот же
+/// выпуск с правками после него — по полям (`None`).
 fn issued_wins(incoming: &Entry, stored: &Entry) -> Option<bool> {
     if incoming.kind != Document::KIND {
         return None;
@@ -1229,12 +1302,13 @@ fn issued_wins(incoming: &Entry, stored: &Entry) -> Option<bool> {
     let issued = |entry: &Entry| {
         decode_record::<Document>(FORMAT_VERSION, entry.record.get())
             .ok()
-            .map(|document| document.issued().is_some())
+            .map(|document| document.issued().cloned())
     };
     match (issued(incoming)?, issued(stored)?) {
-        (true, false) => Some(true),
-        (false, true) => Some(false),
-        (true, true) | (false, false) => None,
+        (Some(_), None) => Some(true),
+        (None, Some(_)) => Some(false),
+        (Some(theirs), Some(ours)) if theirs != ours => Some(incoming.meta.modified() > stored.meta.modified()),
+        (Some(_), Some(_)) | (None, None) => None,
     }
 }
 
@@ -1249,7 +1323,6 @@ pub fn count_after<'b>(kind: &str, existing: impl IntoIterator<Item = Raw<'b>>, 
         .collect();
     let added = merge
         .writes()
-        .iter()
         .filter(|entry| entry.kind == kind && !ids.contains(entry.meta.id().to_string().as_str()))
         .count();
     ids.len() + added

@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.171",
+      "date": "2026-11-22",
+      "hy": [
+        "Երկու սարքում մեկ գրառման երկու ուղղումն այլևս չեն ջնջում իրար. հեռախոսում նշված վճարումը և համակարգչում դրված ՊԵԿ նշումը կոդով կամ պատճենով փոխանցելուց հետո կան երկուսում էլ — յուրաքանչյուր դաշտ վերցվում է այն սարքից, որտեղ այն ավելի ուշ է փոխվել։"
+      ],
+      "ru": [
+        "Две правки одной записи на двух устройствах больше не стирают друг друга: оплата, отмеченная на телефоне, и отметка ՊԵԿ, поставленная на компьютере, после передачи кодом или копией есть на обоих — каждое поле берётся с того устройства, где его правили позже."
+      ],
+      "en": [
+        "Two edits of one record on two devices no longer erase each other: a payment marked on the phone and an SRC mark set on the computer are both kept after a transfer code or a backup — each field comes from the device where it was changed last."
+      ]
+    },
+    {
       "version": "0.0.170",
       "date": "2026-11-22",
       "hy": [
@@ -260,19 +273,6 @@
       "en": [
         "The trial no longer starts over in another browser or on another device: with your consent, the Kvartik server remembers its first day for the TIN in the profile. Consent is asked once before issuing an invoice and can be withdrawn on the License screen.",
         "The license terms and the privacy policy are updated: editions of November 18, 2026."
-      ]
-    },
-    {
-      "version": "0.0.151",
-      "date": "2026-11-18",
-      "hy": [
-        "«Լիցենզիա» էկրանում առանց ՀՎՀՀ տրված «Pro» բանալու մոտ (նվեր՝ փորձի համար) գրված է «առանց ՀՎՀՀ»։"
-      ],
-      "ru": [
-        "На экране лицензии у ключа «Pro», выданного без ИНН (подарком на пробу), написано «без ИНН»."
-      ],
-      "en": [
-        "On the License screen, a “Pro” key issued without a TIN (a trial gift) now says “no TIN”."
       ]
     }
   ]

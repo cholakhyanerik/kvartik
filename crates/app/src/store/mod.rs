@@ -660,8 +660,28 @@ impl Writes {
         self.push(true, record);
     }
 
-    /// Правка записи, прочитанной в этой же транзакции.
-    pub fn update<T: Stored>(&mut self, record: &T) {
+    /// Правка записи `before`, прочитанной в этой же транзакции: `after` —
+    /// она же после команды. Ложится с моментами своих полей
+    /// (`format::fields::stamp`, задача 116): по ним слияние с другим
+    /// устройством берёт каждое поле с той стороны, где его правили позже.
+    /// Моменты ставит этот вызов, а не [`Tx::commit`]: он — в части wasm той
+    /// команды, а `commit` — в главном, и разбор моментов стоил бы первому
+    /// заходу 4,6 КБ после brotli (замер задачи 116; Правило 1).
+    pub fn update<T: Stored>(&mut self, before: &T, after: &T) {
+        let next = format::encode(after);
+        let stamped = format::fields::stamp(T::KIND, &format::encode(before), &next);
+        self.items.push(Item {
+            insert: false,
+            key: key(T::KIND, after.meta().id()),
+            value: JsValue::from_str(stamped.as_deref().unwrap_or(&next)),
+        });
+    }
+
+    /// Запись поверх той, что в базе, как есть — без моментов полей: её
+    /// решило слияние копии (`format::office::route`), она сливается только
+    /// целиком (логотип, `format::fields::WHOLE`) или прежней записи нет —
+    /// она не читается.
+    pub fn put<T: Stored>(&mut self, record: &T) {
         self.push(false, record);
     }
 

@@ -1464,7 +1464,7 @@ async fn put_logo(store: &Store, profile: &Profile, image: Option<Image>) {
     };
     let mut writes = Writes::default();
     if existing.is_some() {
-        writes.update(&logo);
+        writes.put(&logo);
     } else {
         writes.insert(&logo);
     }
@@ -2139,7 +2139,7 @@ async fn the_income_row_is_set_in_the_card_and_kept_by_the_act() {
     let later = clock::now();
     let issued = draft.issue(&documents, 0, Some(&profile()), Some(None), &client, later).expect("акт выпущен");
     let mut writes = Writes::default();
-    writes.update(&issued);
+    writes.update(draft, &issued);
     commit(writes).await;
     drop(mounted);
     host.remove();
@@ -2195,7 +2195,7 @@ async fn the_code_is_cleared_beside_an_income_row() {
         .issue(&[], 0, Some(&seller), Some(None), &client, now)
         .expect("выпущен");
     let mut writes = Writes::default();
-    writes.update(&saved_profile);
+    writes.put(&saved_profile);
     writes.insert(&invoice);
     commit(writes).await;
 

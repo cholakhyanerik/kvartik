@@ -287,9 +287,10 @@ async fn restore_keeps_the_later_record() {
     // После копии: одну запись поправили, одну добавили.
     let tx = store.write().expect("транзакция записи");
     let mut writes = Writes::default();
+    let before = changed_later.clone();
     changed_later.text = "правка после копии".to_owned();
     changed_later.meta = meta(changed_later.meta.id(), 1_760_000_009_000, None);
-    writes.update(&changed_later);
+    writes.update(&before, &changed_later);
     writes.insert(&local_only);
     tx.commit(writes).await.expect("правка сохранена");
 
@@ -314,9 +315,17 @@ async fn restore_keeps_the_later_record() {
 
     let tx = store.read().expect("транзакция чтения");
     assert_eq!(tx.get::<Note>(older.meta.id()).await, Ok(Some(older)));
+    // Правка после копии — с моментом своего поля (задача 116): копия, в
+    // которой текст правлен раньше, его не перебила.
+    let kept = tx
+        .get::<Note>(changed_later.meta.id())
+        .await
+        .expect("читается")
+        .expect("есть");
+    let moments = kvartik_core::format::fields::Moments::of(&kept.meta).expect("моменты годятся");
     assert_eq!(
-        tx.get::<Note>(changed_later.meta.id()).await,
-        Ok(Some(changed_later))
+        (kept.text.as_str(), kept.meta.modified(), moments.changed("text")),
+        (changed_later.text.as_str(), changed_later.meta.modified(), changed_later.meta.modified())
     );
     assert_eq!(
         tx.get::<Note>(local_only.meta.id()).await,
@@ -345,7 +354,7 @@ async fn restore_over_newer_records_writes_nothing() {
     let mut writes = Writes::default();
     let mut gone = fresh.clone();
     gone.meta = meta(fresh.meta.id(), 1_760_000_009_000, Some(1_760_000_009_000));
-    writes.update(&gone);
+    writes.update(&fresh, &gone);
     tx.commit(writes).await.expect("удаление сохранено");
     // «Удалённая» запись — под ключом свежей; копия её бы вернула. Рядом —
     // запись новой версии формата.

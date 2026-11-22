@@ -991,7 +991,7 @@ async fn apply(store: &Store, id: RecordId, change: Change) -> Result<Option<Ope
         return Ok(None);
     };
     let mut writes = Writes::default();
-    writes.update(&changed);
+    writes.update(&operation, &changed);
     tx.commit(writes).await?;
     Ok(Some(changed))
 }
@@ -2132,7 +2132,11 @@ async fn save(
         // Нечитаемое вложение убирать нечем: ссылка на него уходит из
         // записи, а сама запись остаётся в базе как была.
         match tx.get::<Attachment>(*file).await {
-            Ok(Some(found)) => removed.extend(found.remove(now)),
+            Ok(Some(found)) => {
+                if let Some(gone) = found.remove(now) {
+                    removed.push((found, gone));
+                }
+            }
             Ok(None) | Err(StoreError::Damaged) => {}
             Err(error) => return Err(error.into()),
         }
@@ -2141,16 +2145,16 @@ async fn save(
     for file in &saved.added {
         writes.insert(file);
     }
-    for file in &removed {
-        writes.update(file);
+    for (before, file) in &removed {
+        writes.update(before, file);
     }
     let operation = match (existing, saved.operation) {
         (None, Some(created)) => {
             writes.insert(&created);
             created
         }
-        (Some(_), Some(edited)) => {
-            writes.update(&edited);
+        (Some(before), Some(edited)) => {
+            writes.update(&before, &edited);
             edited
         }
         (Some(known), None) => known,

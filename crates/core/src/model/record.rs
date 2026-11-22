@@ -18,11 +18,33 @@
 //! В данных поля записываются так: `{"id":"…","modified":1760000000000,
 //! "deleted":null}`. Читаются — с проверкой каждого поля (Правило 13):
 //! момент — только в пределах дат JS, удаление — не позже последней правки.
+//!
+//! # Моменты полей (задача 116)
+//!
+//! Из двух правок одной записи на двух устройствах слияние брало целиком
+//! позднюю, и одна правка пропадала: оплата на телефоне и отметка ՊԵԿ на
+//! компьютере. Поэтому у записи с версии формата 26 есть и моменты правки
+//! её полей — `edits` ([`Edits`]): `since` — до какого момента правлены все
+//! поля, о которых ничего не записано, и `fields` — поля, правленные позже,
+//! с моментом последней правки каждого: `{"id":"…","modified":…,
+//! "deleted":null,"edits":{"since":1760000000000,"fields":{"payments":…}}}`.
+//! Ставит их не команда, а запись правки сравнением с записью до неё
+//! (`format::fields::stamp`): команда поле забыть могла бы, а сравнение —
+//! нет. Без них — у записей прежних версий и у новой записи до первой
+//! правки — все поля правлены в `modified`, и слияние такой записи —
+//! прежнее, целиком.
+//!
+//! Здесь моменты — нетронутым куском JSON: разбирают и проверяют их только
+//! правка и слияние (`format::fields`), а общие поля читает каждая запись
+//! главного wasm, и словарь моментов в каждой из них стоил первому заходу
+//! 3 КБ после brotli (замер задачи 116; CLAUDE.md, Правило 1).
 
 use std::fmt;
+use std::hash::{Hash, Hasher};
 
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use uuid::Uuid;
 
 /// Постоянный идентификатор записи — случайный UUID версии 4.
@@ -150,6 +172,42 @@ pub struct RecordMeta {
     id: RecordId,
     modified: Timestamp,
     deleted: Option<Timestamp>,
+    /// Моменты правки полей; `None` — все поля правлены в `modified`
+    /// (шапка модуля, «Моменты полей»).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    edits: Option<Edits>,
+}
+
+/// Моменты правки полей записи — нетронутым куском JSON (шапка модуля,
+/// «Моменты полей»): разбирает и проверяет их `format::fields`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Edits(Box<RawValue>);
+
+impl Edits {
+    /// Моменты из куска JSON — его пишет `format::fields`.
+    pub(crate) const fn new(raw: Box<RawValue>) -> Self {
+        Self(raw)
+    }
+
+    /// Текст JSON моментов.
+    pub fn get(&self) -> &str {
+        self.0.get()
+    }
+}
+
+impl PartialEq for Edits {
+    fn eq(&self, other: &Self) -> bool {
+        self.get() == other.get()
+    }
+}
+
+impl Eq for Edits {}
+
+impl Hash for Edits {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.get().hash(state);
+    }
 }
 
 /// Поля `RecordMeta`, как они лежат в данных, — до проверки.
@@ -159,18 +217,25 @@ struct RecordMetaFields {
     id: RecordId,
     modified: Timestamp,
     deleted: Option<Timestamp>,
+    /// С версии формата 26 (задача 116); у записей прежних — нет.
+    #[serde(default)]
+    edits: Option<Edits>,
 }
 
 /// Читается с проверкой, которую иначе держат методы: удаление — тоже
 /// правка, поэтому метка удаления не бывает позже момента изменения
 /// (`delete`). Запись, удалённая «в будущем», при слиянии копий (задача 41)
-/// спорила бы с правками, сделанными после её удаления.
+/// спорила бы с правками, сделанными после её удаления. Моменты полей
+/// проверяет тот, кто их разбирает (`format::fields`): чужая запись с
+/// негодными моментами — порча при чтении копии и кода, а запись базы
+/// с ними слияние считает записью без моментов.
 impl<'de> Deserialize<'de> for RecordMeta {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let RecordMetaFields {
             id,
             modified,
             deleted,
+            edits,
         } = RecordMetaFields::deserialize(deserializer)?;
         if deleted.is_some_and(|deleted| deleted > modified) {
             return Err(de::Error::custom(
@@ -181,6 +246,7 @@ impl<'de> Deserialize<'de> for RecordMeta {
             id,
             modified,
             deleted,
+            edits,
         })
     }
 }
@@ -201,6 +267,33 @@ impl RecordMeta {
             id,
             modified: now,
             deleted: None,
+            edits: None,
+        }
+    }
+
+    /// Моменты правки полей; `None` — все поля правлены в момент изменения.
+    pub const fn edits(&self) -> Option<&Edits> {
+        self.edits.as_ref()
+    }
+
+    /// Те же поля с моментами правки полей `edits` — их ставит только
+    /// `format::fields`: при записи правки и при слиянии.
+    pub(crate) fn with_edits(&self, edits: Option<Edits>) -> Self {
+        Self {
+            edits,
+            ..self.clone()
+        }
+    }
+
+    /// Поля той же записи с моментом изменения `modified` и меткой удаления
+    /// `deleted`, без моментов полей — для записи, слитой по полям
+    /// (`format::fields::merge`).
+    pub(crate) const fn merged(&self, modified: Timestamp, deleted: Option<Timestamp>) -> Self {
+        Self {
+            id: self.id,
+            modified,
+            deleted,
+            edits: None,
         }
     }
 
@@ -412,6 +505,11 @@ mod tests {
             r#"{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":1760000000500,"deleted":1760000000000}"#,
             r#"{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":8640000000000000,"deleted":8640000000000000}"#,
             r#"{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":-8640000000000000,"deleted":null}"#,
+            // Моменты полей (задача 116): правлены оплаты и курс в `data`.
+            concat!(
+                r#"{"id":"0f8c3a52-5b1e-4c7d-9a2b-6e4f1d3c2b1a","modified":1760000005000,"deleted":null,"#,
+                r#""edits":{"since":1760000000000,"fields":{"data.rate":1760000005000,"payments":1760000003000}}}"#
+            ),
         ];
         let mut wrong = Vec::new();
         for sample in samples {

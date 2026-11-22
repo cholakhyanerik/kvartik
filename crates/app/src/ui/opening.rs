@@ -52,17 +52,16 @@ async fn save(store: &Store, start: Quarter, carry: BTreeMap<IncomeKind, i64>) -
     let tx = store.write()?;
     let openings = tx.list::<Opening>().await?.records;
     let existing = Opening::current(&openings, start).cloned();
-    let new = existing.is_none();
+    let before = existing.clone();
     // Такого форма не пропускает: это сбой, а не ошибка человека.
     let saved = Opening::save(existing, start, carry, clock::now()).map_err(|_| StoreError::Failed)?;
     let Some(opening) = saved else {
         return Ok(None);
     };
     let mut writes = Writes::default();
-    if new {
-        writes.insert(&opening);
-    } else {
-        writes.update(&opening);
+    match &before {
+        None => writes.insert(&opening),
+        Some(before) => writes.update(before, &opening),
     }
     tx.commit(writes).await?;
     Ok(Some(opening))
