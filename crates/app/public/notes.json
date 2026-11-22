@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.169",
+      "date": "2026-11-22",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել. կայքի էջերն այժմ որոնողական համակարգերին և ԱԲ օգնականներին ասում են, թե ինչ ծրագիր է Kvartik-ը և որքան արժե բանալին, իսկ թարմացված էջերի մասին Bing-ը և Յանդեքսն իմանում են թողարկումից անմիջապես հետո։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось: страницы сайта теперь говорят поисковикам и ИИ-помощникам, что такое Kvartik и сколько стоит ключ, а об обновлённых страницах Bing и Яндекс узнают сразу после выпуска."
+      ],
+      "en": [
+        "Nothing changed in the app: the website pages now tell search engines and AI assistants what Kvartik is and what a key costs, and Bing and Yandex learn about updated pages right after each release."
+      ]
+    },
+    {
       "version": "0.0.168",
       "date": "2026-11-21",
       "hy": [
@@ -260,19 +273,6 @@
       ],
       "en": [
         "Nothing changed in the app: a check it goes through before each release was fixed."
-      ]
-    },
-    {
-      "version": "0.0.149",
-      "date": "2026-11-17",
-      "hy": [
-        "Ավելի վաղ եռամսյակում դուրս գրված հաշվարկային փաստաթղթի մասին զգուշացումն այլևս չի հայտնվում չեղարկված փաստաթղթի մոտ և նշում է բացառությունները. բաժանորդագրությունների, վարձակալության և կոմունալ ծառայությունների պահը սահմանված է առանձին։"
-      ],
-      "ru": [
-        "Предупреждение о расчётном документе, выписанном в квартале раньше услуги, больше не встаёт у аннулированного документа и называет исключения: у подписок, аренды и коммунальных услуг момент поставки свой."
-      ],
-      "en": [
-        "The warning about a settlement document issued in a quarter before the service no longer shows on a cancelled document, and it names the exceptions: subscriptions, rent and utilities have their own moment of supply."
       ]
     }
   ]

@@ -408,6 +408,17 @@ jobs:
           URL: ${{ steps.site_ai.outputs.url }}
         run: bash tools/deploy/check-ai.sh "$URL" dist-ai
 
+      # IndexNow (задача 118): какие страницы карты сайта живой сайт отдаёт
+      # не так, как эта сборка, — до выкладки всем, пока он прежний. Сказать
+      # о них поисковикам — после проверки своего домена (шаг «IndexNow»).
+      # Выкладку шаг не держит ни сбоем, ни временем: тогда «IndexNow» назовёт
+      # всю карту (шапка `tools/deploy/indexnow.mjs`).
+      - name: IndexNow — что изменилось
+        if: github.event_name == 'push'
+        timeout-minutes: 2
+        continue-on-error: true
+        run: node tools/deploy/indexnow.mjs changed dist "$SITE_URL" "$RUNNER_TEMP/indexnow.txt"
+
       - name: Выкладка всем
         id: site
         if: github.event_name == 'push'
@@ -439,3 +450,13 @@ jobs:
       - name: Проверка домена рамки
         if: github.event_name == 'push'
         run: bash tools/deploy/check-ai.sh https://ai.kvartik.com dist-ai
+
+      # Bing, Яндексу и другим поисковикам протокола — изменившиеся страницы
+      # (задача 118; новый адрес наружу — решение человека 2026-11-22): только
+      # адреса и ключ, который лежит на сайте. Поисковики — чужой сервис:
+      # отказ — в сводке задания, а не красная выкладка.
+      - name: IndexNow
+        if: github.event_name == 'push'
+        timeout-minutes: 2
+        continue-on-error: true
+        run: node tools/deploy/indexnow.mjs send dist "$RUNNER_TEMP/indexnow.txt"

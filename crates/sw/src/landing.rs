@@ -43,8 +43,17 @@
 //!
 //! Встроенных скриптов и стилей нет — CSP их не пускает (`_headers`): скрипт
 //! — файлом, а атрибутов `style` и `on…` в разметке нет, и это держит
-//! проверка ниже. Текст таблицы экранируется: в HTML он только текст
-//! (Правило 13).
+//! проверка ниже. Одно исключение (задача 118) — описание программы для
+//! поисковиков у страниц языков, `<script type="application/ld+json">`
+//! (`described`): это блок данных, браузер его не исполняет, и CSP его не
+//! касается — тип не JavaScript, и разбор элемента кончается раньше проверки
+//! CSP (HTML, «prepare the script element»). Что отказов CSP нет, сверяет
+//! проверка сайта в браузере (`tools/browser/check.mjs`, «лендинг»). Текст
+//! таблицы экранируется: в HTML он только текст (Правило 13).
+//!
+//! И файл ключа IndexNow в корне (задача 118, `INDEXNOW_KEY`): после выкладки
+//! всем CI называет им Bing и Яндексу изменившиеся страницы
+//! (`tools/deploy/indexnow.mjs`).
 //!
 //! Повторяемость: ни часов, ни случайности — та же таблица и те же правила
 //! дают те же байты, иначе пересборка без правок была бы у всех «новой
@@ -77,6 +86,16 @@ const TOKENS: &str = "tokens.css";
 const FONTS: &str = "fonts.css";
 /// Адрес шрифта в `fonts.css` — от папки CSS окна.
 const FONT_URL: &str = "url(\"fonts/";
+/// Ключ IndexNow (задача 118): файл `<ключ>.txt` в корне сайта с ним самим
+/// доказывает поисковикам, что изменившиеся страницы называет хозяин сайта
+/// (indexnow.org, «Documentation», вариант 1 — корень, сверено 2026-11-22).
+/// Ключ не секрет — он и так лежит на сайте; чужой с ним может только
+/// попросить перечитать наши же страницы. Тридцать два знака 0–9 и a–f:
+/// документация называет и «шестнадцатеричные», и «a–z, A–Z, 0–9, дефис», а
+/// такие годятся под оба прочтения. Сменить — новой выкладкой: поисковики
+/// сверяют файл при каждом запросе. CI берёт ключ из собранного файла, а не
+/// отсюда (`tools/deploy/indexnow.mjs`).
+const INDEXNOW_KEY: &str = "8638b8b11062681776b6f7d9a3f2f9b9";
 
 /// Что умеет программа — карточками, по порядку пути человека: документы,
 /// книга, налог, сроки, где лежат данные и на чём работает.
@@ -173,6 +192,7 @@ pub fn write(staging: &Path, site: &Path, style: &Path, legal: &Path, app: &str,
     }
     files.push(("robots.txt".to_owned(), robots()));
     files.push(("sitemap.xml".to_owned(), sitemap()));
+    files.push((format!("{INDEXNOW_KEY}.txt"), INDEXNOW_KEY.to_owned()));
     files.push((css_name, css));
     files.push((js_name, js));
     if let Some((name, _)) = files.iter().find(|(name, _)| staging.join(name).exists()) {
@@ -380,8 +400,9 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
     <meta property="og:url" content="{SITE}{own}" />
     <meta property="og:image" content="{SITE}{app}icons/icon-512.png" />
     <meta property="og:locale" content="{locale}" />
-"#,
+{described}"#,
         name = text(Key::AppName),
+        described = described(lang, app),
     );
     format!(
         r#"{head}  <body>
@@ -501,6 +522,75 @@ fn trial(lang: Lang) -> String {
     let days = u64::from(TRIAL_KEY_DAYS.unsigned_abs());
     let days = fill(plural(lang, days, Key::DaysOne, Key::DaysFew, Key::DaysMany), &[&days.to_string()]);
     escape(&fill(t(lang, Key::WelcomeTrial), &[&days]))
+}
+
+/// Описание программы для поисковиков (задача 118) — JSON-LD по словарю
+/// schema.org у страницы языка `lang`: программа (`SoftwareApplication`) —
+/// имя, страница, описание, языки, что умеет, ключи «Стандарт» и «Pro»
+/// с ценами и страницей «Купить» — и продавец (`Organization`): имя, сайт,
+/// значок, почта. Текст — из таблицы строк, числа — из ядра (цены
+/// `release::PRICE` и `PRO_PRICE`, валюта — её кодом в данных), как у
+/// видимой страницы: описание не обещает того, чего на ней нет.
+///
+/// Звёзд в выдаче Google это не даёт: карточке программы ему нужны ещё
+/// оценки или отзывы (`aggregateRating` или `review`; Search Central,
+/// «Software App structured data», сверено 2026-11-22), а выдумывать их
+/// нельзя. Зато поисковики и ИИ-ответы читают, что это за программа, сколько
+/// стоит и кто продаёт, — не угадывая по тексту.
+///
+/// Блок данных, а не скрипт: браузер его не исполняет, и CSP его не касается
+/// (шапка файла). `<`, `>` и `&` — escape-последовательностями JSON: строка
+/// таблицы не закроет элемент `</script>` и не станет разметкой
+/// (Правило 13). Ключи serde_json кладёт по алфавиту — те же байты на
+/// каждой сборке.
+fn described(lang: Lang, app: &str) -> String {
+    let offer = |tariff: Tariff| {
+        serde_json::json!({
+            "@type": "Offer",
+            "name": fill(t(lang, Key::BuyPlan), &[tariff.name(lang)]),
+            "price": tariff.price().minor().to_string(),
+            "priceCurrency": tariff.price().currency(),
+            "url": format!("{SITE}{}", buy_path(lang)),
+        })
+    };
+    let icon = format!("{SITE}{app}icons/icon-512.png");
+    let seller = format!("{SITE}/#seller");
+    let data = serde_json::json!({
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "SoftwareApplication",
+                "@id": format!("{SITE}/#app"),
+                "name": t(lang, Key::AppName),
+                "url": format!("{SITE}{}", url(lang)),
+                "description": t(lang, Key::LandingDescription),
+                "applicationCategory": "BusinessApplication",
+                "operatingSystem": "Web",
+                "inLanguage": Lang::ALL.map(Lang::code),
+                "image": icon,
+                "featureList": FEATURES.map(|(title, _)| t(lang, title)),
+                "offers": [offer(Tariff::Standard), offer(Tariff::Pro)],
+                "publisher": { "@id": seller },
+            },
+            {
+                "@type": "Organization",
+                "@id": seller,
+                "name": t(lang, Key::AppName),
+                "url": format!("{SITE}/"),
+                "logo": icon,
+                "email": EMAIL,
+            },
+        ],
+    });
+    data_block(&data)
+}
+
+/// Данные JSON блоком `<script type="application/ld+json">`: `<`, `>` и `&`
+/// — escape-последовательностями JSON (`\u003c`…), и ни `</script>`, ни
+/// `<!--` внутри не встанут, а разбор JSON вернёт те же строки.
+fn data_block(data: &serde_json::Value) -> String {
+    let json = data.to_string().replace('<', "\\u003c").replace('>', "\\u003e").replace('&', "\\u0026");
+    format!("    <script type=\"application/ld+json\">{json}</script>\n")
 }
 
 /// Тариф на карточке (задачи 35 и 103): «Стандарт» — один ИП, «Pro» —
@@ -1569,13 +1659,18 @@ mod tests {
 
     /// Ни встроенного скрипта, ни стиля, ни атрибута `style` или
     /// обработчика `on…`: CSP их не пустил бы, и страница молча осталась бы
-    /// без них.
+    /// без них. Блок данных JSON-LD (задача 118) — не скрипт, и он один,
+    /// у страниц языков.
     #[test]
     fn nothing_inline_for_the_csp_to_block() {
         let mut wrong = Vec::new();
         for (page, html) in every_page() {
-            if html.matches("<script").count() != html.matches("<script src=").count() {
+            let data = html.matches("<script type=\"application/ld+json\">").count();
+            if html.matches("<script").count() != html.matches("<script src=").count() + data {
                 wrong.push(format!("{page}: встроенный скрипт"));
+            }
+            if data > 1 {
+                wrong.push(format!("{page}: блоков JSON-LD {data}"));
             }
             if html.contains("<style") || html.contains(" style=") {
                 wrong.push(format!("{page}: встроенный стиль"));
@@ -1589,6 +1684,89 @@ mod tests {
             }
         }
         assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// Описание программы для поисковиков (задача 118) — у каждой страницы
+    /// языка, одно, и разбирается как JSON: программа со страницей своего
+    /// языка, описанием страницы и ключами с ценами ядра в драмах и страницей
+    /// «Купить» своего языка, продавец — с почтой из ядра. `<`, `>` и `&`
+    /// строки таблицы элемент не закроют. У остальных страниц его нет: они
+    /// не о программе целиком.
+    #[test]
+    fn language_pages_describe_the_app_for_search_engines() {
+        let block = |html: &str| -> Option<String> {
+            let open = "<script type=\"application/ld+json\">";
+            let at = html.find(open)? + open.len();
+            Some(html[at..at + html[at..].find("</script>")?].to_owned())
+        };
+        let mut wrong = Vec::new();
+        for lang in Lang::ALL {
+            let html = sample(lang);
+            let Some(json) = block(&html) else {
+                wrong.push(format!("{lang:?}: нет JSON-LD"));
+                continue;
+            };
+            if json.contains('<') || json.contains('>') || json.contains('&') {
+                wrong.push(format!("{lang:?}: <, > или & в блоке как есть"));
+            }
+            let data: serde_json::Value = match serde_json::from_str(&json) {
+                Ok(data) => data,
+                Err(error) => {
+                    wrong.push(format!("{lang:?}: не JSON — {error}"));
+                    continue;
+                }
+            };
+            let app = &data["@graph"][0];
+            let seller = &data["@graph"][1];
+            let site = |path: &str| serde_json::Value::from(format!("https://kvartik.com{path}"));
+            let checks = [
+                (data["@context"] == "https://schema.org", "словарь schema.org"),
+                (app["@type"] == "SoftwareApplication" && app["name"] == "Kvartik", "программа"),
+                (app["url"] == site(url(lang)), "страница своего языка"),
+                (app["description"] == t(lang, Key::LandingDescription), "описание — как у страницы"),
+                (app["inLanguage"] == serde_json::json!(["hy", "ru", "en"]), "три языка"),
+                (app["featureList"].as_array().map(Vec::len) == Some(FEATURES.len()), "что умеет"),
+                (app["publisher"]["@id"] == seller["@id"], "продаёт продавец"),
+                (seller["@type"] == "Organization" && seller["email"] == EMAIL, "продавец с почтой"),
+            ];
+            for (ok, what) in checks {
+                if !ok {
+                    wrong.push(format!("{lang:?}: {what}"));
+                }
+            }
+            for (at, price) in [PRICE, PRO_PRICE].into_iter().enumerate() {
+                let offer = &app["offers"][at];
+                if offer["price"].as_str().and_then(|text| text.parse::<i64>().ok()) != Some(price.minor())
+                    || offer["priceCurrency"] != "AMD"
+                    || offer["url"] != site(buy_path(lang))
+                {
+                    wrong.push(format!("{lang:?}: ключ {at} — не цена ядра {offer}"));
+                }
+            }
+        }
+        for (page, html) in every_page() {
+            let language_page = Lang::ALL.into_iter().any(|lang| page == format!("{lang:?} {}", url(lang)));
+            if !language_page && block(&html).is_some() {
+                wrong.push(format!("{page}: JSON-LD не у страницы языка"));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+        // Строка с `</script>`, `<!--` и `&` элемент не закроет и не станет
+        // разметкой, а разбор вернёт её как была.
+        let text = "</script><!-- & <b>";
+        let html = data_block(&serde_json::json!({ "name": text }));
+        assert_eq!(html.matches("</script>").count(), 1, "{html}");
+        assert!(!html.contains("<!--") && !html.contains("<b>") && !html.contains(" & "), "{html}");
+        let back: serde_json::Value = serde_json::from_str(&block(&html).expect("блок на месте")).expect("JSON");
+        assert_eq!(back["name"], text);
+    }
+
+    /// Ключ IndexNow (задача 118) — из знаков, которые принимают оба прочтения
+    /// документации: от 8 до 128 цифр и букв a–f.
+    #[test]
+    fn the_indexnow_key_has_a_valid_shape() {
+        assert!((8..=128).contains(&INDEXNOW_KEY.len()));
+        assert!(INDEXNOW_KEY.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)), "{INDEXNOW_KEY}");
     }
 
     /// Текст — только текстом (Правило 13).
@@ -1714,10 +1892,12 @@ mod tests {
                 pages.extend(Lang::ALL.into_iter().map(|lang| page_file(&doc.earlier_path(lang, day))));
             }
         }
-        for name in pages.iter().map(String::as_str).chain(["robots.txt", "sitemap.xml"]) {
+        let key = format!("{INDEXNOW_KEY}.txt");
+        for name in pages.iter().map(String::as_str).chain(["robots.txt", "sitemap.xml", key.as_str()]) {
             assert!(written.iter().any(|n| n == name), "нет {name}: {written:?}");
         }
-        assert_eq!(written.len(), pages.len() + 4, "{written:?}");
+        assert_eq!(written.len(), pages.len() + 5, "{written:?}");
+        assert_eq!(fs::read_to_string(stage.join(&key)).ok().as_deref(), Some(INDEXNOW_KEY), "файл ключа — сам ключ");
         for page in &pages {
             let html = fs::read_to_string(stage.join(page)).expect("страница читается");
             assert!(html.contains(&format!("href=\"/{}\"", css[0])) && html.contains(&format!("src=\"/{}\"", js[0])));

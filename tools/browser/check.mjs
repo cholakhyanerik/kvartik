@@ -75,6 +75,7 @@ import { Browser, Checks, DEVICES, sleep } from "./cdp.mjs";
 import { REPO, newVersion, own } from "./serve.mjs";
 import { samples, t } from "./strings.mjs";
 import { parse as parseCba, render as renderRates } from "../deploy/rates.mjs";
+import { changedPages, indexKey, pages as sitemapPages, request as indexNowRequest } from "../deploy/indexnow.mjs";
 
 const { values: opt } = parseArgs({
   options: {
@@ -847,6 +848,14 @@ const SCRIPTED = `document.readyState === "complete"`;
 
 async function landing(browser) {
   const page = await browser.page({ context: true });
+  // Отказы CSP — с первого байта страницы (задача 118): у страниц языков
+  // блок данных JSON-LD в разметке, и CSP без `'unsafe-inline'` его не
+  // касается, только пока это блок данных, а не скрипт. Скрипт ставит
+  // протокол DevTools, и CSP страницы его не касается.
+  await page.send("Page.addScriptToEvaluateOnNewDocument", {
+    source: `window.cspRefused = [];
+      document.addEventListener("securitypolicyviolation", (e) => cspRefused.push(e.violatedDirective + " " + e.blockedURI), true);`,
+  });
   try {
     await page.emulate(360);
     for (const [lang, at] of [["hy", "/"], ["ru", "/ru/"], ["en", "/en/"]]) {
@@ -867,6 +876,15 @@ async function landing(browser) {
       checks.check(`лендинг ${at}: карточка цены ведёт на «Купить»`, await page.eval(`return document
         .querySelector('section.plan .price')?.textContent.replace(/\\D/g, "") === ${JSON.stringify(PRICE)}
         && document.querySelector('section.plan a.button[href="${buyPath(lang)}"]') ? true : null;`));
+      // Описание программы для поисковиков (задача 118): блок JSON-LD
+      // разбирается, цена ключа — та же, что на карточке, и ни одного
+      // отказа CSP на странице.
+      checks.check(`лендинг ${at}: описание для поисковиков с ценой ключа, отказов CSP нет`, await page.eval(`
+        const blocks = document.querySelectorAll('script[type="application/ld+json"]');
+        const app = blocks.length === 1 ? JSON.parse(blocks[0].textContent)["@graph"][0] : null;
+        return app?.["@type"] === "SoftwareApplication" && app.offers[0].price === ${JSON.stringify(PRICE)}
+          && app.url === "https://kvartik.com${at}" && window.cspRefused.length === 0
+          ? true : { blocks: blocks.length, refused: window.cspRefused };`));
     }
     // Страница «Купить» (задачи 35 и 103): своего языка, с ценами
     // «Стандарта» и «Pro», счётом продавца и письмом со словами согласия, без
@@ -1686,6 +1704,42 @@ async function precompressedWasm() {
   }
 }
 
+/// IndexNow (задача 118): файл ключа лежит в корне сборки и отдаётся текстом
+/// с самим ключом; сверка, которой выкладка ищет изменившиеся страницы,
+/// у сайта этой же сборки не находит ни одной — иначе каждая выкладка
+/// называла бы поисковикам все страницы, — а изменённую и новую находит;
+/// запрос — все адреса одного сайта с ключом и его адресом на сайте.
+async function indexNow() {
+  const key = indexKey(DIST);
+  const response = await fetch(`${ORIGIN}/${key}.txt`);
+  const type = response.headers.get("content-type") ?? "";
+  checks.check("IndexNow: файл ключа отдаётся текстом с ключом",
+    response.status === 200 && (await response.text()) === key && type.startsWith("text/plain"), `${response.status} ${type}`);
+  const all = sitemapPages(DIST);
+  const same = await changedPages(DIST, ORIGIN);
+  checks.check("IndexNow: у сайта этой же сборки изменившихся страниц нет", same.length === 0, same.join(" "));
+  // Копия карты и страниц, где одна страница другая, а одной нет на сайте.
+  const copy = fs.mkdtempSync(path.join(WORK, "indexnow-"));
+  fs.copyFileSync(path.join(DIST, "sitemap.xml"), path.join(copy, "sitemap.xml"));
+  for (const loc of all) {
+    const rel = `${new URL(loc).pathname.slice(1)}index.html`;
+    fs.mkdirSync(path.dirname(path.join(copy, rel)), { recursive: true });
+    fs.copyFileSync(path.join(DIST, rel), path.join(copy, rel));
+  }
+  fs.appendFileSync(path.join(copy, "ru/index.html"), "<!-- другая -->");
+  fs.appendFileSync(path.join(copy, "sitemap.xml"), "<url><loc>https://kvartik.com/no-such-page/</loc></url>");
+  fs.mkdirSync(path.join(copy, "no-such-page"));
+  fs.writeFileSync(path.join(copy, "no-such-page/index.html"), "<!doctype html>");
+  const changed = await changedPages(copy, ORIGIN);
+  checks.check("IndexNow: изменённая и новая страницы найдены, остальные — нет",
+    changed.join(" ") === "https://kvartik.com/ru/ https://kvartik.com/no-such-page/", changed.join(" "));
+  fs.rmSync(copy, { recursive: true, force: true });
+  const body = indexNowRequest(DIST, all);
+  checks.check("IndexNow: запрос — все страницы карты одного сайта с ключом и его адресом",
+    body.host === "kvartik.com" && body.key === key && body.keyLocation === `https://kvartik.com/${key}.txt`
+      && body.urlList.length === all.length && all.length >= 15, JSON.stringify(body).slice(0, 300));
+}
+
 async function main() {
   const parts = fs.readdirSync(path.join(DIST, "app")).filter((n) => /^split_\w+-\w+\.wasm$/.test(n));
   checks.check("в сборке есть части wasm", parts.length > 0, parts.join(", "));
@@ -1703,6 +1757,7 @@ async function main() {
     await blocked(browser);
     await trialKeyLinks(browser);
     await landing(browser);
+    await indexNow();
     await calendarScheme(browser);
     await office(browser);
     await motion(browser);
