@@ -4424,6 +4424,84 @@ strings! {
     /// лендинга — те же файлы, что у окна.
     LandingLicenses = "Лицензии шрифтов и кода", "Font and code licenses", "Տառատեսակների և կոդի լիցենզիաներ";
 
+    /// Страница о налоге с оборота (задача 118): её пишет сборка рядом со
+    /// страницей языка (`tax/`, `crates/sw/src/landing.rs`), а ведут на неё
+    /// карточка лендинга и подвал каждой страницы сайта. Числа — из файла
+    /// правил ядра с источником у каждого (`tax::rules`), сроки — те же, что
+    /// в общем календаре (`deadlines::general`), пример — расчёт калькулятора
+    /// (`tax::example`). Текст — толкование закона, его утверждает человек
+    /// (CLAUDE.md, Правило 9).
+    TaxPageLink =
+        "Налог с оборота\u{A0}— ставки и сроки",
+        "Turnover tax\u{A0}— rates and deadlines",
+        "Շրջանառության հարկ\u{A0}— դրույքաչափեր և ժամկետներ";
+    TaxPageTitle =
+        "Налог с оборота для ИП в Армении\u{A0}— ставки, сроки и пример",
+        "Turnover tax for individual entrepreneurs in Armenia\u{A0}— rates, deadlines and an example",
+        "Շրջանառության հարկը Հայաստանի ԱՁ-ների համար\u{A0}— դրույքաչափեր, ժամկետներ և օրինակ";
+    TaxPageDescription =
+        "Ставки налога с оборота по видам деятельности, порог оборота, сроки расчётов и платежей на год, пример расчёта и курс ЦБ для дохода в валюте\u{A0}— со статьями Налогового кодекса Армении.",
+        "Turnover tax rates by type of activity, the turnover threshold, deadlines for returns and payments for the year, a worked example and the CBA rate for income in foreign currency\u{A0}— with articles of the Tax Code of Armenia.",
+        "Շրջանառության հարկի դրույքաչափերը՝ ըստ գործունեության տեսակների, շրջանառության շեմը, հաշվարկների և վճարումների ժամկետները տարվա համար, հաշվարկի օրինակ և ԿԲ փոխարժեքն արտարժույթով եկամտի համար\u{A0}— ՀՀ հարկային օրենսգրքի հոդվածներով։";
+    /// Шаблон: день последней сверки правил (`Rules::checked`).
+    TaxPageLead =
+        "Для ИП на налоге с оборота. Числа здесь\u{A0}— из того же файла правил, по которому считает Kvartik: у каждого\u{A0}— статья закона, а сверены они с законом {}. Это не консультация: перед подачей расчёта сверьте числа с бухгалтером.",
+        "For individual entrepreneurs on turnover tax. The numbers here come from the same rules file Kvartik calculates with: each one has its article of law, and they were checked against the law on {}. This is not advice: check the numbers with an accountant before you file a return.",
+        "Շրջանառության հարկ վճարող ԱՁ-ների համար։ Այստեղ թվերը նույն կանոնների ֆայլից են, որով հաշվում է Kvartik-ը. յուրաքանչյուրի մոտ օրենքի հոդվածն է, իսկ օրենքի հետ դրանք ստուգված են {}։ Սա խորհրդատվություն չէ. հաշվարկը ներկայացնելուց առաջ ստուգեք թվերը հաշվապահի հետ։";
+    TaxPageRates = "Ставки", "Rates", "Դրույքաչափեր";
+    TaxPageRatesAbout =
+        "Налог квартала\u{A0}— процент дохода квартала по строке таблицы ст.\u{A0}258 Налогового кодекса, к которой относится деятельность. У строк с вычетом налог уменьшают расходы квартала с документом продавца, но не ниже нижнего предела.",
+        "The quarterly tax is a percentage of the quarter's income at the row of the table in Art.\u{A0}258 of the Tax Code that the activity falls under. For rows with a deduction, the quarter's expenses with a seller's document reduce the tax, but not below the floor.",
+        "Եռամսյակի հարկը եռամսյակի եկամտի տոկոսն է՝ Հարկային օրենսգրքի 258-րդ հոդվածի աղյուսակի այն տողով, որին վերաբերում է գործունեությունը։ Նվազեցում ունեցող տողերի դեպքում հարկը նվազեցնում են վաճառողի փաստաթղթով եռամսյակի ծախսերը, բայց ոչ ստորին սահմանից ցածր։";
+    /// Шаблон: ставка (`i18n::percent`).
+    TaxRateFlat = "{} дохода", "{} of income", "եկամտի {}";
+    /// Шаблон: ставка, процент вычета расходов и нижний предел
+    /// (`tax::rules::Rate`).
+    TaxRateDeducted =
+        "{} дохода минус {} расходов с документом продавца, но не меньше {} дохода",
+        "{} of income minus {} of expenses with a seller's document, but no less than {} of income",
+        "եկամտի {}՝ հանած վաճառողի փաստաթղթով ծախսերի {}, բայց ոչ պակաս, քան եկամտի {}";
+    /// Шаблон: последний день действия записи правил.
+    TaxRateUntil = "действует по {}", "applies until {}", "գործում է մինչև {}";
+    TaxPageSource = "Источник:", "Source:", "Աղբյուրը՝";
+    /// Шаблон: день сверки записи правил (`tax::rules::Source::checked`).
+    TaxPageChecked = "сверено {}", "checked on {}", "ստուգված է {}";
+    /// Шаблон: порог оборота за год (`tax::rules::Threshold`).
+    TaxPageThreshold =
+        "Налог с оборота платят, пока оборот всех видов деятельности за год не больше {}: больше\u{A0}— ИП перестаёт быть его плательщиком.",
+        "Turnover tax applies while the year's turnover from all activities is no more than {}: above that, the IE is no longer a turnover tax payer.",
+        "Շրջանառության հարկը վճարում են, քանի դեռ տարվա շրջանառությունը բոլոր գործունեության տեսակներից {}\u{2011}ից ավելի չէ. ավելի լինելու դեպքում ԱՁ-ն դադարում է շրջանառության հարկ վճարող լինել։";
+    TaxPageDeadlines = "Сроки", "Deadlines", "Ժամկետներ";
+    /// Шаблон: первый и последний день списка сроков.
+    TaxPageDeadlinesAbout =
+        "Сроки всех ИП на налоге с оборота с {} по {}\u{A0}— те же, что в общем календаре. Медстраховка и декларация о доходах касаются не всех: свои сроки программа считает по профилю.",
+        "Deadlines for all IEs on turnover tax from {} to {}\u{A0}— the same as in the shared calendar. Health insurance and the income declaration don't apply to everyone: the app works out your own deadlines from your profile.",
+        "Շրջանառության հարկ վճարող բոլոր ԱՁ-ների ժամկետները {}\u{2011}ից մինչև {}\u{A0}— նույնը, ինչ ընդհանուր օրացույցում։ Առողջության ապահովագրավճարը և եկամուտների համընդհանուր հայտարարագիրը վերաբերում են ոչ բոլորին. ձեր ժամկետները ծրագիրը հաշվում է ըստ պրոֆիլի։";
+    TaxPageCalendar =
+        "Подписаться на календарь сроков",
+        "Subscribe to the deadline calendar",
+        "Բաժանորդագրվել ժամկետների օրացույցին";
+    TaxPageExample = "Пример", "Example", "Օրինակ";
+    /// Шаблон: строка налога, оборот квартала, гражданство (с большой
+    /// буквы — начало предложения, как в форме) и год рождения примера.
+    TaxPageExampleAbout =
+        "{}, оборот {} в квартал. {}, год рождения\u{A0}— {}. Тот же расчёт, что у калькулятора на главной странице и в программе:",
+        "{}, turnover of {} a quarter. {}, born in {}. The same calculation as the calculator on the home page and in the app:",
+        "{}, շրջանառությունը՝ {} եռամսյակում։ {}, ծննդյան տարին՝ {}։ Նույն հաշվարկն է, ինչ գլխավոր էջի հաշվիչում և ծրագրում.";
+    TaxPageCurrency = "Доход в валюте", "Income in foreign currency", "Եկամուտ արտարժույթով";
+    /// Шаблон: первый день записи `rate_day` файла правил.
+    TaxPageCurrencyAbout =
+        "Налог считается в драмах. Доход в валюте с {} переводят по курсу ЦБ, опубликованному в рабочий день, предыдущий дню поставки (оказания услуги); у аренды, подписок, процентов, ввоза и вывоза день свой. Kvartik подсказывает такой курс у поля курса.",
+        "Tax is counted in drams. From {}, income in foreign currency is converted at the CBA rate published on the working day before the day of supply (the day the service is provided); rent, subscriptions, interest, imports and exports have their own day. Kvartik suggests that rate next to the rate field.",
+        "Հարկը հաշվում են դրամով։ {}\u{2011}ից արտարժույթով եկամուտը փոխարկում են մատակարարման (ծառայության մատուցման) օրվան նախորդող աշխատանքային օրը հրապարակված ԿԲ փոխարժեքով. վարձակալության, բաժանորդագրությունների, տոկոսների, ներմուծման և արտահանման դեպքում օրն այլ է։ Kvartik-ը նման փոխարժեքը հուշում է փոխարժեքի դաշտի մոտ։";
+    /// Карточка лендинга, ведущая на страницу о налоге; заголовок —
+    /// `TaxPageLink`.
+    LandingTaxPage =
+        "Ставки по видам деятельности, порог оборота, сроки на год и пример расчёта\u{A0}— со статьями закона и днём сверки.",
+        "Rates by type of activity, the turnover threshold, deadlines for the year and a worked example\u{A0}— with articles of law and the day they were checked.",
+        "Դրույքաչափերը՝ ըստ գործունեության տեսակների, շրջանառության շեմը, տարվա ժամկետները և հաշվարկի օրինակ\u{A0}— օրենքի հոդվածներով և ստուգման օրով։";
+    LandingTaxPageOpen = "Ставки и сроки", "Rates and deadlines", "Դրույքաչափեր և ժամկետներ";
+
     /// Страница «Купить» (задача 35): её пишет сборка рядом со страницей
     /// языка (`release::buy_path`, `crates/sw/src/landing.rs`), а ведут на
     /// неё карточка цены лендинга, подвал каждой страницы сайта и экран

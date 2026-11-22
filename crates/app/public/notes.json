@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.170",
+      "date": "2026-11-22",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել. կայքում հայտնվել է «Շրջանառության հարկ — դրույքաչափեր և ժամկետներ» էջը՝ դրույքաչափերով, շեմով, ժամկետներով, հաշվարկի օրինակով և ԿԲ փոխարժեքի կանոնով, յուրաքանչյուր թվի մոտ՝ օրենքի հոդվածը։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось: на сайте появилась страница «Налог с оборота — ставки и сроки» со ставками, порогом, сроками, примером расчёта и правилом курса ЦБ, у каждого числа — статья закона."
+      ],
+      "en": [
+        "Nothing changed in the app: the website has a new page, “Turnover tax — rates and deadlines”, with rates, the threshold, deadlines, a worked example and the CBA rate rule, each number with its article of law."
+      ]
+    },
+    {
       "version": "0.0.169",
       "date": "2026-11-22",
       "hy": [
@@ -260,19 +273,6 @@
       ],
       "en": [
         "On the License screen, a “Pro” key issued without a TIN (a trial gift) now says “no TIN”."
-      ]
-    },
-    {
-      "version": "0.0.150",
-      "date": "2026-11-17",
-      "hy": [
-        "Ծրագրում ոչինչ չի փոխվել. ուղղվել է այն ստուգումը, որն այն անցնում է թողարկումից առաջ։"
-      ],
-      "ru": [
-        "В программе ничего не изменилось: поправлена проверка, которую она проходит перед выпуском."
-      ],
-      "en": [
-        "Nothing changed in the app: a check it goes through before each release was fixed."
       ]
     }
   ]

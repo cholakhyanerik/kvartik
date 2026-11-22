@@ -105,6 +105,8 @@ const buyPath = (lang) => (lang === "hy" ? "/buy/" : `/${lang}/buy/`);
 // Страница «Отзывы и предложения» (задача 114) — `release::feedback_path`,
 // а почта и Telegram продавца — `release::EMAIL` и `TELEGRAM`.
 const feedbackPath = (lang) => (lang === "hy" ? "/feedback/" : `/${lang}/feedback/`);
+// Страница о налоге с оборота (задача 118) — `landing::tax_path`.
+const taxPath = (lang) => (lang === "hy" ? "/tax/" : `/${lang}/tax/`);
 const RELEASE = fs.readFileSync(path.join(REPO, "crates/core/src/release.rs"), "utf8");
 const ACCOUNT = RELEASE.match(/pub const ACCOUNT: &str = "(\d+)";/)?.[1];
 const PRICE = RELEASE.match(/pub const PRICE: Money = Money::new\(([\d_]+), Currency::Amd\);/)?.[1]?.replaceAll("_", "");
@@ -913,6 +915,27 @@ async function landing(browser) {
         const e = document.documentElement;
         return e.scrollWidth <= e.clientWidth
           && document.querySelector("article.buy .faq")?.innerText.includes(${JSON.stringify(t("LicenseDevicesData", lang))}) ? true : null;`));
+    }
+    // Страница о налоге (задача 118): своего языка, с оформлением окна,
+    // ставками всех строк налога, у каждой — источник на arlis.am, сроками,
+    // примером калькулятора с суммой; без прокрутки вбок на 360 — армянские
+    // источники длинные — и без отказов CSP; лендинг ведёт на неё.
+    for (const lang of ["hy", "ru", "en"]) {
+      const at = taxPath(lang);
+      await page.go(`${ORIGIN}${at}`);
+      checks.check(`о налоге ${at}: свой язык, ставки с источниками, сроки и пример`, await page.waitFor(`return document.documentElement.lang
+        === ${JSON.stringify(lang)} && document.querySelector("article.tax h1")?.textContent === ${JSON.stringify(t("TaxPageTitle", lang))}
+        && document.querySelectorAll("article.tax ul.rates > li").length >= 10
+        && [...document.querySelectorAll("article.tax ul.rates > li")].every((li) => li.querySelector('a[href^="https://www.arlis.am/"][lang="hy"]'))
+        && document.querySelectorAll("article.tax ul.deadlines > li").length >= 4
+        && /\\d/.test(document.querySelector("article.tax .result .sum")?.textContent ?? "")
+        && getComputedStyle(document.querySelector("h1")).fontFamily.includes("Kvartik Serif")
+        && window.cspRefused.length === 0 ? true : null;`));
+      checks.check(`о налоге ${at}: без прокрутки вбок на 360`, await page.eval(`const d = document.documentElement;
+        return d.clientWidth === 360 && d.scrollWidth <= d.clientWidth ? true : null;`));
+      await page.go(`${ORIGIN}${lang === "hy" ? "/" : `/${lang}/`}`);
+      checks.check(`лендинг ${lang}: карточка ведёт на страницу о налоге`, await page.waitFor(`return document
+        .querySelector('section.card a.button[href="${at}"]') && document.querySelector('footer a[href="${at}"]') ? true : null;`));
     }
     // «Отзывы и предложения» (задача 114): своего языка, с письмом продавцу,
     // в котором первая строка — версия программы и где её найти, и Telegram
