@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.174",
+      "date": "2026-11-22",
+      "hy": [
+        "Մատյանի ֆայլերն ու լոգոտիպերը «Այլ սարք» էկրանով այժմ անցնում են առանց պատճենի ֆայլի. կոդից հետո սեղմեք «Ուղարկել ֆայլերը կոդերի շարքով» և ցույց տվեք կոդերը հերթով։"
+      ],
+      "ru": [
+        "Файлы книги и логотипы теперь переходят экраном «Другое устройство» и без файла копии: после кода нажмите «Передать файлы серией кодов» и показывайте коды по очереди."
+      ],
+      "en": [
+        "Ledger files and logos now move through the “Another device” screen without a backup file too: after the code, tap “Send the files as a series of codes” and show the codes one by one."
+      ]
+    },
+    {
       "version": "0.0.173",
       "date": "2026-11-22",
       "hy": [
@@ -257,19 +270,6 @@
       ],
       "en": [
         "Nothing changed in the app: a check it goes through before each release was fixed."
-      ]
-    },
-    {
-      "version": "0.0.154",
-      "date": "2026-11-18",
-      "hy": [
-        "Առաջին բացման ժամանակ ծրագիրն ավելի արագ է բեռնվում՝ դանդաղ բջջային ինտերնետում մոտ քառորդ վայրկյանով. կայքն այժմ ծրագրի կոդն ուղարկում է ավելի խիտ սեղմված։"
-      ],
-      "ru": [
-        "При первом заходе программа открывается быстрее — на медленном мобильном интернете примерно на четверть секунды: сайт теперь отдаёт её код сжатым плотнее."
-      ],
-      "en": [
-        "The app opens faster on the first visit, by about a quarter of a second on a slow mobile connection: the site now sends its code more tightly compressed."
       ]
     }
   ]

@@ -353,6 +353,7 @@ pub async fn restore_all(
         writes.restore(entry);
     }
     tx.commit(writes).await?;
+    let keys_oldest = oldest(&keys);
     let covers_all = local
         .iter()
         .all(|ip| route.bases.iter().any(|landing| landing.base == ip.base()));
@@ -366,7 +367,10 @@ pub async fn restore_all(
         open_touched: false,
         covers_all: covers_all && route.bases.iter().any(|landing| landing.base == open_name),
         failed: None,
-        landed: Vec::new(),
+        // Ключи «Pro», легшие в контору, — тоже легли: код всех ИП с этого
+        // устройства возьмёт их и тогда, когда они старше его прошлого кода
+        // (ревью задачи 116).
+        landed: keys_oldest.map(|at| (office::OFFICE_DB.to_owned(), at)).into_iter().collect(),
     };
     for landing in &route.bases {
         let landed = if landing.base == open_name {

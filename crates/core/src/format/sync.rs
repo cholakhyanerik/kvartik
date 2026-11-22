@@ -15,10 +15,15 @@
 //! кодом, а первый код — все записи ([`default_day`]). «Все записи» — без
 //! дня.
 //!
-//! Файлы книги, логотип профиля и логотипы выпущенных документов в код не
-//! идут ([`SKIPPED`]): это сотни килобайт картинок, сотни QR-кодов, а их
-//! переносит копия файлом. Сколько таких изменилось, код говорит числом,
-//! и окно называет его словами. Запись книги без своего файла на другом
+//! Файлы книги, логотип профиля и логотипы выпущенных документов в код
+//! изменений не идут ([`SKIPPED`]): это сотни килобайт картинок, и код вырос
+//! бы в сотни QR-кодов. Сколько таких изменилось, код говорит числом, и окно
+//! называет его словами. Передаёт их отдельный код файлов (с 0.0.174, задача
+//! 116; [`pick_files`]) — тот же код, только с файлами и меткой `files`,
+//! больше одного кода и поэтому серией: он режется на коды-части не больше
+//! [`MAX_CODE_BYTES`] ([`segments`]), у каждой — свой круг QR-кодов и свой
+//! текст, а принимающее собирает части в любом порядке ([`Series`]) и кладёт
+//! код, когда собраны все. Запись книги без своего файла на другом
 //! устройстве показывает файл без ссылки — так же, как нечитаемый.
 //!
 //! Живой профиль идёт в код всегда, даже не изменённый: по нему принимающее
@@ -94,8 +99,9 @@ const MARK: &[u8; 3] = b"KVS";
 /// Версия конверта кода — не версия формата записей: растёт, когда меняется
 /// сам конверт или шапка внутри. Код новее программа не читает и говорит
 /// «обновите программу», а не «код испорчен». 2 (0.0.173) — у записи кода
-/// метка базы `base`: код всех ИП (шапка модуля, «Код конторы»).
-const ENVELOPE: u8 = 2;
+/// метка базы `base`: код всех ИП (шапка модуля, «Код конторы»); 3 (0.0.174) —
+/// метка `files` у кода файлов (шапка модуля, «Что передаётся»).
+const ENVELOPE: u8 = 3;
 
 /// Метка открытого текста кода — как `kvartik-backup` у файла копии.
 const PLAIN_MARK: &str = "kvartik-sync";
@@ -110,6 +116,34 @@ pub const MAX_CODE_BYTES: usize = 32 << 10;
 /// [`MAX_CODE_BYTES`] сжатым, а разжатие с пределом не даст подложенному
 /// коду в килобайты закрыть страницу гигабайтами нулей (Правило 13).
 const MAX_PLAIN_BYTES: usize = 1 << 20;
+
+/// Больше стольких частей у кода файлов не бывает: каждая — круг QR-кодов
+/// в минуту с лишним или дюжина кусков текста, и 32 части — уже больше
+/// получаса у камеры; больше файлов — копией файлом.
+pub const MAX_SEGMENTS: usize = 32;
+
+/// Байтов кода в одной части серии: часть с шапкой — не больше
+/// [`MAX_CODE_BYTES`], как обычный код.
+pub const SEGMENT_BYTES: usize = MAX_CODE_BYTES - SEGMENT_HEADER;
+
+/// Байтов шапки части: метка, версия, метка серии, номер и число частей.
+const SEGMENT_HEADER: usize = 12;
+
+/// Больше этого код файлов не бывает.
+pub const MAX_SERIES_BYTES: usize = MAX_SEGMENTS * SEGMENT_BYTES;
+
+/// Больше этого открытый текст кода файлов не собирается и не разжимается:
+/// файлы в base64 сжимаются примерно на четверть — вдвое больше кода с
+/// запасом на текст записей (как у копии, `backup::MAX_PLAIN_BYTES`).
+const MAX_FILES_PLAIN_BYTES: usize = 2 * MAX_SERIES_BYTES;
+
+/// Уровень сжатия кода файлов: первый, как у копии (`backup`): файлы уже
+/// сжаты, и уровень выше лишь дольше держит страницу.
+const FILES_LEVEL: u8 = 1;
+
+/// Метка части серии и её версия.
+const SEGMENT_MARK: &[u8; 3] = b"KVP";
+const SEGMENT_VERSION: u8 = 1;
 
 /// Уровень сжатия кода: самый плотный. Текст — сотни килобайт самое большее
 /// ([`MAX_PLAIN_BYTES`]), и сжимать его дольше дешевле, чем показывать лишние
@@ -337,6 +371,67 @@ where
     Ok(picked)
 }
 
+/// Файлы для кода файлов (шапка модуля): файлы книги и логотипы
+/// ([`SKIPPED`]), изменённые не раньше `since` (`None` — все), и живой
+/// профиль — по нему принимающее сверяет ИП, как у кода изменений.
+pub fn pick_files<'a>(raw: impl IntoIterator<Item = Raw<'a>>, since: Option<Timestamp>) -> Result<Picked, FormatError> {
+    at_once(pick_files_sliced(raw, since, &mut no_pause))
+}
+
+/// [`pick_files`] кусками, с паузой: файлов — мегабайты, и неизменённый файл
+/// не разбирается вовсе — момент изменения читается без него ([`peek`]).
+pub async fn pick_files_sliced<'a, P, F>(
+    raw: impl IntoIterator<Item = Raw<'a>>,
+    since: Option<Timestamp>,
+    pause: &mut P,
+) -> Result<Picked, FormatError>
+where
+    P: FnMut() -> F,
+    F: Future<Output = ()>,
+{
+    let changed = |meta: &RecordMeta| since.is_none_or(|since| meta.modified() >= since);
+    let mut meter = Meter::new(pause);
+    let mut picked = Picked {
+        entries: Vec::new(),
+        skipped: 0,
+        unreadable: 0,
+    };
+    let mut profiles = Vec::new();
+    for item in raw {
+        let file = SKIPPED.contains(&item.kind);
+        if !file && item.kind != Profile::KIND {
+            continue;
+        }
+        if file {
+            let peeked = match item.text.map(peek) {
+                Some(Ok(meta)) => meta,
+                Some(Err(FormatError::Newer { found })) => return Err(FormatError::Newer { found }),
+                Some(Err(FormatError::Damaged(_))) | None => None,
+            };
+            if peeked.as_ref().is_some_and(|meta| !changed(meta)) {
+                continue;
+            }
+            meter.add(item.text.map_or(0, str::len).max(backup::RECORD_WEIGHT)).await;
+        }
+        match backup::read_stored(KINDS, item) {
+            Ok(entry) if entry.kind() == Profile::KIND => profiles.push(entry),
+            Ok(entry) => picked.entries.push(entry),
+            Err(FormatError::Newer { found }) => return Err(FormatError::Newer { found }),
+            Err(FormatError::Damaged(_)) => picked.unreadable += 1,
+        }
+    }
+    let parsed: Vec<Profile> = profiles
+        .iter()
+        .filter_map(|entry| decode_record(FORMAT_VERSION, entry.record()).ok())
+        .collect();
+    if let Some(current) = Profile::current(parsed)
+        && let Some(entry) = profiles.into_iter().find(|entry| entry.meta().id() == current.id())
+    {
+        picked.entries.push(entry);
+    }
+    Ok(picked)
+}
+
 /// Записи базы конторы для кода всех ИП (шапка модуля, «Код конторы»):
 /// записи ИП списка — все, изменённые и нет, ключи «Pro» — изменённые не
 /// раньше `since` (`None` — все). Запись ИП, которая не читается, — отказ:
@@ -369,6 +464,8 @@ pub struct Header {
     created: Timestamp,
     device: RecordId,
     since: Option<Timestamp>,
+    /// Код файлов (шапка модуля): ряд изменений он не продолжает и не рвёт.
+    files: bool,
 }
 
 impl Header {
@@ -380,7 +477,18 @@ impl Header {
             created,
             device,
             since,
+            files: false,
         }
+    }
+
+    /// Та же шапка у кода файлов.
+    pub fn for_files(self) -> Self {
+        Self { files: true, ..self }
+    }
+
+    /// Код ли это файлов.
+    pub const fn files(&self) -> bool {
+        self.files
     }
 
     /// Версия программы, которая сделала код.
@@ -413,6 +521,8 @@ struct PlainOut<'a> {
     created: Timestamp,
     device: RecordId,
     since: Option<Timestamp>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    files: bool,
     records: Vec<RecordOut<'a>>,
 }
 
@@ -434,6 +544,9 @@ struct PlainIn<'a> {
     created: Timestamp,
     device: RecordId,
     since: Option<Timestamp>,
+    /// С конверта 3 (0.0.174); у прежних — нет.
+    #[serde(default)]
+    files: bool,
     #[serde(borrow)]
     records: Vec<RecordIn<'a>>,
 }
@@ -480,6 +593,7 @@ where
         created: header.created,
         device: header.device,
         since: header.since,
+        files: header.files,
         records: entries
             .iter()
             .map(|entry| RecordOut {
@@ -490,12 +604,17 @@ where
             .collect(),
     })
     .expect("код в JSON не падает: записи уже в JSON, остальное — строки и числа");
-    if text.len() > MAX_PLAIN_BYTES {
+    let (plain_limit, level, limit) = if header.files {
+        (MAX_FILES_PLAIN_BYTES, FILES_LEVEL, MAX_SERIES_BYTES)
+    } else {
+        (MAX_PLAIN_BYTES, CODE_LEVEL, MAX_CODE_BYTES)
+    };
+    if text.len() > plain_limit {
         return Err(TooLarge { bytes: text.len() });
     }
-    let packed = backup::deflate_sliced(text.as_bytes(), CODE_LEVEL, pause).await;
+    let packed = backup::deflate_sliced(text.as_bytes(), level, pause).await;
     let bytes = packed.len() + ENVELOPE_BYTES;
-    if bytes > MAX_CODE_BYTES {
+    if bytes > limit {
         return Err(TooLarge { bytes });
     }
     Ok(packed)
@@ -573,13 +692,22 @@ impl Sealed {
 /// Открыть код: метка, версия — новее программы ли, — замок в пределах
 /// и шифротекст не короче метки подлинности.
 pub fn open(code: &[u8]) -> Result<Sealed, CodeError> {
+    open_up_to(code, MAX_CODE_BYTES)
+}
+
+/// Открыть код, собранный из частей серии ([`Series`]): он больше обычного.
+pub fn open_series(code: &[u8]) -> Result<Sealed, CodeError> {
+    open_up_to(code, MAX_SERIES_BYTES)
+}
+
+fn open_up_to(code: &[u8], limit: usize) -> Result<Sealed, CodeError> {
     if code.len() < 4 || &code[..3] != MARK {
         return Err(CodeError::NotCode);
     }
     if code[3] > ENVELOPE {
         return Err(CodeError::Newer);
     }
-    if code[3] == 0 || code.len() > MAX_CODE_BYTES {
+    if code[3] == 0 || code.len() > limit {
         return Err(damaged("конверт кода не той версии или длины"));
     }
     let mut rest = &code[4..];
@@ -653,7 +781,9 @@ where
     P: FnMut() -> F,
     F: Future<Output = ()>,
 {
-    let plain = backup::unpack_sliced(opened, MAX_PLAIN_BYTES, pause).await?;
+    // Код больше обычного — код файлов серией: и текст у него больше.
+    let limit = if sealed.ciphertext.len() > MAX_CODE_BYTES { MAX_FILES_PLAIN_BYTES } else { MAX_PLAIN_BYTES };
+    let plain = backup::unpack_sliced(opened, limit, pause).await?;
     let text = std::str::from_utf8(&plain).map_err(damaged)?;
     let fields: PlainIn<'_> = serde_json::from_str(text).map_err(damaged)?;
     if fields.file != PLAIN_MARK || fields.format_version != sealed.format_version {
@@ -684,6 +814,7 @@ where
             created: fields.created,
             device: fields.device,
             since: fields.since,
+            files: fields.files,
         },
         entries,
     })
@@ -899,8 +1030,10 @@ impl Received {
     }
 }
 
-/// Цел ли ряд изменений от отправителя.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// Цел ли ряд изменений от отправителя. В квитанции — `"whole"`, `"first"`
+/// или `{"gap":{"got":…}}`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Continuity {
     /// Код начинается не позже принятого прежде — или это все записи.
     Whole,
@@ -954,28 +1087,20 @@ pub struct Receipt {
     /// Момент принятого кода — по часам отправителя ([`Header::created`]):
     /// по нему отправитель узнаёт свой код.
     code: Timestamp,
-    /// Цел ли ряд: всё, что было у отправителя до кода, у принявшего есть.
-    whole: bool,
-    /// Ряд не цел — до какого момента часов отправителя от него принято
-    /// прежде ([`Continuity::Gap`]).
-    got: Option<Timestamp>,
+    /// Цел ли ряд ([`Continuity`]) — так, как его видит принявший.
+    taken: Continuity,
 }
 
 impl Receipt {
     /// Квитанция на код с шапкой `header`, принятый устройством `receiver`
     /// с целостью ряда `continuity`.
     pub fn new(header: &Header, receiver: RecordId, continuity: Continuity) -> Self {
-        let (whole, got) = match continuity {
-            Continuity::Whole | Continuity::First => (true, None),
-            Continuity::Gap { got } => (false, Some(got)),
-        };
         Self {
             file: RECEIPT_PLAIN_MARK.to_owned(),
             sender: header.device,
             receiver,
             code: header.created,
-            whole,
-            got,
+            taken: continuity,
         }
     }
 
@@ -991,7 +1116,7 @@ impl Receipt {
         // (+1,7 КБ кода, замер задачи 116).
         let text = std::str::from_utf8(plain).map_err(damaged)?;
         let receipt: Self = serde_json::from_str(text).map_err(damaged)?;
-        if receipt.file != RECEIPT_PLAIN_MARK || receipt.whole == receipt.got.is_some() {
+        if receipt.file != RECEIPT_PLAIN_MARK {
             return Err(damaged("квитанция не та"));
         }
         Ok(receipt)
@@ -1003,6 +1128,10 @@ impl Receipt {
 pub enum Acked {
     /// Код принят, и ряд цел: на том устройстве всё, что было здесь до кода.
     Whole,
+    /// Код принят, но от этого устройства там принимают впервые: было ли
+    /// там то, что здесь до начала кода, неизвестно (ревью задачи 116:
+    /// «цел» обещал бы больше, чем знает принявший).
+    First,
     /// Код принят, но между принятым прежде (`got`, по часам этого
     /// устройства) и началом кода изменений там нет: прошлый код не сняли.
     Gap { got: Timestamp },
@@ -1016,9 +1145,10 @@ pub fn acked(receipt: &Receipt, me: RecordId, code: Timestamp) -> Acked {
     if receipt.sender != me || receipt.code != code {
         return Acked::Other;
     }
-    match receipt.got {
-        Some(got) if !receipt.whole => Acked::Gap { got },
-        _ => Acked::Whole,
+    match receipt.taken {
+        Continuity::Whole => Acked::Whole,
+        Continuity::First => Acked::First,
+        Continuity::Gap { got } => Acked::Gap { got },
     }
 }
 
@@ -1082,11 +1212,100 @@ pub fn receipt_qr(sealed: &[u8], id: u32) -> Option<qr::Code> {
         .and_then(|version| qr::encode(&frame, version, QR_ECC))
 }
 
+/// Части серии кода `code` — каждая со своей шапкой: метка, версия, метка
+/// серии `id`, номер и число частей. Каждая — не больше [`MAX_CODE_BYTES`]
+/// и показывается, как обычный код: своим кругом QR-кодов и своим текстом.
+pub fn segments(code: &[u8], id: u32) -> Vec<Vec<u8>> {
+    let pieces: Vec<&[u8]> = code.chunks(SEGMENT_BYTES).collect();
+    let count = u16::try_from(pieces.len()).unwrap_or(u16::MAX);
+    pieces
+        .iter()
+        .enumerate()
+        .map(|(index, piece)| {
+            let mut segment = Vec::with_capacity(SEGMENT_HEADER + piece.len());
+            segment.extend_from_slice(SEGMENT_MARK);
+            segment.push(SEGMENT_VERSION);
+            segment.extend_from_slice(&id.to_be_bytes());
+            segment.extend_from_slice(&u16::try_from(index).unwrap_or(u16::MAX).to_be_bytes());
+            segment.extend_from_slice(&count.to_be_bytes());
+            segment.extend_from_slice(piece);
+            segment
+        })
+        .collect()
+}
+
+/// Сборка кода из частей серии — в любом порядке и с повторами; часть
+/// другой серии начинает сборку заново, как кадр другой передачи у
+/// [`Collector`].
+#[derive(Default, Debug)]
+pub struct Series {
+    id: Option<u32>,
+    parts: Vec<Option<Vec<u8>>>,
+}
+
+impl Series {
+    /// Взять часть серии — байты, собранные из кадров ([`Collector::whole`]).
+    /// `Err` — это не часть или часть новой версии.
+    pub fn take(&mut self, bytes: &[u8]) -> Result<Took, FrameError> {
+        if bytes.len() < 4 || &bytes[..3] != SEGMENT_MARK {
+            return Err(FrameError::NotFrame);
+        }
+        if bytes[3] > SEGMENT_VERSION {
+            return Err(FrameError::Newer);
+        }
+        if bytes[3] != SEGMENT_VERSION || bytes.len() <= SEGMENT_HEADER {
+            return Err(FrameError::NotFrame);
+        }
+        let id = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+        let index = usize::from(u16::from_be_bytes([bytes[8], bytes[9]]));
+        let count = usize::from(u16::from_be_bytes([bytes[10], bytes[11]]));
+        if count == 0 || index >= count || count > MAX_SEGMENTS {
+            return Err(FrameError::NotFrame);
+        }
+        let took = if self.id == Some(id) && self.parts.len() == count {
+            Took::New
+        } else {
+            let restarted = self.id.is_some();
+            self.id = Some(id);
+            self.parts = vec![None; count];
+            if restarted { Took::Restarted } else { Took::New }
+        };
+        let slot = &mut self.parts[index];
+        if slot.is_some() {
+            return Ok(Took::Again);
+        }
+        *slot = Some(bytes[SEGMENT_HEADER..].to_vec());
+        Ok(took)
+    }
+
+    /// Сколько частей собрано.
+    pub fn got(&self) -> usize {
+        self.parts.iter().filter(|part| part.is_some()).count()
+    }
+
+    /// Сколько частей у серии; 0 — ни одной ещё не было.
+    pub fn count(&self) -> usize {
+        self.parts.len()
+    }
+
+    /// Код целиком, когда собраны все части; `None` — не все или длиннее
+    /// предела.
+    pub fn whole(&self) -> Option<Vec<u8>> {
+        if self.parts.is_empty() || self.parts.iter().any(Option::is_none) {
+            return None;
+        }
+        let code: Vec<u8> = self.parts.iter().flatten().flatten().copied().collect();
+        (code.len() <= MAX_SERIES_BYTES).then_some(code)
+    }
+}
+
 /// Что собрано из кадров.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Payload {
     /// Код передачи ([`open`]).
     Code,
+    /// Часть серии — кода файлов ([`Series`]).
+    Segment,
     /// Квитанция ([`open_receipt`]).
     Receipt,
     /// Ни то, ни другое.
@@ -1098,6 +1317,7 @@ pub enum Payload {
 pub fn payload(bytes: &[u8]) -> Payload {
     match bytes.get(..3) {
         Some(mark) if mark == MARK => Payload::Code,
+        Some(mark) if mark == SEGMENT_MARK => Payload::Segment,
         Some(mark) if mark == RECEIPT_MARK => Payload::Receipt,
         _ => Payload::Other,
     }

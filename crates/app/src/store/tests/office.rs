@@ -217,6 +217,11 @@ async fn a_pro_key_travels_only_with_the_backup_of_all_ies() {
     if keys().await != [pro.id()] {
         wrong.push(format!("в конторе ключи {:?}, а не ключ копии", keys().await));
     }
+    // Легший ключ — легшая запись конторы: код всех ИП возьмёт его дальше
+    // (ревью задачи 116).
+    if !done.landed.iter().any(|(base, at)| base == OFFICE_DB && *at == pro.meta().modified()) {
+        wrong.push(format!("ключ не назван легшим: {:?}", done.landed));
+    }
     let in_base = open.read().expect("чтение").list::<License>().await.expect("ключи").records.len();
     let others = open.read().expect("чтение").list::<OfficeLicense>().await.expect("записи").records.len();
     if (in_base, others) != (0, 0) {

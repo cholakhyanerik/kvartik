@@ -380,10 +380,18 @@ async fn a_receipt_tells_the_sender_what_arrived() {
             if Device::new().sync_made(crate::store::DB_NAME) != Some(got) {
                 wrong.push("день следующего кода не сдвинулся".to_owned());
             }
-            let whole = Receipt::new(&header, RecordId::random(), Continuity::First);
+            let whole = Receipt::new(&header, RecordId::random(), Continuity::Whole);
             paste_reply(&host, &receipt_text(&key, &whole).await, &mut wrong).await;
             if !wait_for(&host, t(lang, Key::SyncReceiptWhole)).await {
                 wrong.push("целый ряд не назван".to_owned());
+            }
+            // Впервые — не «цел» (ревью задачи 116): что там было раньше,
+            // принявший не знает.
+            let first = Receipt::new(&header, RecordId::random(), Continuity::First);
+            paste_reply(&host, &receipt_text(&key, &first).await, &mut wrong).await;
+            let words = fill(t(lang, Key::SyncReceiptFirst), &[""]);
+            if !wait_for(&host, &words).await {
+                wrong.push(format!("«впервые» не названо: «{}»", section_text(&host, "sync")));
             }
         }
         None => wrong.push("код не открылся".to_owned()),
@@ -618,4 +626,126 @@ async fn an_office_code_carries_every_ie() {
     crate::platform::set_hash("");
     documents::forget_device();
     assert!(wrong.is_empty(), "код всех ИП: {wrong:#?}");
+}
+
+/// Код файлов (задача 116): файл книги в код изменений не идёт, а следом
+/// уходит кодом файлов — частями, каждая своим кругом и своим текстом.
+/// Получатель, принявший код изменений паролем, собирает части в любом
+/// порядке и кладёт файл без второго пароля.
+#[wasm_bindgen_test]
+async fn files_follow_as_a_series_of_codes() {
+    use kvartik_core::model::attachment::{Attachment, FileBytes};
+    documents::fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    other_device();
+    Device::new().set_ui_lang(lang);
+    // Файл, который не сжимается: 70 КБ — три части серии.
+    let mut seed = 11u64;
+    let mut bytes = b"%PDF-1.4 ".to_vec();
+    bytes.extend((0..70_000).map(|_| {
+        seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        (seed >> 56) as u8
+    }));
+    let file = Attachment::create(
+        kvartik_core::model::record::RecordId::random(),
+        "договор.pdf",
+        FileBytes::new(bytes).expect("годный PDF"),
+        clock::now(),
+    );
+    let mut writes = Writes::default();
+    writes.insert(&file);
+    documents::commit(writes).await;
+    let mut wrong = Vec::new();
+
+    // Отправитель: код изменений, потом — код файлов, часть за частью.
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база не открылась".to_owned());
+    }
+    let code = make(&host, lang, true, &mut wrong).await.unwrap_or_default();
+    match sync_button(&host, t(lang, Key::SyncFilesMake)) {
+        Some(button) => button.click(),
+        None => wrong.push("нет «Передать файлы серией кодов»".to_owned()),
+    }
+    let first = fill(t(lang, Key::SyncFilesPart), &["1", "3"]);
+    if !wait_for(&host, &first).await {
+        wrong.push(format!("кода файлов нет: «{}»", section_text(&host, "sync")));
+    }
+    let mut parts = Vec::new();
+    for at in 1..=3 {
+        let heading = fill(t(lang, Key::SyncFilesPart), &[&at.to_string(), "3"]);
+        if !wait_for(&host, &heading).await {
+            wrong.push(format!("нет части {at}"));
+            break;
+        }
+        let text = host
+            .query_selector("#sync .sync-text textarea")
+            .ok()
+            .flatten()
+            .and_then(|area| Reflect::get(&area, &"value".into()).ok())
+            .and_then(|value| value.as_string())
+            .unwrap_or_default();
+        parts.push(text);
+        if at < 3 {
+            match sync_button(&host, t(lang, Key::SyncFilesNext)) {
+                Some(next) => next.click(),
+                None => wrong.push(format!("нет «Следующий код»: «{}»", section_text(&host, "sync"))),
+            }
+        }
+    }
+    drop(mounted);
+    host.remove();
+
+    // Получатель: пустая база. Код файлов раньше кода изменений не ложится
+    // (ревью задачи 116); потом код изменений паролем, части — в обратном
+    // порядке, без пароля.
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    other_device();
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база получателя не открылась".to_owned());
+    }
+    if let Some(input) = paste(&host, lang, &parts.join("\n"), &mut wrong).await {
+        accept(&host, lang, &input, PASSWORD);
+        if !wait_for(&host, t(lang, Key::SyncFilesFirst)).await {
+            wrong.push(format!("код файлов лёг раньше кода изменений: «{}»", section_text(&host, "sync")));
+        }
+    }
+    if let Some(input) = paste(&host, lang, &code, &mut wrong).await {
+        accept(&host, lang, &input, PASSWORD);
+        if !wait_for(&host, t(lang, Key::SyncReceiptTitle)).await {
+            wrong.push(format!("код изменений не лёг: «{}»", section_text(&host, "sync")));
+        }
+    }
+    let area = find(&host, ".sync-paste:not(.sync-reply) textarea").await;
+    for part in parts.iter().rev() {
+        if let Some(area) = &area {
+            Reflect::set(area, &"value".into(), &part.into()).expect("значение поставлено");
+            area.dispatch_event(&web_sys::Event::new("input").expect("событие")).expect("отправлено");
+        }
+    }
+    let landed = fill(t(lang, Key::BackupRestored), &["1", "0", "1"]);
+    if !wait_for(&host, &landed).await {
+        wrong.push(format!("файлы не легли: «{}»", section_text(&host, "sync")));
+    }
+    if password_field(&host, t(lang, Key::SyncPassword)).is_some() {
+        wrong.push("код файлов спросил пароль снова".to_owned());
+    }
+    let stored = crate::store::Store::open(|_| {})
+        .await
+        .expect("база открыта")
+        .read()
+        .expect("чтение")
+        .all::<Attachment>()
+        .await
+        .unwrap_or_default();
+    if !stored.iter().any(|found| found.id() == file.id()) {
+        wrong.push("файла нет в базе получателя".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    other_device();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "код файлов: {wrong:#?}");
 }

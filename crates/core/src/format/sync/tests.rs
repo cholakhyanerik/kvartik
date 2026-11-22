@@ -391,7 +391,7 @@ fn a_receipt_says_what_was_taken() {
     let mut wrong = Vec::new();
     for (name, continuity, expected) in [
         ("ряд цел", Continuity::Whole, Acked::Whole),
-        ("впервые", Continuity::First, Acked::Whole),
+        ("впервые", Continuity::First, Acked::First),
         ("дыра", Continuity::Gap { got: at(3_000) }, Acked::Gap { got: at(3_000) }),
     ] {
         let receipt = Receipt::new(&header, them, continuity);
@@ -407,11 +407,12 @@ fn a_receipt_says_what_was_taken() {
         }
     }
     let receipt = String::from_utf8(Receipt::new(&header, them, Continuity::Whole).plain()).expect("текст");
+    assert!(receipt.contains(r#""taken":"whole""#), "вид квитанции: {receipt}");
     for broken in [
-        receipt.replace(r#""whole":true"#, r#""whole":false"#),
+        receipt.replace(r#""taken":"whole""#, r#""taken":"partly""#),
         receipt.replace("kvartik-receipt", "kvartik-sync"),
-        receipt.replace(r#""got":null"#, r#""got":null,"extra":1"#),
-        receipt.replace(r#""got":null"#, r#""got":1"#),
+        receipt.replace(r#""taken":"whole""#, r#""taken":"whole","extra":1"#),
+        receipt.replace(r#""taken":"whole""#, r#""taken":{"gap":{"got":1,"extra":2}}"#),
         "не JSON".to_owned(),
     ] {
         if Receipt::read(broken.as_bytes()).is_ok() {
@@ -564,12 +565,112 @@ fn an_unknown_ip_of_a_delta_is_named() {
     office_base.put(&old);
     office_base.put(&new);
     let entries = pick_office(office_base.raw(), None).expect("собрано").entries().to_vec();
-    let missing = office::missing(&entries, &[], at(4_000)).expect("читается");
+    let missing = office::missing(&entries, &[], Some(at(4_000))).expect("читается");
     assert_eq!(missing.map(|ip| ip.id()), Some(old.id()), "старый ИП, которого здесь нет");
-    assert_eq!(office::missing(&entries, std::slice::from_ref(&old), at(4_000)).expect("читается"), None);
+    assert_eq!(office::missing(&entries, std::slice::from_ref(&old), Some(at(4_000))).expect("читается"), None);
     assert_eq!(
-        office::missing(&entries, &[], at(400)).expect("читается"),
+        office::missing(&entries, &[], Some(at(400))).expect("читается"),
         None,
         "оба добавлены после начала кода"
     );
+    assert!(
+        office::missing(&entries, std::slice::from_ref(&old), None).expect("читается").is_some(),
+        "коду файлов новых нет"
+    );
+    // Тот же ИНН, но свой профиль и своя запись ИП — данных того устройства
+    // здесь нет (ревью задачи 116).
+    let mut theirs = Ip::new(day, at(500));
+    let data = ProfileData {
+        tin: crate::model::tin::Tin::parse("07654321").ok(),
+        ..ProfileData::default()
+    };
+    theirs.copy_profile(&Profile::save(None, data.clone(), at(500)).expect("годный").expect("новый"), at(600));
+    let mut ours = Ip::new(day, at(500));
+    ours.copy_profile(&Profile::save(None, data, at(500)).expect("годный").expect("новый"), at(600));
+    let mut office_base = Base(Vec::new());
+    office_base.put(&theirs);
+    let entries = pick_office(office_base.raw(), None).expect("собрано").entries().to_vec();
+    assert_eq!(
+        office::missing(&entries, &[ours], Some(at(4_000))).expect("читается").map(|ip| ip.id()),
+        Some(theirs.id()),
+        "совпал только ИНН"
+    );
+}
+
+/// Файл книги с `len` байтами, которые не сжимаются.
+fn noisy_file(len: usize, modified: i64) -> Attachment {
+    let mut seed = len as u64 + 7;
+    let mut bytes = b"%PDF-1.4 ".to_vec();
+    bytes.extend((0..len).map(|_| {
+        seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        (seed >> 56) as u8
+    }));
+    let file = FileBytes::new(bytes).expect("годный PDF");
+    Attachment::create(RecordId::random(), "договор.pdf", file, at(modified))
+}
+
+/// Код файлов (задача 116): файлы книги, изменённые с дня, и живой профиль —
+/// серией частей, каждая не больше обычного кода; части собираются в любом
+/// порядке и с повторами, а собранный код читается обратно с меткой `files`.
+#[test]
+fn files_travel_as_a_series() {
+    let (mut base, ip) = sample();
+    let (big, old) = (noisy_file(70_000, 7_000), noisy_file(1_000, 500));
+    base.put(&big);
+    base.put(&old);
+    let picked = pick_files(base.raw(), Some(at(4_000))).expect("собрано");
+    let kinds: Vec<&str> = picked.entries().iter().map(Entry::kind).collect();
+    assert_eq!(kinds, [Attachment::KIND, Attachment::KIND, Profile::KIND], "два изменённых файла и профиль");
+    assert_eq!(picked.entries()[2].meta().id(), ip.id());
+
+    let header = Header::new("0.0.174", at(9_000), RecordId::random(), Some(at(4_000))).for_files();
+    let packed = pack(&header, picked.entries()).expect("помещается в серию");
+    let code = seal(&lock(), &packed);
+    assert!(code.len() > MAX_CODE_BYTES, "в один код не поместился бы");
+    let parts = segments(&code, 77);
+    assert_eq!(parts.len(), code.len().div_ceil(SEGMENT_BYTES));
+    assert!(parts.iter().all(|part| part.len() <= MAX_CODE_BYTES && payload(part) == Payload::Segment));
+    assert!(parts.iter().all(|part| sync_frames(part) <= MAX_FRAMES), "часть — обычный круг кадров");
+
+    let mut series = Series::default();
+    for part in parts.iter().rev().chain(parts.iter()) {
+        series.take(part).expect("часть");
+    }
+    assert_eq!((series.got(), series.count()), (parts.len(), parts.len()));
+    let whole = series.whole().expect("собран");
+    assert_eq!(whole, code);
+    assert_eq!(open(&whole).err(), Some(CodeError::Damaged("конверт кода не той версии или длины".to_owned())));
+    let sealed = open_series(&whole).expect("открывается");
+    let read = read(&sealed, sealed.ciphertext()).expect("читается");
+    assert!(read.header().files());
+    assert_eq!(read.entries().len(), 3);
+}
+
+/// Части серии: чужие байты и часть новой версии — не части, часть другой
+/// серии начинает сборку заново, а файлов больше, чем вмещает серия, — отказ
+/// с числом байтов, а не серия, которую никто не снимет.
+#[test]
+fn a_series_is_whole_or_refused() {
+    let code = vec![9u8; SEGMENT_BYTES + 10];
+    let (first, second) = (segments(&code, 1), segments(&code, 2));
+    let mut series = Series::default();
+    assert_eq!(series.take(&first[0]), Ok(Took::New));
+    assert_eq!(series.take(&first[0]), Ok(Took::Again));
+    assert_eq!(series.take(&second[1]), Ok(Took::Restarted));
+    assert_eq!(series.whole(), None);
+    assert_eq!(series.take(&second[0]), Ok(Took::New));
+    assert_eq!(series.whole(), Some(code));
+    let mut newer = first[0].clone();
+    newer[3] = 2;
+    assert_eq!(series.take(&newer), Err(FrameError::Newer));
+    assert_eq!(series.take(b"KVF\x01"), Err(FrameError::NotFrame));
+    let mut too_many = first[0].clone();
+    too_many[10..12].copy_from_slice(&u16::try_from(MAX_SEGMENTS + 1).expect("число").to_be_bytes());
+    assert_eq!(series.take(&too_many), Err(FrameError::NotFrame));
+
+    let mut base = Base(Vec::new());
+    base.put(&noisy_file(MAX_SERIES_BYTES, 7_000));
+    let picked = pick_files(base.raw(), None).expect("собрано");
+    let header = Header::new("0.0.174", at(9_000), RecordId::random(), None).for_files();
+    assert!(matches!(pack(&header, picked.entries()), Err(TooLarge { bytes }) if bytes > MAX_SERIES_BYTES));
 }

@@ -58,13 +58,23 @@ pub struct Sealing<'a> {
 }
 
 /// Собрать код из базы: изменённые с `header.since` записи — одной
-/// транзакцией чтения, — сжать, зашифровать и запечатать.
+/// транзакцией чтения, — сжать, зашифровать и запечатать. У кода файлов
+/// (`Header::files`) — файлы книги и логотипы (задача 116).
 pub async fn make(store: &Store, sealing: &Sealing<'_>) -> Result<Made, Unmade> {
     let dumped = store.read().map_err(Failure::from)?.dump().await.map_err(Failure::from)?;
-    let picked = sync::pick_sliced(dumped.iter().map(Dumped::raw), sealing.header.since(), &mut breathe)
-        .await
-        .map_err(newer)?;
+    let picked = pick(&dumped, sealing.header.since(), sealing.header.files()).await?;
     seal(picked, sealing).await
+}
+
+/// Что из выгрузки базы идёт в код: изменения или файлы.
+async fn pick(dumped: &[Dumped], since: Option<kvartik_core::model::record::Timestamp>, files: bool) -> Result<Picked, Unmade> {
+    let raw = dumped.iter().map(Dumped::raw);
+    let picked = if files {
+        sync::pick_files_sliced(raw, since, &mut breathe).await
+    } else {
+        sync::pick_sliced(raw, since, &mut breathe).await
+    };
+    Ok(picked.map_err(newer)?)
 }
 
 /// Собрать код всех ИП (задача 116): записи конторы и изменения базы каждого
@@ -86,9 +96,7 @@ pub async fn make_all(open: &Store, open_name: &str, office_store: &Store, seali
             &other
         };
         let dumped = store.read().map_err(Failure::from)?.dump().await.map_err(Failure::from)?;
-        let base = sync::pick_sliced(dumped.iter().map(Dumped::raw), if new { None } else { since }, &mut breathe)
-            .await
-            .map_err(newer)?;
+        let base = pick(&dumped, if new { None } else { since }, sealing.header.files()).await?;
         picked.absorb(base.in_base(ip.id()));
     }
     seal(picked, sealing).await
@@ -127,9 +135,16 @@ pub async fn unlock(sealed: &Sealed, password: &str) -> Result<(Code, Key), Unre
     let key = crypto::derive(password, lock.salt(), lock.iterations())
         .await
         .map_err(Unread::Crypto)?;
-    let plain = crypto::decrypt(&key, lock.iv(), sealed.ciphertext())
+    let code = unlock_with(sealed, &key).await?;
+    Ok((code, key))
+}
+
+/// Расшифровать и прочитать код уже готовым ключом — ключом прошлого кода
+/// того же пароля (код файлов вслед за кодом изменений, задача 116).
+pub async fn unlock_with(sealed: &Sealed, key: &Key) -> Result<Code, Unread> {
+    let lock = sealed.lock();
+    let plain = crypto::decrypt(key, lock.iv(), sealed.ciphertext())
         .await
         .map_err(Unread::Crypto)?;
-    let code = sync::read_sliced(sealed, &plain, &mut breathe).await.map_err(Unread::Code)?;
-    Ok((code, key))
+    sync::read_sliced(sealed, &plain, &mut breathe).await.map_err(Unread::Code)
 }

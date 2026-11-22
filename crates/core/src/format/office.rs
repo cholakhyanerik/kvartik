@@ -207,16 +207,23 @@ fn pair<'a>(local: &'a [Ip], theirs: &Ip) -> Option<&'a Ip> {
         .or_else(|| local.iter().find(|ours| ours.tin().is_some() && ours.tin() == theirs.tin()))
 }
 
-/// ИП кода всех ИП «с дня» `since` (`format::sync`, задача 116), которого
-/// в списке этого устройства `local` нет, а добавлен он не после начала
-/// кода: изменения такого ИП легли бы новым ИП без остального, и остальное не
-/// пришло бы никогда. `None` — все ИП кода здесь есть или новые. ИП,
-/// добавленный после начала кода, отправитель кладёт всеми записями
-/// (`sync::pick_office`), а без момента добавления (`Ip::first`) он не новый.
-pub fn missing(incoming: &[Entry], local: &[Ip], since: Timestamp) -> Result<Option<Ip>, FormatError> {
+/// ИП кода всех ИП «с дня» `since` (`format::sync`, задача 116), данных
+/// которого на этом устройстве нет, а добавлен он не после начала кода:
+/// изменения такого ИП легли бы без остального, и остальное не пришло бы
+/// никогда. Данные здесь — у ИП списка `local` с той же записью ИП или
+/// записью профиля, а не одним ՀՎՀՀ: ИП, заведённый здесь своим профилем, —
+/// не данные того устройства (как у кода одного ИП, ревью задачи 110). `None`
+/// — у всех ИП кода данные здесь или они новые. ИП, добавленный после начала
+/// кода, отправитель кладёт всеми записями (`sync::pick_office`), а без
+/// момента добавления (`Ip::first`) он не новый; `since` — `None` у кода
+/// файлов: ему новых нет — сначала код изменений.
+pub fn missing(incoming: &[Entry], local: &[Ip], since: Option<Timestamp>) -> Result<Option<Ip>, FormatError> {
     for theirs in ips(incoming)? {
-        let new = theirs.added_at().is_some_and(|at| at >= since);
-        if !new && pair(local, &theirs).is_none() {
+        let new = since.is_some_and(|since| theirs.added_at().is_some_and(|at| at >= since));
+        let here = local.iter().any(|ours| {
+            ours.id() == theirs.id() || ours.profile().is_some() && ours.profile() == theirs.profile()
+        });
+        if !new && !here {
             return Ok(Some(theirs));
         }
     }
