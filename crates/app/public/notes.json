@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.179",
+      "date": "2026-11-23",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось."
+      ],
+      "en": [
+        "Nothing changed in the app."
+      ]
+    },
+    {
       "version": "0.0.178",
       "date": "2026-11-23",
       "hy": [
@@ -251,19 +264,6 @@
       ],
       "en": [
         "The AI assistant now opens as its own page inside the app: the key and the conversation live there, and only it talks to the AI provider, while the app with your data talks only to its own site."
-      ]
-    },
-    {
-      "version": "0.0.159",
-      "date": "2026-11-20",
-      "hy": [
-        "ԱԲ օգնականն այժմ ճանաչում է Gemini-ի նոր տեսակի բանալին, որը սկսվում է «AQ.»-ով, և այլևս չի գրում, որ այն նման չէ API բանալու։"
-      ],
-      "ru": [
-        "ИИ-помощник теперь узнаёт ключ Gemini нового вида, который начинается с «AQ.», и больше не пишет, что он не похож на ключ API."
-      ],
-      "en": [
-        "The AI assistant now recognizes the new kind of Gemini key, which starts with “AQ.”, and no longer says it doesn't look like an API key."
       ]
     }
   ]

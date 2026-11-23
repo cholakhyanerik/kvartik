@@ -19,8 +19,8 @@ use crate::platform::{clock, set_hash};
 use crate::store::Writes;
 use crate::store::device::Device;
 
-/// Адрес экрана годовых платежей — договор с закладками (CLAUDE.md,
-/// Правило 2, «Разделы — экранами»).
+/// Адрес экрана годовых платежей — договор с закладками
+/// (`.claude/rules/features/ui.md`, «Разделы — экранами»).
 const ANNUAL: &str = "#/annual";
 
 fn drams(lang: Lang, drams: i64) -> String {

@@ -1461,8 +1461,8 @@ fn EnteredKeys(lang: ReadSignal<Lang>, licenses: Licenses, profile_tin: Memo<Opt
 /// записью, как его выдал автор (`license::Key::text`), для своих устройств
 /// (условия, п. 4.3). В буфер — в самом нажатии, до первого `await`
 /// (`platform::clipboard`); не легло — словами, и ключ встаёт текстом,
-/// который выделяется целиком одним касанием (CLAUDE.md, Правило 6, «Буфер
-/// обмена»).
+/// который выделяется целиком одним касанием
+/// (`.claude/rules/pitfalls/browser-api.md`, «Буфер обмена»).
 #[component]
 fn KeyCopy(lang: ReadSignal<Lang>, text: String) -> impl IntoView {
     let text = StoredValue::new(text);

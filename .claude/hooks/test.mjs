@@ -54,6 +54,12 @@ const cases = [
   ["allow", "Grep", { pattern: "\\.key", path: `${P}/.gitignore` }],
   ["allow", "Glob", { pattern: "**/*.keystore.rs" }],
   ["allow", "Edit", { file_path: `${P}/.gitignore`, old_string: "*.key", new_string: "*.key" }],
+  // Правила `.claude/rules/` (с 0.0.179) — обычные файлы проекта, и «license»
+  // в имени — не ключ.
+  ["allow", "Read", { file_path: `${P}/.claude/rules/features/license.md` }],
+  ["allow", "Edit", { file_path: `${P}/.claude/rules/security.md`, old_string: "a", new_string: "b" }],
+  ["allow", "Write", { file_path: `${P}/.claude/rules/pitfalls/new.md`, content: "---\npaths:\n  - \"crates/**\"\n---\n" }],
+  ["allow", "Grep", { pattern: "paths:", path: `${P}/.claude/rules` }],
   // Ключи: команды оболочки.
   ["deny", "Bash", { command: "cat ~/keys/license.key" }],
   ["deny", "Bash", { command: "cp \"C:/Users/chola/Documents/kvartik signing.key\" /c/tmp/" }],
@@ -134,6 +140,10 @@ try {
   lf("font.ttf", "a\r\nb", "a\r\nb");
   lf("run.bat", "@echo off\r\n", "@echo off\r\n");
   lf("plain.toml", "a = 1\r\n", "a = 1\n");
+  // Файл правил `.claude/rules/` (с 0.0.179): шапку `paths:` с CRLF Claude Code
+  // мог бы не узнать, и файл грузился бы в каждую сессию.
+  fs.mkdirSync(path.join(dir, ".claude", "rules", "features"), { recursive: true });
+  lf(path.join(".claude", "rules", "features", "x.md"), "---\r\npaths:\r\n  - \"a/**\"\r\n---\r\n", "---\npaths:\n  - \"a/**\"\n---\n");
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }

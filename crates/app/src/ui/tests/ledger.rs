@@ -246,8 +246,8 @@ async fn ledger_counts_documents_and_entries() {
     assert!(wrong.is_empty(), "книга: {wrong:#?}");
 }
 
-/// Длинный квартал — страницами (Правило 1, «рисовать только видимое»):
-/// из 31 записи видно 30 и «Показать ещё», после него — все.
+/// Длинный квартал — страницами (`.claude/rules/speed.md`, «Не пересчитывать
+/// лишнего»): из 31 записи видно 30 и «Показать ещё», после него — все.
 #[wasm_bindgen_test]
 async fn long_quarter_shows_by_pages() {
     crate::store::delete_database(crate::store::DB_NAME).await;
