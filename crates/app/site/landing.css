@@ -893,17 +893,23 @@ footer .links {
     scale: 1;
   }
 
+  /* Тень подписи — только пока мышь на кнопке, как у окна (base.css):
+     в покое у подписи в три строки она вставала внутри кнопки. */
   .button .label {
-    text-shadow: 0 var(--motion-flip) var(--on-fill-hover);
-    transition: translate var(--motion-duration) var(--motion-ease);
-  }
-
-  .button.secondary .label {
-    text-shadow: 0 var(--motion-flip) var(--on-fill-hover-soft);
+    text-shadow: 0 var(--motion-flip) transparent;
+    transition:
+      translate var(--motion-duration) var(--motion-ease),
+      text-shadow 0s linear var(--motion-duration);
   }
 
   .button:hover .label {
     translate: 0 calc(-1 * var(--motion-flip));
+    text-shadow: 0 var(--motion-flip) var(--on-fill-hover);
+    transition: translate var(--motion-duration) var(--motion-ease);
+  }
+
+  .button.secondary:hover .label {
+    text-shadow: 0 var(--motion-flip) var(--on-fill-hover-soft);
   }
 
   /* Карточка под мышью чуть наклоняется вслед за курсором, по ней скользит

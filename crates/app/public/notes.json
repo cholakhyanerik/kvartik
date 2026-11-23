@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.177",
+      "date": "2026-11-23",
+      "hy": [
+        "Համակարգչում երեք տողով կոճակի տակ, օրինակ՝ «Ակտ այս հաշվի համար», այլևս չի երևում նույն մակագրության կրկնօրինակը, իսկ մկնիկի տակ մակագրությունը թերթվում է առանց խառնվելու։"
+      ],
+      "ru": [
+        "На компьютере под кнопкой с подписью в три строки, например «Ակտ այս հաշվի համար» в армянском окне, больше не видно второй копии надписи, а под мышью подпись перелистывается, не путаясь сама с собой."
+      ],
+      "en": [
+        "On a computer, a button whose label wraps to three lines, like “Ակտ այս հաշվի համար” in the Armenian window, no longer shows a second copy of the label, and under the mouse the label flips without overlapping itself."
+      ]
+    },
+    {
       "version": "0.0.176",
       "date": "2026-11-23",
       "hy": [
@@ -254,22 +267,6 @@
       "en": [
         "AI assistant: under Tax you can ask your own AI (Claude, ChatGPT, Gemini or Grok) about taxes, with your own API key. The question goes straight to the provider you chose, not to us, and the key stays only on this device. An AI answer is not tax advice: check it against the law and with an accountant.",
         "The license terms and the privacy policy are updated: editions of November 20, 2026."
-      ]
-    },
-    {
-      "version": "0.0.157",
-      "date": "2026-11-19",
-      "hy": [
-        "Երկու սարքով աշխատողների համար. «Կարգավորումներում» այժմ կարելի է անջատել հաշիվների և ակտերի թողարկումն այն սարքում, որը դրանք չի թողարկում, որպեսզի համարները չկրկնվեն։ Այնտեղ մնում են սևագրերը, վճարումները, եկամուտներն ու ծախսերը, իսկ թողարկող սարքին դրանք կհասնեն պատճենով։",
-        "Եթե երկու սարքերն արդեն թողարկել են նույն համարով փաստաթղթեր, ցուցակը նշում է այդ համարները, իսկ դատարկ ծրագրում պատճենը վերականգնելուց հետո ծրագիրը հարցնում է, թե որտեղ թողարկել այսուհետ։"
-      ],
-      "ru": [
-        "Для тех, кто работает с двух устройств: в «Настройках» теперь можно выключить выпуск счетов и актов на устройстве, которое их не выпускает, — номера не совпадут. Черновики, оплаты, доходы и расходы там остаются, а на устройство, которое выпускает, их переносит копия.",
-        "Если два устройства уже выпустили документы с одним номером, список называет эти номера, а после копии, восстановленной в пустую программу, окно спрашивает, где выпускать дальше."
-      ],
-      "en": [
-        "For those who work from two devices: in Settings you can now turn off issuing invoices and acts on the device that doesn't issue them, so numbers won't repeat. Drafts, payments, income and expenses stay there, and a backup carries them to the device that issues.",
-        "If two devices have already issued documents with the same number, the list names those numbers, and after a backup is restored into an empty app, it asks where to issue from now on."
       ]
     }
   ]

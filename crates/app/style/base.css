@@ -3155,13 +3155,23 @@ ul.report-fields {
     scale: 1;
   }
 
+  /* Тень подписи — только пока мышь на кнопке, а снимается, когда подпись
+     вернулась на место (`text-shadow` с задержкой во всю длину перехода:
+     один кадр, а не перерисовка каждого). В покое её нет: у подписи в три
+     строки (армянская «Ակտ այս հաշվի համար» в карточке документа — и на
+     компьютере) тень первой строки вставала внутри кнопки второй надписью
+     (0.0.177). */
   :where(button, .button):where(:not(.link, .round, .entry, .disabled, :disabled, .seg *, .langs *, .notice.due *)) .label {
-    text-shadow: 0 var(--motion-flip) var(--on-fill-hover);
-    transition: translate var(--motion-duration) var(--motion-ease);
+    text-shadow: 0 var(--motion-flip) transparent;
+    transition:
+      translate var(--motion-duration) var(--motion-ease),
+      text-shadow 0s linear var(--motion-duration);
   }
 
   :where(button, .button):where(:not(.link, .round, .entry, .disabled, :disabled, .seg *, .langs *, .notice.due *)):hover .label {
     translate: 0 calc(-1 * var(--motion-flip));
+    text-shadow: 0 var(--motion-flip) var(--on-fill-hover);
+    transition: translate var(--motion-duration) var(--motion-ease);
   }
 
   /* Второстепенная — заливкой тона напоминаний (её цвета — после общих:
@@ -3170,7 +3180,7 @@ ul.report-fields {
     background: var(--fill-hover-soft);
   }
 
-  :where(button, .button):where(.secondary:not(.link, .round, .entry, .disabled, :disabled, .seg *, .langs *, .notice.due *)) .label {
+  :where(button, .button):where(.secondary:not(.link, .round, .entry, .disabled, :disabled, .seg *, .langs *, .notice.due *)):hover .label {
     text-shadow: 0 var(--motion-flip) var(--on-fill-hover-soft);
   }
 

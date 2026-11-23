@@ -1264,6 +1264,19 @@ async function motion(browser) {
     // DevTools не умеет (`Emulation.setEmulatedMedia`, Chrome 157,
     // 2026-11-06), поэтому проверяется то, что верно для этой машины.
     const pointing = await page.eval(`return matchMedia("(hover: hover) and (pointer: fine)").matches;`);
+    // Тень «перелистывания» подписи — только под мышью и до возвращения
+    // подписи (0.0.177): в покое у подписи в три строки она вставала внутри
+    // кнопки второй надписью. Стили наведения — только с мышью системы.
+    const shadow = `const l = document.querySelector("[data-hovered] .label");
+      if (!l) return null; const s = getComputedStyle(l).textShadow;
+      return s === "none" || s.startsWith("rgba(0, 0, 0, 0)") ? "нет" : "есть";`;
+    checks.check(`движение: тень подписи под мышью ${pointing ? "есть" : "нет: мыши нет"}`,
+      await page.waitFor(`const v = (() => { ${shadow} })(); return v === ${JSON.stringify(pointing ? "есть" : "нет")} ? true : null;`, 3000));
+    await mouse(2, 2);
+    await sleep(900);
+    const rest = await page.eval(`return (() => { ${shadow} })();`);
+    checks.check("движение: в покое у подписи тени нет", rest === "нет", JSON.stringify(rest));
+    await hover("#clients");
     checks.check(`движение: кружок у курсора — над кнопкой, ${pointing ? "виден: мышь есть" : "не виден: мыши нет"}`,
       await page.waitFor(`const c = document.querySelector(".cursor");
       return c && c.dataset.over === "press" && getComputedStyle(c).display === ${JSON.stringify(pointing ? "block" : "none")}
