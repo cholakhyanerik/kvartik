@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.182",
+      "date": "2026-11-24",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось."
+      ],
+      "en": [
+        "Nothing changed in the app."
+      ]
+    },
+    {
       "version": "0.0.181",
       "date": "2026-11-23",
       "hy": [
@@ -251,22 +264,6 @@
       "en": [
         "The shared calendar on the Deadlines screen now has a “Copy the address” button: use the address to subscribe in Google Calendar and Outlook.",
         "On Windows there is no subscribe button anymore: Outlook opens such links there and may fetch the calendar over an unprotected connection. Subscribe there with the address that starts with https://."
-      ]
-    },
-    {
-      "version": "0.0.162",
-      "date": "2026-11-21",
-      "hy": [
-        "Ծրագիրն այժմ կարելի է փորձել 30 օրով փորձնական բանալիով. այն անվճար ուղարկում է վաճառողը։ «Լիցենզիա» էկրանի «Գրել վաճառողին» կոճակը բացում է նամակ, որում ՀՎՀՀ-ն արդեն գրված է։ Արդեն սկսված փորձաշրջանը շարունակվում է մինչև ավարտը, իսկ ՀՎՀՀ-ն այլևս սերվեր չի ուղարկվում։",
-        "Թարմացվել են լիցենզիայի պայմաններն ու գաղտնիության քաղաքականությունը՝ 21.11.2026 խմբագրությամբ։"
-      ],
-      "ru": [
-        "Попробовать программу теперь можно с пробным ключом на 30 дней: его бесплатно присылает продавец. Кнопка «Написать продавцу» на экране «Лицензия» открывает письмо, где ИНН уже вписан. Уже начатый пробный период идёт до конца, а ИНН на сервер больше не уходит.",
-        "Обновлены условия лицензии и политика конфиденциальности: редакции от 21.11.2026."
-      ],
-      "en": [
-        "You can now try the app with a 30-day trial key, which the seller sends free of charge. “Write to the seller” on the License screen opens an email with your TIN already filled in. A trial that has already started runs to its end, and the TIN no longer goes to the server.",
-        "The license terms and the privacy policy are updated: editions of November 21, 2026."
       ]
     }
   ]
