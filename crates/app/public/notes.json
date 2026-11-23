@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.180",
+      "date": "2026-11-23",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось."
+      ],
+      "en": [
+        "Nothing changed in the app."
+      ]
+    },
+    {
       "version": "0.0.179",
       "date": "2026-11-23",
       "hy": [
@@ -251,19 +264,6 @@
       ],
       "en": [
         "If the AI assistant asks for your key again, enter it once more: the app no longer hands the key to the assistant itself, so no code in the app can slip it someone else's key."
-      ]
-    },
-    {
-      "version": "0.0.160",
-      "date": "2026-11-20",
-      "hy": [
-        "ԱԲ օգնականն այժմ բացվում է ծրագրի ներսում՝ իր առանձին էջով. բանալին և զրույցը նրանում են, և միայն այն է դիմում ԱԲ մատակարարին, իսկ ծրագիրը՝ ձեր տվյալներով, միայն իր կայքին։"
-      ],
-      "ru": [
-        "ИИ-помощник теперь открывается своей страницей внутри программы: ключ и разговор — в ней, и только она обращается к поставщику ИИ, а сама программа с вашими данными — только к своему сайту."
-      ],
-      "en": [
-        "The AI assistant now opens as its own page inside the app: the key and the conversation live there, and only it talks to the AI provider, while the app with your data talks only to its own site."
       ]
     }
   ]

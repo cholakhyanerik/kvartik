@@ -23,3 +23,9 @@ docs/design/** -text
 # Скрипты bash (tools/deploy/check.sh) — с концами строк LF и на Windows:
 # bash читает `\r` частью команды, и скрипт падает на первой строке.
 *.sh text eol=lf
+
+# Правила Claude Code `.claude/rules/` (с 0.0.179) — тоже LF и на Windows:
+# с core.autocrlf git выдавал их с CRLF, а шапку `paths:` с CRLF ни тест
+# `crates/app/tests/claude_md.rs`, ни, может быть, Claude Code не узнают —
+# и файл грузился бы в каждую сессию (найдено после выкладки 0.0.179).
+.claude/rules/** text eol=lf
