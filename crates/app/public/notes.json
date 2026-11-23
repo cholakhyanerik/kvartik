@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.178",
+      "date": "2026-11-23",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось."
+      ],
+      "en": [
+        "Nothing changed in the app."
+      ]
+    },
+    {
       "version": "0.0.177",
       "date": "2026-11-23",
       "hy": [
@@ -251,22 +264,6 @@
       ],
       "en": [
         "The AI assistant now recognizes the new kind of Gemini key, which starts with “AQ.”, and no longer says it doesn't look like an API key."
-      ]
-    },
-    {
-      "version": "0.0.158",
-      "date": "2026-11-20",
-      "hy": [
-        "ԱԲ օգնական. «Հարկ» բաժնում կարող եք հարկերի մասին հարցնել ձեր ԱԲ-ին (Claude, ChatGPT, Gemini կամ Grok)՝ ձեր API բանալիով։ Հարցն ուղիղ գնում է ձեր ընտրած մատակարարին, ոչ թե մեզ, իսկ բանալին պահվում է միայն այս սարքում։ ԱԲ-ի պատասխանը խորհրդատվություն չէ. ստուգեք այն օրենքով և հաշվապահի մոտ։",
-        "Թարմացվել են լիցենզիայի պայմաններն ու գաղտնիության քաղաքականությունը՝ 20.11.2026 խմբագրությամբ։"
-      ],
-      "ru": [
-        "ИИ-помощник: в разделе «Налог» можно спросить о налогах свой ИИ (Claude, ChatGPT, Gemini или Grok) по своему ключу API. Вопрос уходит прямо выбранному поставщику, а не нам, а ключ хранится только на этом устройстве. Ответ ИИ — не консультация: проверяйте его по закону и у бухгалтера.",
-        "Обновлены условия лицензии и политика конфиденциальности: редакции от 20.11.2026."
-      ],
-      "en": [
-        "AI assistant: under Tax you can ask your own AI (Claude, ChatGPT, Gemini or Grok) about taxes, with your own API key. The question goes straight to the provider you chose, not to us, and the key stays only on this device. An AI answer is not tax advice: check it against the law and with an accountant.",
-        "The license terms and the privacy policy are updated: editions of November 20, 2026."
       ]
     }
   ]
