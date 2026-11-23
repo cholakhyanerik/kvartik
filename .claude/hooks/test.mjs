@@ -86,7 +86,7 @@ const cases = [
   ["allow", "Bash", { command: "cargo clippy -p kvartik-keygen --all-targets -- -D warnings" }],
   // PowerShell 5.1 и текстовые файлы проекта.
   ["deny", "PowerShell", { command: "Set-Content -Path CLAUDE.md -Value $text" }],
-  ["deny", "PowerShell", { command: "(Get-Content crates\\core\\src\\i18n.rs) -replace 'a','b' | Set-Content crates\\core\\src\\i18n.rs" }],
+  ["deny", "PowerShell", { command: "(Get-Content crates\\core\\src\\i18n\\ru.rs) -replace 'a','b' | Set-Content crates\\core\\src\\i18n\\ru.rs" }],
   ["deny", "PowerShell", { command: "\"x\" | Out-File -Encoding utf8 C:\\dev\\kvartik\\README.md" }],
   ["deny", "PowerShell", { command: "echo hi > notes.md" }],
   ["deny", "PowerShell", { command: "git log -1 >> crates/app/public/root/_headers" }],

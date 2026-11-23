@@ -267,6 +267,11 @@ expected_type() {
     # Карта сайта лендинга (задача 34): тип XML — RFC 7303; какой из двух
     # ставит wrangler по таблице `mime`, сверяет первая выкладка.
     *.xml) echo application/xml text/xml ;;
+    # Снимки и ролик лендинга (задача 119): типы — по таблице `mime`
+    # wrangler, как у прочих; что их ставит хостинг, сверяет предпросмотр.
+    *.webp) echo image/webp ;;
+    *.webm) echo video/webm ;;
+    *.mp4) echo video/mp4 ;;
     *) echo "?" ;;
   esac
 }
@@ -297,7 +302,7 @@ while IFS= read -r path; do
   done
   [ "$ok" = 1 ] || fail "$path: Content-Type «$type», а ждали $(expected_type "$path")"
   cache="$(header cache-control "$work/head")"
-  if [[ "$path" =~ -[0-9a-f]{16}(_bg)?\.(wasm|js|css)$ ]]; then
+  if [[ "$path" =~ -[0-9a-f]{16}(_bg)?\.(wasm|js|css|webp|webm|mp4)$ ]]; then
     [[ "$cache" == *immutable* ]] || fail "$path: Cache-Control «$cache» — у файла с хэшем ждали immutable"
   else
     case "$cache" in

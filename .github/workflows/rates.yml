@@ -18,8 +18,14 @@
 # у которого CI красный, своих курсов на сайт не выложит. После выкладки —
 # та же проверка сайта, что у CI (`tools/deploy/check.sh`), на своём домене.
 # Курсы те же, что на сайте (выходной, праздник), — не выкладывается ничего.
-# Минуты CI считаются (CLAUDE.md, Правило 11): в выходной — полминуты,
-# в рабочий день — около двух.
+# В выходной прогон — полминуты, в рабочий день — около двух; минут
+# у публичного репозитория GitHub не считает (CLAUDE.md, Правило 11).
+#
+# Репозиторий публичный (с 2026-11-21), и задания по расписанию — это и
+# advisories.yml — GitHub выключает сам, когда в репозитории 60 дней не было
+# активности (docs.github.com, «Disabling and enabling a workflow», сверено
+# 2026-11-23), молча: курсы на сайте просто перестали бы новеть. Держит их
+# задание `keepalive` ниже (задача 119).
 #
 # Действия — по SHA коммита (Правило 13).
 name: Курсы ЦБ
@@ -49,6 +55,42 @@ env:
   SITE_URL: https://kvartik.com
 
 jobs:
+  # Каждый день включает оба задания по расписанию: включение, по словам
+  # сторонних проектов (gautamkrishnar/keepalive-workflow v2,
+  # PhrozenByte/gh-workflow-immortality; 2026-11-23), снова отсчитывает 60 дней,
+  # а GitHub этого не обещает (Правило 6). Поэтому с 50-го дня без коммита
+  # в main задание ещё и краснеет: о красном прогоне GitHub пишет письмом
+  # (шапка advisories.yml), и до 60-го дня есть десять писем. Своим заданием,
+  # а не шагом курсов: праву `actions: write` нечего делать рядом с токеном
+  # Cloudflare, а красное напоминание не должно останавливать курсы.
+  keepalive:
+    name: Расписание не выключено
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Включить задания по расписанию
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for file in rates.yml advisories.yml; do
+            gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/$file/enable"
+          done
+
+      - name: Коммит в main не старше 50 дней
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq '.commit.committer.date')"
+          days=$(( ( $(date -u +%s) - $(date -u -d "$last" +%s) ) / 86400 ))
+          echo "Последний коммит в main — $days дн. назад ($last)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$days" -ge 50 ]; then
+            echo "::error::В main $days дн. нет коммитов: с 60-го дня GitHub может выключить курсы ЦБ и RustSec по расписанию. Отправьте законченную задачу или проверьте, что задания включены: gh workflow enable rates.yml; gh workflow enable advisories.yml"
+            exit 1
+          fi
+
   rates:
     name: Курсы ЦБ на сайт
     runs-on: ubuntu-latest

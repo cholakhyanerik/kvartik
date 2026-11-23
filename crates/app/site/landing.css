@@ -237,6 +237,98 @@ main > section + section {
   margin-top: var(--space-8);
 }
 
+/* Как это выглядит (задача 119): ролик телефона и снимки экранов. На
+   телефоне — столбцом, а снимки — лентой, которую листают пальцем: четыре
+   высоких снимка подряд — четыре экрана прокрутки. С 48rem ролик стоит
+   слева от слов, а снимки компьютера (`<picture>`) — по два в ряд под ними.
+   Место под картинкой есть до её прихода: размер — в разметке. */
+.look {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.look-head h2,
+.look-head p {
+  margin: 0;
+}
+
+.look-head {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 40rem;
+}
+
+.look figure {
+  margin: 0;
+}
+
+.look figcaption {
+  margin-top: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.demo {
+  justify-self: center;
+  width: min(100%, 18rem);
+}
+
+.demo video,
+.shots img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+}
+
+.shots {
+  display: grid;
+  grid-auto-columns: 72%;
+  grid-auto-flow: column;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0 0 var(--space-3);
+  overflow-x: auto;
+  list-style: none;
+  scroll-snap-type: x mandatory;
+}
+
+.shots li {
+  scroll-snap-align: start;
+}
+
+@media (min-width: 48rem) {
+  .look {
+    grid-template-columns: 18rem minmax(0, 1fr);
+    align-items: center;
+    column-gap: var(--space-7);
+  }
+
+  .demo {
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  .look-head {
+    grid-row: 1;
+    grid-column: 2;
+  }
+
+  .shots {
+    grid-column: 1 / -1;
+    grid-auto-flow: row;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 0;
+    overflow: visible;
+  }
+
+  /* Снимок компьютера — рамкой: его фон — фон страницы. */
+  .shots img {
+    border: 1px solid var(--border);
+  }
+}
+
 /* Что умеет Kvartik — карточками: на телефоне столбцом, шире — в две
    и в три колонки. */
 .cards {

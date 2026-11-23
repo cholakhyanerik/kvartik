@@ -48,7 +48,15 @@ const TYPES = {
   ".txt": "text/plain; charset=utf-8",
   // Карта сайта лендинга (задача 34).
   ".xml": "application/xml",
+  // Снимки и ролик лендинга (задача 119).
+  ".webp": "image/webp", ".webm": "video/webm", ".mp4": "video/mp4",
 };
+
+/// Что Cloudflare не сжимает: картинки и видео уже сжаты, и в его списке
+/// сжимаемых типов их нет (docs Cloudflare, «Content compression»,
+/// сверено 2026-11-23). Своему серверу — так же: вес лендинга по проводу
+/// (задача 119) — без лишних долей процента от brotli.
+const PACKED = new Set([".webp", ".webm", ".mp4"]);
 
 /// Уровень brotli, которым сжимает хостинг (задача 109). Каждый файл,
 /// который отдал kvartik.com 2026-11-18 (узел EVN, 0.0.153), по проводу
@@ -131,7 +139,7 @@ export function own(dist, port, { quality = HOSTING_QUALITY, extra = DEPLOYED } 
     const found = files.get(p);
     const f = found ?? notFound(p);
     if (!f) { res.writeHead(404); return res.end(); }
-    const br = (req.headers["accept-encoding"] ?? "").includes("br");
+    const br = (req.headers["accept-encoding"] ?? "").includes("br") && !PACKED.has(path.extname(p));
     res.writeHead(found ? 200 : 404, {
       ...site, "Content-Type": f.type, "Cache-Control": "no-cache", ...(br ? { "Content-Encoding": "br" } : {}),
     });

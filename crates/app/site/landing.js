@@ -47,6 +47,37 @@ if (navigator.userAgent.includes("Windows NT")) {
   }
 }
 
+// Ролик «новый счёт → выпустить → PDF» (задача 119): в разметке он с
+// кнопками и без `autoplay` — без скрипта его включают сами. Здесь он идёт
+// сам, без звука и по кругу, пока виден хотя бы наполовину, а ушёл с глаз —
+// встаёт: в покое страница не работает (CLAUDE.md, Правило 1). Качать его
+// начинает только показ (`preload="none"`). Кто просит у системы меньше
+// движения или экономит трафик, остаётся с кнопками и постером: движение
+// само, без человека, — то, чего они не хотят (Правило 2, «Движение»).
+// Постер — тоже по мере прокрутки: атрибут `poster` браузер качает сразу,
+// где бы ролик ни стоял, и открытый лендинг весил бы на 60 КБ больше. Поэтому
+// он в `data-poster`, а ставится, когда ролик ближе 1250 точек к окну, — на
+// таком расстоянии Chrome начинает качать ленивую картинку.
+const demo = document.querySelector("video[data-demo]");
+if (demo && "IntersectionObserver" in window) {
+  new IntersectionObserver((entries, watch) => {
+    if (entries.some((entry) => entry.isIntersecting)) {
+      demo.poster = demo.dataset.poster;
+      watch.disconnect();
+    }
+  }, { rootMargin: "1250px 0px" }).observe(demo);
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches || navigator.connection?.saveData === true;
+  if (!still) {
+    demo.controls = false;
+    new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) demo.play().catch(() => { demo.controls = true; });
+        else demo.pause();
+      }
+    }, { threshold: 0.5 }).observe(demo);
+  }
+}
+
 // Калькулятор: форма — в разметке страницы, а считает и пишет ответ wasm
 // ядра (crates/calc, `tax::example`) — тот же расчёт, что у программы.
 // Здесь ни чисел, ни слов: поля уходят в wasm строкой JSON, а ответ — уже

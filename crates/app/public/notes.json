@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.176",
+      "date": "2026-11-23",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել։ kvartik.com-ում այժմ երևում է, թե ինչ տեսք ունի այն՝ տեսանյութ հաշիվ թողարկելու և PDF ստանալու մասին և գլխավոր էկրանի, հաշվի, մատյանի ու հարկի նկարներ։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось. На kvartik.com теперь видно, как она выглядит: ролик о том, как выписать счёт и получить PDF, и снимки главной, счёта, книги и налога."
+      ],
+      "en": [
+        "Nothing changed in the app. kvartik.com now shows what it looks like: a short video of issuing an invoice and getting its PDF, and pictures of the home screen, an invoice, the ledger and the tax."
+      ]
+    },
+    {
       "version": "0.0.175",
       "date": "2026-11-22",
       "hy": [
@@ -257,19 +270,6 @@
       "en": [
         "For those who work from two devices: in Settings you can now turn off issuing invoices and acts on the device that doesn't issue them, so numbers won't repeat. Drafts, payments, income and expenses stay there, and a backup carries them to the device that issues.",
         "If two devices have already issued documents with the same number, the list names those numbers, and after a backup is restored into an empty app, it asks where to issue from now on."
-      ]
-    },
-    {
-      "version": "0.0.156",
-      "date": "2026-11-19",
-      "hy": [
-        "Կարգավորումների ձեր գույներն այժմ երևում են բացման առաջին իսկ պահից. մուգ ֆոնով ծրագիրն այլևս չի սկսվում բաց գույնի կադրով։"
-      ],
-      "ru": [
-        "Свои цвета из настроек теперь видны с первого мгновения открытия: с тёмным фоном программа больше не начинается светлым кадром."
-      ],
-      "en": [
-        "Your own colors from Settings now show from the very first moment the app opens: with a dark background, it no longer starts with a light frame."
       ]
     }
   ]

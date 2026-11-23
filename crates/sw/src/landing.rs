@@ -116,6 +116,169 @@ const FEATURES: [(Key, Key); 6] = [
     (Key::LandingDevicesTitle, Key::LandingDevicesText),
 ];
 
+/// Папка снимков и ролика раздела «Как это выглядит» (задача 119) рядом
+/// с `landing.css`: их пишет `tools/browser/media.mjs` на demo-данных,
+/// а сборка кладёт в корень сайта под именем с хэшем содержимого, как CSS
+/// и скрипт, — `immutable` на год (`_headers`).
+const MEDIA: &str = "media";
+
+/// Экраны на снимках — имя файла (`<имя>-<язык>-<ширина>.webp`), подпись
+/// и описание (`alt`): подпись — имя экрана, как в меню программы.
+const SHOTS: [(&str, Key, Key); 4] = [
+    ("home", Key::NavHome, Key::LandingShotHomeAlt),
+    ("invoice", Key::KindInvoice, Key::LandingShotInvoiceAlt),
+    ("ledger", Key::NavLedger, Key::LandingShotLedgerAlt),
+    ("tax", Key::TaxTitle, Key::LandingShotTaxAlt),
+];
+
+/// Снимок или ролик в корне сайта: адрес и размер в пикселях — размер
+/// пишется в разметку, чтобы место под картинкой было до её прихода.
+struct Picture {
+    url: String,
+    width: u32,
+    height: u32,
+}
+
+/// Медиа страницы одного языка: ролик (WebM, MP4, постер) и снимки экранов
+/// — телефон и компьютер — по порядку [`SHOTS`].
+struct Media {
+    webm: String,
+    mp4: String,
+    poster: Picture,
+    shots: Vec<(Picture, Picture)>,
+}
+
+/// Ширина и высота картинки WebP по её заголовку (RIFF, чанк `VP8 `,
+/// `VP8L` или `VP8X`) — без декодера. `None` — не WebP.
+fn webp_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    if bytes.get(0..4)? != b"RIFF" || bytes.get(8..12)? != b"WEBP" {
+        return None;
+    }
+    let u16le = |at: usize| Some(u32::from(u16::from_le_bytes(bytes.get(at..at + 2)?.try_into().ok()?)));
+    let u24le = |at: usize| {
+        let b = bytes.get(at..at + 3)?;
+        Some(u32::from(b[0]) | u32::from(b[1]) << 8 | u32::from(b[2]) << 16)
+    };
+    match bytes.get(12..16)? {
+        // С потерями: после трёх байтов кадра — подпись 9d 01 2a и 14 бит размеров.
+        b"VP8 " => (bytes.get(23..26)? == [0x9d, 0x01, 0x2a]).then_some(())
+            .and_then(|()| Some((u16le(26)? & 0x3fff, u16le(28)? & 0x3fff))),
+        // Без потерь: подпись 2f и по 14 бит на ширину и высоту минус один.
+        b"VP8L" => {
+            if *bytes.get(20)? != 0x2f {
+                return None;
+            }
+            let bits = u32::from_le_bytes(bytes.get(21..25)?.try_into().ok()?);
+            Some(((bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1))
+        }
+        // Расширенный: размер холста — по 24 бита минус один.
+        b"VP8X" => Some((u24le(24)? + 1, u24le(27)? + 1)),
+        _ => None,
+    }
+}
+
+/// Файлы корня сайта, которые не текст: имя и байты.
+type Blobs = Vec<(String, Vec<u8>)>;
+
+/// Файлы медиа страниц всех языков: что положить в корень (имя и байты)
+/// и что вписать каждой странице. Нет файла, не WebP — ошибка сборки, а не
+/// страница с дырой вместо снимка.
+fn media(dir: &Path) -> Result<(Blobs, Vec<(Lang, Media)>), String> {
+    let mut files: Blobs = Vec::new();
+    let mut put = |name: &str| -> Result<(String, Vec<u8>), String> {
+        let path = dir.join(name);
+        let bytes = fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+        let ext = name.rsplit('.').next().unwrap_or_default();
+        let url = format!("kvartik-site-{}.{ext}", digest([(name, bytes.as_slice())]));
+        files.push((url.clone(), bytes.clone()));
+        Ok((url, bytes))
+    };
+    let mut pages = Vec::new();
+    for lang in Lang::ALL {
+        let code = lang.code();
+        let mut picture = |name: String| -> Result<Picture, String> {
+            let (url, bytes) = put(&name)?;
+            let (width, height) = webp_size(&bytes).ok_or_else(|| format!("{MEDIA}/{name}: не WebP"))?;
+            Ok(Picture { url, width, height })
+        };
+        let poster = picture(format!("demo-{code}.webp"))?;
+        let mut shots = Vec::new();
+        for (name, _, _) in SHOTS {
+            shots.push((picture(format!("{name}-{code}-360.webp"))?, picture(format!("{name}-{code}-1280.webp"))?));
+        }
+        let webm = put(&format!("demo-{code}.webm"))?.0;
+        let mp4 = put(&format!("demo-{code}.mp4"))?.0;
+        pages.push((lang, Media { webm, mp4, poster, shots }));
+    }
+    Ok((files, pages))
+}
+
+/// Раздел «Как это выглядит» (задача 119): ролик «новый счёт → выпустить →
+/// PDF» и снимки четырёх экранов. Ролик — без `autoplay` и с `controls`:
+/// без скрипта его включают сами, а скрипт лендинга снимает кнопки и
+/// включает его, когда он на виду, — и только если система не просит
+/// меньше движения и не экономит трафик (`site/landing.js`). `preload="none"`
+/// — ролик качает только тот, кто до него долистал (Правило 1), и постер
+/// тоже: атрибут `poster` браузер качает сразу, где бы ролик ни стоял
+/// (+60 КБ открытой страницы, замер задачи 119), поэтому он в `data-poster`,
+/// а ставит его скрипт по мере прокрутки, как ленивую картинку. Снимок —
+/// телефона, а с ширины колонки в 48rem — компьютера (`<picture>`), и тоже
+/// по мере прокрутки (`loading="lazy"`). Данные — пример, и это сказано
+/// рядом (Правило 2, «Образец назван образцом»).
+fn look(lang: Lang, media: &Media) -> String {
+    let text = |key: Key| escape(t(lang, key));
+    let mut shots = String::new();
+    for ((_, caption, alt), (phone, desktop)) in SHOTS.iter().zip(&media.shots) {
+        shots.push_str(&format!(
+            r#"          <li>
+            <figure>
+              <picture>
+                <source media="(min-width: 48rem)" srcset="/{desktop}" width="{dw}" height="{dh}" />
+                <img src="/{phone}" width="{pw}" height="{ph}" alt="{alt}" loading="lazy" decoding="async" />
+              </picture>
+              <figcaption>{caption}</figcaption>
+            </figure>
+          </li>
+"#,
+            desktop = desktop.url,
+            dw = desktop.width,
+            dh = desktop.height,
+            phone = phone.url,
+            pw = phone.width,
+            ph = phone.height,
+            alt = text(*alt),
+            caption = text(*caption),
+        ));
+    }
+    format!(
+        r#"      <section class="look" aria-labelledby="look">
+        <div class="look-head">
+          <h2 id="look">{title}</h2>
+          <p>{about}</p>
+        </div>
+        <figure class="demo">
+          <video data-demo muted loop playsinline controls preload="none" data-poster="/{poster}" width="{w}" height="{h}" aria-label="{alt}">
+            <source src="/{webm}" type="video/webm" />
+            <source src="/{mp4}" type="video/mp4" />
+          </video>
+          <figcaption>{caption}</figcaption>
+        </figure>
+        <ul class="shots">
+{shots}        </ul>
+      </section>
+"#,
+        title = text(Key::LandingLookTitle),
+        about = text(Key::LandingLookText),
+        poster = media.poster.url,
+        w = media.poster.width,
+        h = media.poster.height,
+        alt = text(Key::LandingDemoAlt),
+        webm = media.webm,
+        mp4 = media.mp4,
+        caption = text(Key::LandingDemoCaption),
+    )
+}
+
 /// Калькулятор в корне сайта (`wasm::calculator`): клей wasm-bindgen и сам
 /// wasm. Скрипт лендинга просит их вместе, а не wasm после клея: круг сети
 /// на телефоне — 0,56 с.
@@ -168,9 +331,10 @@ pub fn write(staging: &Path, site: &Path, style: &Path, legal: &Path, app: &str,
     let css_name = format!("kvartik-site-{}.css", digest([(STYLE, css.as_bytes())]));
     let js_name = format!("kvartik-site-{}.js", digest([(SCRIPT, js.as_bytes())]));
     let checked = rules::armenia().checked();
+    let (media_files, media) = media(&site.join(MEDIA))?;
     let mut files = Vec::new();
-    for lang in Lang::ALL {
-        files.push((page_file(url(lang)), page(lang, &css_name, &js_name, app, calc, checked)));
+    for (lang, media) in &media {
+        files.push((page_file(url(*lang)), page(*lang, &css_name, &js_name, app, calc, media, checked)));
     }
     let mut editions = 0;
     for doc in Legal::ALL {
@@ -214,23 +378,26 @@ pub fn write(staging: &Path, site: &Path, style: &Path, legal: &Path, app: &str,
     files.push((format!("{INDEXNOW_KEY}.txt"), INDEXNOW_KEY.to_owned()));
     files.push((css_name, css));
     files.push((js_name, js));
-    if let Some((name, _)) = files.iter().find(|(name, _)| staging.join(name).exists()) {
+    let names = files.iter().map(|(name, _)| name).chain(media_files.iter().map(|(name, _)| name));
+    if let Some(name) = names.into_iter().find(|name| staging.join(name).exists()) {
         return Err(format!("{}: файл корня лёг бы на файл лендинга", staging.join(name).display()));
     }
-    for (name, text) in &files {
+    let bytes = files.iter().map(|(name, text)| (name, text.as_bytes()));
+    for (name, bytes) in bytes.chain(media_files.iter().map(|(name, bytes)| (name, bytes.as_slice()))) {
         let target = staging.join(name);
         if let Some(folder) = target.parent() {
             fs::create_dir_all(folder).map_err(|error| format!("{}: {error}", folder.display()))?;
         }
-        fs::write(&target, text).map_err(|error| format!("{}: {error}", target.display()))?;
+        fs::write(&target, bytes).map_err(|error| format!("{}: {error}", target.display()))?;
     }
     Ok(format!(
-        "лендинг: страниц {}, «Купить» {}, отзывов {}, о налоге {}, юридических текстов {}",
+        "лендинг: страниц {}, «Купить» {}, отзывов {}, о налоге {}, юридических текстов {}, снимков и роликов {}",
         Lang::ALL.len(),
         Lang::ALL.len(),
         Lang::ALL.len(),
         Lang::ALL.len(),
-        editions * Lang::ALL.len()
+        editions * Lang::ALL.len(),
+        media_files.len()
     ))
 }
 
@@ -257,7 +424,7 @@ fn agreed(terms: &[(Lang, legal::Doc)]) -> Result<(), String> {
         if !legal::contains(text, words) {
             return Err(format!(
                 "{}.{}.md: нет слов согласия «{words}», которые просит написать страница «Купить» — \
-                 новая редакция условий? Тогда и новые слова в Key::BuyAccept (crates/core/src/i18n.rs)",
+                 новая редакция условий? Тогда и новые слова в Key::BuyAccept (crates/core/src/i18n/)",
                 Legal::Terms.name(),
                 lang.code()
             ));
@@ -388,9 +555,15 @@ fn app_link(app: &str, lang: Lang) -> String {
 }
 
 /// Страница языка `lang`. `css` и `js` — имена файлов оформления и скрипта
-/// в корне, `app` — адрес программы, `calc` — модуль калькулятора,
-/// `checked` — день последней сверки правил: нет его — нет и строки о нём.
-fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option<Date>) -> String {
+/// в корне, `app` — адрес программы, `calc` — модуль калькулятора, `media` —
+/// снимки и ролик её языка, `checked` — день последней сверки правил: нет
+/// его — нет и строки о нём. Снимки — после карточек «Что умеет Kvartik»:
+/// сразу под первым экраном Chrome качал их вместе со страницей (ленивая
+/// картинка ближе ~1250 точек к окну грузится сразу), и открытый лендинг
+/// весил 432 КБ вместо 128 (замер задачи 119), а ниже их качает тот, кто
+/// долистал.
+#[allow(clippy::too_many_arguments)]
+fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, media: &Media, checked: Option<Date>) -> String {
     let text = |key: Key| escape(t(lang, key));
     let trial = trial(lang);
     let calendar = format!("{SITE}/{}", calendar::path(lang));
@@ -438,7 +611,7 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
         <ul class="cards">
 {features}        </ul>
       </section>
-      <section class="card" aria-labelledby="tax" data-tilt>
+{look}      <section class="card" aria-labelledby="tax" data-tilt>
         <h2 id="tax">{tax_title}</h2>
         <p>{tax_text}</p>
         <p class="actions"><a class="button secondary" href="{tax_link}"><span class="label">{tax_open}</span></a></p>
@@ -463,6 +636,7 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, checked: Option
         top = top(lang, own, url),
         footer = footer(lang, app, checked),
         calculator = calculator(lang, calc, app),
+        look = look(lang, media),
         link = app_link(app, lang),
         price = plan_card(
             lang,
@@ -1569,6 +1743,17 @@ mod tests {
         wasm: "kvartik-site-calc-c_bg.wasm",
     };
 
+    /// Медиа страницы для проверок разметки — имена, как у сборки.
+    static MEDIA_SAMPLE: std::sync::LazyLock<Media> = std::sync::LazyLock::new(|| {
+        let picture = |n: u8, width, height| Picture { url: format!("kvartik-site-{n:016x}.webp"), width, height };
+        Media {
+            webm: "kvartik-site-00000000000000aa.webm".to_owned(),
+            mp4: "kvartik-site-00000000000000bb.mp4".to_owned(),
+            poster: picture(0, 720, 1560),
+            shots: (1..=4).map(|n| (picture(n, 720, 1560), picture(n + 10, 1280, 800))).collect(),
+        }
+    });
+
     fn checked() -> Option<Date> {
         rules::armenia().checked()
     }
@@ -1632,7 +1817,7 @@ mod tests {
     }
 
     fn sample(lang: Lang) -> String {
-        page(lang, "kvartik-site-a.css", "kvartik-site-b.js", "/app/", &CALC, checked())
+        page(lang, "kvartik-site-a.css", "kvartik-site-b.js", "/app/", &CALC, &MEDIA_SAMPLE, checked())
     }
 
     /// Каждая страница — на своём языке, называет себя канонической, все
@@ -1862,7 +2047,7 @@ mod tests {
         assert!(html.contains(&format!("Пробный ключ на {TRIAL_KEY_DAYS}\u{A0}дней")), "нет срока пробного ключа");
         let day = checked().expect("правила сверены");
         assert!(html.contains(&escape(&i18n::date(Lang::Ru, day))), "нет дня сверки правил");
-        assert!(!page(Lang::Ru, "a.css", "b.js", "/app/", &CALC, None).contains("сверены с законом"));
+        assert!(!page(Lang::Ru, "a.css", "b.js", "/app/", &CALC, &MEDIA_SAMPLE, None).contains("сверены с законом"));
         let mut wrong = Vec::new();
         for lang in Lang::ALL {
             let price = format!("<p class=\"price\">{}</p>", escape(&i18n::money(lang, PRICE)));
@@ -2151,16 +2336,103 @@ mod tests {
         }
 
         fn put(&self, path: &str, text: &str) {
+            self.put_bytes(path, text.as_bytes());
+        }
+
+        fn put_bytes(&self, path: &str, bytes: &[u8]) {
             let full = self.0.join(path);
             fs::create_dir_all(full.parent().expect("у файла есть папка")).expect("папка создаётся");
-            fs::write(full, text).expect("файл пишется");
+            fs::write(full, bytes).expect("файл пишется");
         }
     }
+
+    /// Заголовок WebP расширенного вида (`VP8X`) с холстом `width`×`height`:
+    /// сборке картинка нужна только ради размера.
+    fn webp(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = b"RIFF\0\0\0\0WEBPVP8X\x0a\0\0\0\0\0\0\0".to_vec();
+        bytes.extend_from_slice(&(width - 1).to_le_bytes()[..3]);
+        bytes.extend_from_slice(&(height - 1).to_le_bytes()[..3]);
+        bytes
+    }
+
+    /// Снимков и роликов на язык: постер, четыре экрана на двух ширинах,
+    /// WebM и MP4.
+    const MEDIA_PER_LANG: usize = 1 + 2 * SHOTS.len() + 2;
 
     impl Drop for Temp {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    /// Размер WebP — из заголовка любого из трёх видов, а не WebP — `None`:
+    /// сборка пишет размер в разметку, и неверный сдвинул бы страницу.
+    #[test]
+    fn reads_the_size_of_any_webp() {
+        // С потерями: кадр 640×480 после трёх байтов кадра и подписи.
+        let mut lossy = b"RIFF\0\0\0\0WEBPVP8 \0\0\0\0\0\0\0\x9d\x01\x2a".to_vec();
+        lossy.extend_from_slice(&640u16.to_le_bytes());
+        lossy.extend_from_slice(&480u16.to_le_bytes());
+        // Без потерь: 14 бит ширины и высоты минус один.
+        let mut lossless = b"RIFF\0\0\0\0WEBPVP8L\0\0\0\0\x2f".to_vec();
+        lossless.extend_from_slice(&(99u32 | (49 << 14)).to_le_bytes());
+        type Size = Option<(u32, u32)>;
+        let cases: [(&[u8], Size); 5] = [
+            (&lossy, Some((640, 480))),
+            (&lossless, Some((100, 50))),
+            (&webp(720, 1560), Some((720, 1560))),
+            (b"\x89PNG\r\n\x1a\n", None),
+            (b"RIFF\0\0\0\0WEBP", None),
+        ];
+        let wrong: Vec<String> = cases
+            .iter()
+            .filter(|(bytes, want)| webp_size(bytes) != *want)
+            .map(|(bytes, want)| format!("{:?}: {:?}, а ждали {want:?}", &bytes[..bytes.len().min(16)], webp_size(bytes)))
+            .collect();
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// Раздел «Как это выглядит» (задача 119): ролик сам не играет и не
+    /// качается, пока его не покажут, — у него кнопки, постер и размер;
+    /// снимки — по мере прокрутки, с размером, описанием своего языка и
+    /// снимком компьютера с 48rem; данные названы примером.
+    #[test]
+    fn the_look_section_shows_the_program_without_cost() {
+        let mut wrong = Vec::new();
+        for lang in Lang::ALL {
+            let html = sample(lang);
+            let section = &html[html.find("<section class=\"look\"").unwrap_or(0)..];
+            let section = &section[..section.find("</section>").unwrap_or(0)];
+            let video = section.find("<video").map(|at| &section[at..at + section[at..].find('>').unwrap_or(0)]).unwrap_or("");
+            for (what, ok) in [
+                ("ролик без кнопок", video.contains(" controls ")),
+                ("ролик качается сразу", video.contains("preload=\"none\"")),
+                ("ролик играет сам", !video.contains("autoplay")),
+                ("ролик без звука и по кругу", video.contains(" muted loop playsinline ")),
+                ("у ролика нет размера", video.contains("width=\"720\" height=\"1560\"")),
+                ("постер качается сразу", !video.contains(" poster=") && video.contains(" data-poster=\"/kvartik-site-")),
+                ("у ролика нет WebM и MP4", section.contains("type=\"video/webm\"") && section.contains("type=\"video/mp4\"")),
+                ("снимков не четыре", section.matches("loading=\"lazy\"").count() == SHOTS.len()),
+                ("снимок телефона без размера", section.matches("width=\"720\" height=\"1560\" alt=").count() == SHOTS.len()),
+                ("снимок компьютера не с 48rem", section.matches("media=\"(min-width: 48rem)\"").count() == SHOTS.len()),
+                ("не сказано, что данные — пример", section.contains(&escape(t(lang, Key::LandingLookText)))),
+            ] {
+                if !ok {
+                    wrong.push(format!("{lang:?}: {what}"));
+                }
+            }
+            for (_, caption, alt) in SHOTS {
+                if !section.contains(&format!("alt=\"{}\"", escape(t(lang, alt)))) || !section.contains(&escape(t(lang, caption))) {
+                    wrong.push(format!("{lang:?}: нет описания или подписи «{}»", t(lang, caption)));
+                }
+            }
+            // После карточек «Что умеет Kvartik»: выше Chrome качал бы снимки
+            // вместе со страницей.
+            if !(html.find("id=\"features\"") < html.find("class=\"look\"")) {
+                wrong.push(format!("{lang:?}: раздел выше карточек «Что умеет Kvartik»"));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
     fn sources(temp: &Temp) {
@@ -2170,6 +2442,16 @@ mod tests {
         temp.put("site/landing.js", LANDING_JS);
         for (name, text) in LEGAL {
             temp.put(&format!("legal/{name}"), text);
+        }
+        for lang in Lang::ALL {
+            let code = lang.code();
+            temp.put_bytes(&format!("site/{MEDIA}/demo-{code}.webp"), &webp(720, 1560));
+            temp.put_bytes(&format!("site/{MEDIA}/demo-{code}.webm"), format!("webm {code}").as_bytes());
+            temp.put_bytes(&format!("site/{MEDIA}/demo-{code}.mp4"), format!("mp4 {code}").as_bytes());
+            for (name, _, _) in SHOTS {
+                temp.put_bytes(&format!("site/{MEDIA}/{name}-{code}-360.webp"), &webp(720, 1560));
+                temp.put_bytes(&format!("site/{MEDIA}/{name}-{code}-1280.webp"), &webp(1280, 800));
+            }
         }
     }
 
@@ -2228,7 +2510,7 @@ mod tests {
         for name in pages.iter().map(String::as_str).chain(["robots.txt", "sitemap.xml", key.as_str()]) {
             assert!(written.iter().any(|n| n == name), "нет {name}: {written:?}");
         }
-        assert_eq!(written.len(), pages.len() + 5, "{written:?}");
+        assert_eq!(written.len(), pages.len() + 5 + MEDIA_PER_LANG * Lang::ALL.len(), "{written:?}");
         assert_eq!(fs::read_to_string(stage.join(&key)).ok().as_deref(), Some(INDEXNOW_KEY), "файл ключа — сам ключ");
         for page in &pages {
             let html = fs::read_to_string(stage.join(page)).expect("страница читается");

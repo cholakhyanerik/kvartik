@@ -2,8 +2,9 @@
 // browser-run и `check.mjs` рядом): сценарий ищет кнопку по её тексту на
 // языке окна.
 //
-// - `t(key, lang)` — таблица `crates/core/src/i18n.rs`: макрос `strings!`
-//   принимает ровно три строки — русскую, английскую, армянскую.
+// - `t(key, lang)` — таблица строк ядра: у каждого ключа — строка в макросе
+//   своего языка, `(Key) => { "…" };` в `crates/core/src/i18n/{hy,ru,en}.rs`
+//   (задача 119). `keys()` — все ключи по порядку таблицы.
 // - `samples()` — образцы файла копии из `crates/core/tests/backups/samples.rs`
 //   с их паролями: восстановленный образец даёт экранам данные.
 
@@ -19,20 +20,31 @@ function unescape(s) {
 }
 
 let table;
-/// Строка `key` (`"UpdateApply"`) на языке `lang` (`hy`, `ru`, `en`).
-export function t(key, lang) {
+function load() {
   if (!table) {
-    const src = fs.readFileSync(path.join(REPO, "crates/core/src/i18n.rs"), "utf8");
-    const body = src.slice(src.indexOf("strings! {")).replace(/^\s*\/\/.*$/gm, "");
     table = new Map();
-    const entry = new RegExp(String.raw`(\w+)\s*=\s*${LIT}\s*,\s*${LIT}\s*,\s*${LIT}\s*;`, "g");
-    for (const m of body.matchAll(entry)) {
-      table.set(m[1], { ru: unescape(m[2]), en: unescape(m[3]), hy: unescape(m[4]) });
+    const entry = new RegExp(String.raw`\((\w+)\) => \{\s*${LIT}\s*\};`, "g");
+    for (const lang of ["ru", "en", "hy"]) {
+      const src = fs.readFileSync(path.join(REPO, `crates/core/src/i18n/${lang}.rs`), "utf8");
+      for (const m of src.matchAll(entry)) {
+        if (!table.has(m[1])) table.set(m[1], {});
+        table.get(m[1])[lang] = unescape(m[2]);
+      }
     }
   }
-  const row = table.get(key);
-  if (!row) throw new Error(`нет строки ${key} в i18n.rs`);
-  return row[lang];
+  return table;
+}
+
+/// Строка `key` (`"UpdateApply"`) на языке `lang` (`hy`, `ru`, `en`).
+export function t(key, lang) {
+  const text = load().get(key)?.[lang];
+  if (text === undefined) throw new Error(`нет строки ${key} (${lang}) в crates/core/src/i18n/${lang}.rs`);
+  return text;
+}
+
+/// Все ключи таблицы по порядку.
+export function keys() {
+  return [...load().keys()];
 }
 
 /// Образцы копий по порядку версий: `{ file, password }`.

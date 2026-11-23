@@ -702,7 +702,7 @@ fn strings_in_parts(main: &[u8], parts: &[(String, Vec<u8>)]) -> Result<(), Stri
     if holds(main) {
         return Err(
             "строка экрана чисел для расчёта (Key::ReportSplit) — в главном модуле: строки частей \
-             легли в него, первый заход потяжелел (crates/core/src/i18n.rs, Key)"
+             легли в него, первый заход потяжелел (crates/core/src/i18n/, Key)"
                 .into(),
         );
     }

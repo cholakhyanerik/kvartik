@@ -887,7 +887,30 @@ async function landing(browser) {
         return app?.["@type"] === "SoftwareApplication" && app.offers[0].price === ${JSON.stringify(PRICE)}
           && app.url === "https://kvartik.com${at}" && window.cspRefused.length === 0
           ? true : { blocks: blocks.length, refused: window.cspRefused };`));
+      // Как это выглядит (задача 119): долистали — первый снимок и постер
+      // пришли картинками своего размера, а ролик пошёл сам, без кнопок,
+      // и CSP пустил и их (`img-src`, `media-src` — `default-src 'self'`).
+      await page.eval(`document.querySelector("section.look").scrollIntoView(); return true;`);
+      checks.check(`лендинг ${at}: снимки пришли, ролик идёт сам`, await page.waitFor(`
+        const shot = document.querySelector("section.look .shots img");
+        const video = document.querySelector("section.look video[data-demo]");
+        const ok = shot.complete && shot.naturalWidth === 720 && !video.controls && !video.paused
+          && video.readyState >= 2 && video.videoWidth === 720 && window.cspRefused.length === 0;
+        return ok ? true : null;`, 20000) ?? await page.eval(`const v = document.querySelector("section.look video[data-demo]");
+        return { controls: v.controls, paused: v.paused, ready: v.readyState, width: v.videoWidth, error: v.error?.code,
+          refused: window.cspRefused };`));
     }
+    // Кто просит меньше движения, остаётся с постером и кнопками: сам ролик
+    // не идёт (Правило 2, «Движение»).
+    await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+    await page.go(`${ORIGIN}/ru/`);
+    await page.waitFor(`return ${SCRIPTED} ? true : null;`);
+    await page.eval(`document.querySelector("section.look").scrollIntoView(); return true;`);
+    await sleep(1500);
+    checks.check("лендинг: при «меньше движения» ролик с кнопками и стоит", await page.eval(`
+      const video = document.querySelector("section.look video[data-demo]");
+      return video.controls && video.paused && video.poster.includes("/kvartik-site-") ? true : null;`));
+    await page.send("Emulation.setEmulatedMedia", { features: [] });
     // Страница «Купить» (задачи 35 и 103): своего языка, с ценами
     // «Стандарта» и «Pro», счётом продавца и письмом со словами согласия, без
     // прокрутки вбок на 360.
