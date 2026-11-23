@@ -101,7 +101,7 @@ pub(in crate::ui) async fn unlisted(office_store: &Store, open: &Store, open_nam
 pub(super) async fn restore_full(
     backups: Backups,
     store: &Store,
-    opened: (&Sealed, &crypto::Key),
+    (sealed, key): (&Sealed, &Rc<crypto::Key>),
     entries: Vec<Entry>,
     ahead: bool,
 ) -> Result<Recovered, Problem> {
@@ -125,12 +125,20 @@ pub(super) async fn restore_full(
         same: if done.covers_all { SameIe::Yes } else { SameIe::No },
         adopt: !had_office,
     };
-    let restored = restored_from(backups, opened, done.restored, landed);
+    let restored = restored_from(backups, (sealed, key), done.restored, landed);
     // Программа была пуста — ни списка ИП, ни записей открытого: так копию
     // всех ИП кладут на новое устройство.
     let fresh = spare.is_some();
     Ok(match done.failed {
-        None => Recovered::Done(restored, After { fresh, ahead }),
+        None => Recovered::Done(
+            restored,
+            After {
+                fresh,
+                ahead,
+                part: sealed.header().part(),
+            },
+            Some(Rc::clone(key)),
+        ),
         Some(failure) => Recovered::Partial(
             match Problem::from(failure) {
                 Problem::Say(why) => why,

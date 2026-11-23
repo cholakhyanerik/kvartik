@@ -109,25 +109,37 @@ pub(super) fn megabytes(lang: Lang, bytes: u64) -> String {
     i18n::integer(lang, i64::try_from(bytes.div_ceil(1 << 20)).unwrap_or(i64::MAX))
 }
 
-/// Копия заняла три четверти предела и больше — слова о файлах книги
-/// предупреждением: до отказа недалеко (задача 64).
-pub(super) fn near_limit(size: u64) -> bool {
-    size.saturating_mul(4) >= MAX_FILE_BYTES.saturating_mul(3)
-}
-
-/// Слова о файлах книги в последней копии: сколько весят, вся копия
-/// и предел, а убранные из записей — если они есть.
-pub(super) fn files_words(lang: Lang, size: u64, files: Files) -> String {
-    let limit = i18n::integer(lang, (MAX_FILE_BYTES >> 20) as i64);
+/// Слова о файлах книги в последней копии: сколько весят они и вся копия,
+/// в скольких она файлах, если их больше одного (задача 117), а убранные из
+/// записей — если они есть. До 0.0.181 здесь был ещё предел файла и с трёх
+/// четвертей его — предупреждение: дальше копию было не сделать, а теперь
+/// она делится на части.
+pub(super) fn files_words(lang: Lang, size: u64, files: Files, parts: usize) -> String {
     let mut words = fill(
         t(lang, Key::BackupFiles),
-        &[&megabytes(lang, files.bytes), &megabytes(lang, size), &limit],
+        &[&megabytes(lang, files.bytes), &megabytes(lang, size)],
     );
+    if parts > 1 {
+        words.push(' ');
+        words.push_str(&fill(
+            t(lang, Key::BackupFilesParts),
+            &[&i18n::integer(lang, parts as i64), &i18n::integer(lang, (MAX_FILE_BYTES >> 20) as i64)],
+        ));
+    }
     if files.removed > 0 {
         words.push(' ');
         words.push_str(&fill(t(lang, Key::BackupFilesRemoved), &[&megabytes(lang, files.removed)]));
     }
     words
+}
+
+/// Слова над файлами копии частями (задача 117): почему файлов несколько
+/// и что с ними делать.
+fn parts_words(lang: Lang, count: usize) -> String {
+    fill(
+        t(lang, Key::BackupParts),
+        &[&i18n::integer(lang, (MAX_FILE_BYTES >> 20) as i64), &i18n::integer(lang, count as i64)],
+    )
 }
 
 /// Копия открытого ИП для клиента (задача 38, решение человека 2026-11-05):
@@ -199,17 +211,28 @@ pub(super) fn ClientCopy(lang: ReadSignal<Lang>, backups: Backups, forms: Forms)
                 <p role="alert">{move || problem.text(lang.get())}</p>
             }.into_any()),
             Making::Ready(ready) => {
-                let name = ready.download.name();
+                let count = ready.downloads.len();
+                let links = ready
+                    .downloads
+                    .iter()
+                    .map(|download| {
+                        let name = download.name();
+                        view! {
+                            <div class="actions backup-file">
+                                <a class="button" href=download.url().to_owned() download=download.name()>
+                                    <span class="label">{move || fill(t(lang.get(), Key::BackupSaveFile), &[&name])}</span>
+                                </a>
+                            </div>
+                        }
+                    })
+                    .collect_view();
                 Some(view! {
                     <p role="status">{counted(lang, Key::BackupReady, ready.records as i64)}</p>
+                    {(count > 1).then(|| view! { <p class="hint">{move || parts_words(lang.get(), count)}</p> })}
                     {(ready.unreadable > 0).then(|| view! {
                         <p role="alert">{counted(lang, Key::BackupUnreadable, ready.unreadable as i64)}</p>
                     })}
-                    <div class="actions backup-file">
-                        <a class="button" href=ready.download.url().to_owned() download=ready.download.name()>
-                            <span class="label">{move || fill(t(lang.get(), Key::BackupSaveFile), &[&name])}</span>
-                        </a>
-                    </div>
+                    {links}
                 }.into_any())
             }
         }}
@@ -237,6 +260,9 @@ pub(super) fn MakeBackup(
     let making = RwSignal::new_local(Making::Idle);
     // Как файл отдан: что сказать о нём.
     let saved = RwSignal::new(None::<Key>);
+    // Какие файлы копии частями уже отданы (задача 117): копия — когда отданы
+    // все, и только тогда сдвигается день последней.
+    let handed_parts = RwSignal::new(Vec::<bool>::new());
     let share_failed = RwSignal::new(false);
     let new_password = move || !backups.key_set.get() || resetting.get();
     let busy = move || matches!(making.get(), Making::Busy);
@@ -260,6 +286,7 @@ pub(super) fn MakeBackup(
         making.set(Making::Busy);
         saved.set(None);
         share_failed.set(false);
+        handed_parts.set(Vec::new());
         leptos::task::spawn_local(async move {
             let job = Job::Manual {
                 typed,
@@ -272,11 +299,12 @@ pub(super) fn MakeBackup(
                 }),
                 Err(_) => Err(Problem::Say(Key::PartFailed)),
             };
-            if outcome.is_ok() {
+            if let Ok(ready) = &outcome {
                 password.set(String::new());
                 repeat.set(String::new());
                 resetting.set(false);
                 backups.password_entered();
+                handed_parts.set(vec![false; ready.downloads.len()]);
             }
             making.set(match outcome {
                 Ok(ready) => Making::Ready(Rc::new(ready)),
@@ -285,21 +313,31 @@ pub(super) fn MakeBackup(
         });
     };
 
-    // Файл отдан браузеру или меню «Поделиться»: это и есть копия. Сохранили
-    // ли они файл, они не говорят.
-    let handed = move |said: Key| {
+    // Файл отдан браузеру или меню «Поделиться»: это и есть копия, а у копии
+    // частями — когда отданы все её файлы (задача 117). Сохранили ли они
+    // файл, они не говорят.
+    let handed = move |index: usize, said: Key| {
+        handed_parts.update(|parts| {
+            if let Some(part) = parts.get_mut(index) {
+                *part = true;
+            }
+        });
+        if !handed_parts.with_untracked(|parts| parts.iter().all(|&done| done)) {
+            return;
+        }
         let now = clock::now();
         let device = Device::new();
         device.set_last_backup(now);
         // Сколько весит отданная копия (задача 64): экран говорит это под
         // меткой последней копии и перечитывает по её сигналу.
         if let Making::Ready(ready) = making.get_untracked() {
-            device.set_last_size(ready.size, ready.files);
+            device.set_last_size(ready.size, ready.files, ready.downloads.len());
         }
         backups.last.set(clock::local_date(now));
-        saved.set(Some(said));
+        // Частей несколько — и слова о частях, а не об одном файле.
+        let parts = handed_parts.with_untracked(Vec::len) > 1;
+        saved.set(Some(if parts { Key::BackupPartsSaved } else { said }));
     };
-    let on_save = move |_: MouseEvent| handed(Key::BackupSaved);
 
     view! {
         <form class="backup" hidden=move || quiet.get() on:submit=submit>
@@ -356,43 +394,67 @@ pub(super) fn MakeBackup(
             }.into_any()),
             Making::Ready(ready) => {
                 let (records, unreadable) = (ready.records as i64, ready.unreadable as i64);
-                let name = ready.download.name();
-                // На iPhone и iPad — ещё и меню «Поделиться» (задача 13):
-                // `platform::share::can_share_any`. Меню открывается в самом
-                // нажатии, до первого `await` (Правило 6).
-                let file = ready.download.file().clone();
-                let shares = share::can_share_any(&file);
-                let send = move |_: MouseEvent| {
-                    share_failed.set(false);
-                    let sent = share::share(&file);
-                    leptos::task::spawn_local(async move {
-                        match sent.await {
-                            Ok(()) => handed(Key::BackupShared),
-                            Err(error) => share_failed.set(error == ShareError::Failed),
+                let count = ready.downloads.len();
+                // По строке на файл: у копии частями (задача 117) — на каждую
+                // часть, с номером в имени файла.
+                let files = ready
+                    .downloads
+                    .iter()
+                    .enumerate()
+                    .map(|(index, download)| {
+                        let name = download.name();
+                        // На iPhone и iPad — ещё и меню «Поделиться» (задача 13):
+                        // `platform::share::can_share_any`. Меню открывается в самом
+                        // нажатии, до первого `await` (Правило 6).
+                        let file = download.file().clone();
+                        let shares = share::can_share_any(&file);
+                        let send = move |_: MouseEvent| {
+                            share_failed.set(false);
+                            let sent = share::share(&file);
+                            leptos::task::spawn_local(async move {
+                                match sent.await {
+                                    Ok(()) => handed(index, Key::BackupShared),
+                                    Err(error) => share_failed.set(error == ShareError::Failed),
+                                }
+                            });
+                        };
+                        view! {
+                            <div class="actions backup-file">
+                                <a
+                                    class="button"
+                                    href=download.url().to_owned()
+                                    download=download.name()
+                                    on:click=move |_: MouseEvent| handed(index, Key::BackupSaved)
+                                >
+                                    <span class="label">{move || fill(t(lang.get(), Key::BackupSaveFile), &[&name])}</span>
+                                </a>
+                                {shares.then(|| view! {
+                                    <button type="button" class="secondary" on:click=send>
+                                        {icon(Icon::Share)}
+                                        <span class="label">{tr(lang, Key::BackupShare)}</span>
+                                    </button>
+                                })}
+                            </div>
                         }
-                    });
-                };
+                    })
+                    .collect_view();
                 Some(view! {
                     <p role="status">{counted(lang, Key::BackupReady, records)}</p>
+                    {(count > 1).then(|| view! { <p class="hint">{move || parts_words(lang.get(), count)}</p> })}
                     {(unreadable > 0).then(|| view! {
                         <p role="alert">{counted(lang, Key::BackupUnreadable, unreadable)}</p>
                     })}
-                    <div class="actions backup-file">
-                        <a
-                            class="button"
-                            href=ready.download.url().to_owned()
-                            download=ready.download.name()
-                            on:click=on_save
-                        >
-                            <span class="label">{move || fill(t(lang.get(), Key::BackupSaveFile), &[&name])}</span>
-                        </a>
-                        {shares.then(|| view! {
-                            <button type="button" class="secondary" on:click=send>
-                                {icon(Icon::Share)}
-                                <span class="label">{tr(lang, Key::BackupShare)}</span>
-                            </button>
-                        })}
-                    </div>
+                    {files}
+                    // Сколько частей отдано, пока отданы не все.
+                    {move || {
+                        let (done, of) = handed_parts.with(|parts| (parts.iter().filter(|&&done| done).count(), parts.len()));
+                        (done > 0 && done < of).then(|| view! {
+                            <p role="status">{move || {
+                                let lang = lang.get();
+                                fill(t(lang, Key::BackupPartsHanded), &[&i18n::integer(lang, done as i64), &i18n::integer(lang, of as i64)])
+                            }}</p>
+                        })
+                    }}
                     {move || saved.get().map(|said| view! {
                         <p role="status">{tr(lang, said)}</p>
                     })}
@@ -418,10 +480,11 @@ pub(super) async fn make(backups: Backups, typed: &str, repeat: Option<&str>) ->
         key: &key,
         salt: device_key.salt(),
         iterations: device_key.iterations(),
+        limit: part_limit(),
     };
     let made = make_file(backups, &store, &sealing).await?;
-    let download = Download::text(&made.file, &backup::file_name(today))
-        .ok_or(Problem::Say(Key::BackupFailed))?;
+    let size = made.size();
+    let downloads = downloads(made.sheets, &backup::file_name(today))?;
     // Новый пароль запоминается, когда копия под ним уже собрана.
     // Включённая автокопия на него сама не переходит: её следующая попытка
     // скажет, что пароль сменился, и попросит его ввести (`write_file`), —
@@ -432,10 +495,10 @@ pub(super) async fn make(backups: Backups, typed: &str, repeat: Option<&str>) ->
         backups.key_set.set(true);
     }
     Ok(Ready {
-        download,
+        downloads,
         records: made.records,
         unreadable: made.unreadable,
-        size: made.file.len() as u64,
+        size,
         files: made.files,
     })
 }
@@ -458,6 +521,7 @@ pub(super) async fn make_client(backups: Backups, typed: &str, repeat: &str) -> 
         key: &key,
         salt: &salt,
         iterations: KDF_ITERATIONS,
+        limit: part_limit(),
     };
     let made = stored::make(&store, KINDS, &sealing).await?;
     // ՀՎՀՀ — из профиля этой базы; не читается — имя без него.
@@ -465,13 +529,13 @@ pub(super) async fn make_client(backups: Backups, typed: &str, repeat: &str) -> 
         Ok(tx) => tx.all::<Profile>().await.ok().and_then(Profile::current).and_then(|profile| profile.data().tin.clone()),
         Err(_) => None,
     };
-    let download = Download::text(&made.file, &backup::client_file_name(tin.as_ref(), today))
-        .ok_or(Problem::Say(Key::BackupFailed))?;
+    let size = made.size();
+    let downloads = downloads(made.sheets, &backup::client_file_name(tin.as_ref(), today))?;
     Ok(Ready {
-        download,
+        downloads,
         records: made.records,
         unreadable: made.unreadable,
-        size: made.file.len() as u64,
+        size,
         files: made.files,
     })
 }

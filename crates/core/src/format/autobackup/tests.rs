@@ -26,6 +26,10 @@ fn own_names_are_read_back() {
     let mine = tag("1a2b");
     assert_eq!(day_of("kvartik-auto-2026-11-03-1a2b.json", mine), Some(day(2026, 11, 3)));
     assert_eq!(day_of("kvartik-auto-2024-02-29-1a2b.json", mine), Some(day(2024, 2, 29)));
+    // Части одной копии дня (задача 117).
+    assert_eq!(day_of("kvartik-auto-2026-11-03-1a2b-1of3.json", mine), Some(day(2026, 11, 3)));
+    assert_eq!(day_of("kvartik-auto-2026-11-03-1a2b-3of3.json", mine), Some(day(2026, 11, 3)));
+    assert_eq!(day_of("kvartik-auto-2026-11-03-1a2b-12of999.json", mine), Some(day(2026, 11, 3)));
 }
 
 /// Всё, что не своё имя целиком, — не файл этого устройства: его нельзя
@@ -50,6 +54,23 @@ fn foreign_names_are_not_ours() {
         "kvartik-auto-2026-11-03-1a2.json",
         "kvartik-auto-2026-11-03.json",
         "kvartik-auto-2026-11-031a2b.json",
+        // Часть — не по образцу (задача 117).
+        "kvartik-auto-2026-11-03-1a2b-0of3.json",
+        "kvartik-auto-2026-11-03-1a2b-4of3.json",
+        "kvartik-auto-2026-11-03-1a2b-1of1.json",
+        "kvartik-auto-2026-11-03-1a2b-01of3.json",
+        "kvartik-auto-2026-11-03-1a2b-1of03.json",
+        "kvartik-auto-2026-11-03-1a2b-1of1000.json",
+        "kvartik-auto-2026-11-03-1a2b-1of99999999999.json",
+        "kvartik-auto-2026-11-03-1a2b-1of.json",
+        "kvartik-auto-2026-11-03-1a2b-of3.json",
+        "kvartik-auto-2026-11-03-1a2b-1of3x.json",
+        "kvartik-auto-2026-11-03-1a2b-1-of-3.json",
+        "kvartik-auto-2026-11-03-1a2b-+1of3.json",
+        "kvartik-auto-2026-11-03-1a2b1of3.json",
+        "kvartik-auto-2026-11-03-1a2b-1of3-1of3.json",
+        "kvartik-auto-2026-11-03-9f9f-1of3.json",
+        "kvartik-auto-2026-11-03-1a2b-Աof3.json",
         // Дня нет в календаре или он записан не так.
         "kvartik-auto-2026-02-30-1a2b.json",
         "kvartik-auto-2026-1-03-1a2b.json",
@@ -74,7 +95,8 @@ fn stale_keeps_the_newest_own_files() {
     // Порядок в папке — любой.
     names.reverse();
     names.swap(0, 7);
-    let mut stale = stale(names.iter().map(String::as_str), mine, day(2026, 11, 10));
+    let today = file_name(day(2026, 11, 10), mine);
+    let mut stale = stale(names.iter().map(String::as_str), mine, day(2026, 11, 10), &[today.as_str()]);
     stale.sort_unstable();
     assert_eq!(
         stale,
@@ -90,10 +112,10 @@ fn stale_keeps_the_newest_own_files() {
 fn stale_leaves_a_short_folder_alone() {
     let mine = tag("1a2b");
     let names: Vec<String> = (1..=7).map(|n| file_name(day(2026, 11, n), mine)).collect();
-    assert!(stale(names.iter().map(String::as_str), mine, day(2026, 11, 7)).is_empty());
+    assert!(stale(names.iter().map(String::as_str), mine, day(2026, 11, 7), &[names[6].as_str()]).is_empty());
     // Чужие файлы не убираются, сколько бы их ни было.
     let foreign: Vec<String> = (1..=20).map(|n| file_name(day(2026, 10, n), tag("9f9f"))).collect();
-    assert!(stale(foreign.iter().map(String::as_str), mine, day(2026, 11, 7)).is_empty());
+    assert!(stale(foreign.iter().map(String::as_str), mine, day(2026, 11, 7), &[]).is_empty());
 }
 
 /// Свои файлы с днём позже сегодняшнего — подложенные в общую папку или
@@ -112,7 +134,7 @@ fn stale_never_takes_today_for_files_from_the_future() {
         .map(String::as_str)
         .chain([fresh.as_str()])
         .collect();
-    let mut stale = stale(names, mine, today);
+    let mut stale = stale(names, mine, today, &[fresh.as_str()]);
     stale.sort_unstable();
     // Из восьми прошлых и сегодняшнего остаются семь самых свежих: сегодняшний
     // и шесть прошлых, — а из будущего не уходит ни один.
@@ -121,6 +143,48 @@ fn stale_never_takes_today_for_files_from_the_future() {
         [
             "kvartik-auto-2026-10-01-1a2b.json",
             "kvartik-auto-2026-10-02-1a2b.json",
+        ]
+    );
+}
+
+/// Копия частями (задача 117): остаются все части семи свежих дней, а не семь
+/// файлов, и из сегодняшних — только что записанные: прежняя копия дня была
+/// в трёх частях, новая — в двух, и `3of3` прежней с ними не смешивается.
+#[test]
+fn stale_counts_days_and_replaces_the_copy_of_today() {
+    let mine = tag("1a2b");
+    let today = day(2026, 11, 10);
+    let mut names: Vec<String> = Vec::new();
+    for n in 1..=9 {
+        for part in ["1of3", "2of3", "3of3"] {
+            names.push(format!("kvartik-auto-2026-11-0{n}-1a2b-{part}.json"));
+        }
+    }
+    // Прежняя копия сегодня — одним файлом и частями, новая — две части.
+    names.push("kvartik-auto-2026-11-10-1a2b.json".to_owned());
+    names.extend(["1of3", "2of3", "3of3", "1of2", "2of2"].map(|part| format!("kvartik-auto-2026-11-10-1a2b-{part}.json")));
+    // Чужие сегодняшние не трогаются.
+    names.push("kvartik-auto-2026-11-10-9f9f-1of2.json".to_owned());
+    names.push("kvartik-2026-11-10-1of2.json".to_owned());
+    let written = ["kvartik-auto-2026-11-10-1a2b-1of2.json", "kvartik-auto-2026-11-10-1a2b-2of2.json"];
+    let mut stale = stale(names.iter().map(String::as_str), mine, today, &written);
+    stale.sort_unstable();
+    assert_eq!(
+        stale,
+        [
+            "kvartik-auto-2026-11-01-1a2b-1of3.json",
+            "kvartik-auto-2026-11-01-1a2b-2of3.json",
+            "kvartik-auto-2026-11-01-1a2b-3of3.json",
+            "kvartik-auto-2026-11-02-1a2b-1of3.json",
+            "kvartik-auto-2026-11-02-1a2b-2of3.json",
+            "kvartik-auto-2026-11-02-1a2b-3of3.json",
+            "kvartik-auto-2026-11-03-1a2b-1of3.json",
+            "kvartik-auto-2026-11-03-1a2b-2of3.json",
+            "kvartik-auto-2026-11-03-1a2b-3of3.json",
+            "kvartik-auto-2026-11-10-1a2b-1of3.json",
+            "kvartik-auto-2026-11-10-1a2b-2of3.json",
+            "kvartik-auto-2026-11-10-1a2b-3of3.json",
+            "kvartik-auto-2026-11-10-1a2b.json",
         ]
     );
 }
@@ -135,6 +199,8 @@ fn leftovers_are_own_swap_files_of_past_days() {
         "kvartik-auto-2026-11-02-1a2b.json.crswap",
         "kvartik-auto-2026-11-02-1a2b.json.1.crswap",
         "kvartik-auto-2025-12-31-1a2b.json.17.crswap",
+        // Часть копии (задача 117).
+        "kvartik-auto-2026-11-02-1a2b-2of3.json.crswap",
     ];
     let kept = [
         // Сегодняшний: его, может быть, пишет другая вкладка.

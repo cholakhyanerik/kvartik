@@ -486,17 +486,30 @@ pub(super) async fn write_file(backups: Backups) -> Result<Option<Wrote>, Hitch>
         key: &key,
         salt: saved.lock.salt(),
         iterations: saved.lock.iterations(),
+        limit: part_limit(),
     };
     let made = make_file(backups, &store, &sealing).await?;
-    folders::write(&saved.folder, &autobackup::file_name(today, tag), made.file.as_bytes()).await?;
+    let (size, parts) = (made.size(), made.sheets.len());
+    // Копия частями (задача 117) — файлы частей рядом, по одному: текст
+    // записанного больше не нужен.
+    let name = autobackup::file_name(today, tag);
+    let mut written = Vec::with_capacity(parts);
+    for sheet in made.sheets {
+        let file = backup::part_file_name(&name, sheet.part);
+        folders::write(&saved.folder, &file, sheet.text.as_bytes()).await?;
+        written.push(file);
+    }
     // Старые свои файлы и брошенные временные — уже после нового: не
     // убрались — копия всё равно записана, а лишнее уберёт следующая.
+    // Сегодняшние, кроме только что записанных, — прежняя копия дня: у неё
+    // частей могло быть больше (`autobackup::stale`).
     if let Ok(names) = folders::names(&saved.folder, autobackup::PREFIX).await {
+        let written: Vec<&str> = written.iter().map(String::as_str).collect();
         let leftovers = names
             .iter()
             .map(String::as_str)
             .filter(|name| autobackup::leftover(name, tag, today));
-        for name in autobackup::stale(names.iter().map(String::as_str), tag, today)
+        for name in autobackup::stale(names.iter().map(String::as_str), tag, today, &written)
             .into_iter()
             .chain(leftovers)
         {
@@ -509,7 +522,7 @@ pub(super) async fn write_file(backups: Backups) -> Result<Option<Wrote>, Hitch>
     // человека 2026-11-03).
     device.set_last_auto(at);
     device.set_last_backup(at);
-    device.set_last_size(made.file.len() as u64, made.files);
+    device.set_last_size(size, made.files, parts);
     Ok(Some(Wrote {
         at,
         unreadable: made.unreadable,

@@ -45,7 +45,7 @@
 //! страниц кружок тот же.
 
 use kvartik_core::format::autobackup::DeviceTag;
-use kvartik_core::format::backup::{DeviceKey, Files};
+use kvartik_core::format::backup::{DeviceKey, Files, MAX_PARTS};
 use kvartik_core::format::sync::Received;
 use kvartik_core::i18n::Lang;
 use kvartik_core::license::{self, Paid};
@@ -107,23 +107,40 @@ impl Device {
 
     /// Сколько весила последняя копия программы — ручная или автокопия — и
     /// файлы книги в ней (задача 64): экран копии говорит это, пока не сделана
-    /// следующая. `None` — копии с 0.0.168 не было, последней стала
-    /// восстановленная, чьих файлов окно не считало, или запись не читается.
-    pub fn last_size(&self) -> Option<(u64, Files)> {
+    /// следующая, — и в скольких она файлах (задача 117). `None` — копии
+    /// с 0.0.168 не было, последней стала восстановленная, чьих файлов окно
+    /// не считало, или запись не читается.
+    ///
+    /// Запись — числа через пробел: размер копии, файлов книги, убранных и,
+    /// с 0.0.181, число файлов копии. Без четвёртого — один файл: так писали
+    /// 0.0.168–0.0.180. Прежняя версия запись с четырьмя числами не читает
+    /// и о размере молчит, а не говорит неправду.
+    pub fn last_size(&self) -> Option<(u64, Files, usize)> {
         let text = self.get(LAST_SIZE)?;
         let mut numbers = text.split(' ').map(|number| number.parse::<u64>().ok());
-        let (Some(Some(copy)), Some(Some(bytes)), Some(Some(removed)), None) =
-            (numbers.next(), numbers.next(), numbers.next(), numbers.next())
+        let (Some(Some(copy)), Some(Some(bytes)), Some(Some(removed)), parts, None) =
+            (numbers.next(), numbers.next(), numbers.next(), numbers.next(), numbers.next())
         else {
             return None;
         };
-        (removed <= bytes).then_some((copy, Files { bytes, removed }))
+        let parts = match parts {
+            None => 1,
+            Some(Some(parts)) if (2..=u64::from(MAX_PARTS)).contains(&parts) => usize::try_from(parts).ok()?,
+            Some(_) => return None,
+        };
+        (removed <= bytes).then_some((copy, Files { bytes, removed }, parts))
     }
 
-    /// Запомнить, сколько весит сделанная копия и файлы книги в ней. `false` —
-    /// `localStorage` отказал: экран скажет о прежней копии или ни о какой.
-    pub fn set_last_size(&self, copy: u64, files: Files) -> bool {
-        self.set(LAST_SIZE, &format!("{copy} {} {}", files.bytes, files.removed))
+    /// Запомнить, сколько весит сделанная копия, файлы книги в ней и в скольких
+    /// она файлах. `false` — `localStorage` отказал: экран скажет о прежней
+    /// копии или ни о какой.
+    pub fn set_last_size(&self, copy: u64, files: Files, parts: usize) -> bool {
+        let text = if parts > 1 {
+            format!("{copy} {} {} {parts}", files.bytes, files.removed)
+        } else {
+            format!("{copy} {} {}", files.bytes, files.removed)
+        };
+        self.set(LAST_SIZE, &text)
     }
 
     /// Забыть размер: последней копией стала восстановленная.

@@ -66,6 +66,7 @@ async fn make_with(store: &Store, kinds: &[Kind], key: &Key, salt: &[u8]) -> Res
         key,
         salt,
         iterations: KDF_ITERATIONS,
+        limit: kvartik_core::format::backup::PART_PLAIN_BYTES,
     };
     make(store, kinds, &sealing).await
 }
@@ -76,7 +77,9 @@ async fn backup_of(store: &Store, salt: &[u8]) -> String {
     make_with(store, KINDS_UNDER_TEST, &key, salt)
         .await
         .expect("копия сделана")
-        .file
+        .sheets
+        .remove(0)
+        .text
 }
 
 /// Восстановить, как окно до ответа человека: в пробах без профилей
@@ -107,7 +110,7 @@ async fn entries_with(profile: &Profile, salt: &[u8]) -> Vec<Entry> {
         .expect("копия сделана");
     drop(store);
     probe.delete().await;
-    let sealed = open(&made.file).expect("файл открывается");
+    let sealed = open(&made.sheets[0].text).expect("файл открывается");
     unlock(KINDS, &sealed, &crypto::normalize(PASSWORD))
         .await
         .expect("копия расшифрована")
@@ -474,18 +477,109 @@ fn device_remembers_backups() {
     }
     assert_eq!(device.last_backup(), None);
     assert_eq!(device.backup_key(), None);
-    // Размер последней копии и файлов книги в ней (задача 64): что записано,
-    // то и читается; испорченная запись — «нет», а не нули.
+    // Размер последней копии и файлов книги в ней (задача 64) и в скольких
+    // она файлах (задача 117): что записано, то и читается, запись 0.0.168 без
+    // числа файлов — один файл, а испорченная — «нет», а не нули.
     let files = Files { bytes: 7_000_000, removed: 1_500 };
-    assert!(device.set_last_size(9_000_000, files));
-    assert_eq!(device.last_size(), Some((9_000_000, files)));
-    for spoiled in ["9000000 7000000", "9000000 7000000 1500 4", "много 7000000 1500", "9000000 1500 7000000"] {
+    assert!(device.set_last_size(9_000_000, files, 1));
+    assert_eq!(device.last_size(), Some((9_000_000, files, 1)));
+    assert_eq!(storage.get_item(&format!("{prefix}last_size")).ok().flatten().as_deref(), Some("9000000 7000000 1500"));
+    assert!(device.set_last_size(190_000_000, files, 2));
+    assert_eq!(device.last_size(), Some((190_000_000, files, 2)));
+    for spoiled in [
+        "9000000 7000000",
+        "9000000 7000000 1500 1",
+        "9000000 7000000 1500 1000",
+        "9000000 7000000 1500 2 2",
+        "9000000 7000000 1500 два",
+        "много 7000000 1500",
+        "9000000 1500 7000000",
+    ] {
         storage.set_item(&format!("{prefix}last_size"), spoiled).expect("записано");
         assert_eq!(device.last_size(), None, "прочитано испорченное: {spoiled}");
     }
     assert!(device.forget_last_size());
     assert_eq!(device.last_size(), None);
     device.clear();
+}
+
+/// Копия больше части (задача 117) — несколько файлов: каждый открывается
+/// сам, несёт номер части и общий идентификатор копии, и тем же паролем
+/// расшифровывается. Части ложатся по одной и в любом порядке — здесь
+/// с последней, — и в пустой базе после всех оказываются все записи, а
+/// после одной — её.
+#[wasm_bindgen_test]
+async fn a_copy_over_the_limit_is_made_in_parts_and_each_part_lands_alone() {
+    let probe = Probe::new();
+    let store = probe.open(DB_VERSION).await.expect("база открыта");
+    let notes: Vec<Note> = (0..6).map(|n| note(&format!("запись {n} {}", "ы".repeat(400)))).collect();
+    insert_all(&store, &notes, &[]).await;
+    let salt = crypto::random(SALT_BYTES).expect("соль");
+    let key = key_for(PASSWORD, &salt).await;
+    let header = header();
+    let sealing = Sealing {
+        header: &header,
+        key: &key,
+        salt: &salt,
+        iterations: KDF_ITERATIONS,
+        limit: 2_000,
+    };
+    let made = make(&store, KINDS_UNDER_TEST, &sealing).await.expect("копия сделана");
+    drop(store);
+    probe.delete().await;
+    let mut wrong = Vec::new();
+    if made.sheets.len() < 2 {
+        wrong.push(format!("частей — {}", made.sheets.len()));
+    }
+    if made.records != notes.len() {
+        wrong.push(format!("записей — {}", made.records));
+    }
+    if made.size() != made.sheets.iter().map(|sheet| sheet.text.len() as u64).sum::<u64>() {
+        wrong.push("размер копии — не сумма частей".to_owned());
+    }
+    let of = made.sheets.len();
+    let copy = made.sheets[0].part.map(|part| part.copy());
+    let sealed: Vec<_> = made.sheets.iter().map(|sheet| open(&sheet.text).expect("часть открывается")).collect();
+    for (index, (sheet, sealed)) in made.sheets.iter().zip(&sealed).enumerate() {
+        let part = sealed.header().part();
+        if part != sheet.part
+            || part.map(|part| (usize::from(part.number()), usize::from(part.of()), Some(part.copy())))
+                != Some((index + 1, of, copy))
+        {
+            wrong.push(format!("часть {}: {part:?}", index + 1));
+        }
+    }
+    let probe = Probe::new();
+    let store = probe.open(DB_VERSION).await.expect("база открыта");
+    for (index, sealed) in sealed.iter().enumerate().rev() {
+        let entries = match unlock(KINDS_UNDER_TEST, sealed, &crypto::normalize(PASSWORD)).await {
+            Ok((entries, _)) => entries,
+            Err(failure) => {
+                wrong.push(format!("часть {} не открылась: {failure:?}", index + 1));
+                continue;
+            }
+        };
+        if let Err(failure) = restore_all(&store, KINDS_UNDER_TEST, &entries).await {
+            wrong.push(format!("часть {} не легла: {failure:?}", index + 1));
+        }
+        if index + 1 == of {
+            let landed = store.read().expect("чтение").list::<Note>().await.expect("записи").records.len();
+            if landed == 0 || landed == notes.len() {
+                wrong.push(format!("после последней части записей {landed}"));
+            }
+        }
+    }
+    let stored = store.read().expect("чтение").list::<Note>().await.expect("записи").records;
+    let mut ids: Vec<_> = stored.iter().map(|note| note.meta().id()).collect();
+    let mut expected: Vec<_> = notes.iter().map(|note| note.meta().id()).collect();
+    ids.sort_unstable();
+    expected.sort_unstable();
+    if ids != expected {
+        wrong.push(format!("легло {} записей из {}", ids.len(), expected.len()));
+    }
+    drop(store);
+    probe.delete().await;
+    assert!(wrong.is_empty(), "копия частями: {wrong:#?}");
 }
 
 /// Устройство помнит версии: о какой человек знает и какую пробовали

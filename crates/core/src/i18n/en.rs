@@ -183,7 +183,7 @@ macro_rules! en {
     (Cancel) => { "Cancel" };
     (BackupRestoring) => { "Decrypting and restoring…" };
     (BackupRestored) => { "Done. New records: {}, updated: {}, unchanged: {}." };
-    (BackupFiles) => { "In the last backup, ledger files take {}\u{A0}MB, and the whole backup is {}\u{A0}MB of a possible {}\u{A0}MB." };
+    (BackupFiles) => { "In the last backup, ledger files take {}\u{A0}MB, and the whole backup is {}\u{A0}MB." };
     (BackupFilesRemoved) => { "Of these, {}\u{A0}MB are files removed from entries: they are kept too and go into the backup." };
     (BackupAhead) => { "The backup has changes dated later than this device's clock shows now: the clock on one of the devices is wrong. Check the date and time on both\u{A0}— while the clocks disagree, of two changes to the same field of a record, the one made by the clock that runs fast is kept." };
     (BackupIssuerAsk) => { "Where will you issue invoices and acts from now on: here, or where the backup was made? Numbers won't repeat only if one device issues them." };
@@ -1209,7 +1209,14 @@ macro_rules! en {
     (DocRateSave) => { "Save the rate" };
     (DocRateSaved) => { "Rate saved." };
 
-    (BackupOversized) => { "The backup came out over {}\u{A0}MB, and the app can't open one that large. Ledger files in it take {}\u{A0}MB, of which files removed from entries take {}\u{A0}MB: a removed file is kept too and goes into the backup, so removing a file from an entry won't make the backup smaller. The app can't make a backup this large yet\u{A0}— write to the seller: {}." };
+    (BackupOversized) => { "The backup didn't fit even in parts, and the app couldn't open it. Write to the seller: {}." };
+    (BackupParts) => { "The backup is over {}\u{A0}MB, so it is split into {} files: save each one. The parts are restored one at a time, in any order, and the whole backup is all of them together." };
+    (BackupPartsHanded) => { "Parts handed over: {} of {}. Save the rest too." };
+    (BackupPartsSaved) => { "All parts of the backup have been handed over. Find them in your downloads or wherever you sent them, and move them together somewhere safe." };
+    (BackupFilePart) => { "This is part {} of {} of one backup. The other parts are restored the same way, in any order." };
+    (BackupPartsLaid) => { "The backup has {} parts; restored: {}. Restore the rest the same way before issuing invoices and acts here: a new document gets its number from what is already in. While this screen is open, we won't ask for the password again." };
+    (BackupPartsAll) => { "All parts of the backup are restored\u{A0}— {}." };
+    (BackupFilesParts) => { "It comes in {} files, each no larger than {}\u{A0}MB." };
 
     (LandingTitle) => { "Kvartik\u{A0}— invoices, ledger and tax for individual entrepreneurs in Armenia" };
     (LandingDescription) => { "Invoices and acts in three languages, income and expenses in drams and foreign currency, quarterly turnover tax and deadlines for individual entrepreneurs in Armenia. Your data stays on your device." };

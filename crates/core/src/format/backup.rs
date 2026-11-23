@@ -53,6 +53,24 @@
 //! `pack`, `seal`, `open`, `read`) — та же работа одним куском: так их
 //! зовут тесты и ядро.
 //!
+//! # Частями
+//!
+//! Файл копии не бывает больше [`MAX_FILE_BYTES`]: такой программа не
+//! откроет. Копия, которая в него не влезает, с версии 27 (0.0.181,
+//! задача 117) — несколько файлов, частей ([`split`]): в каждом не больше
+//! [`PART_PLAIN_BYTES`] открытого текста, записи без файлов книги — первыми
+//! (у копии одного ИП они почти всегда влезают в первую часть, а у конторы на
+//! десятки ИП могут уйти и во вторую), файлы книги — по порядку после них. В шапке части — её номер, сколько их
+//! и общий идентификатор копии ([`Part`]): так окно говорит, что это часть
+//! и какие ещё остались. Восстановление сливает и ничего не стирает, поэтому
+//! каждая часть — копия сама по себе и ложится одна, в любом порядке. Для
+//! этого в каждой части — записи, по которым её узнаёт восстановление:
+//! профили ИП (ни один ли это ИП, [`relation`]) и записи ИП конторы (куда
+//! ложится запись с меткой базы, [`whole`]). Убрать что-то из файла,
+//! а не из базы, нельзя: обещание «удалённое восстанавливается» держится
+//! и на убранных файлах книги (выбор задачи 64), — поэтому части, а не копия
+//! без файлов и не стёртые байты убранных (разбор задачи 117).
+//!
 //! Что меняет этот файл — меняет версию формата ([`FORMAT_VERSION`]):
 //! шапку, замок, имена шифра, вид записи в списке. Прошлые версии читаются
 //! по своему номеру; образец копии каждой выпущенной версии лежит
@@ -124,13 +142,46 @@ pub const FILE_MARK: &str = "kvartik-backup";
 /// (600 документов по 1–2 КБ и тысяча операций книги по полкилобайта),
 /// а сжатым — сотни килобайт. Место занимают вложения (задача 14): фото
 /// чека — сотни килобайт, и 128 МБ — это около трёхсот фото по
-/// 300 КБ (base64 и шифр — ещё треть). Предел был 32 МБ до вложений;
-/// Pro (задача 38) его пересмотрит. Копию больше предела окно не делает:
-/// она бы не открылась.
+/// 300 КБ (base64 и шифр — ещё треть). Предел был 32 МБ до вложений.
+/// Копию больше предела окно с 0.0.181 делит на части ([`split`],
+/// задача 117), а до того не делало вовсе: такая не открылась бы.
 pub const MAX_FILE_BYTES: u64 = 128 << 20;
 
 /// С этой версии формата открытый текст копии сжат перед шифром ([`pack`]).
 const PACKED_SINCE: u32 = 6;
+
+/// С этой версии формата копия бывает частями ([`Part`]): шапки прежних
+/// версий части не несут, и такая шапка у них — порча.
+const PARTS_SINCE: u32 = 27;
+
+/// Больше стольких частей у копии не бывает: 999 файлов по
+/// [`PART_PLAIN_BYTES`] — около 90 ГБ, больше, чем браузер даёт сайту на
+/// телефоне. Предел проверяется и при чтении шапки (Правило 13): номер части
+/// окно показывает человеку.
+pub const MAX_PARTS: u16 = 999;
+
+/// Сколько байтов открытого текста — не больше — кладётся в один файл копии
+/// ([`split`]). Файл из такого текста не больше [`MAX_FILE_BYTES`] при
+/// любых данных ([`sealed_bound`]): файлы книги — уже сжатые JPEG и PDF,
+/// и сжатие их почти не уменьшает, а base64 шифротекста — ещё треть.
+pub const PART_PLAIN_BYTES: usize = 94 << 20;
+
+/// Шапка файла копии с замком и кавычками `data` — не длиннее: метка,
+/// версии, момент, часть, соль до 64 байтов в base64, вектор — около
+/// 400 знаков.
+const SEALED_HEAD_BYTES: usize = 1 << 10;
+
+/// Сколько байтов — не больше — займёт файл копии из `plain` байтов
+/// открытого текста. Сжатие DEFLATE, которому нечего сжать, пишет блоки
+/// «как есть» и прибавляет к ним по 5 байтов на 64 КиБ (RFC 1951, §3.2.4) —
+/// здесь с запасом, по килобайту на мегабайт; потом метка подлинности шифра
+/// и base64: три байта — четыре знака.
+pub const fn sealed_bound(plain: usize) -> usize {
+    let packed = plain + plain / 1024 + 1024;
+    SEALED_HEAD_BYTES + (packed + TAG_BYTES).div_ceil(3) * 4
+}
+
+const _: () = assert!(sealed_bound(PART_PLAIN_BYTES) <= MAX_FILE_BYTES as usize);
 
 /// Больше этого открытый текст копии не разжимается: разжатие
 /// останавливается на пределе, а не после (Правило 13), — иначе
@@ -562,12 +613,84 @@ where
     })
 }
 
-/// Шапка копии: какой версией программы и когда сделана.
+/// Идентификатор одной копии, сделанной частями: общий у всех её частей
+/// (задача 117). По нему окно узнаёт, что две части — одной копии.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct CopyId(uuid::Uuid);
+
+impl CopyId {
+    /// Новый: та же случайность, что у идентификаторов записей
+    /// (`RecordId::random`).
+    fn random() -> Self {
+        Self(uuid::Uuid::new_v4())
+    }
+}
+
+/// Часть копии (задача 117): какая из скольких и какой копии. В шапке файла
+/// — `"part":{"copy":"…","number":2,"of":3}`; у копии одним файлом поля нет.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Part {
+    copy: CopyId,
+    number: u16,
+    of: u16,
+}
+
+impl Part {
+    /// Копия, чья это часть.
+    pub const fn copy(&self) -> CopyId {
+        self.copy
+    }
+
+    /// Номер части — с единицы.
+    pub const fn number(&self) -> u16 {
+        self.number
+    }
+
+    /// Сколько частей у копии — две и больше.
+    pub const fn of(&self) -> u16 {
+        self.of
+    }
+
+    /// Годится ли часть: номер от единицы до числа частей, частей — от двух
+    /// до [`MAX_PARTS`]. Шапка — чужой ввод (Правило 13).
+    const fn fits(&self) -> bool {
+        self.number >= 1 && self.number <= self.of && self.of >= 2 && self.of <= MAX_PARTS
+    }
+}
+
+/// Имя файла части: `kvartik-2026-11-23.json` — `kvartik-2026-11-23-1of3.json`;
+/// у копии одним файлом — само имя. Номер — в конце, перед расширением: по
+/// имени человек видит, сколько файлов у копии и какой из них какой.
+pub fn part_file_name(name: &str, part: Option<Part>) -> String {
+    match (part, name.strip_suffix(".json")) {
+        (Some(part), Some(stem)) => format!("{stem}-{}of{}.json", part.number, part.of),
+        _ => name.to_owned(),
+    }
+}
+
+/// Номер части и их число из конца имени, как его пишет [`part_file_name`]:
+/// `1of3`. `None` — не по образцу: с нулём впереди, номер больше числа,
+/// частей меньше двух или больше [`MAX_PARTS`].
+pub(super) fn part_of_name(text: &str) -> Option<(u16, u16)> {
+    let (number, of) = text.split_once("of")?;
+    let read = |digits: &str| {
+        let plain = !digits.is_empty() && !digits.starts_with('0') && digits.bytes().all(|byte| byte.is_ascii_digit());
+        plain.then(|| digits.parse::<u16>().ok()).flatten()
+    };
+    let (number, of) = (read(number)?, read(of)?);
+    (number <= of && (2..=MAX_PARTS).contains(&of)).then_some((number, of))
+}
+
+/// Шапка копии: какой версией программы и когда сделана, а у копии
+/// частями — какая это часть.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Header {
     format_version: u32,
     app_version: String,
     created: Timestamp,
+    part: Option<Part>,
 }
 
 impl Header {
@@ -577,7 +700,21 @@ impl Header {
             format_version: FORMAT_VERSION,
             app_version: app_version.to_owned(),
             created,
+            part: None,
         }
+    }
+
+    /// Та же шапка — у части `part`.
+    fn with_part(&self, part: Part) -> Self {
+        Self {
+            part: Some(part),
+            ..self.clone()
+        }
+    }
+
+    /// Какая это часть копии; `None` — копия одним файлом.
+    pub const fn part(&self) -> Option<Part> {
+        self.part
     }
 
     /// Версия формата копии.
@@ -603,6 +740,8 @@ struct PlainOut<'a> {
     format_version: u32,
     app_version: &'a str,
     created: Timestamp,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    part: Option<Part>,
     records: Vec<RecordOut<'a>>,
 }
 
@@ -615,14 +754,16 @@ struct RecordOut<'a> {
 }
 
 /// Открытый текст копии: шапка и записи — JSON, ещё не сжатый ([`pack`]).
-pub fn plaintext(header: &Header, entries: &[Entry]) -> String {
+/// Записи — все записи копии или записи одной её части ([`split`]).
+pub fn plaintext<'e>(header: &Header, entries: impl IntoIterator<Item = &'e Entry>) -> String {
     serde_json::to_string(&PlainOut {
         file: FILE_MARK,
         format_version: header.format_version,
         app_version: &header.app_version,
         created: header.created,
+        part: header.part,
         records: entries
-            .iter()
+            .into_iter()
             .map(|entry| RecordOut {
                 kind: entry.kind,
                 base: entry.base,
@@ -635,17 +776,88 @@ pub fn plaintext(header: &Header, entries: &[Entry]) -> String {
 
 /// То, что окно шифрует: открытый текст копии ([`plaintext`]), сжатый
 /// DEFLATE (RFC 1951) — так пишет версия формата 6 и новее.
-pub fn pack(header: &Header, entries: &[Entry]) -> Vec<u8> {
+pub fn pack<'e>(header: &Header, entries: impl IntoIterator<Item = &'e Entry>) -> Vec<u8> {
     at_once(pack_sliced(header, entries, &mut no_pause))
 }
 
 /// [`pack`] кусками: пауза — после каждого мегабайта сжатого текста.
-pub async fn pack_sliced<P, F>(header: &Header, entries: &[Entry], pause: &mut P) -> Vec<u8>
+pub async fn pack_sliced<'e, P, F>(header: &Header, entries: impl IntoIterator<Item = &'e Entry>, pause: &mut P) -> Vec<u8>
 where
     P: FnMut() -> F,
     F: Future<Output = ()>,
 {
     deflate_sliced(plaintext(header, entries).as_bytes(), PACK_LEVEL, pause).await
+}
+
+/// Сколько байтов открытого текста — не больше — занимает запись вокруг
+/// своих полей: `{"kind":"…","base":"…","record":…},` — вид, метка базы
+/// и кавычки.
+const RECORD_FRAME_BYTES: usize = 128;
+
+/// Шапка открытого текста — не длиннее: метка, версии, момент и часть.
+const PLAIN_HEAD_BYTES: usize = 512;
+
+/// Сколько байтов — не больше — запись займёт в открытом тексте копии.
+fn plain_bytes(entry: &Entry) -> usize {
+    entry.record.get().len() + RECORD_FRAME_BYTES
+}
+
+/// Запись, которая идёт в каждую часть копии: по ней восстановление узнаёт
+/// часть (шапка модуля, «Частями»). Профиль — ни один ли это ИП
+/// ([`relation`]), ИП конторы — куда лечь записям с меткой его базы
+/// ([`whole`]). Их мало и они маленькие.
+fn in_every_part(entry: &Entry) -> bool {
+    entry.kind == Profile::KIND || entry.kind == Ip::KIND
+}
+
+/// Копия, разложенная по частям (задача 117): шапка и записи каждой. Влезает
+/// вся в `limit` байтов открытого текста — одна часть с шапкой как есть,
+/// без номера, и файл тот же, что до частей. Не влезает — частей несколько:
+/// в каждой записи [`in_every_part`], потом записи без файлов книги, потом
+/// файлы книги, всё — в порядке копии, пока часть не наберёт `limit`. Записей
+/// без файлов больше `limit` — у конторы на десятки ИП — и граница части
+/// пройдёт и между ними: восстановивший одну часть до остальных выпускать
+/// не должен, и окно это говорит (ревью задачи 117).
+/// Запись, которая и одна больше `limit`, ложится частью сама — и даёт файл
+/// больше [`MAX_FILE_BYTES`], который окно не отдаст; у программы таких нет:
+/// файл книги — не больше 2 МБ (`model::attachment::MAX_BYTES`).
+///
+/// `limit` окна — [`PART_PLAIN_BYTES`]; тесты делят мелко.
+pub fn split<'e>(header: &Header, entries: &'e [Entry], limit: usize) -> Vec<(Header, Vec<&'e Entry>)> {
+    let total = entries.iter().map(plain_bytes).fold(PLAIN_HEAD_BYTES, usize::saturating_add);
+    if total <= limit {
+        return vec![(header.clone(), entries.iter().collect())];
+    }
+    let shared: Vec<&Entry> = entries.iter().filter(|entry| in_every_part(entry)).collect();
+    let shared_bytes = shared.iter().map(|entry| plain_bytes(entry)).fold(PLAIN_HEAD_BYTES, usize::saturating_add);
+    let file = |entry: &&Entry| entry.kind == Attachment::KIND;
+    let rest = entries
+        .iter()
+        .filter(|entry| !in_every_part(entry) && !file(entry))
+        .chain(entries.iter().filter(file));
+    let mut parts: Vec<Vec<&Entry>> = Vec::new();
+    let mut part = shared.clone();
+    let mut used = shared_bytes;
+    for entry in rest {
+        let bytes = plain_bytes(entry);
+        // В части уже есть своё, кроме общего, — новая часть.
+        if used.saturating_add(bytes) > limit && part.len() > shared.len() {
+            parts.push(std::mem::replace(&mut part, shared.clone()));
+            used = shared_bytes;
+        }
+        part.push(entry);
+        used = used.saturating_add(bytes);
+    }
+    parts.push(part);
+    let of = u16::try_from(parts.len()).unwrap_or(u16::MAX);
+    if of < 2 {
+        return vec![(header.clone(), entries.iter().collect())];
+    }
+    let copy = CopyId::random();
+    (1..=of)
+        .zip(parts)
+        .map(|(number, entries)| (header.with_part(Part { copy, number, of }), entries))
+        .collect()
 }
 
 /// Сжатие DEFLATE без обёртки (RFC 1951) уровнем `level` кусками по
@@ -757,6 +969,8 @@ struct SealedOut<'a> {
     format_version: u32,
     app_version: &'a str,
     created: Timestamp,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    part: Option<Part>,
     kdf: KdfFields,
     cipher: CipherFields,
     data: String,
@@ -778,6 +992,7 @@ where
         format_version: header.format_version,
         app_version: &header.app_version,
         created: header.created,
+        part: header.part,
         kdf: KdfFields {
             name: KDF_NAME.to_owned(),
             iterations: lock.iterations,
@@ -874,6 +1089,8 @@ struct SealedIn {
     format_version: u32,
     app_version: String,
     created: Timestamp,
+    #[serde(default)]
+    part: Option<Part>,
     kdf: KdfFields,
     cipher: CipherFields,
     data: String,
@@ -923,6 +1140,7 @@ where
     if !is_app_version(&fields.app_version) {
         return Err(damaged("версия программы в шапке — не номер версии"));
     }
+    part_fits(fields.format_version, fields.part)?;
     let salt = base64::decode(&fields.kdf.salt).ok_or_else(|| damaged("соль — не base64"))?;
     let iv = base64::decode(&fields.cipher.iv).ok_or_else(|| damaged("вектор — не base64"))?;
     let lock = Lock::new(fields.kdf.iterations, salt, iv)
@@ -938,6 +1156,7 @@ where
             format_version: fields.format_version,
             app_version: fields.app_version,
             created: fields.created,
+            part: fields.part,
         },
         lock,
         ciphertext,
@@ -972,6 +1191,17 @@ where
     Some(bytes)
 }
 
+/// Часть в шапке годится: есть только с версии 27 и номером не больше
+/// числа частей ([`Part::fits`]).
+fn part_fits(format_version: u32, part: Option<Part>) -> Result<(), BackupError> {
+    match part {
+        None => Ok(()),
+        Some(_) if format_version < PARTS_SINCE => Err(damaged("часть копии в шапке версии до 27")),
+        Some(part) if part.fits() => Ok(()),
+        Some(part) => Err(damaged(format!("часть {} из {}: так не бывает", part.number, part.of))),
+    }
+}
+
 /// Начало каждого файла копии: так его пишет [`seal`].
 const MARK_PREFIX: &str = r#"{"file":"kvartik-backup""#;
 
@@ -991,6 +1221,8 @@ struct PlainIn<'a> {
     format_version: u32,
     app_version: String,
     created: Timestamp,
+    #[serde(default)]
+    part: Option<Part>,
     #[serde(borrow)]
     records: Vec<RecordIn<'a>>,
 }
@@ -1040,6 +1272,7 @@ where
         format_version: plain.format_version,
         app_version: plain.app_version,
         created: plain.created,
+        part: plain.part,
     };
     if plain.file != FILE_MARK || inner != sealed.header {
         return Err(damaged("шапка снаружи не совпадает с шапкой внутри"));

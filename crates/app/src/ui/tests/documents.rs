@@ -2362,7 +2362,7 @@ async fn settlement_file_is_given_for_services() {
 }
 
 /// Текст по адресу `blob:` — настоящим `fetch`.
-async fn blob_text(url: &str) -> Option<String> {
+pub(super) async fn blob_text(url: &str) -> Option<String> {
     let window = web_sys::window()?;
     let response: Response = window.fetch_with_str(url).await.ok()?.dyn_into().ok()?;
     response.text().ok()?.await.ok()?.as_string()

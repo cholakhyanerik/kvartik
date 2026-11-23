@@ -43,8 +43,8 @@ use std::time::Duration;
 
 use kvartik_core::format::autobackup::{self, DeviceTag};
 use kvartik_core::format::backup::{
-    self, BackupError, DeviceKey, Entry, FILE_KINDS, Files, Header, KDF_ITERATIONS, KINDS, MAX_FILE_BYTES,
-    MIN_PASSWORD_CHARS, Owner, PasswordProblem, SALT_BYTES, Sealed,
+    self, BackupError, CopyId, DeviceKey, Entry, FILE_KINDS, Files, Header, KDF_ITERATIONS, KINDS, MAX_FILE_BYTES,
+    MIN_PASSWORD_CHARS, Owner, Part, PasswordProblem, SALT_BYTES, Sealed,
 };
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
 use kvartik_core::release::EMAIL;
@@ -143,8 +143,8 @@ enum Hitch {
     Damaged,
     /// Хранилище отказало.
     Store(StoreError),
-    /// Копия вышла больше `MAX_FILE_BYTES` — вот сколько в ней файлов книги.
-    TooLarge(Files),
+    /// Копия не уложилась и частями (`store::backup::Failure::TooLarge`).
+    TooLarge,
     /// Шифра нет: страница открыта не по HTTPS.
     NoCrypto,
     /// Прочее; подробность — в консоли.
@@ -169,7 +169,7 @@ impl Hitch {
             Self::PasswordChanged => Key::AutoPasswordChanged,
             Self::Damaged => Key::AutoDamaged,
             Self::Store(error) => error_key(error),
-            Self::TooLarge(files) => return Problem::Oversized(files),
+            Self::TooLarge => return Problem::Oversized,
             Self::NoCrypto => Key::BackupNoCrypto,
             Self::Failed => Key::AutoFailed,
         })
@@ -203,7 +203,7 @@ impl From<Failure> for Hitch {
             Failure::Store(error) => Self::Store(error),
             Failure::Crypto(CryptoError::Unavailable) => Self::NoCrypto,
             Failure::Crypto(_) | Failure::File(_) | Failure::TooManyIps(_) | Failure::TooManyKeys => Self::Failed,
-            Failure::TooLarge(files) => Self::TooLarge(files),
+            Failure::TooLarge => Self::TooLarge,
         }
     }
 }
@@ -624,9 +624,8 @@ pub(super) enum Problem {
     Say(Key),
     TooShort,
     TooLarge,
-    /// Сделанная копия вышла больше предела: такую программа не откроет.
-    /// Сколько в ней файлов книги и убранных — то, что её раздуло (задача 64).
-    Oversized(Files),
+    /// Копия не уложилась и частями: такую программа не откроет (задача 117).
+    Oversized,
     /// С копией ИП в программе стало бы больше `MAX_IPS` (задача 38).
     TooManyIps,
     /// Копия всех ИП легла не вся — вот почему (задача 38): повтор
@@ -646,15 +645,7 @@ impl Problem {
                 t(lang, Key::BackupTooLarge),
                 &[&i18n::integer(lang, (MAX_FILE_BYTES >> 20) as i64)],
             ),
-            Self::Oversized(files) => fill(
-                t(lang, Key::BackupOversized),
-                &[
-                    &i18n::integer(lang, (MAX_FILE_BYTES >> 20) as i64),
-                    &megabytes(lang, files.bytes),
-                    &megabytes(lang, files.removed),
-                    EMAIL,
-                ],
-            ),
+            Self::Oversized => fill(t(lang, Key::BackupOversized), &[EMAIL]),
             Self::TooManyIps => fill(t(lang, Key::OfficeTooMany), &[&i18n::integer(lang, MAX_IPS as i64)]),
             Self::Partly(why) => fill(t(lang, Key::BackupPartly), &[t(lang, why)]),
         }
@@ -709,7 +700,7 @@ impl From<Failure> for Problem {
             Failure::Store(error) => Self::Say(error_key(error)),
             Failure::Crypto(error) => error.into(),
             Failure::File(error) => error.into(),
-            Failure::TooLarge(files) => Self::Oversized(files),
+            Failure::TooLarge => Self::Oversized,
             Failure::TooManyIps(_) => Self::TooManyIps,
             // Больше `license::MAX_KEYS` записей ключей — «Pro» в конторе или
             // ключей одного ИП — программа не пишет (с 0.0.135), значит, и файл
@@ -727,14 +718,45 @@ pub(super) fn counted(lang: ReadSignal<Lang>, key: Key, n: i64) -> impl Fn() -> 
     }
 }
 
-/// Готовая копия: файл и что в нём.
+/// Готовая копия: файл — или файлы частей по порядку (задача 117) — и что
+/// в ней.
 struct Ready {
-    download: Download,
+    downloads: Vec<Download>,
     records: usize,
     unreadable: usize,
-    /// Сколько весит файл копии и файлы книги в нём (задача 64).
+    /// Сколько весят файлы копии вместе и файлы книги в ней (задача 64).
     size: u64,
     files: Files,
+}
+
+/// Файлы сделанной копии — ссылками для человека: имя части — с её номером
+/// (`backup::part_file_name`). Текст файла уходит в браузер по одному, и
+/// в памяти wasm он больше не нужен.
+pub(super) fn downloads(sheets: Vec<stored::Sheet>, name: &str) -> Result<Vec<Download>, Problem> {
+    sheets
+        .into_iter()
+        .map(|sheet| {
+            Download::text(&sheet.text, &backup::part_file_name(name, sheet.part)).ok_or(Problem::Say(Key::BackupFailed))
+        })
+        .collect()
+}
+
+/// Сколько открытого текста кладётся в один файл копии
+/// (`backup::PART_PLAIN_BYTES`, задача 117). Браузерные тесты окна делят
+/// копию мелко, чтобы видеть части без сотни мегабайт.
+#[cfg(not(test))]
+pub(super) fn part_limit() -> usize {
+    backup::PART_PLAIN_BYTES
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static PART_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(backup::PART_PLAIN_BYTES) };
+}
+
+#[cfg(test)]
+pub(super) fn part_limit() -> usize {
+    PART_LIMIT.with(std::cell::Cell::get)
 }
 
 /// Где копия.
@@ -847,29 +869,25 @@ fn BackupBody(ctx: Ctx) -> impl IntoView {
                     }
                 }}
             </p>
-            // Сколько весят файлы книги в последней копии (задача 64): предел
-            // файла копии ближе всего тому, у кого их много, а убранный из
-            // записи файл тоже хранится и идёт в копию. Запись устройства
+            // Сколько весят файлы книги в последней копии (задача 64): больше
+            // всего места в копии — у них, а убранный из записи файл тоже
+            // хранится и идёт в копию; копия больше файла — частями
+            // (задача 117), и сколько их, сказано тут же. Запись устройства
             // перечитывается вслед за днём последней копии.
-            // Класс — строкой, а не `class:warning=`: строка и так строится
-            // заново, а булев класс развернул бы в части копии обобщённый код
-            // Leptos, общий с другими частями, — новый файл wasm (замер
-            // задачи 64).
             {move || {
                 backups.last.track();
-                let (size, files) = Device::new().last_size().filter(|(_, files)| files.bytes > 0)?;
-                let class = if near_limit(size) { "hint backup-files warning" } else { "hint backup-files" };
-                Some(view! { <p class=class>{move || files_words(lang.get(), size, files)}</p> })
+                let (size, files, parts) = Device::new().last_size().filter(|(_, files, _)| files.bytes > 0)?;
+                Some(view! { <p class="hint backup-files">{move || files_words(lang.get(), size, files, parts)}</p> })
             }}
             {if backups.has_data.get_untracked() {
                 view! {
                     <MakeBackup lang backups forms router quiet />
-                    <RestoreBackup lang backups forms picked />
+                    <RestoreBackup lang backups forms picked router />
                 }
                 .into_any()
             } else {
                 view! {
-                    <RestoreBackup lang backups forms picked />
+                    <RestoreBackup lang backups forms picked router />
                     <MakeBackup lang backups forms router quiet />
                 }
                 .into_any()
@@ -997,6 +1015,9 @@ pub(super) enum RestoreJob {
     /// Расшифровать файл этим паролем и слить — или остановиться на
     /// вопросе о другом ИП.
     Open(Rc<Sealed>, String),
+    /// То же ключом прошлой части той же копии (задача 117): пароль второй
+    /// раз не спрашивается.
+    Known(Rc<Sealed>, Rc<crypto::Key>),
     /// Человек ответил «слить» на вопрос о копии другого ИП.
     Merge(Rc<Asked>),
     /// Человек ответил «добавить как нового ИП» (задача 38).
@@ -1005,8 +1026,9 @@ pub(super) enum RestoreJob {
 
 /// Чем кончилась часть восстановления.
 pub(super) enum Recovered {
-    /// Записи легли.
-    Done(Restored, After),
+    /// Записи легли. Ключ — у части копии (задача 117): им окно откроет
+    /// следующую часть.
+    Done(Restored, After, Option<Rc<crypto::Key>>),
     /// Копия другого ИП: окно спрашивает, а записано ничего.
     Other(Rc<Asked>),
     /// Копия легла новым ИП.
@@ -1028,6 +1050,8 @@ pub(super) struct After {
     /// В копии — правки позже «сейчас» этого устройства (`backup::ahead`):
     /// часы одного из устройств идут неверно.
     ahead: bool,
+    /// Легла часть копии (задача 117): окно говорит, какие ещё остались.
+    part: Option<Part>,
 }
 
 /// Расшифрованная копия другого ИП — ждёт ответа человека (задача 38,
@@ -1036,7 +1060,7 @@ pub(super) struct After {
 pub(super) struct Asked {
     sealed: Rc<Sealed>,
     entries: Vec<Entry>,
-    key: crypto::Key,
+    key: Rc<crypto::Key>,
     ours: Option<Owner>,
     theirs: Owner,
 }

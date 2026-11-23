@@ -1743,9 +1743,10 @@ fn shown_button(host: &HtmlElement, label: &str) -> bool {
 }
 
 /// Сколько весят файлы книги в последней копии (задача 64): строка под днём
-/// последней копии — мегабайты по правилам языка, вся копия и предел,
-/// убранные из записей, — а копия в три четверти предела и больше —
-/// предупреждением. Без файлов строки нет.
+/// последней копии — мегабайты по правилам языка, вся копия, в скольких она
+/// файлах, когда их больше одного (задача 117), и убранные из записей.
+/// Предупреждения у тяжёлой копии больше нет: тупика у неё нет, она делится
+/// на части. Без файлов строки нет.
 #[wasm_bindgen_test]
 async fn the_backup_screen_names_the_weight_of_ledger_files() {
     use kvartik_core::format::backup::Files;
@@ -1755,30 +1756,50 @@ async fn the_backup_screen_names_the_weight_of_ledger_files() {
     Device::new().set_ui_lang(lang);
     let device = Device::new();
     let mut wrong = Vec::new();
-    assert!(device.set_last_size(100 << 20, Files { bytes: 37 << 20, removed: 12 << 20 }));
+    assert!(device.set_last_size(200 << 20, Files { bytes: 137 << 20, removed: 12 << 20 }, 3));
     let (host, mounted) = mount_at("#/backup");
     let mb = |n: i64| i18n::integer(lang, n);
-    let words = fill(t(lang, Key::BackupFiles), &[&mb(37), &mb(100), "128"]);
+    let words = fill(t(lang, Key::BackupFiles), &[&mb(137), &mb(200)]);
     if !wait_for(&host, &words).await {
         wrong.push(format!("нет «{words}»"));
+    }
+    let parts = fill(t(lang, Key::BackupFilesParts), &[&mb(3), "128"]);
+    if !wait_for(&host, &parts).await {
+        wrong.push(format!("нет «{parts}»"));
     }
     let removed = fill(t(lang, Key::BackupFilesRemoved), &[&mb(12)]);
     if !wait_for(&host, &removed).await {
         wrong.push(format!("нет «{removed}»"));
     }
-    let near = host
+    let warned = host
         .query_selector("p.backup-files")
         .ok()
         .flatten()
         .is_some_and(|line| line.class_list().contains("warning"));
-    if !near {
-        wrong.push("копия в 100 МБ из 128 — а не предупреждением".to_owned());
+    if warned {
+        wrong.push("копия частями — предупреждением, а тупика нет".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+
+    // Копия одним файлом — без слов о частях.
+    assert!(device.set_last_size(100 << 20, Files { bytes: 37 << 20, removed: 0 }, 1));
+    let (host, mounted) = mount_at("#/backup");
+    let words = fill(t(lang, Key::BackupFiles), &[&mb(37), &mb(100)]);
+    if !wait_for(&host, &words).await {
+        wrong.push(format!("нет «{words}»"));
+    }
+    let said = host.text_content().unwrap_or_default();
+    let parts_head = t(lang, Key::BackupFilesParts).split("{}").next().unwrap_or_default();
+    let removed_head = t(lang, Key::BackupFilesRemoved).split("{}").next().unwrap_or_default();
+    if said.contains(parts_head) || said.contains(removed_head) {
+        wrong.push("у копии одним файлом без убранных — слова о частях или убранных".to_owned());
     }
     drop(mounted);
     host.remove();
 
     // Без файлов книги — ни слова о них.
-    assert!(device.set_last_size(1 << 20, Files::default()));
+    assert!(device.set_last_size(1 << 20, Files::default(), 1));
     let (host, mounted) = mount_at("#/backup");
     if !wait_for(&host, t(lang, Key::BackupChooseFile)).await {
         wrong.push("раздела копии нет".to_owned());
@@ -1792,6 +1813,208 @@ async fn the_backup_screen_names_the_weight_of_ledger_files() {
     device.forget_last_size();
     crate::store::delete_database(crate::store::DB_NAME).await;
     assert!(wrong.is_empty(), "файлы книги на экране копии: {wrong:#?}");
+}
+
+/// Копия больше файла — частями (задача 117): у каждой части своя ссылка
+/// с номером в имени файла и слова, что их несколько; отданная часть — ещё
+/// не копия: день последней копии сдвигается, когда отданы все, и тогда же
+/// запоминается, в скольких она файлах. Части ложатся по одной: у первой —
+/// пароль и слова, какая это часть, следующая той же копии — без пароля,
+/// и окно говорит, какие легли. Ключ прошлой части окно забывает, когда
+/// человек ушёл с экрана копии и когда легли все части (ревью задачи 117):
+/// тогда пароль снова спрашивается. Предел части тест ставит мелкий
+/// (`backup::PART_LIMIT`), чтобы не собирать сотню мегабайт.
+#[wasm_bindgen_test]
+async fn a_backup_over_the_limit_is_saved_in_parts() {
+    use crate::ui::backup::PART_LIMIT;
+    use kvartik_core::i18n;
+    documents::fresh_base_with_client().await;
+    let mut writes = Writes::default();
+    for name in ["Beispiel GmbH", "Example LLC"] {
+        let data = ClientData {
+            name: Line::new(name).expect("имя"),
+            ..documents::acme()
+        };
+        writes.insert(&Client::create(data, crate::platform::clock::now()).expect("годный клиент"));
+    }
+    documents::commit(writes).await;
+    let device = Device::new();
+    for forget in ["last_backup", "backup_key", "last_size"] {
+        if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
+            let _ = storage.remove_item(&format!("kvartik.{forget}"));
+        }
+    }
+    let lang = Lang::Ru;
+    device.set_ui_lang(lang);
+    // Каждая запись, кроме профиля, — своей частью: три клиента — три файла.
+    PART_LIMIT.with(|limit| limit.set(1));
+    let (host, mounted) = mount_at("#/backup");
+    // Ссылки на файлы человек нажимает сам, а скачивать в тесте нечего:
+    // у ссылок на файлы действие браузера снято, обработчик окна — нет.
+    let prevent = wasm_bindgen::closure::Closure::<dyn Fn(web_sys::Event)>::new(|event: web_sys::Event| {
+        let link = event
+            .target()
+            .and_then(|target| target.dyn_into::<Element>().ok())
+            .and_then(|element| element.closest("a[download]").ok().flatten());
+        if link.is_some() {
+            event.prevent_default();
+        }
+    });
+    host.add_event_listener_with_callback_and_bool("click", prevent.as_ref().unchecked_ref(), true)
+        .expect("слушатель поставлен");
+    let mut wrong = Vec::new();
+    let password = "Пароль копии задачи 117 частями";
+    let mut make = None;
+    for _ in 0..100 {
+        make = button(&host, &[t(lang, Key::BackupMake)]);
+        if make.is_some() {
+            break;
+        }
+        sleep(50).await;
+    }
+    match make {
+        Some(make) => {
+            for label in [Key::BackupNewPassword, Key::BackupRepeatPassword] {
+                match field(&host, t(lang, label), 0) {
+                    Some(input) => type_into(&input, password),
+                    None => wrong.push(format!("нет поля {label:?}")),
+                }
+            }
+            make.click();
+        }
+        None => wrong.push("нет «Сделать копию»".to_owned()),
+    }
+    let words = fill(t(lang, Key::BackupParts), &["128", "3"]);
+    if !wait_for(&host, &words).await {
+        let said = host.text_content().unwrap_or_default();
+        let at = said.find(t(lang, Key::BackupHeadline)).unwrap_or(0);
+        wrong.push(format!("нет «{words}»: {}", &said[at..]));
+    }
+    let links: Vec<HtmlElement> = host
+        .query_selector_all("a[download]")
+        .map(|found| {
+            (0..found.length())
+                .filter_map(|index| found.item(index))
+                .filter_map(|node| node.dyn_into::<HtmlElement>().ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    let names: Vec<String> = links.iter().filter_map(|link| link.get_attribute("download")).collect();
+    let today = crate::platform::clock::today().expect("часы с датой");
+    let expected: Vec<String> = (1..=3).map(|n| format!("kvartik-{}-{n}of3.json", today.iso())).collect();
+    if names != expected {
+        wrong.push(format!("файлы {names:?}, а не {expected:?}"));
+    }
+    if let Some(first) = links.first() {
+        first.click();
+        let handed = fill(t(lang, Key::BackupPartsHanded), &["1", "3"]);
+        if !wait_for(&host, &handed).await {
+            wrong.push(format!("нет «{handed}»"));
+        }
+        if device.last_backup().is_some() {
+            wrong.push("отдана одна часть из трёх — а день копии сдвинулся".to_owned());
+        }
+        // Та же часть второй раз — по-прежнему одна.
+        first.click();
+        sleep(100).await;
+        if device.last_backup().is_some() {
+            wrong.push("одна часть дважды засчитана двумя".to_owned());
+        }
+    }
+    for link in links.iter().skip(1) {
+        link.click();
+    }
+    if !wait_for(&host, t(lang, Key::BackupPartsSaved)).await {
+        wrong.push("отданы все части — а слов нет".to_owned());
+    }
+    if device.last_backup().is_none() {
+        wrong.push("отданы все части — а копия не засчитана".to_owned());
+    }
+    match device.last_size() {
+        Some((_, _, 3)) => {}
+        other => wrong.push(format!("размер последней копии: {other:?}")),
+    }
+
+    // Части — обратно, по одной.
+    let mut parts = Vec::new();
+    for link in &links {
+        let text = match link.get_attribute("href") {
+            Some(url) => documents::blob_text(&url).await,
+            None => None,
+        };
+        match text {
+            Some(text) => parts.push(text),
+            None => wrong.push("часть не читается по своей ссылке".to_owned()),
+        }
+    }
+    let n = |number: i64| i18n::integer(lang, number);
+    let asked = |number: i64| fill(t(lang, Key::BackupFilePart), &[&n(number), &n(3)]);
+    let laid = |numbers: &str| fill(t(lang, Key::BackupPartsLaid), &[&n(3), numbers]);
+    // Положить часть `number`; `typed` — её спросят паролем. Поле выбора
+    // файла окно рисует заново после каждого восстановления — брать новое.
+    let lay = async |number: usize, typed: bool, wrong: &mut Vec<String>| {
+        let Some(text) = parts.get(number - 1) else {
+            return;
+        };
+        let Some(input) = backup_file(&host).await else {
+            wrong.push("нет поля выбора копии".to_owned());
+            return;
+        };
+        choose_file(&input, &expected[number - 1], text);
+        if !typed {
+            return;
+        }
+        if !wait_for(&host, &asked(number as i64)).await {
+            wrong.push(format!("у части {number} не спросили пароль со словами о части"));
+            return;
+        }
+        match field(&host, t(lang, Key::BackupFilePassword), 0) {
+            Some(input) => type_into(&input, password),
+            None => wrong.push("нет поля пароля копии".to_owned()),
+        }
+        match button(&host, &[t(lang, Key::BackupRestore)]) {
+            Some(restore) => restore.click(),
+            None => wrong.push("нет «Восстановить»".to_owned()),
+        }
+    };
+    lay(2, true, &mut wrong).await;
+    if !wait_for(&host, &laid(&n(2))).await {
+        wrong.push("после части 2 нет слов о легших".to_owned());
+    }
+    // Следующая той же копии — без пароля.
+    lay(1, false, &mut wrong).await;
+    if !wait_for(&host, &laid(&format!("{}, {}", n(1), n(2)))).await {
+        wrong.push("часть 1 не легла ключом прошлой".to_owned());
+    }
+    // Ушли с экрана копии — ключ забыт.
+    crate::platform::set_hash(&Screen::Home.href());
+    sleep(200).await;
+    lay(3, true, &mut wrong).await;
+    if !wait_for(&host, &laid(&n(3))).await {
+        wrong.push("после ухода с экрана часть 3 не легла паролем".to_owned());
+    }
+    lay(1, false, &mut wrong).await;
+    if !wait_for(&host, &laid(&format!("{}, {}", n(1), n(3)))).await {
+        wrong.push("часть 1 не легла ключом части 3".to_owned());
+    }
+    lay(2, false, &mut wrong).await;
+    let all = fill(t(lang, Key::BackupPartsAll), &[&n(3)]);
+    if !wait_for(&host, &all).await {
+        wrong.push(format!("нет «{all}»"));
+    }
+    // Легли все — ключ забыт, и та же часть снова спрашивает пароль.
+    lay(1, true, &mut wrong).await;
+    PART_LIMIT.with(|limit| limit.set(kvartik_core::format::backup::PART_PLAIN_BYTES));
+    let _ = host.remove_event_listener_with_callback_and_bool("click", prevent.as_ref().unchecked_ref(), true);
+    drop(mounted);
+    host.remove();
+    for forget in ["last_backup", "backup_key", "last_size"] {
+        if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
+            let _ = storage.remove_item(&format!("kvartik.{forget}"));
+        }
+    }
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    assert!(wrong.is_empty(), "копия частями: {wrong:#?}");
 }
 
 /// Восстановление не путается с новой копией (полный прогон 2026-11-10,

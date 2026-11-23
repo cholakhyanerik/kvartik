@@ -51,6 +51,7 @@ async fn sealed(salt: &[u8], all: Option<(&Store, &str, &Store)>, single: Option
         key: &key,
         salt,
         iterations: KDF_ITERATIONS,
+        limit: kvartik_core::format::backup::PART_PLAIN_BYTES,
     };
     match (all, single) {
         (Some((open, name, office)), _) => make_all(open, name, office, &sealing).await.expect("копия всех"),
@@ -97,7 +98,7 @@ async fn a_backup_of_all_ies_lands_in_each_base() {
     for name in [DB_NAME, OFFICE_DB, second.base(), removed.base()] {
         delete_database(name).await;
     }
-    let file = open_file(&made.file).expect("файл открывается");
+    let file = open_file(&made.sheets[0].text).expect("файл открывается");
     let (entries, _) = unlock(FILE_KINDS, &file, &crypto::normalize(PASSWORD)).await.expect("расшифрована");
     assert!(is_full(&entries));
     let open = Store::open_base(DB_NAME, |_| {}).await.expect("база открыта");
@@ -156,7 +157,7 @@ async fn a_backup_of_all_ies_lands_in_each_base() {
 
 /// Записи файла копии `made` — расшифрованные.
 async fn entries_of(made: &Made) -> Vec<Entry> {
-    let file = open_file(&made.file).expect("файл открывается");
+    let file = open_file(&made.sheets[0].text).expect("файл открывается");
     let (entries, _) = unlock(FILE_KINDS, &file, &crypto::normalize(PASSWORD)).await.expect("расшифрована");
     entries
 }
@@ -275,6 +276,7 @@ async fn a_broken_pro_key_does_not_stop_the_backup_of_all_ies() {
         key: &key,
         salt: &salt,
         iterations: KDF_ITERATIONS,
+        limit: kvartik_core::format::backup::PART_PLAIN_BYTES,
     };
     let mut wrong = Vec::new();
     match make_all(&open, DB_NAME, &office, &sealing).await {
@@ -452,7 +454,7 @@ async fn a_backup_of_one_ie_lands_as_a_new_ie() {
     let made = sealed(&salt, None, Some(&source)).await;
     drop(source);
     delete_database(other.base()).await;
-    let file = open_file(&made.file).expect("файл открывается");
+    let file = open_file(&made.sheets[0].text).expect("файл открывается");
     let (entries, _) = unlock(FILE_KINDS, &file, &crypto::normalize(PASSWORD)).await.expect("расшифрована");
     assert!(!is_full(&entries));
 

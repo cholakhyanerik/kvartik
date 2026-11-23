@@ -15,11 +15,16 @@
 //! куда ляжет каждый, решает маршрут ядра до первой записи, потом список
 //! конторы и каждая база — своей транзакцией, и повтор безвреден
 //! ([`restore_all`], решение человека 2026-11-05).
+//!
+//! Копия больше файла (задача 117) — несколько файлов, частей: как
+//! разложить записи, решает ядро (`backup::split`), а здесь каждая часть
+//! сжимается и шифруется по очереди, своим вектором. Ложится часть тем же
+//! путём, что целая копия: каждая — копия сама по себе.
 
 use kvartik_core::format::FormatError;
 use kvartik_core::format::backup::{
-    self, BackupError, Entry, Files, Header, IV_BYTES, KINDS, Kind, Lock, MAX_FILE_BYTES, Merge, OFFICE_KINDS,
-    Owner, Relation, Sealed,
+    self, BackupError, Entry, Files, Header, IV_BYTES, KINDS, Kind, Lock, MAX_FILE_BYTES, MAX_PARTS, Merge,
+    OFFICE_KINDS, Owner, Part, Relation, Sealed,
 };
 use kvartik_core::format::Stored;
 use kvartik_core::format::office::{self as route, RouteError};
@@ -42,10 +47,11 @@ pub enum Failure {
     Crypto(CryptoError),
     /// Файл копии не открывается.
     File(BackupError),
-    /// Копия вышла больше `MAX_FILE_BYTES`: такую программа не откроет,
-    /// и отдавать её человеку — обещать то, чего она не вернёт. Сколько
-    /// в ней весят файлы книги — то, что её раздуло (задача 64).
-    TooLarge(Files),
+    /// Часть копии вышла больше `MAX_FILE_BYTES` или частей — больше
+    /// `MAX_PARTS`: такую программа не откроет, и отдавать её человеку —
+    /// обещать то, чего она не вернёт. У программы так не бывает: часть
+    /// больше предела — только у записи больше части (`backup::split`).
+    TooLarge,
     /// С копией ИП в программе стало бы больше `MAX_IPS`: столько.
     TooManyIps(usize),
     /// С копией записей ключей — «Pro» в конторе или в базе ИП — стало бы
@@ -71,10 +77,18 @@ impl From<BackupError> for Failure {
     }
 }
 
+/// Файл копии — или файл её части (задача 117).
+pub struct Sheet {
+    /// Текст файла.
+    pub text: String,
+    /// Какая это часть; `None` — копия одним файлом.
+    pub part: Option<Part>,
+}
+
 /// Сделанная копия.
 pub struct Made {
-    /// Текст файла копии.
-    pub file: String,
+    /// Файлы копии: один — или по файлу на часть, по порядку.
+    pub sheets: Vec<Sheet>,
     /// Сколько записей в копии.
     pub records: usize,
     /// Сколько записей не читается и в копию не вошло.
@@ -83,13 +97,23 @@ pub struct Made {
     pub files: Files,
 }
 
+impl Made {
+    /// Сколько весят все файлы копии вместе.
+    pub fn size(&self) -> u64 {
+        self.sheets.iter().map(|sheet| sheet.text.len() as u64).sum()
+    }
+}
+
 /// Ключ копии и откуда он: соль и число итераций, из которых его получили,
 /// ложатся в замок файла — по ним ключ получат снова при восстановлении.
+/// `limit` — сколько открытого текста кладётся в один файл: у окна
+/// `backup::PART_PLAIN_BYTES`, а тесты делят копию мелко (задача 117).
 pub struct Sealing<'a> {
     pub header: &'a Header,
     pub key: &'a Key,
     pub salt: &'a [u8],
     pub iterations: u32,
+    pub limit: usize,
 }
 
 /// Собрать копию всей базы и зашифровать её.
@@ -155,19 +179,35 @@ async fn collect_dumped(dumped: &[Dumped], kinds: &[Kind]) -> Result<(Vec<Entry>
     Ok((entries, unreadable.len()))
 }
 
-/// Сжать, зашифровать и запечатать записи копии.
+/// Сжать, зашифровать и запечатать записи копии — одним файлом или
+/// частями (`backup::split`, задача 117). Части — по одной: сжатый текст
+/// и шифротекст части уходят, как только её файл готов, и в памяти рядом
+/// с записями — готовые файлы и одна часть в работе. Вектор шифра — новый
+/// у каждой части: ключ у них один (шапка `format/backup.rs`, «Шифр»).
 async fn seal(entries: Vec<Entry>, unreadable: usize, sealing: &Sealing<'_>) -> Result<Made, Failure> {
     let files = backup::files(&entries);
-    let packed = backup::pack_sliced(sealing.header, &entries, &mut breathe).await;
-    let iv = crypto::random(IV_BYTES)?;
-    let lock = Lock::new(sealing.iterations, sealing.salt.to_vec(), iv).ok_or(CryptoError::Failed)?;
-    let ciphertext = crypto::encrypt(sealing.key, lock.iv(), &packed).await?;
-    let file = backup::seal_sliced(sealing.header, &lock, &ciphertext, &mut breathe).await;
-    if file.len() as u64 > MAX_FILE_BYTES {
-        return Err(Failure::TooLarge(files));
+    let parts = backup::split(sealing.header, &entries, sealing.limit);
+    if parts.len() > usize::from(MAX_PARTS) {
+        return Err(Failure::TooLarge);
+    }
+    let mut sheets = Vec::with_capacity(parts.len());
+    for (header, part) in &parts {
+        let packed = backup::pack_sliced(header, part.iter().copied(), &mut breathe).await;
+        let iv = crypto::random(IV_BYTES)?;
+        let lock = Lock::new(sealing.iterations, sealing.salt.to_vec(), iv).ok_or(CryptoError::Failed)?;
+        let ciphertext = crypto::encrypt(sealing.key, lock.iv(), &packed).await?;
+        drop(packed);
+        let text = backup::seal_sliced(header, &lock, &ciphertext, &mut breathe).await;
+        if text.len() as u64 > MAX_FILE_BYTES {
+            return Err(Failure::TooLarge);
+        }
+        sheets.push(Sheet {
+            text,
+            part: header.part(),
+        });
     }
     Ok(Made {
-        file,
+        sheets,
         records: entries.len(),
         unreadable,
         files,
@@ -176,7 +216,8 @@ async fn seal(entries: Vec<Entry>, unreadable: usize, sealing: &Sealing<'_>) -> 
 
 /// Записи копии: ключ из пароля и замка файла, расшифровка, разбор.
 /// Пароль — уже приведённый (`crypto::normalize`). Вместе с записями —
-/// ключ: по нему устройство запомнит пароль, если своего ещё нет.
+/// ключ: по нему устройство запомнит пароль, если своего ещё нет, а окно
+/// откроет следующую часть той же копии (задача 117).
 pub async fn unlock(
     kinds: &[Kind],
     sealed: &Sealed,
@@ -184,9 +225,16 @@ pub async fn unlock(
 ) -> Result<(Vec<Entry>, Key), Failure> {
     let lock = sealed.lock();
     let key = crypto::derive(password, lock.salt(), lock.iterations()).await?;
-    let plaintext = crypto::decrypt(&key, lock.iv(), sealed.ciphertext()).await?;
-    let entries = backup::read_sliced(kinds, sealed, &plaintext, &mut breathe).await?;
+    let entries = unlock_with(kinds, sealed, &key).await?;
     Ok((entries, key))
+}
+
+/// Записи копии ключом, уже полученным из пароля: у частей одной копии
+/// замок с одной солью и одним числом итераций (задача 117), и ключ
+/// прошлой части открывает следующую без пароля.
+pub async fn unlock_with(kinds: &[Kind], sealed: &Sealed, key: &Key) -> Result<Vec<Entry>, Failure> {
+    let plaintext = crypto::decrypt(key, sealed.lock().iv(), sealed.ciphertext()).await?;
+    Ok(backup::read_sliced(kinds, sealed, &plaintext, &mut breathe).await?)
 }
 
 /// Что сделало восстановление.
