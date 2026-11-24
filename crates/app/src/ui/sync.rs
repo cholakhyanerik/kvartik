@@ -51,7 +51,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use kvartik_core::format::Stored;
-use kvartik_core::format::backup::{self, DeviceKey, IV_BYTES, KDF_ITERATIONS, KINDS, Owner};
+use kvartik_core::format::backup::{self, DeviceKey, IV_BYTES, KDF_ITERATIONS, KINDS, Owner, Tally};
 use kvartik_core::format::office as office_route;
 use kvartik_core::format::qr::{self, Gray};
 use kvartik_core::format::sync::{
@@ -65,7 +65,7 @@ use kvartik_core::model::record::Timestamp;
 use leptos::ev::{MouseEvent, SubmitEvent};
 use leptos::prelude::*;
 
-use super::backup::{Backups, IssuerAsk, Problem, counted, key_for, who};
+use super::backup::{Backups, IssuerAsk, Problem, counted, key_for, restored_words, tally_words, who};
 use super::form::Forms;
 use super::icon::{Icon, icon};
 use super::office::Office;
@@ -336,7 +336,8 @@ struct Shown {
     parts: Vec<String>,
     /// С какого дня изменения; `None` — все записи.
     since: Option<Date>,
-    changed: usize,
+    /// Изменённые записи кода — по видам (задача 124, п. 21).
+    tally: Tally,
     skipped: usize,
     unreadable: usize,
     /// Ключ кода — им зашифрована квитанция в ответ (задача 116).
@@ -671,7 +672,7 @@ async fn make(ctx: Ctx, typed: &str, repeat: Option<&str>, since: Option<Date>, 
         side,
         parts: sync::text_parts(&made.code, sync::transfer_id()),
         since,
-        changed: made.changed,
+        tally: made.tally,
         skipped: made.skipped,
         unreadable: made.unreadable,
         key: Rc::new(key),
@@ -925,12 +926,13 @@ fn ShownCode(
 ) -> impl IntoView {
     let Ctx { lang, .. } = ctx;
     let summary = {
-        let (since, changed) = (shown.since, shown.changed as i64);
+        // Что в коде — по видам (задача 124, п. 21).
+        let (since, tally) = (shown.since, shown.tally);
         move || {
             let lang = lang.get();
             match since {
-                Some(day) => fill(t(lang, Key::SyncMadeSince), &[&i18n::date(lang, day), &i18n::integer(lang, changed)]),
-                None => fill(t(lang, Key::SyncMadeAll), &[&i18n::integer(lang, changed)]),
+                Some(day) => fill(t(lang, Key::SyncMadeSince), &[&i18n::date(lang, day), &tally_words(lang, tally)]),
+                None => fill(t(lang, Key::SyncMadeAll), &[&tally_words(lang, tally)]),
             }
         }
     };
@@ -1590,17 +1592,8 @@ fn AcceptedWords(lang: ReadSignal<Lang>, accepted: Rc<Accepted>) -> impl IntoVie
         }.into_any()),
     };
     view! {
-        <p role="status">{move || {
-            let lang = lang.get();
-            fill(
-                t(lang, Key::BackupRestored),
-                &[
-                    &i18n::integer(lang, restored.added as i64),
-                    &i18n::integer(lang, restored.updated as i64),
-                    &i18n::integer(lang, restored.unchanged as i64),
-                ],
-            )
-        }}</p>
+        // Что легло — по видам (задача 124, п. 21).
+        <p role="status">{move || restored_words(lang.get(), &restored, None)}</p>
         {flow}
         {accepted.ahead.then(|| view! { <p class="warning">{tr(lang, Key::BackupAhead)}</p> })}
         {(accepted.fresh && restored.added > 0).then(|| view! { <IssuerAsk lang /> })}

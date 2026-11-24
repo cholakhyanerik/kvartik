@@ -24,7 +24,7 @@
 use kvartik_core::format::FormatError;
 use kvartik_core::format::backup::{
     self, BackupError, Entry, Files, Header, IV_BYTES, KINDS, Kind, Lock, MAX_FILE_BYTES, MAX_PARTS, Merge,
-    OFFICE_KINDS, Owner, Part, Relation, Sealed,
+    OFFICE_KINDS, Owner, Part, Relation, Sealed, Tally,
 };
 use kvartik_core::format::Stored;
 use kvartik_core::format::office::{self as route, RouteError};
@@ -253,6 +253,8 @@ pub struct Restored {
     /// этому моменту следующий код возьмёт и её (`Device::sync_arrived`,
     /// ревью задачи 110).
     pub oldest: Option<Timestamp>,
+    /// Что легло — по видам (задача 124, п. 21): слова итога.
+    pub landed: Tally,
 }
 
 /// Самый ранний момент изменения записей, которые слияние запишет.
@@ -318,6 +320,7 @@ pub async fn restore(
         updated: merge.updated(),
         unchanged: merge.unchanged(),
         oldest: oldest(&merge),
+        landed: Tally::of(merge.writes()),
     }))
 }
 
@@ -411,6 +414,7 @@ pub async fn restore_all(
             updated: keys.updated(),
             unchanged: keys.unchanged(),
             oldest: None,
+            landed: Tally::of(keys.writes()),
         },
         open_touched: false,
         covers_all: covers_all && route.bases.iter().any(|landing| landing.base == open_name),
@@ -435,6 +439,7 @@ pub async fn restore_all(
                 done.restored.added += restored.added;
                 done.restored.updated += restored.updated;
                 done.restored.unchanged += restored.unchanged;
+                done.restored.landed = done.restored.landed.plus(restored.landed);
                 if let Some(at) = restored.oldest {
                     done.landed.push((landing.base.clone(), at));
                 }
@@ -498,6 +503,7 @@ async fn merge_into(store: &Store, entries: &[Entry]) -> Result<Restored, Failur
         updated: merge.updated(),
         unchanged: merge.unchanged(),
         oldest: oldest(&merge),
+        landed: Tally::of(merge.writes()),
     })
 }
 

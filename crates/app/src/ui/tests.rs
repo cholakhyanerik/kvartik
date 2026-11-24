@@ -2108,6 +2108,18 @@ async fn a_backup_over_the_limit_is_saved_in_parts() {
     // спрошен снова, со словами, какой это из выбранных файлов. Где
     // выпускать — спрошено в итоге, хотя целой копию сделал третий файл,
     // а не последний.
+    // Спрошен ли пароль файла — есть ли его поле: слова «Файл 4 из 4.» видно
+    // и на шаге «Восстанавливаем…», до формы (CLAUDE.md, «браузерный тест
+    // ждёт состояния»).
+    let password_asked = async |host: &HtmlElement| {
+        for _ in 0..100 {
+            if field(host, t(lang, Key::BackupFilePassword), 0).is_some() {
+                return true;
+            }
+            sleep(50).await;
+        }
+        false
+    };
     let enter = |host: &HtmlElement, wrong: &mut Vec<String>| {
         match field(host, t(lang, Key::BackupFilePassword), 0) {
             Some(input) => type_into(&input, password),
@@ -2137,7 +2149,7 @@ async fn a_backup_over_the_limit_is_saved_in_parts() {
             }
             enter(&host, &mut wrong);
             let fourth = fill(t(lang, Key::BackupChainAt), &[&n(4), &n(4)]);
-            if !wait_for(&host, &fourth).await {
+            if !wait_for(&host, &fourth).await || !password_asked(&host).await {
                 wrong.push(format!("пароль четвёртого файла — без «{fourth}»: «{}»", section_text(&host, "backup")));
             }
             enter(&host, &mut wrong);
@@ -2163,7 +2175,7 @@ async fn a_backup_over_the_limit_is_saved_in_parts() {
                 enter(&host, &mut wrong);
             }
             let fourth = fill(t(lang, Key::BackupChainAt), &[&n(4), &n(4)]);
-            if !wait_for(&host, &fourth).await {
+            if !wait_for(&host, &fourth).await || !password_asked(&host).await {
                 wrong.push("отмена: нет пароля четвёртого файла".to_owned());
             }
             match button(&host, &[t(lang, Key::Cancel)]) {
@@ -2171,6 +2183,20 @@ async fn a_backup_over_the_limit_is_saved_in_parts() {
                 None => wrong.push("отмена: у пароля нет «Отмены»".to_owned()),
             }
             said(&host, &all, true, "отмена посреди цепочки", &mut wrong).await;
+            // Итог — по видам (задача 124, п. 21): три клиента и профиль
+            // легли, а профиль в двух следующих частях уже был. Слова — из
+            // ключей таблицы строк, а не функцией окна, которую тест проверяет.
+            let kinds = format!(
+                "{} {}",
+                fill(
+                    t(lang, Key::BackupRestored),
+                    &[&format!("{}, {}", fill(t(lang, Key::TallyClients), &["3"]), fill(t(lang, Key::TallyOther), &["1"]))],
+                ),
+                fill(t(lang, Key::BackupRestoredSame), &["2"]),
+            );
+            if !wait_for(&host, &kinds).await {
+                wrong.push(format!("итог цепочки не по видам: нет «{kinds}» в «{}»", section_text(&host, "backup")));
+            }
         }
         None => wrong.push("нет поля выбора копии".to_owned()),
     }

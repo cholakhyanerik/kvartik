@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.187",
+      "date": "2026-11-24",
+      "hy": [
+        "Պատճենը վերականգնելուց, կոդն ընդունելուց և կոդը պատրաստելուց հետո ծրագիրն ասում է, թե ինչ է եկել՝ ըստ տեսակների. հաշիվներ և ակտեր, հաճախորդներ, մատյանի գրառումներ, մատյանի ֆայլեր, իսկ առանձին՝ քանի գրառում արդեն այստեղ էր։"
+      ],
+      "ru": [
+        "После восстановления копии, приёма кода и готового кода программа говорит, что пришло, по видам: счета и акты, клиенты, записи книги, файлы книги, а отдельно — сколько записей уже было здесь."
+      ],
+      "en": [
+        "After restoring a backup, taking a code or making one, the app says what came in by kind: invoices and acts, clients, ledger entries, ledger files, and separately how many records were already here."
+      ]
+    },
+    {
       "version": "0.0.186",
       "date": "2026-11-24",
       "hy": [
@@ -266,19 +279,6 @@
       ],
       "en": [
         "The backup screen now shows, under the day of the last backup, how much its ledger files weigh and how much of that is files removed from entries: a removed file is kept too and goes into the backup. When a backup comes out over 128 MB, the app no longer suggests removing files — that never made it smaller."
-      ]
-    },
-    {
-      "version": "0.0.167",
-      "date": "2026-11-21",
-      "hy": [
-        "Եթե ծրագրում մի քանի ԱՁ ունեք, «Կարգավորումներում» հաշիվների և ակտերի թողարկումն այժմ միացվում և անջատվում է յուրաքանչյուր ԱՁ-ի համար առանձին, իսկ «Բոլոր ԱՁ-ների մոտ դարձնել նույնը»-ն այդ ընտրությունը տալիս է բոլորին։ Բոլոր ԱՁ-ների պատճենը, որը դատարկ ծրագրում վերականգնվել է ոչ ամբողջությամբ, նույնպես հարցնում է, թե որտեղ թողարկել այսուհետ։"
-      ],
-      "ru": [
-        "У кого в программе несколько ИП, выпуск счетов и актов в «Настройках» теперь включают и выключают у каждого ИП отдельно, а «Сделать у всех ИП так же» отдаёт этот выбор всем. Копия всех ИП, легшая в пустую программу не целиком, тоже спрашивает, где выпускать дальше."
-      ],
-      "en": [
-        "If you keep several entrepreneurs in the app, issuing invoices and acts in Settings is now turned on and off for each entrepreneur separately, and “Make it the same for all entrepreneurs” gives that choice to all. A backup of all entrepreneurs that landed in an empty app only in part also asks where to issue from now on."
       ]
     }
   ]

@@ -3042,6 +3042,44 @@ fn sized(kind: &'static str, n: u32, bytes: usize, base: Option<RecordId>) -> En
     Entry { kind, base, ..entry }
 }
 
+/// Итог по видам (задача 124, п. 21): счета и акты, клиенты, записи книги
+/// и файлы книги — своим счётом, остальное — «прочим»; сумма двух — по видам.
+#[test]
+fn a_tally_counts_by_kind() {
+    let kinds = [
+        Document::KIND,
+        Document::KIND,
+        Client::KIND,
+        Operation::KIND,
+        Operation::KIND,
+        Operation::KIND,
+        Attachment::KIND,
+        Profile::KIND,
+        Recurring::KIND,
+    ];
+    let entries: Vec<Entry> = kinds.iter().zip(1..).map(|(kind, n)| sized(kind, n, 10, None)).collect();
+    let tally = Tally::of(&entries);
+    let expected = Tally {
+        documents: 2,
+        clients: 1,
+        ledger: 3,
+        files: 1,
+        other: 2,
+    };
+    assert_eq!(tally, expected);
+    assert_eq!(tally.total(), kinds.len());
+    assert_eq!(
+        tally.plus(expected),
+        Tally {
+            documents: 4,
+            clients: 2,
+            ledger: 6,
+            files: 2,
+            other: 4,
+        }
+    );
+}
+
 /// Часть для проб шапки.
 fn part(number: u16, of: u16) -> Part {
     Part {

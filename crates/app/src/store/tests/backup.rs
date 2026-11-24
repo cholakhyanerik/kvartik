@@ -210,6 +210,11 @@ async fn backup_carries_the_whole_base() {
             unchanged: 0,
             // Самый ранний момент легших — у заметок (задача 110).
             oldest: Some(Timestamp::from_unix_millis(1_760_000_000_000)),
+            // Заметки и метки — не виды программы: «прочее» (задача 124).
+            landed: kvartik_core::format::backup::Tally {
+                other: 3,
+                ..Default::default()
+            },
         }
     );
     let tx = store.read().expect("транзакция чтения");

@@ -80,7 +80,7 @@ use std::future::Future;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
-use super::backup::{self, BackupError, Entry, FILE_KINDS, KINDS, Lock, Meter, OFFICE_KINDS, Raw, at_once, no_pause};
+use super::backup::{self, BackupError, Entry, FILE_KINDS, KINDS, Lock, Meter, OFFICE_KINDS, Raw, Tally, at_once, no_pause};
 use super::qr::{self, Ecc};
 use super::{FIRST_VERSION, FORMAT_VERSION, FormatError, Stored, decode_record, split_raw};
 use crate::model::attachment::Attachment;
@@ -278,10 +278,16 @@ impl Picked {
 
     /// Изменённых записей в коде — без живого профиля, который идёт всегда.
     pub fn changed(&self, since: Option<Timestamp>) -> usize {
-        self.entries
-            .iter()
-            .filter(|entry| since.is_none_or(|since| entry.meta().modified() >= since))
-            .count()
+        self.tally(since).total()
+    }
+
+    /// Те же записи по видам — для слов «код готов» (задача 124, п. 21).
+    pub fn tally(&self, since: Option<Timestamp>) -> Tally {
+        Tally::of(
+            self.entries
+                .iter()
+                .filter(|entry| since.is_none_or(|since| entry.meta().modified() >= since)),
+        )
     }
 }
 

@@ -44,7 +44,7 @@ use std::time::Duration;
 use kvartik_core::format::autobackup::{self, DeviceTag};
 use kvartik_core::format::backup::{
     self, BackupError, CopyId, DeviceKey, Entry, FILE_KINDS, Files, Header, KDF_ITERATIONS, KINDS, MAX_FILE_BYTES,
-    Laid, MIN_PASSWORD_CHARS, Owner, Part, PasswordProblem, SALT_BYTES, Sealed,
+    Laid, MIN_PASSWORD_CHARS, Owner, Part, PasswordProblem, SALT_BYTES, Sealed, Tally,
 };
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
 use kvartik_core::release::EMAIL;
@@ -727,6 +727,51 @@ impl From<Failure> for Problem {
             Failure::TooManyKeys => Self::Say(Key::BackupNotOurs),
         }
     }
+}
+
+/// Сколько чего — словами по видам (задача 124, п. 21): «счета и акты — 14,
+/// клиенты — 3, записи книги — 40». Пустые виды молчат, а совсем пусто —
+/// «записей нет».
+pub(in crate::ui) fn tally_words(lang: Lang, tally: Tally) -> String {
+    let words: Vec<String> = [
+        (tally.documents, Key::TallyDocuments),
+        (tally.clients, Key::TallyClients),
+        (tally.ledger, Key::TallyLedger),
+        (tally.files, Key::TallyFiles),
+        (tally.other, Key::TallyOther),
+    ]
+    .into_iter()
+    .filter(|(count, _)| *count > 0)
+    .map(|(count, key)| fill(t(lang, key), &[&i18n::integer(lang, count as i64)]))
+    .collect();
+    if words.is_empty() {
+        t(lang, Key::TallyNone).to_owned()
+    } else {
+        words.join(", ")
+    }
+}
+
+/// Итог восстановления или принятого кода (задача 124, п. 21): что легло —
+/// по видам, а что уже было здесь — числом; «новых — 14, обновлено — 3»
+/// человек сопоставить со своими данными не мог. `part` — легла часть копии:
+/// её номер и сколько их (задача 123).
+pub(in crate::ui) fn restored_words(lang: Lang, restored: &Restored, part: Option<(u16, u16)>) -> String {
+    let landed = restored.landed;
+    let number = |count: usize| i18n::integer(lang, count as i64);
+    let mut words = match (part, landed.total()) {
+        (Some((at, of)), 0) => fill(t(lang, Key::BackupPartNothing), &[&number(at.into()), &number(of.into())]),
+        (Some((at, of)), _) => fill(
+            t(lang, Key::BackupPartRestored),
+            &[&number(at.into()), &number(of.into()), &tally_words(lang, landed)],
+        ),
+        (None, 0) => fill(t(lang, Key::BackupRestoredNothing), &[&number(restored.unchanged)]),
+        (None, _) => fill(t(lang, Key::BackupRestored), &[&tally_words(lang, landed)]),
+    };
+    if landed.total() > 0 && restored.unchanged > 0 {
+        words.push(' ');
+        words.push_str(&fill(t(lang, Key::BackupRestoredSame), &[&number(restored.unchanged)]));
+    }
+    words
 }
 
 /// Шаблон с одним числом на языке окна — производное от сигнала языка.

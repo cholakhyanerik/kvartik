@@ -119,6 +119,7 @@ fn plus(before: Option<Restored>, now: Restored) -> Restored {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
         },
+        landed: before.landed.plus(now.landed),
     }
 }
 
@@ -430,28 +431,9 @@ pub(super) fn RestoreBackup(
             && !issued_elsewhere(backups);
         let whole = laid.as_ref().is_none_or(Laid::whole);
         view! {
+            // Что легло — по видам (задача 124, п. 21).
             <p role="status">
-                {move || {
-                    let lang = lang.get();
-                    let counts = [
-                        i18n::integer(lang, restored.added as i64),
-                        i18n::integer(lang, restored.updated as i64),
-                        i18n::integer(lang, restored.unchanged as i64),
-                    ];
-                    match part {
-                        Some(part) => fill(
-                            t(lang, Key::BackupPartRestored),
-                            &[
-                                &i18n::integer(lang, i64::from(part.number())),
-                                &i18n::integer(lang, i64::from(part.of())),
-                                &counts[0],
-                                &counts[1],
-                                &counts[2],
-                            ],
-                        ),
-                        None => fill(t(lang, Key::BackupRestored), &[&counts[0], &counts[1], &counts[2]]),
-                    }
-                }}
+                {move || restored_words(lang.get(), &restored, part.map(|part| (part.number(), part.of())))}
             </p>
             // Части копии (задача 117): какие остались — или что легли все.
             // Почему не выпускать до остальных — под «Подробнее» (задача 124):

@@ -182,7 +182,7 @@ macro_rules! en {
     (BackupRestore) => { "Restore" };
     (Cancel) => { "Cancel" };
     (BackupRestoring) => { "Decrypting and restoring…" };
-    (BackupRestored) => { "Done. New records: {}, updated: {}, unchanged: {}." };
+    (BackupRestored) => { "Done. Added or updated: {}." };
     (BackupFiles) => { "In the last backup, ledger files take {}\u{A0}MB, and the whole backup is {}\u{A0}MB." };
     (BackupFilesRemoved) => { "Of these, {}\u{A0}MB are files removed from entries: they are kept too and go into the backup." };
     (BackupAhead) => { "The backup has changes dated later than this device's clock shows now: the clock on one of the devices is wrong. Check the date and time on both\u{A0}— while the clocks disagree, of two changes to the same field of a record, the one made by the clock that runs fast is kept." };
@@ -1214,7 +1214,7 @@ macro_rules! en {
     (BackupPartsHanded) => { "Parts handed over: {} of {}. Save the rest too." };
     (BackupPartsSaved) => { "All parts of the backup have been handed over. Find them in your downloads or wherever you sent them, and move them together somewhere safe." };
     (BackupFilePart) => { "This is part {} of {} of one backup. The other parts are restored the same way, in any order." };
-    (BackupPartRestored) => { "Part {} of {} restored. New records: {}, updated: {}, unchanged: {}." };
+    (BackupPartRestored) => { "Part {} of {} restored: {}." };
     (BackupPartsLeftOne) => { "Part {} is still left: the file with {} in its name. Restore it the same way before issuing invoices and acts here." };
     (BackupPartsLeft) => { "Not restored yet: {} parts of {}, the files with {} in their names. Restore them the same way before issuing invoices and acts here." };
     (BackupPartsAll) => { "The backup is fully restored: all parts are in ({} of {})." };
@@ -1427,7 +1427,7 @@ macro_rules! en {
     (SyncDayMissing) => { "Enter the day to send changes from." };
     (SyncMake) => { "Make a code" };
     (SyncMaking) => { "Assembling and encrypting the code…" };
-    (SyncMadeSince) => { "The code is ready. Changes since {}, records: {}." };
+    (SyncMadeSince) => { "The code is ready. Changes since {}: {}." };
     (SyncMadeAll) => { "The code is ready. All records: {}." };
     (SyncSkipped) => { "Ledger files and logos don't go into this code; changed ones: {}. A file code (the button under the code) or a backup file will carry them." };
     (SyncUnreadable) => { "Records that can't be read and were left out of the code: {}." };
@@ -1533,4 +1533,13 @@ macro_rules! en {
     (InstallCarryHide) => { "Hide" };
     (SyncFilesAfter) => { "The code was taken. It didn’t carry ledger files and logos\u{A0}— changed: {}. Send them next with a code of files." };
     (SyncFilesAsBackup) => { "Send as a backup file" };
+    (BackupRestoredSame) => { "Already here, unchanged: {}." };
+    (BackupRestoredNothing) => { "Done: all of it was already here, records: {}." };
+    (BackupPartNothing) => { "Part {} of {} restored: all of it was already here." };
+    (TallyDocuments) => { "invoices and acts: {}" };
+    (TallyClients) => { "clients: {}" };
+    (TallyLedger) => { "ledger entries: {}" };
+    (TallyFiles) => { "ledger files: {}" };
+    (TallyOther) => { "other: {}" };
+    (TallyNone) => { "no records" };
 }

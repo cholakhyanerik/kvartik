@@ -120,10 +120,12 @@ async fn make(host: &HtmlElement, lang: Lang, all: bool, wrong: &mut Vec<String>
         None => wrong.push("нет «Сделать код»".to_owned()),
     }
     let today = clock::today().expect("часы с датой");
+    // Профиль и клиент — словами по видам (задача 124, п. 21).
+    let words = kinds(lang, 1, 0, 1);
     let ready = if all {
-        fill(t(lang, Key::SyncMadeAll), &["2"])
+        fill(t(lang, Key::SyncMadeAll), &[&words])
     } else {
-        fill(t(lang, Key::SyncMadeSince), &[&kvartik_core::i18n::date(lang, today), "2"])
+        fill(t(lang, Key::SyncMadeSince), &[&kvartik_core::i18n::date(lang, today), &words])
     };
     if !wait_for(host, &ready).await {
         wrong.push(format!("код не готов: «{}»", section_text(host, "sync")));
@@ -156,6 +158,28 @@ async fn paste(host: &HtmlElement, lang: Lang, code: &str, wrong: &mut Vec<Strin
     }
     wrong.push(format!("код не собрался: «{}»", section_text(host, "sync")));
     None
+}
+
+/// Записи по видам словами (задача 124, п. 21) — из ключей таблицы строк,
+/// а не функцией окна: иначе сломанная функция проверяла бы сама себя.
+/// Порядок — как у окна: клиенты, файлы книги, прочее; пустые молчат.
+fn kinds(lang: Lang, clients: usize, files: usize, other: usize) -> String {
+    [(clients, Key::TallyClients), (files, Key::TallyFiles), (other, Key::TallyOther)]
+        .into_iter()
+        .filter(|(count, _)| *count > 0)
+        .map(|(count, key)| fill(t(lang, key), &[&count.to_string()]))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Итог принятого кода: легло — словами `kinds`, уже было — `unchanged`.
+fn landed_words(lang: Lang, kinds: &str, unchanged: usize) -> String {
+    let mut words = fill(t(lang, Key::BackupRestored), &[kinds]);
+    if unchanged > 0 {
+        words.push(' ');
+        words.push_str(&fill(t(lang, Key::BackupRestoredSame), &[&unchanged.to_string()]));
+    }
+    words
 }
 
 /// Ввести пароль и нажать «Принять».
@@ -241,7 +265,7 @@ async fn a_code_carries_all_records_to_another_device() {
             Some(input) => accept(&host, lang, &input, PASSWORD),
             None => wrong.push("после неверного пароля нет поля пароля".to_owned()),
         }
-        let done = fill(t(lang, Key::BackupRestored), &["2", "0", "0"]);
+        let done = landed_words(lang, &kinds(lang, 1, 0, 1), 0);
         if !wait_for(&host, &done).await {
             wrong.push(format!("код не лёг: «{}»", section_text(&host, "sync")));
         }
@@ -842,7 +866,7 @@ async fn files_follow_as_a_series_of_codes() {
             area.dispatch_event(&web_sys::Event::new("input").expect("событие")).expect("отправлено");
         }
     }
-    let landed = fill(t(lang, Key::BackupRestored), &["1", "0", "1"]);
+    let landed = landed_words(lang, &kinds(lang, 0, 1, 0), 1);
     if !wait_for(&host, &landed).await {
         wrong.push(format!("файлы не легли: «{}»", section_text(&host, "sync")));
     }

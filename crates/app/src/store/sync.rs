@@ -8,6 +8,7 @@
 
 use kvartik_core::format::backup::{IV_BYTES, Lock};
 use kvartik_core::format::office as route;
+use kvartik_core::format::backup::Tally;
 use kvartik_core::format::sync::{self, Code, CodeError, Header, Picked, Sealed, TooLarge};
 
 use super::backup::{Failure, newer};
@@ -21,6 +22,8 @@ pub struct Made {
     pub code: Vec<u8>,
     /// Изменённых записей в нём — без живого профиля, который идёт всегда.
     pub changed: usize,
+    /// Они же по видам (задача 124, п. 21).
+    pub tally: Tally,
     /// Изменённых файлов книги и логотипов, которые в код не идут.
     pub skipped: usize,
     /// Нечитаемых записей, которые в код не вошли.
@@ -113,6 +116,7 @@ async fn seal(picked: Picked, sealing: &Sealing<'_>) -> Result<Made, Unmade> {
     Ok(Made {
         code: sync::seal(&lock, &ciphertext),
         changed: picked.changed(sealing.header.since()),
+        tally: picked.tally(sealing.header.since()),
         skipped: picked.skipped(),
         unreadable: picked.unreadable(),
     })

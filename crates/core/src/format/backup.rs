@@ -440,6 +440,57 @@ fn canon<T: Stored>(record: &str) -> Result<Checked, FormatError> {
     })
 }
 
+/// Сколько записей каких видов — для слов итога (задача 124, п. 21): «счета
+/// и акты — 14, клиенты — 3, записи книги — 40» вместо «новых записей — 57».
+/// Человек узнаёт четыре вида; остальное — профиль, логотипы, повторы,
+/// закрытые кварталы, ключи, начальные остатки, ИП конторы — «прочее».
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Tally {
+    /// Счета и акты.
+    pub documents: usize,
+    pub clients: usize,
+    /// Записи книги доходов и расходов.
+    pub ledger: usize,
+    /// Файлы книги.
+    pub files: usize,
+    pub other: usize,
+}
+
+impl Tally {
+    /// Записи по видам.
+    pub fn of<'a>(entries: impl IntoIterator<Item = &'a Entry>) -> Self {
+        let mut tally = Self::default();
+        for entry in entries {
+            let slot = match entry.kind() {
+                kind if kind == Document::KIND => &mut tally.documents,
+                kind if kind == Client::KIND => &mut tally.clients,
+                kind if kind == Operation::KIND => &mut tally.ledger,
+                kind if kind == Attachment::KIND => &mut tally.files,
+                _ => &mut tally.other,
+            };
+            *slot += 1;
+        }
+        tally
+    }
+
+    /// Всего записей.
+    pub const fn total(&self) -> usize {
+        self.documents + self.clients + self.ledger + self.files + self.other
+    }
+
+    /// Сумма двух — у копии всех ИП и у цепочки частей.
+    #[must_use]
+    pub const fn plus(self, other: Self) -> Self {
+        Self {
+            documents: self.documents + other.documents,
+            clients: self.clients + other.clients,
+            ledger: self.ledger + other.ledger,
+            files: self.files + other.files,
+            other: self.other + other.other,
+        }
+    }
+}
+
 /// Запись копии: разобрана своим видом и записана в текущей версии формата.
 #[derive(Clone, Debug)]
 pub struct Entry {
