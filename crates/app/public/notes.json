@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.186",
+      "date": "2026-11-24",
+      "hy": [
+        "«Այլ սարք» էկրանին, երբ անդորրագիրն ասում է, որ կոդն ընդունված է, ծրագիրն անմիջապես նշում է, քանի ֆայլ այն չէր տանում, և ֆայլերի կոդը դառնում է գլխավոր կոճակը։",
+        "Եթե ֆայլերը չեն տեղավորվում կոդերի շարքում, «Ուղարկել պատճենի ֆայլով» կոճակը բացում է պատճենի էկրանն արդեն պատրաստ պատճենով՝ առանց գաղտնաբառը կրկին մուտքագրելու։"
+      ],
+      "ru": [
+        "На экране «Другое устройство», когда квитанция говорит, что код принят, программа сразу называет, сколько файлов он не нёс, и код файлов становится главной кнопкой.",
+        "Если файлы не помещаются в серию кодов, кнопка «Отправить копией файлом» открывает экран копии с готовой копией — без второго ввода пароля."
+      ],
+      "en": [
+        "On the “Another device” screen, once the receipt says the code was taken, the app tells you how many files it didn’t carry, and the code of files becomes the main button.",
+        "If the files don’t fit in a series of codes, “Send as a backup file” opens the backup screen with the backup already made, without typing the password again."
+      ]
+    },
+    {
       "version": "0.0.185",
       "date": "2026-11-24",
       "hy": [
@@ -263,19 +279,6 @@
       ],
       "en": [
         "If you keep several entrepreneurs in the app, issuing invoices and acts in Settings is now turned on and off for each entrepreneur separately, and “Make it the same for all entrepreneurs” gives that choice to all. A backup of all entrepreneurs that landed in an empty app only in part also asks where to issue from now on."
-      ]
-    },
-    {
-      "version": "0.0.166",
-      "date": "2026-11-21",
-      "hy": [
-        "Նոր էկրան՝ «Այլ սարք» (Պրոֆիլ). փոփոխությունները ձեր մի սարքից մյուսին են անցնում առանց ֆայլի և ինտերնետի։ Մեկը ստեղծում է կոդ պատճենների գաղտնաբառով և ցույց է տալիս QR կոդերով ու տեքստով, մյուսը սկանավորում է այն տեսախցիկով կամ տեղադրում տեքստը և ընդունում. գրառումները միավորվում են պատճենի պես։ Մատյանի ֆայլերը և լոգոտիպերը տեղափոխում է պատճենի ֆայլը։"
-      ],
-      "ru": [
-        "Новый экран «Другое устройство» (Профиль): изменения переходят с одного вашего устройства на другое без файла и без интернета. Одно делает код под паролем копий и показывает его QR-кодами и текстом, другое снимает его камерой или вставляет текст и принимает — записи ложатся, как копия. Файлы книги и логотипы переносит копия файлом."
-      ],
-      "en": [
-        "A new “Another device” screen (Profile): changes move from one of your devices to another without a file or the internet. One makes a code under the backup password and shows it as QR codes and text; the other scans it with the camera or pastes the text and receives it — records merge like a backup. Ledger files and logos travel with a backup file."
       ]
     }
   ]

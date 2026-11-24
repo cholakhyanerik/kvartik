@@ -1531,4 +1531,6 @@ macro_rules! en {
     (SyncCarryTooLarge) => { "There is more data than a code can hold: {}\u{A0}KB of {}. Move everything with a backup file: on the backup screen, “Make a backup” and “Send or save to Files”, then in the app “Restore from a backup…”. A code from a later day would move only what’s new, and Safari erases the rest if you don’t come back here for a while." };
     (SyncCopyAll) => { "Copy the whole code" };
     (InstallCarryHide) => { "Hide" };
+    (SyncFilesAfter) => { "The code was taken. It didn’t carry ledger files and logos\u{A0}— changed: {}. Send them next with a code of files." };
+    (SyncFilesAsBackup) => { "Send as a backup file" };
 }

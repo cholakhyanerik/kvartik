@@ -291,23 +291,14 @@ pub(super) fn MakeBackup(
         }
     });
 
-    let submit = move |event: SubmitEvent| {
-        conceal(&event, shown);
-        event.prevent_default();
-        if busy() {
-            return;
-        }
-        let fresh = new_password();
-        let (typed, again) = (password.get_untracked(), repeat.get_untracked());
+    // Собрать копию — паролем из формы или ключом, который передал код
+    // передачи (задача 124, п. 18).
+    let start = move |job: Job| {
         making.set(Making::Busy);
         saved.set(None);
         share_failed.set(false);
         handed_parts.set(Vec::new());
         leptos::task::spawn_local(async move {
-            let job = Job::Manual {
-                typed,
-                repeat: fresh.then_some(again),
-            };
             let outcome = match making_task(backups, job).await {
                 Ok(task) => task.await.and_then(|made| match made {
                     Made::File(ready) => Ok(ready),
@@ -328,6 +319,30 @@ pub(super) fn MakeBackup(
             });
         });
     };
+    let submit = move |event: SubmitEvent| {
+        conceal(&event, shown);
+        event.prevent_default();
+        if busy() {
+            return;
+        }
+        let fresh = new_password();
+        let (typed, again) = (password.get_untracked(), repeat.get_untracked());
+        start(Job::Manual {
+            typed,
+            repeat: fresh.then_some(again),
+        });
+    };
+    // Файлов больше, чем вмещает серия кодов (задача 124, п. 18): экран
+    // открылся с ключом, который код передачи только что получил из пароля
+    // копий, — копия собирается сразу, без второго ввода.
+    Effect::new(move |_| {
+        if router.shows(Screen::Backup)
+            && !untrack(busy)
+            && let Some(key) = backups.take_handoff()
+        {
+            start(Job::Prepared(key));
+        }
+    });
 
     // Файл отдан браузеру или меню «Поделиться»: это и есть копия, а у копии
     // частями — когда отданы все её файлы (задача 117). Сохранили ли они
@@ -501,20 +516,7 @@ pub(super) fn MakeBackup(
 /// пароль на устройстве уже задан, и введённый сверяется с ним.
 pub(super) async fn make(backups: Backups, typed: &str, repeat: Option<&str>) -> Result<Ready, Problem> {
     let (key, device_key, fresh) = key_for(backups, typed, repeat).await?;
-    let store = backups.base.get().ok_or(Problem::Say(Key::BackupFailed))?;
-    let now = clock::now();
-    let today = clock::local_date(now).ok_or(Problem::Say(Key::BackupFailed))?;
-    let header = Header::new(env!("CARGO_PKG_VERSION"), now);
-    let sealing = Sealing {
-        header: &header,
-        key: &key,
-        salt: device_key.salt(),
-        iterations: device_key.iterations(),
-        limit: part_limit(),
-    };
-    let made = make_file(backups, &store, &sealing).await?;
-    let size = made.size();
-    let downloads = downloads(made.sheets, &backup::file_name(today))?;
+    let ready = sealed_copy(backups, &key, &device_key).await?;
     // Новый пароль запоминается, когда копия под ним уже собрана.
     // Включённая автокопия на него сама не переходит: её следующая попытка
     // скажет, что пароль сменился, и попросит его ввести (`write_file`), —
@@ -524,6 +526,36 @@ pub(super) async fn make(backups: Backups, typed: &str, repeat: Option<&str>) ->
         Device::new().set_backup_key(&device_key);
         backups.key_set.set(true);
     }
+    Ok(ready)
+}
+
+/// Ручная копия ключом, который только что дал пароль копий для кода
+/// передачи (задача 124, п. 18, [`Backups::hand_off`]). Пароль устройства —
+/// тот же: ключ сверяется с ним, как введённый.
+pub(super) async fn make_prepared(backups: Backups, key: &crypto::Key) -> Result<Ready, Problem> {
+    let device_key = Device::new().backup_key().ok_or(Problem::Say(Key::BackupPasswordLost))?;
+    if !device_key.accepts(key.check()) {
+        return Err(Problem::Say(Key::PasswordWrong));
+    }
+    sealed_copy(backups, key, &device_key).await
+}
+
+/// Собрать и зашифровать копию программы ключом пароля копий устройства.
+async fn sealed_copy(backups: Backups, key: &crypto::Key, device_key: &DeviceKey) -> Result<Ready, Problem> {
+    let store = backups.base.get().ok_or(Problem::Say(Key::BackupFailed))?;
+    let now = clock::now();
+    let today = clock::local_date(now).ok_or(Problem::Say(Key::BackupFailed))?;
+    let header = Header::new(env!("CARGO_PKG_VERSION"), now);
+    let sealing = Sealing {
+        header: &header,
+        key,
+        salt: device_key.salt(),
+        iterations: device_key.iterations(),
+        limit: part_limit(),
+    };
+    let made = make_file(backups, &store, &sealing).await?;
+    let size = made.size();
+    let downloads = downloads(made.sheets, &backup::file_name(today))?;
     Ok(Ready {
         downloads,
         records: made.records,

@@ -241,6 +241,10 @@ struct AutoParts {
     /// Её объекты браузера.
     handles: Handles,
     office: Option<Office>,
+    /// Ключ пароля копий, только что введённого для кода передачи (задача
+    /// 124, п. 18): экран копии соберёт им ручную копию без второго ввода.
+    /// Берётся один раз ([`Backups::take_handoff`]).
+    handoff: Option<Rc<crypto::Key>>,
 }
 
 /// Объекты браузера автокопии и её будильник.
@@ -277,8 +281,22 @@ impl Backups {
                 state: RwSignal::new(Auto::default()),
                 handles: Handles::default(),
                 office: None,
+                handoff: None,
             }),
         }
+    }
+
+    /// Файлов больше, чем вмещает серия кодов (задача 124, п. 18): экран
+    /// копии соберёт ручную копию этим ключом — пароль копий человек только
+    /// что ввёл для кода, и второй раз его не спрашивают. Тот же ключ: код
+    /// и копию шифрует пароль копий с солью устройства (`key_for`).
+    pub(super) fn hand_off(&self, key: Rc<crypto::Key>) {
+        self.auto.update_value(|parts| parts.handoff = Some(key));
+    }
+
+    /// Ключ, переданный кодом передачи, — один раз.
+    fn take_handoff(&self) -> Option<Rc<crypto::Key>> {
+        self.auto.try_update_value(|parts| parts.handoff.take()).flatten()
     }
 
     /// Контора заведена — копия теперь знает о ней.
@@ -915,6 +933,9 @@ enum Job {
     /// Ручная копия: введённый пароль и повтор нового; `None` — пароль на
     /// устройстве уже задан, и введённый сверяется с ним.
     Manual { typed: String, repeat: Option<String> },
+    /// Ручная копия ключом, который передал код передачи (задача 124,
+    /// п. 18, [`Backups::hand_off`]).
+    Prepared(Rc<crypto::Key>),
     /// Копия открытого ИП для клиента — своим новым паролем с повтором
     /// (задача 38).
     Client { typed: String, repeat: String },
@@ -980,6 +1001,7 @@ split! {
         Box::pin(async move {
             match job {
                 Job::Manual { typed, repeat } => make(backups, &typed, repeat.as_deref()).await.map(Made::File),
+                Job::Prepared(key) => make_prepared(backups, &key).await.map(Made::File),
                 Job::Client { typed, repeat } => make_client(backups, &typed, &repeat).await.map(Made::File),
                 Job::Status => Ok(status().await),
                 Job::Enable { typed, repeat, folder, place } => {

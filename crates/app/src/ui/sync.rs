@@ -968,6 +968,16 @@ fn ShownCode(
     // Квитанция этого кода пришла (задача 123): круг стоит, а «Готово,
     // убрать код» — главной кнопкой.
     let accepted = RwSignal::new(false);
+    let skipped = shown.skipped;
+    // Файлов больше серии кодов (задача 124, п. 18): ручная копия тем же
+    // паролем — экран копии соберёт её ключом этого кода и откроется с ней
+    // готовой.
+    let as_backup = move |_: MouseEvent| {
+        if let Some(key) = source.try_with_value(|shown| Rc::clone(&shown.key)) {
+            ctx.backups.hand_off(key);
+            ctx.router.go(Screen::Backup);
+        }
+    };
     view! {
         <p role="status">{summary}</p>
         {(codes > 1).then(|| view! { <p class="hint">{round}</p> })}
@@ -1012,16 +1022,41 @@ fn ShownCode(
                 let (qr, side, parts) = main.get_value();
                 view! {
                     <CodeShown lang seen qr side parts accepted=accepted.into() hint=Key::SyncQrHint carry />
-                    {(shown_skipped(&source) > 0).then(|| view! {
+                    // Файлы — без отдельного шага (задача 124, п. 18): пришла
+                    // квитанция «принято» — код файлов следующей главной
+                    // кнопкой и словами, сколько их.
+                    {(skipped > 0).then(|| view! {
+                        {move || accepted.get().then(|| view! {
+                            <p role="status">{counted(lang, Key::SyncFilesAfter, skipped as i64)}</p>
+                        })}
                         <div class="actions">
-                            <button type="button" class="secondary" disabled=matches!(state, FilesState::Busy) on:click=build>
+                            <button
+                                type="button"
+                                class=move || (!accepted.get()).then_some("secondary")
+                                disabled=matches!(state, FilesState::Busy)
+                                on:click=build
+                            >
                                 <span class="label">{tr(lang, Key::SyncFilesMake)}</span>
                             </button>
                         </div>
                     })}
                     {match state {
                         FilesState::Busy => Some(view! { <p role="status">{tr(lang, Key::SyncFilesMaking)}</p> }.into_any()),
-                        FilesState::Failed(say) => Some(view! { <p role="alert">{move || say.text(lang.get())}</p> }.into_any()),
+                        // Файлов больше серии — копией файлом, тем же паролем,
+                        // одной кнопкой (задача 124, п. 18).
+                        FilesState::Failed(say) => {
+                            let large = matches!(say, Say::FilesTooLarge(_));
+                            Some(view! {
+                                <p role="alert">{move || say.text(lang.get())}</p>
+                                {large.then(|| view! {
+                                    <div class="actions">
+                                        <button type="button" on:click=as_backup>
+                                            <span class="label">{tr(lang, Key::SyncFilesAsBackup)}</span>
+                                        </button>
+                                    </div>
+                                })}
+                            }.into_any())
+                        }
                         FilesState::Off | FilesState::On(..) => None,
                     }}
                     <Reply lang seen shown=source.get_value() gap accepted />
@@ -1029,15 +1064,12 @@ fn ShownCode(
                 .into_any()
             }
         }}
-        <button type="button" class=move || (!accepted.get()).then_some("link") on:click=move |_| close()>
+        // Главная — «Готово», когда код приняли и больше передавать нечего:
+        // файлы ждут — главная у них.
+        <button type="button" class=move || (!accepted.get() || skipped > 0).then_some("link") on:click=move |_| close()>
             <span class="label">{tr(lang, Key::SyncClose)}</span>
         </button>
     }
-}
-
-/// Сколько файлов не вошло в показанный код.
-fn shown_skipped(source: &StoredValue<Rc<Shown>, LocalStorage>) -> usize {
-    source.try_with_value(|shown| shown.skipped).unwrap_or(0)
 }
 
 /// Где квитанция у отправителя.

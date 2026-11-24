@@ -760,6 +760,27 @@ async fn files_follow_as_a_series_of_codes() {
         wrong.push("база не открылась".to_owned());
     }
     let code = make(&host, lang, true, &mut wrong).await.unwrap_or_default();
+    // Квитанция «принято» — код файлов следующей главной кнопкой, а «Готово»
+    // — ссылкой (задача 124, п. 18).
+    match opened_code(&code).await {
+        Some((header, key)) => {
+            let whole = kvartik_core::format::sync::Receipt::new(&header, RecordId::random(), kvartik_core::format::sync::Continuity::Whole);
+            paste_reply(&host, &receipt_text(&key, &whole).await, &mut wrong).await;
+            let after = fill(t(lang, Key::SyncFilesAfter), &["1"]);
+            if !wait_for(&host, &after).await {
+                wrong.push(format!("после квитанции нет «{after}»"));
+            }
+            match sync_button(&host, t(lang, Key::SyncFilesMake)) {
+                Some(files) if !files.class_list().contains("secondary") => {}
+                Some(_) => wrong.push("после квитанции код файлов — не главная кнопка".to_owned()),
+                None => wrong.push("после квитанции нет кода файлов".to_owned()),
+            }
+            if sync_button(&host, t(lang, Key::SyncClose)).is_some_and(|close| !close.class_list().contains("link")) {
+                wrong.push("файлы ждут, а «Готово, убрать код» — главная".to_owned());
+            }
+        }
+        None => wrong.push("код файлов: код изменений не открылся".to_owned()),
+    }
     match sync_button(&host, t(lang, Key::SyncFilesMake)) {
         Some(button) => button.click(),
         None => wrong.push("нет «Передать файлы серией кодов»".to_owned()),
@@ -1178,4 +1199,71 @@ async fn carrying_from_a_tab_moves_everything() {
     crate::platform::set_hash("");
     documents::forget_device();
     assert!(wrong.is_empty(), "перенос из вкладки: {wrong:#?}");
+}
+
+/// Файлов больше, чем вмещает серия кодов (задача 124, п. 18): одна кнопка
+/// «Отправить копией файлом» — и экран копии открывается с готовой ручной
+/// копией, без второго ввода пароля: его только что ввели для кода.
+#[wasm_bindgen_test]
+async fn files_beyond_a_series_go_as_a_backup_file() {
+    use kvartik_core::model::attachment::{Attachment, FileBytes};
+    documents::fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    other_device();
+    for name in ["last_backup", "last_size"] {
+        if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
+            let _ = storage.remove_item(&format!("kvartik.{name}"));
+        }
+    }
+    Device::new().set_ui_lang(lang);
+    // Файл, который не сжимается и больше серии: 1,2 МБ.
+    let mut seed = 23u64;
+    let mut bytes = b"%PDF-1.4 ".to_vec();
+    bytes.extend((0..1_200_000).map(|_| {
+        seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        (seed >> 56) as u8
+    }));
+    let file = Attachment::create(RecordId::random(), "скан.pdf", FileBytes::new(bytes).expect("годный PDF"), clock::now());
+    let mut writes = Writes::default();
+    writes.insert(&file);
+    documents::commit(writes).await;
+    let mut wrong = Vec::new();
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база не открылась".to_owned());
+    }
+    make(&host, lang, true, &mut wrong).await;
+    match sync_button(&host, t(lang, Key::SyncFilesMake)) {
+        Some(button) => button.click(),
+        None => wrong.push("нет «Передать файлы серией кодов»".to_owned()),
+    }
+    let large = t(lang, Key::SyncFilesTooLarge).split("{}").next().unwrap_or_default().to_owned();
+    if !wait_for(&host, &large).await {
+        wrong.push(format!("нет «{large}»: «{}»", section_text(&host, "sync")));
+    }
+    match sync_button(&host, t(lang, Key::SyncFilesAsBackup)) {
+        Some(button) => button.click(),
+        None => wrong.push("нет «Отправить копией файлом»".to_owned()),
+    }
+    let ready = t(lang, Key::BackupReady).split("{}").next().unwrap_or_default().to_owned();
+    let mut done = false;
+    for _ in 0..300 {
+        done = section_text(&host, "backup").contains(&ready) && host.query_selector("#backup a[download]").ok().flatten().is_some();
+        if done {
+            break;
+        }
+        sleep(50).await;
+    }
+    if !done {
+        wrong.push(format!("экран копии без готовой копии: «{}»", section_text(&host, "backup")));
+    }
+    if crate::platform::hash() != Screen::Backup.href() {
+        wrong.push(format!("открыт не экран копии: {}", crate::platform::hash()));
+    }
+    drop(mounted);
+    host.remove();
+    other_device();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "файлы копией: {wrong:#?}");
 }
