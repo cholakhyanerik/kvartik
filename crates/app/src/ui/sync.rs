@@ -397,11 +397,16 @@ fn qr_path(code: &qr::Code) -> String {
 /// День по умолчанию для поля «Изменения с этого дня» (`sync::default_day`):
 /// `base` — база ИП, а у кода всех ИП — база конторы.
 fn default_day(base: &str) -> Option<Date> {
-    let device = Device::new();
+    day_after(base, Device::new().sync_arrived(base))
+}
+
+/// День по умолчанию с моментом легших сюда записей `arrived` — у встречного
+/// кода он свой: до принятого кода ([`Unsent`]).
+fn day_after(base: &str, arrived: Option<Timestamp>) -> Option<Date> {
     let today = clock::today()?;
     sync::default_day(
-        device.sync_made(base).and_then(clock::local_date),
-        device.sync_arrived(base).and_then(sync::day_covering),
+        Device::new().sync_made(base).and_then(clock::local_date),
+        arrived.and_then(sync::day_covering),
         today,
     )
 }
@@ -612,11 +617,86 @@ fn Send(ctx: Ctx, seen: Signal<bool>, carry: bool) -> impl IntoView {
     }
 }
 
+/// Ключ кода и замок его пароля: соль и итерации пароля копий того
+/// устройства, которое код сделало первым.
+#[derive(Clone)]
+struct CodeLock {
+    key: Rc<crypto::Key>,
+    salt: Vec<u8>,
+    iterations: u32,
+}
+
 /// Собрать код: пароль копий — сверить с устройством или задать, записи
 /// с дня `since` — в код (`everyone` — всех ИП), код — в QR-коды и куски
-/// текста.
+/// текста. Сделанный код сдвигает ряд изменений отсюда: день следующего
+/// кода по умолчанию — день этого.
 async fn make(ctx: Ctx, typed: &str, repeat: Option<&str>, since: Option<Date>, everyone: bool) -> Result<Shown, Say> {
     let (key, device_key, fresh) = key_for(ctx.backups, typed, repeat).await?;
+    let lock = CodeLock {
+        key: Rc::new(key),
+        salt: device_key.salt().to_vec(),
+        iterations: device_key.iterations(),
+    };
+    let (shown, changed) = seal_code(ctx, &lock, since, everyone).await?;
+    // Новый пароль запоминается, когда код под ним уже собран, — как у копии.
+    if fresh {
+        ctx.backups.password_set(&device_key);
+    }
+    ctx.backups.password_entered();
+    if changed == 0 && shown.skipped == 0 {
+        return Err(Say::Key(Key::SyncNothing));
+    }
+    let device = Device::new();
+    device.set_sync_made(&shown.base, shown.created);
+    // «Последний обмен» — не здесь: код, который никто не снял, обменом не
+    // был (ревью задачи 124). Его ставят квитанция «принято» (`Reply`)
+    // и принятый код (`accept`).
+    // Записи, легшие сюда копией или кодом, код взял, если начат не позже
+    // самой ранней: дальше по умолчанию — день этого кода. Начат позже —
+    // человек выбрал день сам, и они ждут следующего.
+    let taken = shown
+        .since_at
+        .is_none_or(|since| device.sync_arrived(&shown.base).is_none_or(|arrived| since <= arrived));
+    if taken {
+        device.clear_sync_arrived(&shown.base);
+    }
+    Ok(shown)
+}
+
+/// Что ждало здесь кода отсюда до принятого кода (`Device::sync_arrived`
+/// открытой базы и базы конторы). Встречный код берёт записи с дня по нему,
+/// а не по легшим принятым кодом: те у того устройства уже есть, и код вышел
+/// бы вдвое длиннее.
+#[derive(Clone, Copy)]
+struct Unsent {
+    open: Option<Timestamp>,
+    office: Option<Timestamp>,
+}
+
+/// Встречный код (задача 124, п. 14): изменения отсюда — ключом только что
+/// принятого кода, без пароля, с дня по умолчанию этого устройства до того
+/// кода (`unsent`). Ряд изменений отсюда он не сдвигает: квитанции на
+/// встречный код нет, и день следующего кода, сдвинутый кодом, который не
+/// сняли, спрятал бы дыру (риск в записи задачи) — как у кода файлов. У кого
+/// ИП несколько, код — всех ИП, как у «Передать отсюда» по умолчанию.
+async fn make_back(ctx: Ctx, lock: &CodeLock, unsent: Unsent) -> Result<Shown, Say> {
+    let everyone = Device::new().office();
+    let (base, arrived) = if everyone {
+        (OFFICE_DB.to_owned(), unsent.office)
+    } else {
+        (ctx.office.open_name(), unsent.open)
+    };
+    let (shown, changed) = seal_code(ctx, lock, day_after(&base, arrived), everyone).await?;
+    if changed == 0 && shown.skipped == 0 {
+        return Err(Say::Key(Key::SyncNothing));
+    }
+    Ok(shown)
+}
+
+/// Код ключом `lock`: записи с дня `since` (`everyone` — всех ИП) — в QR-коды
+/// и куски текста; вместе с кодом — сколько в нём изменённых записей. Ряда
+/// изменений не трогает: это решает тот, кто зовёт.
+async fn seal_code(ctx: Ctx, lock: &CodeLock, since: Option<Date>, everyone: bool) -> Result<(Shown, usize), Say> {
     let store = ctx.base.get().ok_or(Say::Key(Key::BackupFailed))?;
     // Контору не открыть — отказ, а не код одного открытого ИП молча: человек
     // считал бы, что в нём все.
@@ -631,9 +711,9 @@ async fn make(ctx: Ctx, typed: &str, repeat: Option<&str>, since: Option<Date>, 
     let header = sync::Header::new(env!("CARGO_PKG_VERSION"), now, device.sync_id(), since.map(sync::since_day));
     let sealing = Sealing {
         header: &header,
-        key: &key,
-        salt: device_key.salt(),
-        iterations: device_key.iterations(),
+        key: &lock.key,
+        salt: &lock.salt,
+        iterations: lock.iterations,
     };
     let made = match &office {
         Some((office_store, open_name)) => stored_sync::make_all(&store, open_name, office_store, &sealing).await,
@@ -644,30 +724,9 @@ async fn make(ctx: Ctx, typed: &str, repeat: Option<&str>, since: Option<Date>, 
         Err(Unmade::Failure(failure)) => return Err(Problem::from(failure).into()),
         Err(Unmade::TooLarge(large)) => return Err(Say::TooLarge(large.bytes)),
     };
-    // Новый пароль запоминается, когда код под ним уже собран, — как у копии.
-    if fresh {
-        ctx.backups.password_set(&device_key);
-    }
-    ctx.backups.password_entered();
-    if made.changed == 0 && made.skipped == 0 {
-        return Err(Say::Key(Key::SyncNothing));
-    }
-    device.set_sync_made(&base, now);
-    // «Последний обмен» — не здесь: код, который никто не снял, обменом не
-    // был (ревью задачи 124). Его ставят квитанция «принято» (`Reply`)
-    // и принятый код (`accept`).
-    // Записи, легшие сюда копией или кодом, код взял, если начат не позже
-    // самой ранней: дальше по умолчанию — день этого кода. Начат позже —
-    // человек выбрал день сам, и они ждут следующего.
-    let taken = header
-        .since()
-        .is_none_or(|since| device.sync_arrived(&base).is_none_or(|arrived| since <= arrived));
-    if taken {
-        device.clear_sync_arrived(&base);
-    }
     let codes = sync::qr_codes(&made.code, sync::transfer_id());
     let side = codes.first().map_or(0, qr::Code::side) + 2 * QUIET;
-    Ok(Shown {
+    let shown = Shown {
         qr: codes.iter().map(qr_path).collect(),
         side,
         parts: sync::text_parts(&made.code, sync::transfer_id()),
@@ -675,14 +734,15 @@ async fn make(ctx: Ctx, typed: &str, repeat: Option<&str>, since: Option<Date>, 
         tally: made.tally,
         skipped: made.skipped,
         unreadable: made.unreadable,
-        key: Rc::new(key),
+        key: Rc::clone(&lock.key),
         created: now,
         base,
         since_at: header.since(),
         everyone: office.is_some(),
-        salt: device_key.salt().to_vec(),
-        iterations: device_key.iterations(),
-    })
+        salt: lock.salt.clone(),
+        iterations: lock.iterations,
+    };
+    Ok((shown, made.changed))
 }
 
 /// Следующий QR-код круга — через [`QR_STEP`], и снова, пока круг идёт.
@@ -955,29 +1015,18 @@ async fn make_files(ctx: Ctx, shown: Rc<Shown>) -> Result<FilesShown, Say> {
     Ok(FilesShown { parts })
 }
 
-/// Готовый код: что в нём, QR-коды по кругу и текст кусками, а под ними —
-/// квитанция в ответ. Файлы, которых в коде нет, — кодом файлов по нажатию,
-/// частями вместо кода изменений. `gap` — квитанция назвала дыру: день,
-/// с которого сделать новый код.
+/// Что в готовом коде — по видам (задача 124, п. 21), сколько QR-кодов
+/// и сколько идёт круг, что не вошло: у кода изменений и у встречного кода.
+/// `skipped` — слова о файлах, которых в коде нет: у встречного кода под ним
+/// нет кнопки кода файлов.
 #[component]
-fn ShownCode(
-    ctx: Ctx,
-    seen: Signal<bool>,
-    carry: bool,
-    shown: Rc<Shown>,
-    gap: Callback<Date>,
-    close: impl Fn() + Copy + 'static,
-) -> impl IntoView {
-    let Ctx { lang, .. } = ctx;
-    let summary = {
-        // Что в коде — по видам (задача 124, п. 21).
-        let (since, tally) = (shown.since, shown.tally);
-        move || {
-            let lang = lang.get();
-            match since {
-                Some(day) => fill(t(lang, Key::SyncMadeSince), &[&i18n::date(lang, day), &tally_words(lang, tally)]),
-                None => fill(t(lang, Key::SyncMadeAll), &[&tally_words(lang, tally)]),
-            }
+fn MadeWords(lang: ReadSignal<Lang>, shown: Rc<Shown>, skipped: Key) -> impl IntoView {
+    let (since, tally) = (shown.since, shown.tally);
+    let summary = move || {
+        let lang = lang.get();
+        match since {
+            Some(day) => fill(t(lang, Key::SyncMadeSince), &[&i18n::date(lang, day), &tally_words(lang, tally)]),
+            None => fill(t(lang, Key::SyncMadeAll), &[&tally_words(lang, tally)]),
         }
     };
     // Сколько QR-кодов и сколько идёт круг (задача 124): у кода в 32 КиБ их
@@ -992,6 +1041,30 @@ fn ShownCode(
             &[&i18n::integer(lang, codes as i64), &i18n::integer(lang, i64::try_from(seconds).unwrap_or(i64::MAX))],
         )
     };
+    view! {
+        <p role="status">{summary}</p>
+        {(codes > 1).then(|| view! { <p class="hint">{round}</p> })}
+        {(shown.skipped > 0).then(|| view! {
+            <p class="hint">{counted(lang, skipped, shown.skipped as i64)}</p>
+        })}
+        {(shown.unreadable > 0).then(|| view! { <p role="alert">{counted(lang, Key::SyncUnreadable, shown.unreadable as i64)}</p> })}
+    }
+}
+
+/// Готовый код: что в нём, QR-коды по кругу и текст кусками, а под ними —
+/// квитанция в ответ. Файлы, которых в коде нет, — кодом файлов по нажатию,
+/// частями вместо кода изменений. `gap` — квитанция назвала дыру: день,
+/// с которого сделать новый код.
+#[component]
+fn ShownCode(
+    ctx: Ctx,
+    seen: Signal<bool>,
+    carry: bool,
+    shown: Rc<Shown>,
+    gap: Callback<Date>,
+    close: impl Fn() + Copy + 'static,
+) -> impl IntoView {
+    let Ctx { lang, .. } = ctx;
     let files = RwSignal::new_local(FilesState::Off);
     let source = StoredValue::new_local(Rc::clone(&shown));
     let build = move |_: MouseEvent| {
@@ -1025,12 +1098,7 @@ fn ShownCode(
         }
     };
     view! {
-        <p role="status">{summary}</p>
-        {(codes > 1).then(|| view! { <p class="hint">{round}</p> })}
-        {(shown.skipped > 0).then(|| view! {
-            <p class="hint">{counted(lang, Key::SyncSkipped, shown.skipped as i64)}</p>
-        })}
-        {(shown.unreadable > 0).then(|| view! { <p role="alert">{counted(lang, Key::SyncUnreadable, shown.unreadable as i64)}</p> })}
+        <MadeWords lang shown=Rc::clone(&shown) skipped=Key::SyncSkipped />
         {move || match files.get() {
             FilesState::On(made, at) => {
                 let total = made.parts.len();
@@ -1105,7 +1173,7 @@ fn ShownCode(
                         }
                         FilesState::Off | FilesState::On(..) => None,
                     }}
-                    <Reply lang seen shown=source.get_value() gap accepted />
+                    <Reply ctx seen shown=source.get_value() gap accepted />
                 }
                 .into_any()
             }
@@ -1126,6 +1194,8 @@ enum Replying {
     Scanning,
     Reading,
     Read(Acked),
+    /// Встречный код того устройства принят сюда (задача 124, п. 14).
+    Took(Rc<Accepted>),
     Failed(Say),
 }
 
@@ -1135,11 +1205,17 @@ enum Replying {
 /// следующего кода этой базы (`Device::sync_made`). Квитанция этого кода —
 /// «всё дошло», «впервые» или дыра — ставит `accepted` (задача 123): код
 /// принят, и круг QR-кодов стоит; квитанция другого кода и нечитаемая его не
-/// трогают — этот код, может быть, ещё не сняли.
+/// трогают — этот код, может быть, ещё не сняли. Здесь же снимают встречный
+/// код того устройства (задача 124, п. 14): он под замком этого кода
+/// и открывается его ключом, без пароля; его приём тоже ставит `accepted` —
+/// того кода, не открыв этот, не сделать.
 #[component]
-fn Reply(lang: ReadSignal<Lang>, seen: Signal<bool>, shown: Rc<Shown>, gap: Callback<Date>, accepted: RwSignal<bool>) -> impl IntoView {
+fn Reply(ctx: Ctx, seen: Signal<bool>, shown: Rc<Shown>, gap: Callback<Date>, accepted: RwSignal<bool>) -> impl IntoView {
+    let lang = ctx.lang;
     let replying = RwSignal::new_local(Replying::Waiting);
     let collector = StoredValue::new_local(Collector::default());
+    // Сколько кадров встречного кода собрано из скольких; у квитанции кадр один.
+    let progress = RwSignal::new((0usize, 0usize));
     let key = StoredValue::new_local(Rc::clone(&shown.key));
     let (created, base, since) = (shown.created, StoredValue::new(shown.base.clone()), shown.since);
     let pasted = RwSignal::new(String::new());
@@ -1150,13 +1226,41 @@ fn Reply(lang: ReadSignal<Lang>, seen: Signal<bool>, shown: Rc<Shown>, gap: Call
             replying.set(Replying::Waiting);
         }
     });
+    // Встречный код — принять ключом этого кода. Код под другим замком этим
+    // ключом не откроется: он не в ответ на этот.
+    let take_back = move |bytes: &[u8]| {
+        let sealed = match sync::open(bytes) {
+            Ok(sealed) => sealed,
+            Err(error) => return replying.set(Replying::Failed(code_problem(error))),
+        };
+        replying.set(Replying::Reading);
+        leptos::task::spawn_local(async move {
+            let Some(key) = key.try_get_value() else {
+                return;
+            };
+            replying.set(match accept(ctx, &sealed, Secret::Known(key), false).await {
+                Ok((took, _)) => {
+                    if !accepted.get_untracked() {
+                        accepted.set(true);
+                    }
+                    pasted.set(String::new());
+                    Replying::Took(Rc::new(took))
+                }
+                // Свой код этого устройства — код, а не ответ на него.
+                Err(Say::Key(Key::SyncOwn)) => Replying::Failed(Say::Key(Key::SyncIsCode)),
+                Err(Say::Key(Key::SyncWrongPassword)) => Replying::Failed(Say::Key(Key::SyncBackOther)),
+                Err(say) => Replying::Failed(say),
+            });
+        });
+    };
     let read = move |bytes: Vec<u8>| {
         let sealed = match sync::payload(&bytes) {
             Payload::Receipt => match sync::open_receipt(&bytes) {
                 Ok(sealed) => sealed,
                 Err(error) => return replying.set(Replying::Failed(receipt_problem(error))),
             },
-            Payload::Code | Payload::Segment => return replying.set(Replying::Failed(Say::Key(Key::SyncIsCode))),
+            Payload::Code => return take_back(&bytes),
+            Payload::Segment => return replying.set(Replying::Failed(Say::Key(Key::SyncIsCode))),
             Payload::Other => return replying.set(Replying::Failed(Say::Key(Key::SyncNotCode))),
         };
         replying.set(Replying::Reading);
@@ -1202,16 +1306,24 @@ fn Reply(lang: ReadSignal<Lang>, seen: Signal<bool>, shown: Rc<Shown>, gap: Call
             Err(FrameError::Newer) => return replying.set(Replying::Failed(Say::Key(Key::SyncNewer))),
             Err(FrameError::NotFrame) => return,
         };
-        let whole = collector
+        let (got, count, whole) = collector
             .try_update_value(|collector| {
                 collector.take(frame);
-                collector.whole()
+                (collector.got(), collector.count(), collector.whole())
             })
-            .flatten();
+            .unwrap_or((0, 0, None));
+        progress.set((got, count));
         if let Some(bytes) = whole {
             collector.set_value(Collector::default());
+            progress.set((0, 0));
             read(bytes);
         }
+    };
+    // Снято столько-то кадров встречного кода — как у «Принять сюда».
+    let got_words = move || {
+        let (got, count) = progress.get();
+        let lang = lang.get();
+        (count > 1).then(|| fill(t(lang, Key::SyncGot), &[&i18n::integer(lang, got as i64), &i18n::integer(lang, count as i64)]))
     };
     // Квитанция из буфера — в самом нажатии, до первого `await` (задача 124,
     // `platform::clipboard::paste`).
@@ -1240,6 +1352,7 @@ fn Reply(lang: ReadSignal<Lang>, seen: Signal<bool>, shown: Rc<Shown>, gap: Call
                     {Suspend::new(async move {
                         scanner_part(ScanView { lang, found, stop }).await.ok()
                     })}
+                    <p role="status">{got_words}</p>
                 }
                 .into_any()
             }
@@ -1270,7 +1383,12 @@ fn Reply(lang: ReadSignal<Lang>, seen: Signal<bool>, shown: Rc<Shown>, gap: Call
                         }
                     ></textarea>
                 </label>
+                <p role="status">{got_words}</p>
                 {match state {
+                    Replying::Took(took) => Some(view! {
+                        <p role="status">{tr(lang, Key::SyncBackTook)}</p>
+                        <AcceptedWords lang accepted=took />
+                    }.into_any()),
                     Replying::Read(Acked::Whole) => Some(view! { <p role="status">{tr(lang, Key::SyncReceiptWhole)}</p> }.into_any()),
                     Replying::Read(Acked::First) => Some(view! {
                         <p class="warning">{move || {
@@ -1345,8 +1463,14 @@ struct Accepted {
     /// Легло в пустую программу, а выпуск здесь не выключен: так заводят
     /// устройство — где выпускать.
     fresh: bool,
-    /// Квитанция тому устройству (задача 116); у кода файлов её нет.
+    /// Квитанция тому устройству (задача 116); у кода файлов и у встречного
+    /// кода её нет.
     receipt: Option<ShownReceipt>,
+    /// Легло в пустую программу: встречному коду (задача 124, п. 14) нечего
+    /// нести — здесь только записи того устройства.
+    was_empty: bool,
+    /// Что ждало кода отсюда до этого кода — день встречного кода.
+    unsent: Unsent,
 }
 
 /// Чем открыть код: паролем, который вписал человек, или ключом прошлого
@@ -1380,8 +1504,9 @@ fn Receive(ctx: Ctx, seen: Signal<bool>) -> impl IntoView {
     let series = StoredValue::new_local(Series::default());
     let series_progress = RwSignal::new((0usize, 0usize));
     // Ключ последнего принятого кода — с солью и итерациями его замка: код
-    // файлов того же пароля откроется без второго ввода.
-    let known = StoredValue::new_local(None::<(Vec<u8>, u32, Rc<crypto::Key>)>);
+    // файлов того же пароля откроется без второго ввода, а встречный код
+    // (задача 124, п. 14) закроется им же.
+    let known = StoredValue::new_local(None::<CodeLock>);
     // Сколько кадров собрано из скольких — для слов; (0, 0) — ни одного.
     let progress = RwSignal::new((0usize, 0usize));
     let pasted = RwSignal::new(String::new());
@@ -1405,10 +1530,14 @@ fn Receive(ctx: Ctx, seen: Signal<bool>) -> impl IntoView {
         receiving.set(Receiving::Busy);
         leptos::task::spawn_local(async move {
             let known_key = matches!(secret, Secret::Known(_));
-            let outcome = accept(ctx, &sealed, secret).await;
+            let outcome = accept(ctx, &sealed, secret, true).await;
             if let Ok((_, key)) = &outcome {
                 let lock = sealed.lock();
-                known.set_value(Some((lock.salt().to_vec(), lock.iterations(), Rc::clone(key))));
+                known.set_value(Some(CodeLock {
+                    key: Rc::clone(key),
+                    salt: lock.salt().to_vec(),
+                    iterations: lock.iterations(),
+                }));
                 password.set(String::new());
                 pasted.set(String::new());
                 progress.set((0, 0));
@@ -1430,8 +1559,8 @@ fn Receive(ctx: Ctx, seen: Signal<bool>) -> impl IntoView {
         let key = known.with_value(|known| {
             known
                 .as_ref()
-                .filter(|(salt, iterations, _)| salt == lock.salt() && *iterations == lock.iterations())
-                .map(|(_, _, key)| Rc::clone(key))
+                .filter(|known| known.salt == lock.salt() && known.iterations == lock.iterations())
+                .map(|known| Rc::clone(&known.key))
         });
         match key {
             Some(key) => {
@@ -1606,7 +1735,17 @@ fn Receive(ctx: Ctx, seen: Signal<bool>) -> impl IntoView {
                 </label>
                 <p role="status">{got_words}</p>
                 {match state {
-                    Receiving::Done(accepted) => Some(view! { <AcceptedWords lang accepted /> }.into_any()),
+                    // Под квитанцией — встречный код (задача 124, п. 14): в
+                    // пустую программу легли только записи того устройства,
+                    // и нести обратно нечего.
+                    Receiving::Done(accepted) => {
+                        let lock = (accepted.receipt.is_some() && !accepted.was_empty).then(|| known.get_value()).flatten();
+                        let unsent = accepted.unsent;
+                        Some(view! {
+                            <AcceptedWords lang accepted />
+                            {lock.map(|lock| view! { <BackCode ctx seen lock unsent /> })}
+                        }.into_any())
+                    }
                     Receiving::Failed(say) => Some(view! { <p role="alert">{move || say.text(lang.get())}</p> }.into_any()),
                     _ => None,
                 }}
@@ -1685,6 +1824,62 @@ fn ReceiptShown(lang: ReadSignal<Lang>, receipt: ShownReceipt) -> impl IntoView 
     }
 }
 
+/// Встречный код (задача 124, п. 14): под квитанцией — изменения отсюда тому
+/// устройству тем же ключом, без пароля, по нажатию. Снимает его тот, кто
+/// показал код, — там же, где квитанцию (`Reply`). Квитанции на него нет:
+/// круг идёт, пока путь на виду.
+#[component]
+fn BackCode(ctx: Ctx, seen: Signal<bool>, lock: CodeLock, unsent: Unsent) -> impl IntoView {
+    let lang = ctx.lang;
+    let back = RwSignal::new_local(Sending::Idle);
+    let lock = StoredValue::new_local(lock);
+    let start = move |_: MouseEvent| {
+        if matches!(back.get_untracked(), Sending::Busy) {
+            return;
+        }
+        back.set(Sending::Busy);
+        leptos::task::spawn_local(async move {
+            let Some(lock) = lock.try_get_value() else {
+                return;
+            };
+            back.set(match make_back(ctx, &lock, unsent).await {
+                Ok(shown) => Sending::Ready(Rc::new(shown)),
+                Err(say) => Sending::Failed(say),
+            });
+        });
+    };
+    view! {
+        {move || match back.get() {
+            Sending::Ready(shown) => {
+                let (qr, side, parts) = (shown.qr.clone(), shown.side, shown.parts.clone());
+                view! {
+                    <h3>{tr(lang, Key::SyncBackTitle)}</h3>
+                    <MadeWords lang shown skipped=Key::SyncBackSkipped />
+                    <CodeShown lang seen qr side parts accepted=Signal::stored(false) hint=Key::SyncBackHint carry=false />
+                }
+                .into_any()
+            }
+            state => view! {
+                <div class="actions">
+                    <button type="button" disabled=matches!(state, Sending::Busy) on:click=start>
+                        <span class="label">{tr(lang, Key::SyncBackMake)}</span>
+                    </button>
+                </div>
+                {match state {
+                    Sending::Busy => Some(view! { <p role="status">{tr(lang, Key::SyncMaking)}</p> }.into_any()),
+                    // «Передавать нечего» — ответ, а не беда, как у «Передать отсюда».
+                    Sending::Failed(say @ Say::Key(Key::SyncNothing)) => {
+                        Some(view! { <p role="status">{move || say.text(lang.get())}</p> }.into_any())
+                    }
+                    Sending::Failed(say) => Some(view! { <p role="alert">{move || say.text(lang.get())}</p> }.into_any()),
+                    Sending::Idle | Sending::Ready(_) => None,
+                }}
+            }
+            .into_any(),
+        }}
+    }
+}
+
 /// Ошибка кода — словами.
 fn code_problem(error: CodeError) -> Say {
     Say::Key(match error {
@@ -1698,8 +1893,10 @@ fn code_problem(error: CodeError) -> Say {
 }
 
 /// Расшифровать код и слить с базой — или сказать, почему нельзя. Вместе
-/// с принятым — ключ кода: код файлов того же пароля откроется им.
-async fn accept(ctx: Ctx, sealed: &Sealed, secret: Secret) -> Result<(Accepted, Rc<crypto::Key>), Say> {
+/// с принятым — ключ кода: код файлов того же пароля откроется им. `answer` —
+/// показать квитанцию в ответ; встречный код (задача 124, п. 14) принимают
+/// без неё: снять её там негде, и ряд встречного кода там не двигается.
+async fn accept(ctx: Ctx, sealed: &Sealed, secret: Secret, answer: bool) -> Result<(Accepted, Rc<crypto::Key>), Say> {
     let opened = match secret {
         Secret::Typed(typed) => stored_sync::unlock(sealed, &crypto::normalize(&typed))
             .await
@@ -1725,6 +1922,11 @@ async fn accept(ctx: Ctx, sealed: &Sealed, secret: Secret) -> Result<(Accepted, 
     let ahead = backup::ahead(code.entries(), now)
         || header.created().unix_millis() > now.unix_millis().saturating_add(backup::CLOCK_SLACK_MILLIS);
     let had_office = device.office();
+    // До слияния: что здесь ждало кода отсюда (`Unsent`).
+    let unsent = Unsent {
+        open: device.sync_arrived(&ctx.office.open_name()),
+        office: device.sync_arrived(OFFICE_DB),
+    };
     let (landed, fresh, base) = if backup::is_full(code.entries()) {
         land_all(ctx, &store, code.into_entries(), header.since(), header.files()).await?
     } else {
@@ -1763,7 +1965,7 @@ async fn accept(ctx: Ctx, sealed: &Sealed, secret: Secret) -> Result<(Accepted, 
         ctx.backups.password_set(&opened_with);
         ctx.backups.password_entered();
     }
-    let receipt = if files { None } else { receipt(&key, &header, continuity).await };
+    let receipt = if files || !answer { None } else { receipt(&key, &header, continuity).await };
     Ok((
         Accepted {
             restored: landed,
@@ -1775,6 +1977,8 @@ async fn accept(ctx: Ctx, sealed: &Sealed, secret: Secret) -> Result<(Accepted, 
             // заводит.
             fresh: !files && fresh && !super::settings::issue_elsewhere_untracked(store.name()),
             receipt,
+            was_empty: fresh,
+            unsent,
         },
         key,
     ))

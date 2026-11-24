@@ -1472,7 +1472,7 @@ macro_rules! en {
     (SyncReceiptQrLabel) => { "Receipt QR code" };
     (SyncReceiptCopy) => { "Copy the receipt" };
     (SyncReceiptText) => { "Receipt text" };
-    (SyncReceiptAbout) => { "When the other device receives the code, it shows a receipt. Scan it or paste its text to see whether everything arrived." };
+    (SyncReceiptAbout) => { "When the other device receives the code, it shows a receipt. Scan it or paste its text to see whether everything arrived. Its code back, with the changes from there, is scanned here too." };
     (SyncReceiptScan) => { "Scan the receipt" };
     (SyncReceiptPaste) => { "Or paste the receipt as text" };
     (SyncReceiptWhole) => { "Receipt: the code was received, and the other device has everything that was here before it." };
@@ -1545,4 +1545,10 @@ macro_rules! en {
     (SyncQrFull) => { "QR code full screen" };
     (SyncQrBright) => { "Turn the screen brightness up: the other device’s camera will read the code faster." };
     (SyncQrFullClose) => { "Close" };
+    (SyncBackMake) => { "Send the changes from here back" };
+    (SyncBackTitle) => { "Changes from here for the other device" };
+    (SyncBackHint) => { "On the other device, scan this code where you scanned the receipt, under its own QR codes. No password is needed again." };
+    (SyncBackTook) => { "The other device’s code back was taken." };
+    (SyncBackOther) => { "This code is not a reply to the code from here: receive it under “Receive here”." };
+    (SyncBackSkipped) => { "Ledger files and logos don't go into the code back; changed ones: {}. A file code from “Send from here” or a backup file will carry them." };
 }

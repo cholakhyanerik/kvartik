@@ -531,6 +531,11 @@ async fn a_receipt_tells_the_sender_what_arrived() {
         if !wait_for(&host, t(lang, Key::SyncReceiptTitle)).await {
             wrong.push(format!("квитанции нет: «{}»", section_text(&host, "sync")));
         }
+        // В пустую программу легли только записи того устройства — нести
+        // обратно нечего (задача 124, п. 14).
+        if sync_button(&host, t(lang, Key::SyncBackMake)).is_some() {
+            wrong.push("в пустой программе — встречный код".to_owned());
+        }
         let shown = find(&host, ".sync-receipt textarea")
             .await
             .and_then(|area| Reflect::get(&area, &"value".into()).ok())
@@ -1362,4 +1367,217 @@ async fn the_qr_code_opens_full_screen() {
     crate::platform::set_hash("");
     documents::forget_device();
     assert!(wrong.is_empty(), "QR на весь экран: {wrong:#?}");
+}
+
+/// Записи этой программы на устройстве (`kvartik.*`) — чтобы «вернуться» на
+/// устройство после другого.
+fn device_records() -> Vec<(String, String)> {
+    let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) else {
+        return Vec::new();
+    };
+    (0..storage.length().unwrap_or(0))
+        .filter_map(|at| storage.key(at).ok().flatten())
+        .filter(|name| name.starts_with("kvartik."))
+        .filter_map(|name| {
+            let value = storage.get_item(&name).ok().flatten()?;
+            Some((name, value))
+        })
+        .collect()
+}
+
+/// Вернуть устройству его записи `records`, а чужие убрать.
+fn restore_device(records: &[(String, String)]) {
+    let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) else {
+        return;
+    };
+    for (name, _) in device_records() {
+        let _ = storage.remove_item(&name);
+    }
+    for (name, value) in records {
+        let _ = storage.set_item(name, value);
+    }
+}
+
+/// База программы с профилем `profile` и клиентом `client` — с нуля.
+async fn seed_pair(profile: &Profile, client: &Client) {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let mut writes = Writes::default();
+    writes.insert(profile);
+    writes.insert(client);
+    documents::commit(writes).await;
+}
+
+/// Обмен в обе стороны за один сеанс (задача 124, п. 14): принявшее
+/// устройство под квитанцией делает встречный код тем же ключом — без
+/// пароля, с дня по умолчанию до принятого кода (легшее им туда не
+/// возвращается) и не сдвигая своего ряда изменений. Отправитель вставляет
+/// его там же, где квитанцию: код ложится, квитанции на него нет, «Готово»
+/// становится главной кнопкой, а код под чужим замком назван словами. В
+/// пустой программе встречного кода нет — это держит тест квитанции.
+#[wasm_bindgen_test]
+async fn changes_go_both_ways_in_one_session() {
+    use kvartik_core::format::sync;
+    use kvartik_core::model::record::Timestamp;
+    const DAY: i64 = 86_400_000;
+    let lang = Lang::Ru;
+    let now = clock::now();
+    let profile = Profile::save(None, documents::profile(), now).expect("годный профиль").expect("новый");
+    // Клиент отправителя правлен десять дней назад: встречный код с дня до
+    // принятого кода его обратно не несёт.
+    let theirs = Client::create(documents::acme(), Timestamp::from_unix_millis(now.unix_millis() - 10 * DAY)).expect("годный клиент");
+    let ours = Client::create(documents::acme(), now).expect("годный клиент");
+    let mut wrong = Vec::new();
+
+    // Отправитель: код всех записей.
+    seed_pair(&profile, &theirs).await;
+    other_device();
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база отправителя не открылась".to_owned());
+    }
+    let code = make(&host, lang, true, &mut wrong).await.unwrap_or_default();
+    let sender = device_records();
+    drop(mounted);
+    host.remove();
+
+    // Получатель: тот же ИП, свой клиент и файл книги, прошлый код отсюда —
+    // два дня назад.
+    seed_pair(&profile, &ours).await;
+    let file = kvartik_core::model::attachment::Attachment::create(
+        RecordId::random(),
+        "чек.pdf",
+        kvartik_core::model::attachment::FileBytes::new(b"%PDF-1.4 receipt".to_vec()).expect("годный PDF"),
+        now,
+    );
+    let mut writes = Writes::default();
+    writes.insert(&file);
+    documents::commit(writes).await;
+    other_device();
+    let made = Timestamp::from_unix_millis(now.unix_millis() - 2 * DAY);
+    Device::new().set_sync_made(crate::store::DB_NAME, made);
+    let receiver = Device::new().sync_id();
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база получателя не открылась".to_owned());
+    }
+    let mut back = String::new();
+    if let Some(input) = paste(&host, lang, &code, &mut wrong).await {
+        accept(&host, lang, &input, PASSWORD);
+        if !wait_for(&host, &landed_words(lang, &kinds(lang, 1, 0, 0), 1)).await {
+            wrong.push(format!("код не лёг: «{}»", section_text(&host, "sync")));
+        }
+        match sync_button(&host, t(lang, Key::SyncBackMake)) {
+            Some(button) => button.click(),
+            None => wrong.push(format!("под квитанцией нет встречного кода: «{}»", section_text(&host, "sync"))),
+        }
+        let day = clock::local_date(made).expect("день");
+        let ready = fill(t(lang, Key::SyncMadeSince), &[&kvartik_core::i18n::date(lang, day), &kinds(lang, 1, 0, 1)]);
+        if !wait_for(&host, &ready).await {
+            wrong.push(format!("встречный код не с того дня: «{}»", section_text(&host, "sync")));
+        }
+        // Кнопки кода файлов под встречным кодом нет — и слова о файлах свои.
+        if !section_text(&host, "sync").contains(&fill(t(lang, Key::SyncBackSkipped), &["1"])) {
+            wrong.push(format!("о файлах встречного кода — не те слова: «{}»", section_text(&host, "sync")));
+        }
+        back = find(&host, ".sync-text:not(.sync-receipt) textarea")
+            .await
+            .and_then(|area| Reflect::get(&area, &"value".into()).ok())
+            .and_then(|value| value.as_string())
+            .unwrap_or_default();
+        match opened_code(&back).await {
+            Some((header, _)) => {
+                if header.device() != receiver {
+                    wrong.push("встречный код не от получателя".to_owned());
+                }
+                if header.since() != Some(sync::since_day(day)) {
+                    wrong.push(format!("встречный код не с дня до принятого: {:?}", header.since()));
+                }
+            }
+            None => wrong.push(format!("встречный код не открылся паролем того кода: {}", back.chars().take(20).collect::<String>())),
+        }
+        if Device::new().sync_made(crate::store::DB_NAME) != Some(made) {
+            wrong.push("встречный код сдвинул ряд изменений получателя".to_owned());
+        }
+    }
+    drop(mounted);
+    host.remove();
+
+    // Снова отправитель: код тем же паролем копий — замок тот же, — и под ним
+    // встречный код получателя.
+    seed_pair(&profile, &theirs).await;
+    restore_device(&sender);
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база отправителя не открылась снова".to_owned());
+    }
+    crate::platform::set_hash(&Screen::Sync.href());
+    if find(&host, "input[type=radio][name=sync-what]").await.is_none() {
+        wrong.push("нет выбора, что передать".to_owned());
+    }
+    choose_way(&host, true);
+    match password_field(&host, t(lang, Key::BackupPassword)) {
+        Some(input) => type_into(&input, PASSWORD),
+        None => wrong.push("нет поля пароля копий".to_owned()),
+    }
+    match sync_button(&host, t(lang, Key::SyncMake)) {
+        Some(make) => make.click(),
+        None => wrong.push("нет «Сделать код»".to_owned()),
+    }
+    if find(&host, ".sync-reply textarea").await.is_none() {
+        wrong.push(format!("код отсюда не готов: «{}»", section_text(&host, "sync")));
+    }
+    // Код под чужим замком — не встречный этому.
+    let salt = [7u8; 16];
+    let foreign_key = crate::platform::crypto::derive(&crate::platform::crypto::normalize(PASSWORD), &salt, 1)
+        .await
+        .expect("ключ");
+    let header = sync::Header::new("0.0.189", clock::now(), RecordId::random(), None);
+    let store = crate::store::Store::open(|_| {}).await.expect("база открыта");
+    let sealing = crate::store::sync::Sealing {
+        header: &header,
+        key: &foreign_key,
+        salt: &salt,
+        iterations: 1,
+    };
+    let foreign = match crate::store::sync::make(&store, &sealing).await {
+        Ok(made) => sync::text_parts(&made.code, 1).join("\n"),
+        Err(_) => {
+            wrong.push("чужой код не собрался".to_owned());
+            String::new()
+        }
+    };
+    drop(store);
+    paste_reply(&host, &foreign, &mut wrong).await;
+    if !wait_for(&host, t(lang, Key::SyncBackOther)).await {
+        wrong.push(format!("код под чужим замком не назван: «{}»", section_text(&host, "sync")));
+    }
+    paste_reply(&host, &back, &mut wrong).await;
+    if !wait_for(&host, t(lang, Key::SyncBackTook)).await {
+        wrong.push(format!("встречный код не принят: «{}»", section_text(&host, "sync")));
+    }
+    if !wait_for(&host, &landed_words(lang, &kinds(lang, 1, 0, 0), 1)).await {
+        wrong.push(format!("встречный код не лёг: «{}»", section_text(&host, "sync")));
+    }
+    if section_text(&host, "sync").contains(t(lang, Key::SyncReceiptTitle)) {
+        wrong.push("на встречный код показана квитанция".to_owned());
+    }
+    match button(&host, &[t(lang, Key::SyncClose)]) {
+        Some(close) if !close.class_list().contains("link") => {}
+        Some(_) => wrong.push("после встречного кода «Готово, убрать код» — не главная кнопка".to_owned()),
+        None => wrong.push("нет «Готово, убрать код»".to_owned()),
+    }
+    match stored_clients().await {
+        Ok(clients) if clients.iter().any(|known| known.id() == ours.id()) => {}
+        other => wrong.push(format!("клиента получателя нет у отправителя: {other:?}")),
+    }
+    if Device::new().sync_received(crate::store::DB_NAME).until(receiver).is_none() {
+        wrong.push("отправитель не запомнил, что принял от получателя".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    other_device();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "обмен в обе стороны: {wrong:#?}");
 }

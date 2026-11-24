@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.189",
+      "date": "2026-11-24",
+      "hy": [
+        "«Այլ սարք» էկրանում փոփոխությունները կարելի է փոխանակել երկու ուղղությամբ մեկ նստաշրջանում. կոդն ընդունած սարքն անդորրագրի տակ առաջարկում է «Փոխանցել այստեղի փոփոխությունները հետ»՝ նույն բանալիով, առանց գաղտնաբառի։ Առաջին սարքում այդ կոդը սկանավորեք այնտեղ, որտեղ անդորրագիրը։"
+      ],
+      "ru": [
+        "На экране «Другое устройство» изменения можно обменять в обе стороны за один раз: устройство, принявшее код, под квитанцией предлагает «Передать изменения отсюда обратно» — тем же ключом, без пароля. На первом устройстве этот код снимают там же, где квитанцию."
+      ],
+      "en": [
+        "On the “Another device” screen, changes can now go both ways in one session: the device that received the code offers “Send the changes from here back” under the receipt, with the same key and no password. On the first device, scan that code where you scanned the receipt."
+      ]
+    },
+    {
       "version": "0.0.188",
       "date": "2026-11-24",
       "hy": [
@@ -266,19 +279,6 @@
       ],
       "en": [
         "Nothing changed in the app: the website has a new page, “Turnover tax — rates and deadlines”, with rates, the threshold, deadlines, a worked example and the CBA rate rule, each number with its article of law."
-      ]
-    },
-    {
-      "version": "0.0.169",
-      "date": "2026-11-22",
-      "hy": [
-        "Ծրագրում ոչինչ չի փոխվել. կայքի էջերն այժմ որոնողական համակարգերին և ԱԲ օգնականներին ասում են, թե ինչ ծրագիր է Kvartik-ը և որքան արժե բանալին, իսկ թարմացված էջերի մասին Bing-ը և Յանդեքսն իմանում են թողարկումից անմիջապես հետո։"
-      ],
-      "ru": [
-        "В программе ничего не изменилось: страницы сайта теперь говорят поисковикам и ИИ-помощникам, что такое Kvartik и сколько стоит ключ, а об обновлённых страницах Bing и Яндекс узнают сразу после выпуска."
-      ],
-      "en": [
-        "Nothing changed in the app: the website pages now tell search engines and AI assistants what Kvartik is and what a key costs, and Bing and Yandex learn about updated pages right after each release."
       ]
     }
   ]
