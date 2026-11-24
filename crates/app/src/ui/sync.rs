@@ -13,10 +13,12 @@
 //! копии: первому заходу он не нужен (Правило 1). Камера и сканер кадров —
 //! ещё одной частью ([`scanner_part`]): нужны только по «Снять QR-код».
 //!
-//! QR-коды идут по кругу, пока код на экране и экран открыт: это работа,
-//! которую человек сам начал, а не покой (Правило 1), — ушёл с экрана или
-//! нажал «Готово» — круг стоит. Камера горит, только пока сканер на экране:
-//! уход с экрана её выключает.
+//! QR-коды идут по кругу, пока код на экране, экран открыт и квитанции этого
+//! кода нет: это работа, которую человек сам начал, а не покой (Правило 1), —
+//! ушёл с экрана или нажал «Готово» — круг стоит, а квитанция, что код
+//! принят, останавливает его насовсем (задача 123): экран сказал, что всё
+//! дошло, а коды крутились дальше. Камера горит, только пока сканер на
+//! экране: уход с экрана её выключает.
 //!
 //! У кого ИП несколько, код бывает и всех ИП (задача 116, «Код конторы»
 //! в `format::sync`): ложится он маршрутом копии всех ИП
@@ -540,22 +542,35 @@ fn halt(running: StoredValue<bool>, timer: StoredValue<Option<TimeoutHandle>>) {
 }
 
 /// Код на экране — QR-коды по кругу и текст кусками со «Скопировать»: у кода
-/// изменений и у каждой части кода файлов.
+/// изменений и у каждой части кода файлов. `accepted` — квитанция сказала,
+/// что код принят (задача 123): круг стоит и после возврата на экран.
+/// `hint` — подсказка под кодами: когда круг кончится.
 #[component]
-fn CodeShown(lang: ReadSignal<Lang>, router: Router, qr: Vec<String>, side: usize, parts: Vec<String>) -> impl IntoView {
+fn CodeShown(
+    lang: ReadSignal<Lang>,
+    router: Router,
+    qr: Vec<String>,
+    side: usize,
+    parts: Vec<String>,
+    accepted: Signal<bool>,
+    hint: Key,
+) -> impl IntoView {
     let count = qr.len();
     let index = RwSignal::new(0usize);
-    // Круг — сменой через `setTimeout`, пока экран на виду: таймер ставится
-    // заново на каждый шаг, а ушедший экран круг останавливает — и вернувшийся
-    // запускает снова (Правило 1: в покое таймеров нет).
+    // Круг — сменой через `setTimeout`, пока экран на виду и код не принят:
+    // таймер ставится заново на каждый шаг, а ушедший экран круг
+    // останавливает — и вернувшийся запускает снова (Правило 1: в покое
+    // таймеров нет). Квитанция этого кода круг останавливает навсегда: экран
+    // сказал, что всё дошло, и показывать работу дальше незачем (найдено
+    // человеком 2026-11-24).
     let running = StoredValue::new(false);
     let timer = StoredValue::new(None::<TimeoutHandle>);
     Effect::new(move |_| {
-        let visible = router.shows(Screen::Sync);
-        if visible && count > 1 && !running.get_value() {
+        let go = router.shows(Screen::Sync) && !accepted.get();
+        if go && count > 1 && !running.get_value() {
             running.set_value(true);
             cycle(index, count, running, timer);
-        } else if !visible {
+        } else if !go {
             halt(running, timer);
         }
     });
@@ -577,7 +592,7 @@ fn CodeShown(lang: ReadSignal<Lang>, router: Router, qr: Vec<String>, side: usiz
                 }}</figcaption>
             })}
         </figure>
-        <p class="hint">{tr(lang, Key::SyncQrHint)}</p>
+        <p class="hint">{tr(lang, hint)}</p>
         <p>{tr(lang, Key::SyncTextAbout)}</p>
         <div class="actions">
             {parts.into_iter().enumerate().map(|(i, part)| {
@@ -716,6 +731,9 @@ fn ShownCode(ctx: Ctx, shown: Rc<Shown>, gap: Callback<Date>, close: impl Fn() +
     };
     let (qr, side, parts) = (shown.qr.clone(), shown.side, shown.parts.clone());
     let main = StoredValue::new((qr, side, parts));
+    // Квитанция этого кода пришла (задача 123): круг стоит, а «Готово,
+    // убрать код» — главной кнопкой.
+    let accepted = RwSignal::new(false);
     view! {
         <p role="status">{summary}</p>
         {(shown.skipped > 0).then(|| view! {
@@ -738,7 +756,9 @@ fn ShownCode(ctx: Ctx, shown: Rc<Shown>, gap: Callback<Date>, close: impl Fn() +
                         fill(t(lang, Key::SyncFilesPart), &[&i18n::integer(lang, at as i64 + 1), &i18n::integer(lang, total as i64)])
                     }}</h3>
                     <p class="hint">{tr(lang, Key::SyncFilesHint)}</p>
-                    <CodeShown lang router qr side parts=text />
+                    // Квитанции у кода файлов нет: круг части стоит, когда
+                    // она убрана с экрана.
+                    <CodeShown lang router qr side parts=text accepted=Signal::stored(false) hint=Key::SyncFilesQrHint />
                     <div class="actions">
                         <button type="button" class="secondary" disabled={at == 0} on:click=move |_| step(at.saturating_sub(1))>
                             <span class="label">{tr(lang, Key::SyncFilesPrev)}</span>
@@ -756,7 +776,7 @@ fn ShownCode(ctx: Ctx, shown: Rc<Shown>, gap: Callback<Date>, close: impl Fn() +
             state => {
                 let (qr, side, parts) = main.get_value();
                 view! {
-                    <CodeShown lang router qr side parts />
+                    <CodeShown lang router qr side parts accepted=accepted.into() hint=Key::SyncQrHint />
                     {(shown_skipped(&source) > 0).then(|| view! {
                         <div class="actions">
                             <button type="button" class="secondary" disabled=matches!(state, FilesState::Busy) on:click=build>
@@ -769,12 +789,12 @@ fn ShownCode(ctx: Ctx, shown: Rc<Shown>, gap: Callback<Date>, close: impl Fn() +
                         FilesState::Failed(say) => Some(view! { <p role="alert">{move || say.text(lang.get())}</p> }.into_any()),
                         FilesState::Off | FilesState::On(..) => None,
                     }}
-                    <Reply lang router shown=source.get_value() gap />
+                    <Reply lang router shown=source.get_value() gap accepted />
                 }
                 .into_any()
             }
         }}
-        <button type="button" class="link" on:click=move |_| close()>
+        <button type="button" class=move || (!accepted.get()).then_some("link") on:click=move |_| close()>
             <span class="label">{tr(lang, Key::SyncClose)}</span>
         </button>
     }
@@ -799,9 +819,12 @@ enum Replying {
 /// Квитанция в ответ на показанный код (задача 116): снять камерой или
 /// вставить текстом, расшифровать ключом кода и сказать, что она значит.
 /// Дыра — день, с которого сделать новый код, встаёт в поле формы и в день
-/// следующего кода этой базы (`Device::sync_made`).
+/// следующего кода этой базы (`Device::sync_made`). Квитанция этого кода —
+/// «всё дошло», «впервые» или дыра — ставит `accepted` (задача 123): код
+/// принят, и круг QR-кодов стоит; квитанция другого кода и нечитаемая его не
+/// трогают — этот код, может быть, ещё не сняли.
 #[component]
-fn Reply(lang: ReadSignal<Lang>, router: Router, shown: Rc<Shown>, gap: Callback<Date>) -> impl IntoView {
+fn Reply(lang: ReadSignal<Lang>, router: Router, shown: Rc<Shown>, gap: Callback<Date>, accepted: RwSignal<bool>) -> impl IntoView {
     let replying = RwSignal::new_local(Replying::Waiting);
     let collector = StoredValue::new_local(Collector::default());
     let key = StoredValue::new_local(Rc::clone(&shown.key));
@@ -843,6 +866,14 @@ fn Reply(lang: ReadSignal<Lang>, router: Router, shown: Rc<Shown>, gap: Callback
                 if let Some(day) = clock::local_date(got) {
                     gap.run(day);
                 }
+            }
+            match acked {
+                Acked::Whole | Acked::First | Acked::Gap { .. } => {
+                    if !accepted.get_untracked() {
+                        accepted.set(true);
+                    }
+                }
+                Acked::Other => {}
             }
             pasted.set(String::new());
             replying.set(Replying::Read(acked));

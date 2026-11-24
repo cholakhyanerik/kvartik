@@ -1214,8 +1214,11 @@ macro_rules! en {
     (BackupPartsHanded) => { "Parts handed over: {} of {}. Save the rest too." };
     (BackupPartsSaved) => { "All parts of the backup have been handed over. Find them in your downloads or wherever you sent them, and move them together somewhere safe." };
     (BackupFilePart) => { "This is part {} of {} of one backup. The other parts are restored the same way, in any order." };
-    (BackupPartsLaid) => { "The backup has {} parts; restored: {}. Restore the rest the same way before issuing invoices and acts here: a new document gets its number from what is already in. While this screen is open, we won't ask for the password again." };
-    (BackupPartsAll) => { "All parts of the backup are restored\u{A0}— {}." };
+    (BackupPartRestored) => { "Part {} of {} restored. New records: {}, updated: {}, unchanged: {}." };
+    (BackupPartsLeftOne) => { "Part {} is still left: the file with {} in its name. Restore it the same way before issuing invoices and acts here: a new document gets its number from what is already in. While this screen is open, we won't ask for the password again." };
+    (BackupPartsLeft) => { "Not restored yet: {} parts of {}, the files with {} in their names. Restore them the same way before issuing invoices and acts here: a new document gets its number from what is already in. While this screen is open, we won't ask for the password again." };
+    (BackupPartsAll) => { "The backup is fully restored: all parts are in ({} of {})." };
+    (BackupPartMark) => { "“{}”" };
     (BackupFilesParts) => { "It comes in {} files, each no larger than {}\u{A0}MB." };
 
     (LandingTitle) => { "Kvartik\u{A0}— invoices, ledger and tax for individual entrepreneurs in Armenia" };
@@ -1430,7 +1433,7 @@ macro_rules! en {
     (SyncUnreadable) => { "Records that can't be read and were left out of the code: {}." };
     (SyncNothing) => { "No records have changed since that day\u{A0}— there's nothing to send." };
     (SyncTooLarge) => { "There are more changes than a code holds: {}\u{A0}KB of {}. Pick a later day or move the changes with a backup file." };
-    (SyncQrHint) => { "On the other device, open “Another device” and tap “Scan the QR code”. The codes go round in a loop: a missed one comes again." };
+    (SyncQrHint) => { "On the other device, open “Another device” and tap “Scan the QR code”. The codes go round in a loop, so a missed one comes again. Once the other device takes the code, it shows a receipt: scan it or paste its text below, and the loop stops." };
     (SyncQrCount) => { "Code {} of {}" };
     (SyncQrLabel) => { "QR code with the changes" };
     (SyncTextAbout) => { "Or forward the code as text\u{A0}— to yourself by messenger or email\u{A0}— and paste it on the other device. If there are several parts, paste them all, in any order." };
@@ -1485,6 +1488,7 @@ macro_rules! en {
     (SyncFilesMaking) => { "Putting the file codes together…" };
     (SyncFilesPart) => { "Files: code {} of {}" };
     (SyncFilesHint) => { "Show the codes one by one: the other device scans each like a regular code, in any order, and the files land once all are in." };
+    (SyncFilesQrHint) => { "The codes of this part go round in a loop while it is on screen. The files code has no receipt: the other device will say when the files are in." };
     (SyncFilesNext) => { "Next code" };
     (SyncFilesPrev) => { "Previous code" };
     (SyncFilesBack) => { "Back to the changes code" };

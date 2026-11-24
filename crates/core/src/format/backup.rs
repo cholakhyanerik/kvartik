@@ -103,6 +103,10 @@
 //! ответу ([`relation`], с 0.0.85): по идентификаторам записи двух ИП не
 //! совпадут, и слияние молча положило бы их рядом.
 
+mod laid;
+
+pub use laid::Laid;
+
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -665,9 +669,15 @@ impl Part {
 /// имени человек видит, сколько файлов у копии и какой из них какой.
 pub fn part_file_name(name: &str, part: Option<Part>) -> String {
     match (part, name.strip_suffix(".json")) {
-        (Some(part), Some(stem)) => format!("{stem}-{}of{}.json", part.number, part.of),
+        (Some(part), Some(stem)) => format!("{stem}-{}.json", part_mark(part.number, part.of)),
         _ => name.to_owned(),
     }
+}
+
+/// Метка части в имени файла — `1of3`: по ней окно называет человеку части,
+/// которых не хватает (задача 123), той же записью, что [`part_file_name`].
+pub fn part_mark(number: u16, of: u16) -> String {
+    format!("{number}of{of}")
 }
 
 /// Номер части и их число из конца имени, как его пишет [`part_file_name`]:

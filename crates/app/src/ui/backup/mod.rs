@@ -44,7 +44,7 @@ use std::time::Duration;
 use kvartik_core::format::autobackup::{self, DeviceTag};
 use kvartik_core::format::backup::{
     self, BackupError, CopyId, DeviceKey, Entry, FILE_KINDS, Files, Header, KDF_ITERATIONS, KINDS, MAX_FILE_BYTES,
-    MIN_PASSWORD_CHARS, Owner, Part, PasswordProblem, SALT_BYTES, Sealed,
+    Laid, MIN_PASSWORD_CHARS, Owner, Part, PasswordProblem, SALT_BYTES, Sealed,
 };
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
 use kvartik_core::release::EMAIL;
@@ -777,7 +777,8 @@ enum Restoring {
     Password(Rc<Sealed>, Option<Problem>),
     /// Копия другого ИП расшифрована: слить ли её (задача 38, этап 1).
     Other(Rc<Asked>),
-    Done(Restored, After),
+    /// Записи легли; у копии частями — и какие её части легли здесь (задача 123).
+    Done(Restored, After, Option<Laid>),
     /// Копия другого ИП легла новым ИП (задача 38).
     AsNew,
     /// Копия ИП из списка, а открыт другой: ничего не записано (задача 38).
@@ -1045,7 +1046,9 @@ pub(super) enum Recovered {
 #[derive(Clone, Copy, Default)]
 pub(super) struct After {
     /// Копия легла в пустую программу — так заводят второе устройство,
-    /// а номера документов выдаёт одно: окно спрашивает, где выпускать.
+    /// а номера документов выдаёт одно: окно спрашивает, где выпускать. У
+    /// копии частями окно ставит его заново (`backup::Laid::asks`, задача
+    /// 123): эта часть сделала копию целой, а пуста программа была до первой.
     fresh: bool,
     /// В копии — правки позже «сейчас» этого устройства (`backup::ahead`):
     /// часы одного из устройств идут неверно.

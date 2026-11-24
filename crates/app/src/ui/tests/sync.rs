@@ -325,10 +325,32 @@ async fn paste_reply(host: &HtmlElement, text: &str, wrong: &mut Vec<String>) {
     area.dispatch_event(&web_sys::Event::new("input").expect("событие")).expect("отправлено");
 }
 
+/// Подпись под QR-кодом на экране — какой он из скольких; `None` — код один,
+/// и круга нет.
+fn qr_caption(host: &HtmlElement) -> Option<String> {
+    host.query_selector("#sync .sync-qr figcaption").ok().flatten()?.text_content()
+}
+
+/// Идёт ли круг QR-кодов: подпись сменилась за две секунды — четыре шага
+/// круга (`QR_STEP`).
+async fn circling(host: &HtmlElement) -> bool {
+    let first = qr_caption(host);
+    for _ in 0..40 {
+        sleep(50).await;
+        if qr_caption(host) != first {
+            return true;
+        }
+    }
+    false
+}
+
 /// Квитанция (задача 116): принявшее устройство показывает её под ключом
 /// кода — на код этого отправителя, с целым рядом; отправитель, вставив
 /// квитанцию с дырой, слышит день и находит его в поле и в дне следующего
 /// кода, а квитанцию чужого кода и сам код вместо квитанции называет словами.
+/// Квитанция, что код принят, останавливает круг QR-кодов — и после возврата
+/// на экран, — а «Готово, убрать код» становится главной кнопкой; квитанция
+/// чужого кода круга не трогает (задача 123).
 #[wasm_bindgen_test]
 async fn a_receipt_tells_the_sender_what_arrived() {
     use kvartik_core::format::sync::{self, Continuity, Receipt};
@@ -354,13 +376,51 @@ async fn a_receipt_tells_the_sender_what_arrived() {
                 RecordId::random(),
                 Continuity::Whole,
             );
+            if !circling(&host).await {
+                wrong.push(format!("до квитанции круг QR-кодов не идёт: {:?}", qr_caption(&host)));
+            }
             paste_reply(&host, &receipt_text(&key, &other).await, &mut wrong).await;
             if !wait_for(&host, t(lang, Key::SyncReceiptOther)).await {
                 wrong.push(format!("квитанция чужого кода не названа: «{}»", section_text(&host, "sync")));
             }
+            if !circling(&host).await {
+                wrong.push("квитанция чужого кода остановила круг".to_owned());
+            }
             paste_reply(&host, &code, &mut wrong).await;
             if !wait_for(&host, t(lang, Key::SyncIsCode)).await {
                 wrong.push("код вместо квитанции не назван".to_owned());
+            }
+            // «Всё дошло» — круг стоит, и после возврата на экран тоже, а убрать
+            // код — главной кнопкой.
+            let whole = Receipt::new(&header, RecordId::random(), Continuity::Whole);
+            paste_reply(&host, &receipt_text(&key, &whole).await, &mut wrong).await;
+            if !wait_for(&host, t(lang, Key::SyncReceiptWhole)).await {
+                wrong.push("целый ряд не назван".to_owned());
+            }
+            if circling(&host).await {
+                wrong.push("квитанция «всё дошло» — а круг QR-кодов идёт".to_owned());
+            }
+            match button(&host, &[t(lang, Key::SyncClose)]) {
+                Some(close) if !close.class_list().contains("link") => {}
+                Some(_) => wrong.push("после квитанции «Готово, убрать код» — не главная кнопка".to_owned()),
+                None => wrong.push("нет «Готово, убрать код»".to_owned()),
+            }
+            crate::platform::set_hash(&Screen::Home.href());
+            for _ in 0..100 {
+                if shown_screens(&host) == [Screen::Home.id()] {
+                    break;
+                }
+                sleep(10).await;
+            }
+            crate::platform::set_hash(&Screen::Sync.href());
+            for _ in 0..100 {
+                if shown_screens(&host) == [Screen::Sync.id()] {
+                    break;
+                }
+                sleep(10).await;
+            }
+            if circling(&host).await {
+                wrong.push("после возврата на экран круг QR-кодов пошёл снова".to_owned());
             }
             let gap = Receipt::new(&header, RecordId::random(), Continuity::Gap { got });
             paste_reply(&host, &receipt_text(&key, &gap).await, &mut wrong).await;
@@ -379,11 +439,6 @@ async fn a_receipt_tells_the_sender_what_arrived() {
             }
             if Device::new().sync_made(crate::store::DB_NAME) != Some(got) {
                 wrong.push("день следующего кода не сдвинулся".to_owned());
-            }
-            let whole = Receipt::new(&header, RecordId::random(), Continuity::Whole);
-            paste_reply(&host, &receipt_text(&key, &whole).await, &mut wrong).await;
-            if !wait_for(&host, t(lang, Key::SyncReceiptWhole)).await {
-                wrong.push("целый ряд не назван".to_owned());
             }
             // Впервые — не «цел» (ревью задачи 116): что там было раньше,
             // принявший не знает.

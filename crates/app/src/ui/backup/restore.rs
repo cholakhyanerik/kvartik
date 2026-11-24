@@ -5,26 +5,32 @@
 //!
 //! Копия частями (задача 117) восстанавливается по файлу: каждая часть —
 //! копия сама по себе и ложится тем же путём. Окно помнит ключ прошлой части
-//! и какие части этой копии уже легли ([`Known`]): следующая часть той же
-//! копии ложится сразу, без пароля, а слова говорят, какие ещё остались.
-//! Ключ окно забывает, как только легли все части или человек ушёл с экрана
+//! ([`Known`]): следующая часть той же копии ложится сразу, без пароля. Ключ
+//! окно забывает, как только легли все части или человек ушёл с экрана
 //! копии (ревью задачи 117): экраны спрятаны, а не убраны, и иначе ключ из
 //! пароля чужой копии жил бы до перезагрузки страницы.
+//!
+//! Какие части уже легли и была ли программа пуста до первой, окно помнит
+//! записью устройства по идентификатору копии (`backup::Laid`, задача 123),
+//! а не памятью экрана: части ложатся в разные заходы и после перезагрузки,
+//! и слова «осталась часть 1», а потом «восстановлена целиком» и вопрос, где
+//! выпускать, — по всем частям. До 0.0.183 номера забывались вместе с ключом,
+//! слова называли номер легшей части голым числом («восстановлены: 2» —
+//! человек прочёл «две из двух»), а вопрос вставал после первой же части,
+//! хотя записи без файлов книги — и документы с их номерами — копия кладёт
+//! первыми (`backup::split`), а человек мог начать со второй (найдено
+//! человеком 2026-11-24).
 
 use super::*;
 
-/// Части одной копии, легшие в этом окне (задача 117): ключ, которым открыта
-/// прошлая, — у частей одной копии один замок, — и номера легших. Живёт, пока
-/// открыт экран копии, а ключ — пока легли не все части: ключа не сохраняет
+/// Ключ прошлой части копии (задача 117): у частей одной копии один замок.
+/// Живёт, пока открыт экран копии и легли не все части: ключа не сохраняет
 /// ничто, кроме памяти страницы.
 pub(super) struct Known {
     copy: CopyId,
     iterations: u32,
     salt: Vec<u8>,
-    /// `None` — легли все части, и ключ больше не нужен.
-    key: Option<Rc<crypto::Key>>,
-    of: u16,
-    laid: Vec<u16>,
+    key: Rc<crypto::Key>,
 }
 
 impl Known {
@@ -33,47 +39,35 @@ impl Known {
         let part = sealed.header().part()?;
         let lock = sealed.lock();
         let same = part.copy() == self.copy && lock.iterations() == self.iterations && lock.salt() == self.salt;
-        same.then(|| self.key.clone()).flatten()
+        same.then(|| Rc::clone(&self.key))
     }
 
-    /// Легла часть `part` файла `sealed`, открытая ключом `key`: та же копия —
-    /// ещё один номер, другая — новая запись.
-    fn laid(known: Option<Self>, sealed: &Sealed, part: Part, key: Rc<crypto::Key>) -> Self {
-        let mut known = match known {
-            Some(mut known) if known.copy == part.copy() => {
-                if !known.laid.contains(&part.number()) {
-                    known.laid.push(part.number());
-                    known.laid.sort_unstable();
-                }
-                known
-            }
-            _ => Self {
-                copy: part.copy(),
-                iterations: sealed.lock().iterations(),
-                salt: sealed.lock().salt().to_vec(),
-                key: Some(key),
-                of: part.of(),
-                laid: vec![part.number()],
-            },
-        };
-        if known.laid.len() == usize::from(known.of) {
-            known.key = None;
-        }
-        known
-    }
-
-    /// Слова о легших частях копии `part` — или `None`, если это не она.
-    fn words(&self, lang: Lang, part: Part) -> Option<String> {
-        if part.copy() != self.copy {
-            return None;
-        }
-        let of = i18n::integer(lang, i64::from(self.of));
-        Some(if self.laid.len() == usize::from(self.of) {
-            fill(t(lang, Key::BackupPartsAll), &[&of])
-        } else {
-            let laid: Vec<String> = self.laid.iter().map(|&number| i18n::integer(lang, i64::from(number))).collect();
-            fill(t(lang, Key::BackupPartsLaid), &[&of, &laid.join(", ")])
+    /// Легла часть `part` файла `sealed`, открытая ключом `key`: им откроется
+    /// следующая — или ничего, если легли все.
+    fn after(laid: &Laid, sealed: &Sealed, part: Part, key: Rc<crypto::Key>) -> Option<Self> {
+        (!laid.whole()).then(|| Self {
+            copy: part.copy(),
+            iterations: sealed.lock().iterations(),
+            salt: sealed.lock().salt().to_vec(),
+            key,
         })
+    }
+}
+
+/// Слова о частях копии (задача 123): какие ещё не легли — номером со словом
+/// «часть» и меткой файла, — или что легли все.
+fn parts_words(lang: Lang, laid: &Laid) -> String {
+    let of = laid.of();
+    let integer = |number: u16| i18n::integer(lang, i64::from(number));
+    let mark = |number: u16| fill(t(lang, Key::BackupPartMark), &[&backup::part_mark(number, of)]);
+    match laid.missing().as_slice() {
+        [] => fill(t(lang, Key::BackupPartsAll), &[&integer(of), &integer(of)]),
+        &[number] => fill(t(lang, Key::BackupPartsLeftOne), &[&integer(number), &mark(number)]),
+        missing => {
+            let marks: Vec<String> = missing.iter().map(|&number| mark(number)).collect();
+            let count = u16::try_from(missing.len()).unwrap_or(of);
+            fill(t(lang, Key::BackupPartsLeft), &[&integer(count), &integer(of), &marks.join(", ")])
+        }
     }
 }
 
@@ -92,41 +86,70 @@ pub(super) fn RestoreBackup(
     router: Router,
 ) -> impl IntoView {
     let restoring = RwSignal::new_local(Restoring::Idle);
-    // Части копии, легшие в этом окне, и ключ прошлой (задача 117) — пока
-    // открыт экран копии: ушли с него — забыть.
+    // Ключ прошлой части копии (задача 117) — пока открыт экран копии: ушли
+    // с него — забыть.
     let known = StoredValue::new_local(None::<Known>);
     Effect::new(move |_| {
         if !router.shows(Screen::Backup) {
             known.set_value(None);
         }
     });
-    // Копия всех ИП легла в пустую программу частью (ревью задачи 41,
-    // задача 116): спросить, где выпускать, — и сразу, под словами о сбое,
-    // и после повтора: к повтору список ИП уже записан, и программа для
-    // него не пустая.
+    // Легшие части — запасом к записи устройства (задача 123): `localStorage`
+    // может отказать, и тогда слова — по памяти экрана, до перезагрузки.
+    // Ключа в ней нет, и с уходом с экрана она не забывается.
+    let laid_here = StoredValue::new_local(None::<Laid>);
+    // Копия всех ИП одним файлом легла в пустую программу частью (ревью
+    // задачи 41, задача 116): спросить, где выпускать, — и сразу, под словами
+    // о сбое, и после повтора: к повтору список ИП уже записан, и программа
+    // для него не пустая. У копии частями то же помнит запись устройства
+    // (`Laid::failed`): её вопрос — когда лягут все части, и после
+    // перезагрузки тоже.
     let fresh_partly = RwSignal::new(false);
+    let failed_part = StoredValue::new(false);
+    // Что помнилось о частях копий: запись устройства и память экрана.
+    let remembered = move || -> Vec<Laid> {
+        [Device::new().parts_laid(), laid_here.get_value()].into_iter().flatten().collect()
+    };
+    let remember = move |laid: &Laid| {
+        Device::new().set_parts_laid(laid);
+        laid_here.set_value(Some(laid.clone()));
+    };
     // Переход к ответу: частичная копия запоминает, что программа была
     // пуста, а легшая после неё — спрашивает и тогда.
     let landed = move |outcome: Recovered, sealed: &Sealed| -> Option<Restoring> {
         Some(match outcome {
             Recovered::Done(restored, after, key) => {
-                if let (Some(part), Some(key)) = (after.part, key) {
-                    known.update_value(|known| *known = Some(Known::laid(known.take(), sealed, part, key)));
+                // Пустой программа была до этой копии — или до её прошлой
+                // попытки, легшей частью: тогда прежних частей здесь нет.
+                // Взятое один раз: следующая часть ложится уже не в пустую.
+                let empty = after.fresh || fresh_partly.get_untracked();
+                if fresh_partly.get_untracked() {
+                    fresh_partly.set(false);
                 }
-                Restoring::Done(
-                    restored,
-                    After {
-                        fresh: after.fresh || fresh_partly.get_untracked(),
-                        ..after
-                    },
-                )
+                let mut after = After { fresh: empty, ..after };
+                let laid = after.part.map(|part| {
+                    let before = remembered();
+                    let laid = Laid::after(before.iter().cloned(), part, empty);
+                    remember(&laid);
+                    known.set_value(key.and_then(|key| Known::after(&laid, sealed, part, key)));
+                    // У копии частями — когда эта часть сделала её целой
+                    // (задача 123).
+                    after.fresh = laid.asks(&before);
+                    laid
+                });
+                Restoring::Done(restored, after, laid)
             }
             Recovered::AsNew => Restoring::AsNew,
             Recovered::Elsewhere(ip) => Restoring::Elsewhere(ip),
             Recovered::Partial(why, fresh) => {
-                if fresh {
-                    fresh_partly.set(true);
+                let part = sealed.header().part();
+                match part {
+                    Some(part) if fresh => remember(&Laid::failed(part)),
+                    Some(_) => {}
+                    None if fresh => fresh_partly.set(true),
+                    None => {}
                 }
+                failed_part.set_value(part.is_some());
                 Restoring::Failed(Problem::Partly(why))
             }
             Recovered::Other(_) => return None,
@@ -331,29 +354,51 @@ pub(super) fn RestoreBackup(
                     />
                 </label>
                 {match state {
-                    Restoring::Done(restored, after) => Some(view! {
-                        <p role="status">
-                            {move || {
-                                let lang = lang.get();
-                                fill(
-                                    t(lang, Key::BackupRestored),
-                                    &[
-                                        &i18n::integer(lang, restored.added as i64),
-                                        &i18n::integer(lang, restored.updated as i64),
-                                        &i18n::integer(lang, restored.unchanged as i64),
-                                    ],
-                                )
-                            }}
-                        </p>
-                        // Легла часть копии (задача 117): какие легли, какие остались.
-                        {after.part.map(|part| view! {
-                            <p role="status">{move || known.with_value(|known| known.as_ref().and_then(|known| known.words(lang.get(), part)))}</p>
-                        })}
-                        {after.ahead.then(|| view! { <p class="warning">{tr(lang, Key::BackupAhead)}</p> })}
-                        // Выпуск уже выключен — спрашивать не о чем.
-                        {(after.fresh && restored.added > 0 && !issued_elsewhere(backups))
-                            .then(|| view! { <IssuerAsk lang /> })}
-                    }.into_any()),
+                    Restoring::Done(restored, after, laid) => {
+                        // Легла часть, а не вся копия (задача 123): «Готово» над
+                        // ней человек принимал за всю копию.
+                        let part = after.part.filter(|_| laid.as_ref().is_some_and(|laid| !laid.whole()));
+                        // Где выпускать — когда программа была пуста до копии, а у
+                        // копии частями — до первой её части, и эта часть сделала
+                        // копию целой: документы и номера могли быть в ещё не
+                        // легшей (задача 123). Выпуск уже выключен — спрашивать
+                        // не о чем.
+                        let ask = (after.fresh && (laid.is_some() || restored.added > 0)) && !issued_elsewhere(backups);
+                        let whole = laid.as_ref().is_none_or(Laid::whole);
+                        Some(view! {
+                            <p role="status">
+                                {move || {
+                                    let lang = lang.get();
+                                    let counts = [
+                                        i18n::integer(lang, restored.added as i64),
+                                        i18n::integer(lang, restored.updated as i64),
+                                        i18n::integer(lang, restored.unchanged as i64),
+                                    ];
+                                    match part {
+                                        Some(part) => fill(
+                                            t(lang, Key::BackupPartRestored),
+                                            &[
+                                                &i18n::integer(lang, i64::from(part.number())),
+                                                &i18n::integer(lang, i64::from(part.of())),
+                                                &counts[0],
+                                                &counts[1],
+                                                &counts[2],
+                                            ],
+                                        ),
+                                        None => fill(t(lang, Key::BackupRestored), &[&counts[0], &counts[1], &counts[2]]),
+                                    }
+                                }}
+                            </p>
+                            // Части копии (задача 117): какие остались — или что легли все.
+                            {laid.map(|laid| view! {
+                                <p role=whole.then_some("status") class=(!whole).then_some("warning")>
+                                    {move || parts_words(lang.get(), &laid)}
+                                </p>
+                            })}
+                            {after.ahead.then(|| view! { <p class="warning">{tr(lang, Key::BackupAhead)}</p> })}
+                            {ask.then(|| view! { <IssuerAsk lang /> })}
+                        }.into_any())
+                    }
                     // Другой ИП открывается на экране списка: переход
                     // перезагружает страницу, и его место там (`ui/office.rs`).
                     Restoring::AsNew => Some(view! {
@@ -373,7 +418,10 @@ pub(super) fn RestoreBackup(
                     }.into_any()),
                     Restoring::Failed(problem) => Some(view! {
                         <p role="alert">{move || problem.text(lang.get())}</p>
-                        {(matches!(problem, Problem::Partly(_)) && fresh_partly.get_untracked() && !issued_elsewhere(backups))
+                        {(matches!(problem, Problem::Partly(_))
+                            && fresh_partly.get_untracked()
+                            && !failed_part.get_value()
+                            && !issued_elsewhere(backups))
                             .then(|| view! { <IssuerAsk lang /> })}
                     }.into_any()),
                     _ => None,
