@@ -595,14 +595,16 @@ fn mount_welcome(browser: Browser) -> (HtmlElement, impl Sized) {
 }
 
 /// На iPhone, iPad и Mac установленная программа не видит данных браузера:
-/// после языка — установка, и «У меня есть копия» тоже ведёт через неё. В Chrome
-/// видит: шага нет, экран закрывается сразу.
+/// после языка — установка, и «У меня есть копия» и «Перенести с другого
+/// устройства» (задача 124) тоже ведут через неё. В Chrome видит: шага нет,
+/// экран закрывается сразу, а перенос с другого устройства открывает его
+/// экран.
 #[wasm_bindgen_test]
 async fn install_comes_before_data_where_the_app_does_not_see_them() {
     let lang = Lang::Ru;
     let mut wrong = Vec::new();
     for browser in [Browser::SafariTouch, Browser::OtherTouch, Browser::SafariMac] {
-        for first in [Key::WelcomeContinue, Key::WelcomeHaveBackup] {
+        for first in [Key::WelcomeContinue, Key::WelcomeHaveBackup, Key::WelcomeFromDevice] {
             forget_device();
             Device::new().set_ui_lang(lang);
             let (host, mounted) = mount_welcome(browser);
@@ -640,6 +642,20 @@ async fn install_comes_before_data_where_the_app_does_not_see_them() {
     sleep(50).await;
     if host.query_selector(".welcome").ok().flatten().is_some() {
         wrong.push("в Chrome экран не закрылся сразу".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    forget_device();
+    Device::new().set_ui_lang(lang);
+    crate::platform::set_hash("");
+    let (host, mounted) = mount_welcome(Browser::Chrome);
+    match button(&host, &[t(lang, Key::WelcomeFromDevice)]) {
+        Some(found) => found.click(),
+        None => wrong.push("Chrome: нет «Перенести с другого устройства»".to_owned()),
+    }
+    let sync = crate::ui::route::Screen::Sync.href();
+    if !wait_until(|| hash() == sync).await {
+        wrong.push(format!("«Перенести с другого устройства» открыло «{}»", hash()));
     }
     drop(mounted);
     host.remove();

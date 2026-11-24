@@ -60,6 +60,7 @@ use web_sys::{FileSystemDirectoryHandle, HtmlInputElement};
 use super::form::Forms;
 use super::icon::{Icon, icon};
 use super::office::Office;
+use super::password::{PasswordInput, PasswordLogin, PasswordShow};
 use super::route::{Router, Screen};
 use super::split::{Task, screen, split};
 use super::storage::{Storage, error_key};
@@ -887,8 +888,14 @@ fn BackupBody(ctx: Ctx) -> impl IntoView {
                 }
                 .into_any()
             } else {
+                // Пустой программе — и путь без файла (задача 124): новое
+                // устройство чаще заводят рядом со старым, а не из копии.
                 view! {
                     <RestoreBackup lang backups forms picked router />
+                    <a class="button link sync-instead" href=Screen::Sync.href() hidden=move || picked.get()>
+                        <span class="label">{tr(lang, Key::BackupSyncInstead)}</span>
+                        {icon(Icon::Forward)}
+                    </a>
                     <MakeBackup lang backups forms router quiet />
                 }
                 .into_any()

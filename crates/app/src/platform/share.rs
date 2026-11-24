@@ -1,6 +1,7 @@
 //! «Поделиться» (Web Share, задача 13): отдать файл системному меню
 //! телефона или компьютера — PDF счёта в Telegram, WhatsApp или почту без
-//! сохранения, а на iPhone ещё и «Сохранить в Файлы».
+//! сохранения, а на iPhone ещё и «Сохранить в Файлы». С задачи 124 — и текст:
+//! код передачи в мессенджер одним нажатием.
 //!
 //! Где меню есть (по исходникам Chromium `main` d6b17880fcaf, WebKit
 //! `main` 1cc0fbfcd0fe и Firefox `main` 976279105b2e; MDN
@@ -97,6 +98,25 @@ pub fn can_share_any(file: &File) -> bool {
     pwa::apple_touch() && can_share(file)
 }
 
+/// Данные для `share` и `canShare`: только текст — код передачи в мессенджер
+/// (задача 124). Без файла рядом WebKit кладёт его одной записью, и ошибка
+/// у [`data`] его не касается.
+fn text_data(text: &str) -> Object {
+    let data = Object::new();
+    let _ = Reflect::set(&data, &"text".into(), &text.into());
+    data
+}
+
+/// Отправит ли браузер этот текст: Chrome и Edge на Android, Windows, macOS
+/// и ChromeOS, Safari на iPhone, iPad и Mac, Firefox на Android. У Firefox
+/// на компьютере `navigator.share` нет (по браузеру: MDN browser-compat-data,
+/// `api/Navigator/share.json`, 2026-11-24) — там остаётся «Скопировать».
+pub fn can_share_text(text: &str) -> bool {
+    navigator()
+        .and_then(|navigator| navigator.can_share(&text_data(text)).ok())
+        .unwrap_or(false)
+}
+
 /// Открыть меню «Поделиться» с файлом.
 ///
 /// Зовётся прямо в обработчике нажатия, до первого `await`: меню
@@ -106,9 +126,21 @@ pub fn can_share_any(file: &File) -> bool {
 /// `LocalDOMWindow.cpp`, `Navigator.cpp`; 2026-10-15). Поэтому
 /// `navigator.share` вызывается сразу, а ждать — уже ответа меню.
 pub fn share(file: &File) -> impl Future<Output = Result<(), ShareError>> + 'static {
+    open(data(file))
+}
+
+/// Открыть меню «Поделиться» с текстом — так же в самом нажатии, до первого
+/// `await` (задача 124).
+pub fn share_text(text: &str) -> impl Future<Output = Result<(), ShareError>> + 'static {
+    open(text_data(text))
+}
+
+/// Меню с этими данными: вызов — сразу, ждать — ответа. Данные — по
+/// значению: будущее с заимствованием держало бы их и после вызова.
+fn open(data: Object) -> impl Future<Output = Result<(), ShareError>> + 'static {
     let started = navigator().ok_or(ShareError::Failed).and_then(|navigator| {
         navigator
-            .share(&data(file))
+            .share(&data)
             .map_err(|error| failure(&error))
     });
     async move {

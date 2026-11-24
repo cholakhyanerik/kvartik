@@ -126,7 +126,8 @@ web-sys = { version = "0.3.107", features = [
 # `DataTransfer` — тест окна кладёт файл копии в поле выбора файла,
 # `HtmlSelectElement` — тест клиентов выбирает страну и валюту, `History` —
 # тест экранов нажимает «Назад», `KeyboardEventInit` — тест окна «Что нового»
-# нажимает Escape; фичи
+# нажимает Escape, `EventInit` — тест копии бросает файлы на экран копии
+# отменяемым `drop` (задача 124); фичи
 # dev-зависимостей в сборку сайта не попадают (резолвер 3).
 # Машинные тесты окна (`tests/*.rs`): манифест программы — JSON, и тест
 # читает его разбором, а не поиском строк (`tests/pwa.rs`, `tests/tokens.rs`).
@@ -145,6 +146,7 @@ web-sys = { version = "0.3.107", features = [
     "DataTransfer",
     "DataTransferItem",
     "DataTransferItemList",
+    "EventInit",
     "FileSystemRemoveOptions",
     "History",
     "HtmlSelectElement",

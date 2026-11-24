@@ -151,6 +151,7 @@ fn parts_words(lang: Lang, count: usize) -> String {
 pub(super) fn ClientCopy(lang: ReadSignal<Lang>, backups: Backups, forms: Forms) -> impl IntoView {
     let password = RwSignal::new(String::new());
     let repeat = RwSignal::new(String::new());
+    let shown = RwSignal::new(false);
     let making = RwSignal::new_local(Making::Idle);
     let busy = move || matches!(making.get(), Making::Busy);
     forms.hold_while(move || {
@@ -189,15 +190,12 @@ pub(super) fn ClientCopy(lang: ReadSignal<Lang>, backups: Backups, forms: Forms)
     view! {
         <h2>{tr(lang, Key::BackupClientTitle)}</h2>
         <p class="hint">{tr(lang, Key::BackupClientAbout)}</p>
+        // Без поля логина (задача 124): пароль копии для клиента — разовый,
+        // и менеджер паролей не должен записать его поверх пароля копий.
         <form class="backup" on:submit=submit>
-            <label>
-                {tr(lang, Key::BackupFilePassword)}
-                <input type="password" autocomplete="new-password" bind:value=password />
-            </label>
-            <label>
-                {tr(lang, Key::BackupRepeatPassword)}
-                <input type="password" autocomplete="new-password" bind:value=repeat />
-            </label>
+            <PasswordInput lang label=Key::BackupFilePassword value=password shown fresh=true />
+            <PasswordInput lang label=Key::BackupRepeatPassword value=repeat shown fresh=true />
+            <PasswordShow lang shown />
             <p class="hint">{counted(lang, Key::BackupClientPasswordHint, MIN_PASSWORD_CHARS as i64)}</p>
             <button type="submit" class="secondary" disabled=busy>
                 {icon(Icon::Download)}
@@ -264,8 +262,10 @@ pub(super) fn MakeBackup(
     // все, и только тогда сдвигается день последней.
     let handed_parts = RwSignal::new(Vec::<bool>::new());
     let share_failed = RwSignal::new(false);
+    let shown = RwSignal::new(false);
     let new_password = move || !backups.key_set.get() || resetting.get();
     let busy = move || matches!(making.get(), Making::Busy);
+    let ready = move || matches!(making.get(), Making::Ready(_));
     forms.hold_while(move || {
         let typed = password.with(|text| !text.is_empty()) || repeat.with(|text| !text.is_empty());
         typed
@@ -274,6 +274,20 @@ pub(super) fn MakeBackup(
                 Making::Ready(_) => router.shows(Screen::Backup),
                 Making::Idle | Making::Failed(_) => false,
             })
+    });
+    // Готовая копия, отданная целиком, уходит с экрана вместе с человеком
+    // (задача 124): форма пароля прячется, пока копия на экране, и иначе
+    // вернувшийся через день увидел бы вчерашние ссылки без формы. Отдана
+    // не вся — ссылки ждут его.
+    Effect::new(move |_| {
+        if !router.shows(Screen::Backup)
+            && untrack(ready)
+            && handed_parts.with_untracked(|parts| !parts.is_empty() && parts.iter().all(|&done| done))
+        {
+            making.set(Making::Idle);
+            saved.set(None);
+            handed_parts.set(Vec::new());
+        }
     });
 
     let submit = move |event: SubmitEvent| {
@@ -340,17 +354,16 @@ pub(super) fn MakeBackup(
     };
 
     view! {
-        <form class="backup" hidden=move || quiet.get() on:submit=submit>
+        // Готовая копия — на экране вместо формы (задача 124): у неё одна
+        // главная кнопка — сохранить файл, — а менеджер паролей предлагает
+        // сохранить пароль, только когда форма пропала (`ui/password.rs`).
+        <form class="backup" hidden=move || quiet.get() || ready() on:submit=submit>
+            <PasswordLogin />
             {move || if new_password() {
                 view! {
-                    <label>
-                        {tr(lang, Key::BackupNewPassword)}
-                        <input type="password" autocomplete="new-password" bind:value=password />
-                    </label>
-                    <label>
-                        {tr(lang, Key::BackupRepeatPassword)}
-                        <input type="password" autocomplete="new-password" bind:value=repeat />
-                    </label>
+                    <PasswordInput lang label=Key::BackupNewPassword value=password shown fresh=true />
+                    <PasswordInput lang label=Key::BackupRepeatPassword value=repeat shown fresh=true />
+                    <PasswordShow lang shown />
                     <p class="hint">
                         {counted(lang, Key::BackupPasswordHint, MIN_PASSWORD_CHARS as i64)}
                     </p>
@@ -361,10 +374,8 @@ pub(super) fn MakeBackup(
                 .into_any()
             } else {
                 view! {
-                    <label>
-                        {tr(lang, Key::BackupPassword)}
-                        <input type="password" autocomplete="current-password" bind:value=password />
-                    </label>
+                    <PasswordInput lang label=Key::BackupPassword value=password shown />
+                    <PasswordShow lang shown />
                 }
                 .into_any()
             }}
@@ -418,22 +429,25 @@ pub(super) fn MakeBackup(
                                 }
                             });
                         };
+                        // Где меню есть, оно — главная кнопка, а файл — второй
+                        // (задача 124): скачанное на телефоне теряется в
+                        // загрузках, а «Сохранить в Файлы» человек выбирает сам.
                         view! {
                             <div class="actions backup-file">
+                                {shares.then(|| view! {
+                                    <button type="button" on:click=send>
+                                        {icon(Icon::Share)}
+                                        <span class="label">{tr(lang, Key::BackupShare)}</span>
+                                    </button>
+                                })}
                                 <a
-                                    class="button"
+                                    class=if shares { "button secondary" } else { "button" }
                                     href=download.url().to_owned()
                                     download=download.name()
                                     on:click=move |_: MouseEvent| handed(index, Key::BackupSaved)
                                 >
                                     <span class="label">{move || fill(t(lang.get(), Key::BackupSaveFile), &[&name])}</span>
                                 </a>
-                                {shares.then(|| view! {
-                                    <button type="button" class="secondary" on:click=send>
-                                        {icon(Icon::Share)}
-                                        <span class="label">{tr(lang, Key::BackupShare)}</span>
-                                    </button>
-                                })}
                             </div>
                         }
                     })
@@ -461,6 +475,20 @@ pub(super) fn MakeBackup(
                     {move || share_failed.get().then(|| view! {
                         <p role="alert">{tr(lang, Key::ShareFailed)}</p>
                     })}
+                    // Форма спрятана, пока копия на экране: собрать её снова —
+                    // словами, ссылкой.
+                    <button
+                        type="button"
+                        class="link"
+                        on:click=move |_| {
+                            making.set(Making::Idle);
+                            saved.set(None);
+                            share_failed.set(false);
+                            handed_parts.set(Vec::new());
+                        }
+                    >
+                        <span class="label">{tr(lang, Key::BackupMakeAgain)}</span>
+                    </button>
                 }.into_any())
             }
         }}

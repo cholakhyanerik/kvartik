@@ -883,6 +883,19 @@ async fn hidden_screens_are_drawn_on_first_show() {
 }
 
 /// Положить файл в поле выбора файла, как будто его выбрал человек.
+/// Выбрать в поле несколько файлов разом (задача 124): имя и текст каждого.
+fn choose_files(input: &HtmlInputElement, files: &[(&str, &str)]) {
+    let transfer = web_sys::DataTransfer::new().expect("DataTransfer есть");
+    for (name, text) in files {
+        let file = web_sys::File::new_with_str_sequence(&js_sys::Array::of1(&(*text).into()), name)
+            .expect("файл собран");
+        transfer.items().add_with_file(&file).expect("файл положен");
+    }
+    input.set_files(transfer.files().as_ref());
+    let event = web_sys::Event::new("change").expect("событие создаётся");
+    input.dispatch_event(&event).expect("событие отправлено");
+}
+
 fn choose_file(input: &HtmlInputElement, name: &str, text: &str) {
     let file = web_sys::File::new_with_str_sequence(&js_sys::Array::of1(&text.into()), name)
         .expect("файл собран");
@@ -1909,6 +1922,11 @@ async fn a_backup_over_the_limit_is_saved_in_parts() {
     if names != expected {
         wrong.push(format!("файлы {names:?}, а не {expected:?}"));
     }
+    // Готовая копия — вместо формы (задача 124): одна главная кнопка, а
+    // менеджер паролей видит, что форма отправлена.
+    if shown_button(&host, t(lang, Key::BackupMake)) {
+        wrong.push("копия готова — а форма пароля на экране".to_owned());
+    }
     if let Some(first) = links.first() {
         first.click();
         let handed = fill(t(lang, Key::BackupPartsHanded), &["1", "3"]);
@@ -1950,6 +1968,24 @@ async fn a_backup_over_the_limit_is_saved_in_parts() {
             Some(text) => parts.push(text),
             None => wrong.push("часть не читается по своей ссылке".to_owned()),
         }
+    }
+    // «Сделать копию заново» возвращает форму.
+    match button(&host, &[t(lang, Key::BackupMakeAgain)]) {
+        Some(again) => {
+            again.click();
+            let mut back = false;
+            for _ in 0..100 {
+                back = shown_button(&host, t(lang, Key::BackupMake));
+                if back {
+                    break;
+                }
+                sleep(20).await;
+            }
+            if !back {
+                wrong.push("«Сделать копию заново» не вернула форму".to_owned());
+            }
+        }
+        None => wrong.push("у готовой копии нет «Сделать копию заново»".to_owned()),
     }
     PART_LIMIT.with(|limit| limit.set(kvartik_core::format::backup::PART_PLAIN_BYTES));
     let _ = host.remove_event_listener_with_callback_and_bool("click", prevent.as_ref().unchecked_ref(), true);
@@ -2065,6 +2101,141 @@ async fn a_backup_over_the_limit_is_saved_in_parts() {
     said(&host, &all, true, "часть 3 после второй перезагрузки", &mut wrong).await;
     drop(mounted);
     host.remove();
+
+    // Все части разом (задача 124): одним выбором и не по порядку — пароль
+    // спрошен один раз на три части, остальные легли ключом первой. Четвёртый
+    // файл — та же часть 1 ещё раз: копия уже целая, ключ забыт, и пароль
+    // спрошен снова, со словами, какой это из выбранных файлов. Где
+    // выпускать — спрошено в итоге, хотя целой копию сделал третий файл,
+    // а не последний.
+    let enter = |host: &HtmlElement, wrong: &mut Vec<String>| {
+        match field(host, t(lang, Key::BackupFilePassword), 0) {
+            Some(input) => type_into(&input, password),
+            None => wrong.push("нет поля пароля копии".to_owned()),
+        }
+        match button(host, &[t(lang, Key::BackupRestore)]) {
+            Some(restore) => restore.click(),
+            None => wrong.push("нет «Восстановить»".to_owned()),
+        }
+    };
+    let files = |order: &[usize]| -> Vec<(String, String)> {
+        order
+            .iter()
+            .filter_map(|&at| Some((expected.get(at)?.clone(), parts.get(at)?.clone())))
+            .collect()
+    };
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    forget(&["parts_laid"]);
+    let (host, mounted) = mount_at("#/backup");
+    match backup_file(&host).await {
+        Some(input) => {
+            let chosen = files(&[1, 2, 0, 0]);
+            let chosen: Vec<(&str, &str)> = chosen.iter().map(|(name, text)| (name.as_str(), text.as_str())).collect();
+            choose_files(&input, &chosen);
+            if !wait_for(&host, &asked(2)).await {
+                wrong.push("у выбранных разом не спросили пароль первой".to_owned());
+            }
+            enter(&host, &mut wrong);
+            let fourth = fill(t(lang, Key::BackupChainAt), &[&n(4), &n(4)]);
+            if !wait_for(&host, &fourth).await {
+                wrong.push(format!("пароль четвёртого файла — без «{fourth}»: «{}»", section_text(&host, "backup")));
+            }
+            enter(&host, &mut wrong);
+            said(&host, &all, true, "все части разом", &mut wrong).await;
+        }
+        None => wrong.push("нет поля выбора копии".to_owned()),
+    }
+    drop(mounted);
+    host.remove();
+
+    // Те же четыре, но пароль четвёртого — «Отмена» (ревью задачи 124): что
+    // легло до неё, и вопрос, где выпускать, остаются на экране — повтор
+    // у целой копии его уже не задал бы.
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    forget(&["parts_laid"]);
+    let (host, mounted) = mount_at("#/backup");
+    match backup_file(&host).await {
+        Some(input) => {
+            let chosen = files(&[1, 2, 0, 0]);
+            let chosen: Vec<(&str, &str)> = chosen.iter().map(|(name, text)| (name.as_str(), text.as_str())).collect();
+            choose_files(&input, &chosen);
+            if wait_for(&host, &asked(2)).await {
+                enter(&host, &mut wrong);
+            }
+            let fourth = fill(t(lang, Key::BackupChainAt), &[&n(4), &n(4)]);
+            if !wait_for(&host, &fourth).await {
+                wrong.push("отмена: нет пароля четвёртого файла".to_owned());
+            }
+            match button(&host, &[t(lang, Key::Cancel)]) {
+                Some(cancel) => cancel.click(),
+                None => wrong.push("отмена: у пароля нет «Отмены»".to_owned()),
+            }
+            said(&host, &all, true, "отмена посреди цепочки", &mut wrong).await;
+        }
+        None => wrong.push("нет поля выбора копии".to_owned()),
+    }
+    drop(mounted);
+    host.remove();
+
+    // Битый файл посреди цепочки (ревью задачи 124): назван, следующие не
+    // тронуты, а что легло до него — с частями, которые остались.
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    forget(&["parts_laid"]);
+    let (host, mounted) = mount_at("#/backup");
+    match backup_file(&host).await {
+        Some(input) => {
+            let good = files(&[1, 2]);
+            let chosen = [
+                (good[0].0.as_str(), good[0].1.as_str()),
+                ("broken.json", "{}"),
+                (good[1].0.as_str(), good[1].1.as_str()),
+            ];
+            choose_files(&input, &chosen);
+            if wait_for(&host, &asked(2)).await {
+                enter(&host, &mut wrong);
+            }
+            let failed = fill(t(lang, Key::BackupChainFailed), &["broken.json"]);
+            let remain = left(&[1, 3]);
+            for words in [failed.as_str(), t(lang, Key::BackupChainRest), remain.as_str()] {
+                if !wait_for(&host, words).await {
+                    wrong.push(format!("битый файл: нет «{words}» в «{}»", section_text(&host, "backup")));
+                }
+            }
+        }
+        None => wrong.push("нет поля выбора копии".to_owned()),
+    }
+    drop(mounted);
+    host.remove();
+
+    // Брошенные на экран копии (задача 124, компьютер): окно берёт их само,
+    // а браузер файла не открывает.
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    forget(&["parts_laid"]);
+    let (host, mounted) = mount_at("#/backup");
+    if backup_file(&host).await.is_none() {
+        wrong.push("нет поля выбора копии перед броском".to_owned());
+    }
+    let transfer = web_sys::DataTransfer::new().expect("DataTransfer есть");
+    for (name, text) in files(&[2, 0, 1]) {
+        let file = web_sys::File::new_with_str_sequence(&js_sys::Array::of1(&text.into()), &name).expect("файл собран");
+        transfer.items().add_with_file(&file).expect("файл положен");
+    }
+    let init = web_sys::EventInit::new();
+    init.set_cancelable(true);
+    let thrown = web_sys::Event::new_with_event_init_dict("drop", &init).expect("событие создаётся");
+    js_sys::Reflect::set(&thrown, &"dataTransfer".into(), &transfer).expect("файлы положены в событие");
+    web_sys::window().expect("окно есть").dispatch_event(&thrown).expect("событие отправлено");
+    if !thrown.default_prevented() {
+        wrong.push("брошенные файлы браузер открыл бы сам".to_owned());
+    }
+    if wait_for(&host, &asked(3)).await {
+        enter(&host, &mut wrong);
+        said(&host, &all, true, "брошенные на экран", &mut wrong).await;
+    } else {
+        wrong.push(format!("брошенные файлы не взяты: «{}»", section_text(&host, "backup")));
+    }
+    drop(mounted);
+    host.remove();
     forget(&["last_backup", "backup_key", "last_size", "parts_laid", "trial_data"]);
     crate::store::delete_database(crate::store::DB_NAME).await;
     assert!(wrong.is_empty(), "копия частями: {wrong:#?}");
@@ -2091,6 +2262,13 @@ async fn a_chosen_backup_hides_making_one() {
     if shown_button(&host, make) {
         wrong.push("в пустой базе — «Сделать копию»".to_owned());
     }
+    // И путь без файла (задача 124): новое устройство заводят и кодом.
+    let instead = host.query_selector("#backup a.sync-instead").ok().flatten().map(JsCast::unchecked_into::<HtmlElement>);
+    match instead {
+        Some(link) if link.offset_width() > 0 && link.get_attribute("href").as_deref() == Some(Screen::Sync.href().as_str()) => {}
+        Some(link) => wrong.push(format!("ссылка на «Другое устройство»: видна {}, {:?}", link.offset_width() > 0, link.get_attribute("href"))),
+        None => wrong.push("в пустой базе нет ссылки на «Другое устройство»".to_owned()),
+    }
     drop(mounted);
     host.remove();
 
@@ -2104,6 +2282,9 @@ async fn a_chosen_backup_hides_making_one() {
     }
     if !shown_button(&host, make) {
         wrong.push("с данными нет «Сделать копию»".to_owned());
+    }
+    if host.query_selector("#backup a.sync-instead").ok().flatten().is_some() {
+        wrong.push("с данными — ссылка «Новое устройство?»".to_owned());
     }
     let input: Option<HtmlInputElement> = host
         .query_selector(r#"input[type="file"][accept=".json,application/json"]"#)
@@ -2128,6 +2309,10 @@ async fn a_chosen_backup_hides_making_one() {
     // Видимый текст: спрятанная форма остаётся в разметке.
     if host.inner_text().contains(t(lang, Key::BackupNewPassword)) {
         wrong.push("пока выбран файл копии — «Придумайте пароль копий»".to_owned());
+    }
+    // Пароль файла — с логином для менеджера паролей (задача 124).
+    if host.query_selector(r#"#backup form.backup:not([hidden]) input[autocomplete="username"][hidden]"#).ok().flatten().is_none() {
+        wrong.push("у пароля копии нет логина для менеджера паролей".to_owned());
     }
     match button(&host, &[t(lang, Key::Cancel)]) {
         Some(cancel) => cancel.click(),

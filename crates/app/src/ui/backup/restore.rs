@@ -20,6 +20,23 @@
 //! хотя записи без файлов книги — и документы с их номерами — копия кладёт
 //! первыми (`backup::split`), а человек мог начать со второй (найдено
 //! человеком 2026-11-24).
+//!
+//! Части выбирают и разом (задача 124): полем с `multiple` или перетащив файлы
+//! на экран копии на компьютере. Они ложатся по очереди одной цепочкой
+//! ([`Chain`]): каждая читается и кладётся, только когда легла прошлая, —
+//! часть бывает до 128 МБ, и все разом в памяти телефона не уместились бы
+//! (задача 122), — а пароль спрашивается один раз: следующую часть той же
+//! копии открывает ключ прошлой ([`Known`]). Упал файл — цепочка стоит,
+//! окно называет его, а следующие не трогает. Итог — один, по всей цепочке,
+//! и при любом её конце: отмене, сбое, вопросе о другом ИП (ревью задачи
+//! 124). Поздно прочитанный файл на iPhone может оказаться пустым (WebKit bug
+//! 197142, `platform::file::read`) — тогда он упадёт с именем, и его выбирают
+//! снова: все части разом в памяти телефона были бы хуже.
+
+use std::collections::VecDeque;
+
+use wasm_bindgen::JsCast;
+use web_sys::File;
 
 use super::*;
 
@@ -69,6 +86,51 @@ fn parts_words(lang: Lang, laid: &Laid) -> String {
             fill(t(lang, Key::BackupPartsLeft), &[&integer(count), &integer(of), &marks.join(", ")])
         }
     }
+}
+
+/// Выбранные разом файлы копии (задача 124): ещё не тронутые — по порядку
+/// выбора, какой из скольких ложится сейчас и что легло прошлыми.
+#[derive(Default)]
+struct Chain {
+    left: VecDeque<File>,
+    total: usize,
+    at: usize,
+    /// Имя файла, который ложится сейчас: упал — окно его называет.
+    name: String,
+    /// Что легло файлами цепочки: итог суммой, слова о частях — последней
+    /// части, о часах — любого файла. Окно показывает его, чем бы цепочка ни
+    /// кончилась (ревью задачи 124).
+    landed: Option<(Restored, After, Option<Laid>)>,
+    /// Какой-то файл цепочки спросил бы, где выпускать: вопрос встаёт в итоге,
+    /// а не пропадает с промежуточным.
+    asks: bool,
+}
+
+/// Итог двух файлов цепочки — суммой, а самый ранний момент легших — меньший.
+fn plus(before: Option<Restored>, now: Restored) -> Restored {
+    let Some(before) = before else {
+        return now;
+    };
+    Restored {
+        added: before.added + now.added,
+        updated: before.updated + now.updated,
+        unchanged: before.unchanged + now.unchanged,
+        oldest: match (before.oldest, now.oldest) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        },
+    }
+}
+
+/// Файлы, которые бросили на страницу (`DataTransfer.files`), — через
+/// `Reflect`: своя привязка `DragEvent.dataTransfer` прибавила бы главному
+/// wasm импорт (Правило 6, «Импорт JS — в главном wasm»), а `Reflect` там уже
+/// есть. `None` — файлов нет: тащат текст или ссылку.
+fn dropped(event: &web_sys::Event) -> Option<web_sys::FileList> {
+    let transfer = js_sys::Reflect::get(event, &"dataTransfer".into()).ok()?;
+    let files = js_sys::Reflect::get(&transfer, &"files".into()).ok()?;
+    let files: web_sys::FileList = files.dyn_into().ok()?;
+    (files.length() > 0).then_some(files)
 }
 
 /// Восстановить из копии: выбрать файл, ввести его пароль, слить.
@@ -161,6 +223,48 @@ pub(super) fn RestoreBackup(
         }));
     });
     let password = RwSignal::new(String::new());
+    let shown = RwSignal::new(false);
+
+    // Файлы, выбранные разом (задача 124): что легло — в итог цепочки, а есть
+    // ещё файл — он, а не итог. Следующий берёт `Effect` ниже: итог зовут из
+    // чтения файла, и прямой вызов замкнул бы их друг на друга.
+    let chain = StoredValue::new_local(Chain::default());
+    let advance = RwSignal::new(false);
+    let settle = move |state: Restoring| match state {
+        Restoring::Done(restored, after, laid) => {
+            let asks = after.fresh && (laid.is_some() || restored.added > 0);
+            let more = chain
+                .try_update_value(|chain| {
+                    chain.landed = Some(match chain.landed.take() {
+                        // Слова о частях — последней части, о часах — любого
+                        // файла: спешащие часы в первой части не пропадают
+                        // за второй (ревью задачи 124).
+                        Some((before, prior, prior_laid)) => (
+                            plus(Some(before), restored),
+                            After {
+                                ahead: prior.ahead || after.ahead,
+                                ..after
+                            },
+                            laid.clone().or(prior_laid),
+                        ),
+                        None => (restored, after, laid.clone()),
+                    });
+                    chain.asks |= asks;
+                    !chain.left.is_empty()
+                })
+                .unwrap_or(false);
+            if more {
+                restoring.set(Restoring::Busy);
+                advance.set(true);
+            } else {
+                let (total, after, laid) = chain.with_value(|chain| chain.landed.clone()).unwrap_or((restored, after, laid));
+                restoring.set(Restoring::Done(total, after, laid));
+            }
+        }
+        state => restoring.set(state),
+    };
+    // Остановить цепочку: следующие файлы не трогать.
+    let stop = move || chain.update_value(|chain| chain.left.clear());
 
     // Расшифровать и слить: паролем из поля или ключом прошлой части той же
     // копии (задача 117).
@@ -174,7 +278,7 @@ pub(super) fn RestoreBackup(
             if outcome.is_ok() {
                 password.set(String::new());
             }
-            restoring.set(match outcome {
+            settle(match outcome {
                 Ok(Recovered::Other(asked)) => Restoring::Other(asked),
                 Ok(outcome) => landed(outcome, &sealed).unwrap_or(Restoring::Failed(Problem::Say(Key::BackupFailed))),
                 // Пароль не подошёл — спросить снова, а не выбирать файл
@@ -187,24 +291,30 @@ pub(super) fn RestoreBackup(
         });
     };
 
-    // Файл читается сразу при выборе (`platform::file::read`).
-    let on_file = move |event: Event| {
-        let input: HtmlInputElement = event_target(&event);
-        let Some(chosen) = file::chosen(&input) else {
+    // Следующий файл цепочки: прочитать, открыть, положить — ключом прошлой
+    // части той же копии или спросив пароль. Читается файл, только когда до
+    // него дошла очередь: части бывают до 128 МБ (задача 122).
+    let next = move || {
+        let file = chain
+            .try_update_value(|chain| {
+                let file = chain.left.pop_front()?;
+                chain.at += 1;
+                chain.name = file.name();
+                Some(file)
+            })
+            .flatten();
+        let Some(file) = file else {
             return;
         };
         restoring.set(Restoring::Busy);
         leptos::task::spawn_local(async move {
-            let opened = match file::read(&chosen, MAX_FILE_BYTES).await {
+            let opened = match file::read(&file, MAX_FILE_BYTES).await {
                 Ok(text) => match opening(text).await {
                     Ok(task) => task.await,
                     Err(_) => Err(Problem::Say(Key::PartFailed)),
                 },
                 Err(error) => Err(Problem::from(error)),
             };
-            // Тот же файл можно будет выбрать снова: без сброса браузер
-            // не сообщит о повторном выборе.
-            input.set_value("");
             match opened {
                 Ok(sealed) => {
                     let sealed = Rc::new(sealed);
@@ -218,6 +328,62 @@ pub(super) fn RestoreBackup(
             }
         });
     };
+    Effect::new(move |_| {
+        if advance.get() {
+            advance.set(false);
+            next();
+        }
+    });
+    // Выбранные файлы — новой цепочкой.
+    let take = move |files: Vec<File>| {
+        if files.is_empty() {
+            return;
+        }
+        chain.set_value(Chain {
+            total: files.len(),
+            left: files.into(),
+            ..Chain::default()
+        });
+        next();
+    };
+
+    // Файлы — при выборе: читает их цепочка по одному (`platform::file::read`).
+    let on_file = move |event: Event| {
+        let input: HtmlInputElement = event_target(&event);
+        let files = file::chosen_all(&input);
+        // Тот же файл можно будет выбрать снова: без сброса браузер не
+        // сообщит о повторном выборе. Выбранные `File` живут и без поля.
+        input.set_value("");
+        take(files);
+    };
+
+    // Файлы копии, брошенные на экран копии на компьютере (задача 124). Над
+    // страницей, которая сама их не берёт, браузер открыл бы файл вместо
+    // программы, поэтому слушает окно, а не одна подпись. Пока ждут пароль
+    // или ответ, брошенное не берётся — но и не открывается.
+    let on_backup = move || untrack(|| router.shows(Screen::Backup));
+    let over = window_event_listener(leptos::ev::dragover, move |event| {
+        if on_backup() {
+            event.prevent_default();
+        }
+    });
+    let dropped_here = window_event_listener(leptos::ev::drop, move |event| {
+        if !on_backup() {
+            return;
+        }
+        let Some(files) = dropped(&event) else {
+            return;
+        };
+        event.prevent_default();
+        let free = restoring.with_untracked(|state| !matches!(state, Restoring::Busy | Restoring::Password(..) | Restoring::Other(..)));
+        if free {
+            take((0..files.length()).filter_map(|at| files.get(at)).collect());
+        }
+    });
+    on_cleanup(move || {
+        over.remove();
+        dropped_here.remove();
+    });
 
     let submit = move |event: SubmitEvent| {
         event.prevent_default();
@@ -241,17 +407,104 @@ pub(super) fn RestoreBackup(
                 Ok(task) => task.await,
                 Err(_) => Err(Problem::Say(Key::PartFailed)),
             };
-            restoring.set(match outcome {
+            settle(match outcome {
                 // С ответом хранилище второй раз не спрашивает.
                 Ok(outcome) => landed(outcome, &sealed).unwrap_or(Restoring::Failed(Problem::Say(Key::BackupFailed))),
                 Err(problem) => Restoring::Failed(problem),
             });
         });
     };
-
+    // Что легло — итог, части, часы и где выпускать. Цепочка файлов (задача
+    // 124) спрашивает, где выпускать, если спросил бы любой её файл:
+    // промежуточного итога человек не видит.
+    let landed_words = move |restored: Restored, after: After, laid: Option<Laid>| -> AnyView {
+        // Легла часть, а не вся копия (задача 123): «Готово» над ней человек
+        // принимал за всю копию.
+        let part = after.part.filter(|_| laid.as_ref().is_some_and(|laid| !laid.whole()));
+        // Где выпускать — когда программа была пуста до копии, а у копии
+        // частями — до первой её части, и эта часть сделала копию целой:
+        // документы и номера могли быть в ещё не легшей (задача 123). Выпуск
+        // уже выключен — спрашивать не о чем.
+        let ask = (after.fresh && (laid.is_some() || restored.added > 0) || chain.with_value(|chain| chain.asks))
+            && !issued_elsewhere(backups);
+        let whole = laid.as_ref().is_none_or(Laid::whole);
+        view! {
+            <p role="status">
+                {move || {
+                    let lang = lang.get();
+                    let counts = [
+                        i18n::integer(lang, restored.added as i64),
+                        i18n::integer(lang, restored.updated as i64),
+                        i18n::integer(lang, restored.unchanged as i64),
+                    ];
+                    match part {
+                        Some(part) => fill(
+                            t(lang, Key::BackupPartRestored),
+                            &[
+                                &i18n::integer(lang, i64::from(part.number())),
+                                &i18n::integer(lang, i64::from(part.of())),
+                                &counts[0],
+                                &counts[1],
+                                &counts[2],
+                            ],
+                        ),
+                        None => fill(t(lang, Key::BackupRestored), &[&counts[0], &counts[1], &counts[2]]),
+                    }
+                }}
+            </p>
+            // Части копии (задача 117): какие остались — или что легли все.
+            // Почему не выпускать до остальных — под «Подробнее» (задача 124):
+            // что выпускать нельзя, видно и так.
+            {laid.map(|laid| view! {
+                <p role=whole.then_some("status") class=(!whole).then_some("warning")>
+                    {move || parts_words(lang.get(), &laid)}
+                </p>
+                {(!whole).then(|| view! {
+                    <details class="more">
+                        <summary>{tr(lang, Key::More)}</summary>
+                        <p>{tr(lang, Key::BackupPartsLeftMore)}</p>
+                    </details>
+                })}
+            })}
+            {after.ahead.then(|| view! { <p class="warning">{tr(lang, Key::BackupAhead)}</p> })}
+            {ask.then(|| view! { <IssuerAsk lang /> })}
+        }
+        .into_any()
+    };
+    // Цепочка кончилась не итогом — отменой, сбоем файла, копией другого ИП
+    // или ИП из списка, — а прошлые её файлы легли: что они сделали, что
+    // осталось и где выпускать (ревью задачи 124). Без этого вопрос пропадал:
+    // повтор у целой копии его уже не задаёт, и второе устройство выдало бы
+    // номера, которые уже выдал первый.
+    let landed_before = move || {
+        chain
+            .with_value(|chain| chain.landed.clone())
+            .map(|(restored, after, laid)| landed_words(restored, after, laid))
+    };
+    // Цепочка встала, а файлы после этого остались: они не тронуты.
+    let rest = move || {
+        chain
+            .with_value(|chain| chain.total > 1 && !chain.left.is_empty())
+            .then(|| view! { <p class="hint">{tr(lang, Key::BackupChainRest)}</p> })
+    };
+    // Какой из выбранных разом файлов на экране — пока их больше одного.
+    let chain_at = move || {
+        let (at, total) = chain.with_value(|chain| (chain.at, chain.total));
+        (total > 1).then(|| view! {
+            <p class="hint">{move || {
+                let lang = lang.get();
+                fill(t(lang, Key::BackupChainAt), &[&i18n::integer(lang, at as i64), &i18n::integer(lang, total as i64)])
+            }}</p>
+        })
+    };
 
     view! {
+        // Первая строка видна, остальное — под «Подробнее» (задача 124).
         <p class="restore">{tr(lang, Key::BackupRestoreAbout)}</p>
+        <details class="more">
+            <summary>{tr(lang, Key::More)}</summary>
+            <p>{tr(lang, Key::BackupRestoreAboutMore)}</p>
+        </details>
         {move || match restoring.get() {
             Restoring::Password(sealed, problem) => {
                 forms.hold();
@@ -270,13 +523,15 @@ pub(super) fn RestoreBackup(
                     )
                 });
                 view! {
+                    {chain_at}
                     {info.map(|info| view! { <p>{info}</p> })}
                     {part.map(|part| view! { <p class="hint">{part}</p> })}
+                    // Легла — форма сменяется итогом: так менеджер паролей
+                    // видит, что она отправлена (`ui/password.rs`).
                     <form class="backup" on:submit=submit>
-                        <label>
-                            {tr(lang, Key::BackupFilePassword)}
-                            <input type="password" autocomplete="current-password" bind:value=password />
-                        </label>
+                        <PasswordLogin />
+                        <PasswordInput lang label=Key::BackupFilePassword value=password shown />
+                        <PasswordShow lang shown />
                         {problem.map(|problem| view! {
                             <p role="alert">{move || problem.text(lang.get())}</p>
                         })}
@@ -287,6 +542,7 @@ pub(super) fn RestoreBackup(
                                 class="secondary"
                                 on:click=move |_| {
                                     password.set(String::new());
+                                    stop();
                                     restoring.set(Restoring::Idle);
                                 }
                             >
@@ -319,7 +575,13 @@ pub(super) fn RestoreBackup(
                         // Безопасный ответ — первым и главным: смешанные
                         // ИП потом не разделить одной кнопкой.
                         <div class="actions">
-                            <button type="button" on:click=move |_| restoring.set(Restoring::Idle)>
+                            <button
+                                type="button"
+                                on:click=move |_| {
+                                    stop();
+                                    restoring.set(Restoring::Idle);
+                                }
+                            >
                                 <span class="label">{tr(lang, Key::Cancel)}</span>
                             </button>
                             <button type="button" class="secondary" on:click=move |_| answer(RestoreJob::AsNew)>
@@ -337,73 +599,35 @@ pub(super) fn RestoreBackup(
                 forms.hold();
                 view! {
                     <p role="status">{tr(lang, Key::BackupRestoring)}</p>
+                    {chain_at}
                 }
                 .into_any()
             }
             state => view! {
                 // Поле выбора файла спрятано под подписью-кнопкой: нажатие на
                 // подпись открывает выбор без кода, и на iPhone тоже
-                // (разведка задачи 7, 2026-10-12).
+                // (разведка задачи 7, 2026-10-12). Файлов — сколько угодно
+                // (задача 124): части копии выбирают разом.
                 <label class="button link file">
                     {tr(lang, Key::BackupChooseFile)}
                     <input
                         type="file"
                         class="visually-hidden"
                         accept=".json,application/json"
+                        multiple
                         on:change=on_file
                     />
                 </label>
+                <p class="hint drop-hint">{tr(lang, Key::BackupDropHint)}</p>
                 {match state {
-                    Restoring::Done(restored, after, laid) => {
-                        // Легла часть, а не вся копия (задача 123): «Готово» над
-                        // ней человек принимал за всю копию.
-                        let part = after.part.filter(|_| laid.as_ref().is_some_and(|laid| !laid.whole()));
-                        // Где выпускать — когда программа была пуста до копии, а у
-                        // копии частями — до первой её части, и эта часть сделала
-                        // копию целой: документы и номера могли быть в ещё не
-                        // легшей (задача 123). Выпуск уже выключен — спрашивать
-                        // не о чем.
-                        let ask = (after.fresh && (laid.is_some() || restored.added > 0)) && !issued_elsewhere(backups);
-                        let whole = laid.as_ref().is_none_or(Laid::whole);
-                        Some(view! {
-                            <p role="status">
-                                {move || {
-                                    let lang = lang.get();
-                                    let counts = [
-                                        i18n::integer(lang, restored.added as i64),
-                                        i18n::integer(lang, restored.updated as i64),
-                                        i18n::integer(lang, restored.unchanged as i64),
-                                    ];
-                                    match part {
-                                        Some(part) => fill(
-                                            t(lang, Key::BackupPartRestored),
-                                            &[
-                                                &i18n::integer(lang, i64::from(part.number())),
-                                                &i18n::integer(lang, i64::from(part.of())),
-                                                &counts[0],
-                                                &counts[1],
-                                                &counts[2],
-                                            ],
-                                        ),
-                                        None => fill(t(lang, Key::BackupRestored), &[&counts[0], &counts[1], &counts[2]]),
-                                    }
-                                }}
-                            </p>
-                            // Части копии (задача 117): какие остались — или что легли все.
-                            {laid.map(|laid| view! {
-                                <p role=whole.then_some("status") class=(!whole).then_some("warning")>
-                                    {move || parts_words(lang.get(), &laid)}
-                                </p>
-                            })}
-                            {after.ahead.then(|| view! { <p class="warning">{tr(lang, Key::BackupAhead)}</p> })}
-                            {ask.then(|| view! { <IssuerAsk lang /> })}
-                        }.into_any())
-                    }
+                    Restoring::Done(restored, after, laid) => Some(landed_words(restored, after, laid)),
                     // Другой ИП открывается на экране списка: переход
                     // перезагружает страницу, и его место там (`ui/office.rs`).
                     Restoring::AsNew => Some(view! {
                         <p role="status">{tr(lang, Key::BackupAsNewDone)}</p>
                         <a class="button" href=Screen::Office.href()><span class="label">{tr(lang, Key::OfficeTitle)}</span></a>
+                        {rest}
+                        {landed_before}
                     }.into_any()),
                     Restoring::Elsewhere(ip) => Some(view! {
                         <p role="alert">{move || {
@@ -415,16 +639,27 @@ pub(super) fn RestoreBackup(
                             fill(t(lang, Key::BackupElsewhere), &[name])
                         }}</p>
                         <a class="button" href=Screen::Office.href()><span class="label">{tr(lang, Key::OfficeTitle)}</span></a>
+                        {rest}
+                        {landed_before}
                     }.into_any()),
                     Restoring::Failed(problem) => Some(view! {
+                        // Файл цепочки (задача 124) — назван: какой из
+                        // выбранных разом не лёг.
+                        {chain.with_value(|chain| (chain.total > 1).then(|| chain.name.clone())).map(|name| view! {
+                            <p role="alert">{move || fill(t(lang.get(), Key::BackupChainFailed), &[&name])}</p>
+                        })}
                         <p role="alert">{move || problem.text(lang.get())}</p>
                         {(matches!(problem, Problem::Partly(_))
                             && fresh_partly.get_untracked()
                             && !failed_part.get_value()
                             && !issued_elsewhere(backups))
                             .then(|| view! { <IssuerAsk lang /> })}
+                        {rest}
+                        {landed_before}
                     }.into_any()),
-                    _ => None,
+                    // Отменили посреди цепочки — что легло до отмены.
+                    Restoring::Idle => landed_before(),
+                    Restoring::Busy | Restoring::Password(..) | Restoring::Other(..) => None,
                 }}
             }
             .into_any(),

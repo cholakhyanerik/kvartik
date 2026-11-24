@@ -26,6 +26,7 @@ mod office;
 mod onboarding;
 pub mod panic;
 mod paper;
+mod password;
 mod profile;
 mod pwa;
 mod opening;
@@ -372,7 +373,7 @@ pub fn App() -> impl IntoView {
                             <BackupEntry lang backups />
                         </li>
                         <li>
-                            <SyncEntry lang />
+                            <SyncEntry lang router />
                         </li>
                         <li>
                             <OfficeEntry lang />

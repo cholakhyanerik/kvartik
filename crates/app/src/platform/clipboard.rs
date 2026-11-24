@@ -1,5 +1,6 @@
 //! Буфер обмена (задача 24): число для расчёта — в поле формы в системе
-//! ՊԵԿ, все числа — текстом бухгалтеру.
+//! ՊԵԿ, все числа — текстом бухгалтеру; код передачи — туда и обратно
+//! (задачи 110 и 124).
 //!
 //! `navigator.clipboard` есть только в защищённом контексте — по HTTPS и на
 //! `localhost` (`[SecureContext]` по спецификации Clipboard API): на
@@ -29,6 +30,10 @@ extern "C" {
     /// `navigator.clipboard.writeText(текст)`.
     #[wasm_bindgen(method, catch, js_name = writeText)]
     fn write_text(this: &Board, text: &str) -> Result<Promise, JsValue>;
+
+    /// `navigator.clipboard.readText()`.
+    #[wasm_bindgen(method, catch, js_name = readText)]
+    fn read_text(this: &Board) -> Result<Promise, JsValue>;
 }
 
 /// Буфер обмена; `None` — его нет: адрес не защищённый или браузер старый.
@@ -52,5 +57,34 @@ pub fn copy(text: &str) -> impl Future<Output = Result<(), ()>> + 'static {
             Err(error) => Err(error),
         };
         written.map_err(|error| web_sys::console::error_2(&"Kvartik, буфер обмена:".into(), &error))
+    }
+}
+
+/// Взять текст из буфера обмена (задача 124): код передачи, пересланный себе
+/// мессенджером, — одним нажатием «Вставить», а не жестом в поле. Читать
+/// буфер браузеры дают строже, чем писать (по браузеру: MDN,
+/// `Clipboard.readText`, сверено 2026-11-24): Chromium спрашивает разрешение
+/// `clipboard-read`, Firefox и Safari — только от свежего нажатия и ещё
+/// кнопкой «Вставить» у самого места, — поэтому `readText` зовётся в самом
+/// обработчике нажатия, до первого `await`, как `writeText`. `Err` — буфера
+/// нет, человек отказал или в нём не текст: поле остаётся, и вставить в него
+/// можно жестом.
+pub fn paste() -> impl Future<Output = Result<String, ()>> + 'static {
+    let started = board()
+        .ok_or_else(|| JsValue::from_str("navigator.clipboard нет"))
+        .and_then(|board| board.read_text());
+    async move {
+        let read = match started {
+            Ok(promise) => promise.await,
+            Err(error) => Err(error),
+        };
+        match read.map(|text| text.as_string()) {
+            Ok(Some(text)) => Ok(text),
+            Ok(None) => Err(()),
+            Err(error) => {
+                web_sys::console::error_2(&"Kvartik, буфер обмена:".into(), &error);
+                Err(())
+            }
+        }
     }
 }

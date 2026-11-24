@@ -249,3 +249,42 @@ async fn install_comes_after_the_cards_where_data_is_shared() {
     super::documents::forget_device();
     assert!(wrong.is_empty(), "место «Установки»: {wrong:#?}");
 }
+
+/// Вкладка Safari с данными (задача 124): установленная программа их не
+/// увидит, и карточка главного экрана ведёт перенести их кодом — ссылкой на
+/// «Другое устройство». Там, где программа видит данные вкладки, карточки
+/// нет. Без данных её нет и так: карточки главного экрана рисует часть книги,
+/// а её грузят, только когда данные есть (`ui/tax.rs`, `TaxCard`).
+#[wasm_bindgen_test]
+async fn install_offers_to_carry_the_tab_data() {
+    use leptos::prelude::*;
+
+    use crate::ui::pwa::CarryCard;
+    let lang = Lang::Ru;
+    let mut wrong = Vec::new();
+    let cases = [
+        (Browser::SafariTouch, true),
+        (Browser::OtherTouch, true),
+        (Browser::SafariMac, true),
+        (Browser::Chrome, false),
+        (Browser::ChromeAndroid, false),
+    ];
+    for (browser, offered) in cases {
+        let page = web_sys::window().and_then(|window| window.document()).expect("документ есть");
+        let host: HtmlElement = page.create_element("div").expect("создаётся").unchecked_into();
+        page.body().expect("есть <body>").append_child(&host).expect("вставляется");
+        let mounted = leptos::mount::mount_to(host.clone(), move || {
+            let (lang, _) = signal(lang);
+            view! { <CarryCard lang browser /> }
+        });
+        sleep(50).await;
+        let link = host.query_selector(r##"a[href="#/sync"]"##).ok().flatten();
+        let said = host.text_content().unwrap_or_default().contains(t(lang, Key::InstallCarry));
+        if link.is_some() != offered || said != offered {
+            wrong.push(format!("{browser:?}: ссылка {}, слова {said}", link.is_some()));
+        }
+        drop(mounted);
+        host.remove();
+    }
+    assert!(wrong.is_empty(), "перенос данных вкладки: {wrong:#?}");
+}

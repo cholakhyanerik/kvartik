@@ -496,6 +496,22 @@ impl Device {
         self.set(&per_base("sync_received", base), &received.to_text())
     }
 
+    /// Когда на устройстве в последний раз сделан или принят код передачи —
+    /// по его часам, у любого ИП (задача 124): строка профиля «Последний
+    /// обмен». Своей записью, а не из `sync_made` и `sync_received`: у тех
+    /// момент по базе, первый сдвигает назад квитанция с дырой, а во втором —
+    /// часы отправителя, и разбор его в главном wasm стоил бы байтов
+    /// (Правило 1). `None` — не было или запись не читается.
+    pub fn sync_last(&self) -> Option<Timestamp> {
+        self.moment("sync_last")
+    }
+
+    /// Обмен был сейчас. `false` — `localStorage` отказал: строка профиля
+    /// скажет прежнее.
+    pub fn set_sync_last(&self, at: Timestamp) -> bool {
+        self.set("sync_last", &at.unix_millis().to_string())
+    }
+
     /// База ИП, открытая на устройстве последней, — для новой вкладки;
     /// `None` — не помнит.
     pub fn base(&self) -> Option<String> {

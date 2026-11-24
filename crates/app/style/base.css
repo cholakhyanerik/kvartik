@@ -2462,14 +2462,16 @@ dl.months dd,
    в своём `::details-content`, и `gap` на самой `<details>` до него не
    доходит: отступы — у абзацев. */
 .income-kind > summary,
-.rate-day > summary {
+.rate-day > summary,
+.more > summary {
   min-height: var(--touch);
   color: var(--accent-text);
   cursor: pointer;
 }
 
 .income-kind > p,
-.rate-day > p {
+.rate-day > p,
+.more > p {
   margin: var(--space-2) 0 0;
 }
 
@@ -3340,4 +3342,63 @@ ul.report-fields {
 
 .sync-paste {
   margin-top: var(--space-4);
+}
+
+/* Копия и «Другое устройство» быстрее и проще (задача 124). Плитки пути —
+   карточки выбора, как у клиента (`.choices`), с воздухом до выбранного
+   пути; что войдёт в код — строкой над свёрнутым «Настроить», а выбор дня
+   под ним — теми же отступами, что поля формы. */
+.sync-ways {
+  margin-top: var(--space-5);
+}
+
+/* Армянское слово длиннее половины экрана телефона: в узкой плитке оно
+   переносится, а не вылезает за край (глазной прогон задачи 124). */
+.sync-ways .choice-card {
+  overflow-wrap: break-word;
+}
+
+/* Путь под плитками начинается с одного отступа, чем бы ни начинался:
+   у ряда кнопок «Принять» своего нет, у формы «Передать» — есть. */
+.sync-way {
+  margin-top: var(--space-5);
+}
+
+.sync-way > form:first-child {
+  margin-top: 0;
+}
+
+.sync-what {
+  margin: 0;
+}
+
+/* Содержимое `<details>` — в своём `::details-content`, и `gap` формы до
+   него не доходит: отступы — у самих полей. */
+.sync-tune > fieldset,
+.sync-tune > label,
+.sync-tune > p {
+  margin-top: var(--space-3);
+}
+
+/* Ссылка пустого экрана копии на «Другое устройство» — под выбором файла,
+   словами со стрелкой, как строка профиля. */
+.sync-instead {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  text-align: start;
+}
+
+/* Раскрытое «Подробнее» — с воздухом до следующего абзаца: свёрнутому его
+   даёт высота заголовка. */
+.more[open] {
+  margin-bottom: var(--space-3);
+}
+
+/* Перетащить файлы копии можно только мышью: на телефоне слов о ней нет. */
+@media (pointer: coarse) {
+  .drop-hint {
+    display: none;
+  }
 }

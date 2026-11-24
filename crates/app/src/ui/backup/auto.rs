@@ -87,6 +87,9 @@ pub(super) fn AutoSection(lang: ReadSignal<Lang>, backups: Backups, forms: Forms
     let password = RwSignal::new(String::new());
     let repeat = RwSignal::new(String::new());
     let typed_check = RwSignal::new(String::new());
+    // «Показать пароль» (задача 124): у формы включения и у проверки — свои.
+    let shown = RwSignal::new(false);
+    let shown_check = RwSignal::new(false);
     let busy = RwSignal::new(false);
     // Чем кончилось последнее действие здесь: слова успеха или беда.
     let said = RwSignal::new(None::<Result<Key, Problem>>);
@@ -204,28 +207,20 @@ pub(super) fn AutoSection(lang: ReadSignal<Lang>, backups: Backups, forms: Forms
     let form = move || {
         chosen_name.get().map(|name| view! {
             <p>{folder_words(name)}</p>
+            // Включилась — форма пропадает (`chosen_name` снят): так менеджер
+            // паролей видит, что она отправлена (`ui/password.rs`).
             <form class="backup" on:submit=enable>
+                <PasswordLogin />
                 {move || if new_password() {
                     view! {
-                        <label>
-                            {tr(lang, Key::BackupNewPassword)}
-                            <input type="password" autocomplete="new-password" bind:value=password />
-                        </label>
-                        <label>
-                            {tr(lang, Key::BackupRepeatPassword)}
-                            <input type="password" autocomplete="new-password" bind:value=repeat />
-                        </label>
+                        <PasswordInput lang label=Key::BackupNewPassword value=password shown fresh=true />
+                        <PasswordInput lang label=Key::BackupRepeatPassword value=repeat shown fresh=true />
                     }
                     .into_any()
                 } else {
-                    view! {
-                        <label>
-                            {tr(lang, Key::BackupPassword)}
-                            <input type="password" autocomplete="current-password" bind:value=password />
-                        </label>
-                    }
-                    .into_any()
+                    view! { <PasswordInput lang label=Key::BackupPassword value=password shown /> }.into_any()
                 }}
+                <PasswordShow lang shown />
                 <p class="hint">{tr(lang, Key::AutoPasswordNote)}</p>
                 <div class="actions">
                     <button type="submit" disabled=move || busy.get()><span class="label">{tr(lang, Key::AutoEnable)}</span></button>
@@ -298,11 +293,10 @@ pub(super) fn AutoSection(lang: ReadSignal<Lang>, backups: Backups, forms: Forms
                 // ввести пароль рядом с ней только путала бы.
                 {move || (check_due.get() && !picking() && !renewing.get()).then(|| view! {
                     <form class="backup" on:submit=check>
+                        <PasswordLogin />
                         <p>{tr(lang, Key::AutoCheckDue)}</p>
-                        <label>
-                            {tr(lang, Key::BackupPassword)}
-                            <input type="password" autocomplete="current-password" bind:value=typed_check />
-                        </label>
+                        <PasswordInput lang label=Key::BackupPassword value=typed_check shown=shown_check />
+                        <PasswordShow lang shown=shown_check />
                         <button type="submit" class="wide" disabled=move || busy.get()>
                             <span class="label">{tr(lang, Key::AutoCheck)}</span>
                         </button>

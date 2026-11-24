@@ -55,12 +55,14 @@ use super::ledger::{Operations, tax_part};
 use super::license::{LicenseCard, LicensePage, Licenses, RenewDialog};
 use super::opening::OpeningEntry;
 use super::profile::Profiles;
+use super::pwa::CarryCard;
 use super::report::ReportPage;
 use super::route::{Router, Screen};
 use super::split::screen;
 use super::storage::error_key;
 use super::{Base, tr};
 use crate::platform::clock;
+use crate::platform::pwa::Browser;
 use crate::store::{Store, StoreError, Writes};
 
 /// Квартал, когда часы без даты.
@@ -647,7 +649,10 @@ pub(super) enum Part {
 /// и срок лицензии у неё — отсюда.
 pub(super) fn content(ctx: Ctx, part: Part) -> AnyView {
     match part {
+        // Перенос данных вкладки в установленную программу (задача 124) —
+        // первым: без него в программе с экрана «Домой» их не будет.
         Part::Card => view! {
+            <CarryCard lang=ctx.lang browser=Browser::detect() />
             <AutoCards lang=ctx.lang backups=ctx.backups />
             <LicenseCard ctx />
             <RenewDialog ctx />

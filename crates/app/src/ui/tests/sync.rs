@@ -31,6 +31,7 @@ fn other_device() {
             "password_entered",
             "issue_elsewhere",
             "issue_at",
+            "sync_last",
         ] {
             let _ = storage.remove_item(&format!("kvartik.{name}"));
         }
@@ -61,6 +62,20 @@ fn password_field(host: &HtmlElement, label: &str) -> Option<HtmlInputElement> {
         .map(JsCast::unchecked_into)
 }
 
+/// Выбрать путь плиткой (задача 124): `send` — «Передать отсюда», иначе
+/// «Принять сюда». В пустой программе плиток нет: «Принять сюда» уже на
+/// экране, а передавать нечего.
+fn choose_way(host: &HtmlElement, send: bool) {
+    let tile = host
+        .query_selector_all("#sync input[type=radio][name=sync-way]")
+        .ok()
+        .and_then(|tiles| tiles.item(u32::from(!send)))
+        .map(JsCast::unchecked_into::<HtmlElement>);
+    if let Some(tile) = tile {
+        tile.click();
+    }
+}
+
 /// Кнопка экрана с подписью `label`.
 fn sync_button(host: &HtmlElement, label: &str) -> Option<HtmlElement> {
     let buttons = host.query_selector_all("#sync button").ok()?;
@@ -80,6 +95,7 @@ async fn make(host: &HtmlElement, lang: Lang, all: bool, wrong: &mut Vec<String>
         wrong.push("нет выбора, что передать".to_owned());
         return None;
     }
+    choose_way(host, true);
     let radio = host
         .query_selector_all("#sync input[type=radio][name=sync-what]")
         .ok()
@@ -126,6 +142,7 @@ async fn paste(host: &HtmlElement, lang: Lang, code: &str, wrong: &mut Vec<Strin
         wrong.push("нет поля для текста кода".to_owned());
         return None;
     };
+    choose_way(host, false);
     // С подписью вокруг, как из мессенджера.
     let pasted = format!("Kvartik — мой код:\n{code}\nконец");
     Reflect::set(&area, &"value".into(), &pasted.into()).expect("значение поставлено");
@@ -520,6 +537,7 @@ async fn make_any(host: &HtmlElement, lang: Lang, all: bool, wrong: &mut Vec<Str
         wrong.push("нет выбора, что передать".to_owned());
         return None;
     }
+    choose_way(host, true);
     let radios = host.query_selector_all("#sync input[type=radio][name=sync-what]").ok()?;
     radios.item(u32::from(all)).map(JsCast::unchecked_into::<HtmlElement>)?.click();
     let fields = host.query_selector_all("#sync form.sync input[type=password]").ok()?;
@@ -803,4 +821,160 @@ async fn files_follow_as_a_series_of_codes() {
     crate::platform::set_hash("");
     documents::forget_device();
     assert!(wrong.is_empty(), "код файлов: {wrong:#?}");
+}
+
+/// Виден ли элемент экрана по селектору: спрятанный путь остаётся в разметке.
+fn visible(host: &HtmlElement, selector: &str) -> bool {
+    host.query_selector(&format!("#sync {selector}"))
+        .ok()
+        .flatten()
+        .is_some_and(|found| found.unchecked_into::<HtmlElement>().offset_width() > 0)
+}
+
+/// Сначала выбор (задача 124): в пустой программе плиток нет — «Принять
+/// сюда» уже на экране, а «Передать отсюда» нет вовсе, и «Вставить» без
+/// буфера просит вставить самому. С данными — две плитки и ни одного пути;
+/// выбранная показывает свой путь и прячет другой. В форме передачи — логин
+/// для менеджера паролей, что войдёт — строкой, своя подсказка пароля,
+/// а «Показать пароль» делает поле текстовым. Готовый код называет число
+/// QR-кодов и круг, круг стоит, пока выбрано «Принять сюда», а строка
+/// профиля называет день последнего обмена — сегодняшний.
+#[wasm_bindgen_test]
+async fn the_screen_starts_with_a_choice() {
+    let lang = Lang::Ru;
+    let mut wrong = Vec::new();
+
+    // Пустая программа: сразу «Принять сюда».
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    other_device();
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at("#/sync");
+    if !opened(&host, lang).await {
+        wrong.push("пустая база не открылась".to_owned());
+    }
+    if find(&host, ".sync-paste:not(.sync-reply) textarea").await.is_none() || !visible(&host, ".sync-paste:not(.sync-reply) textarea") {
+        wrong.push("в пустой программе «Принять сюда» не на экране".to_owned());
+    }
+    if host.query_selector("#sync input[name=sync-way]").ok().flatten().is_some() {
+        wrong.push("в пустой программе — плитки выбора".to_owned());
+    }
+    if host.query_selector("#sync input[name=sync-what]").ok().flatten().is_some() {
+        wrong.push("в пустой программе есть «Передать отсюда»".to_owned());
+    }
+    // Буфер headless-браузер тесту не отдаёт: нажатие не человека.
+    match sync_button(&host, t(lang, Key::SyncPasteNow)) {
+        Some(paste) => {
+            paste.click();
+            if !wait_for(&host, t(lang, Key::SyncPasteFailed)).await {
+                wrong.push(format!("«Вставить» без буфера молчит: «{}»", section_text(&host, "sync")));
+            }
+        }
+        None => wrong.push("у поля кода нет «Вставить»".to_owned()),
+    }
+    drop(mounted);
+    host.remove();
+
+    // С данными: две плитки, ни одного пути.
+    documents::fresh_base_with_client().await;
+    other_device();
+    let (host, mounted) = mount_at("#/sync");
+    if !opened(&host, lang).await {
+        wrong.push("база не открылась".to_owned());
+    }
+    if find(&host, "input[name=sync-way]").await.is_none() {
+        wrong.push("с данными нет плиток выбора".to_owned());
+    }
+    let tiles = host.query_selector_all("#sync input[name=sync-way]").map(|tiles| tiles.length()).unwrap_or(0);
+    if tiles != 2 {
+        wrong.push(format!("плиток {tiles}, а не две"));
+    }
+    if visible(&host, "form.sync") || visible(&host, ".sync-paste:not(.sync-reply) textarea") {
+        wrong.push("до выбора на экране уже путь".to_owned());
+    }
+    choose_way(&host, true);
+    sleep(50).await;
+    if !visible(&host, "form.sync") || visible(&host, ".sync-paste:not(.sync-reply) textarea") {
+        wrong.push("«Передать отсюда» не показало свой путь или не спрятало другой".to_owned());
+    }
+    // Логин для менеджера паролей — спрятанный, один на все языки.
+    let login = host
+        .query_selector("#sync form.sync input[autocomplete=username]")
+        .ok()
+        .flatten()
+        .map(JsCast::unchecked_into::<HtmlInputElement>);
+    match login {
+        Some(login) if login.hidden() && login.value() == "Kvartik" => {}
+        Some(login) => wrong.push(format!("логин: виден {}, «{}»", !login.hidden(), login.value())),
+        None => wrong.push("в форме передачи нет логина".to_owned()),
+    }
+    let said = section_text(&host, "sync");
+    if !said.contains(t(lang, Key::SyncWhatFirst)) {
+        wrong.push(format!("первый код — не «{}»: «{said}»", t(lang, Key::SyncWhatFirst)));
+    }
+    let hint = fill(t(lang, Key::SyncPasswordHint), &["15"]);
+    if !said.contains(&hint) {
+        wrong.push("под паролем передачи нет своей подсказки".to_owned());
+    }
+    if said.contains(&fill(t(lang, Key::BackupPasswordHint), &["15"])) {
+        wrong.push("под паролем передачи — подсказка копии".to_owned());
+    }
+    // «Показать пароль» — поле текстом, и обратно.
+    let field = password_field(&host, t(lang, Key::BackupNewPassword));
+    let show = host
+        .query_selector("#sync form.sync label.choice input[type=checkbox]")
+        .ok()
+        .flatten()
+        .map(JsCast::unchecked_into::<HtmlElement>);
+    match (field, show) {
+        (Some(field), Some(show)) => {
+            show.click();
+            sleep(50).await;
+            if field.type_() != "text" {
+                wrong.push(format!("«Показать пароль» не показал: {}", field.type_()));
+            }
+            show.click();
+            sleep(50).await;
+            if field.type_() != "password" {
+                wrong.push(format!("«Показать пароль» не спрятал: {}", field.type_()));
+            }
+        }
+        _ => wrong.push("нет поля пароля или «Показать пароль»".to_owned()),
+    }
+    // Готовый код — с числом QR-кодов и кругом.
+    if make(&host, lang, true, &mut wrong).await.is_some() {
+        let round = t(lang, Key::SyncMadeQr).split("{}").next().unwrap_or_default();
+        if qr_caption(&host).is_some() && !section_text(&host, "sync").contains(round) {
+            wrong.push(format!("у кода нет «{round}»"));
+        }
+        if !circling(&host).await {
+            wrong.push("круг QR-кодов не идёт".to_owned());
+        }
+        // «Отправить» — там, где меню «Поделиться» берёт текст (headless
+        // Chrome — да, Firefox на компьютере — нет).
+        let shares = crate::platform::share::can_share_text("Kvartik");
+        if sync_button(&host, t(lang, Key::SyncShare)).is_some() != shares {
+            wrong.push(format!("«Отправить код» есть: {}, а меню с текстом: {shares}", !shares));
+        }
+        // Выбрано «Принять сюда» — код спрятан, и круг стоит.
+        choose_way(&host, false);
+        sleep(50).await;
+        if !visible(&host, ".sync-paste:not(.sync-reply) textarea") || visible(&host, ".sync-qr") {
+            wrong.push("«Принять сюда» не сменило путь".to_owned());
+        }
+        if circling(&host).await {
+            wrong.push("код спрятан, а круг QR-кодов идёт".to_owned());
+        }
+    }
+    crate::platform::set_hash(&Screen::Profile.href());
+    let today = clock::today().expect("часы с датой");
+    let last = fill(t(lang, Key::SyncEntryLast), &[&kvartik_core::i18n::date(lang, today)]);
+    if !wait_for(&host, &last).await {
+        wrong.push(format!("строка профиля не сказала «{last}»: «{}»", section_text(&host, "profile")));
+    }
+    drop(mounted);
+    host.remove();
+    other_device();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "выбор пути: {wrong:#?}");
 }

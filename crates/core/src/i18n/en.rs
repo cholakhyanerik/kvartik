@@ -175,7 +175,7 @@ macro_rules! en {
     (PasswordMismatch) => { "The passwords don't match." };
     (BackupPasswordLost) => { "The backup password wasn't found on this device: the site's data seems to have been cleared. Set the password again." };
     (PasswordWrong) => { "That's not this device's backup password. Check the keyboard layout and Caps Lock." };
-    (BackupRestoreAbout) => { "Restoring merges the backup with what's already here: of two edits of one record, each field comes from the one where it was changed last, and nothing is deleted." };
+    (BackupRestoreAbout) => { "Restoring merges the backup with what's already here and deletes nothing." };
     (BackupChooseFile) => { "Restore from a backup…" };
     (BackupFileInfo) => { "Backup from {}, made by version {}." };
     (BackupFilePassword) => { "This backup's password" };
@@ -1215,8 +1215,8 @@ macro_rules! en {
     (BackupPartsSaved) => { "All parts of the backup have been handed over. Find them in your downloads or wherever you sent them, and move them together somewhere safe." };
     (BackupFilePart) => { "This is part {} of {} of one backup. The other parts are restored the same way, in any order." };
     (BackupPartRestored) => { "Part {} of {} restored. New records: {}, updated: {}, unchanged: {}." };
-    (BackupPartsLeftOne) => { "Part {} is still left: the file with {} in its name. Restore it the same way before issuing invoices and acts here: a new document gets its number from what is already in. While this screen is open, we won't ask for the password again." };
-    (BackupPartsLeft) => { "Not restored yet: {} parts of {}, the files with {} in their names. Restore them the same way before issuing invoices and acts here: a new document gets its number from what is already in. While this screen is open, we won't ask for the password again." };
+    (BackupPartsLeftOne) => { "Part {} is still left: the file with {} in its name. Restore it the same way before issuing invoices and acts here." };
+    (BackupPartsLeft) => { "Not restored yet: {} parts of {}, the files with {} in their names. Restore them the same way before issuing invoices and acts here." };
     (BackupPartsAll) => { "The backup is fully restored: all parts are in ({} of {})." };
     (BackupPartMark) => { "“{}”" };
     (BackupFilesParts) => { "It comes in {} files, each no larger than {}\u{A0}MB." };
@@ -1417,7 +1417,7 @@ macro_rules! en {
 
     (SyncTitle) => { "Another device" };
     (SyncEntryAbout) => { "Pass changes on by code, without a file" };
-    (SyncAbout) => { "Changes move from one of your devices to another without a file or the internet: one shows a code, the other scans it with the camera or pastes it as text. The code is protected by the backup password and merges like a backup: of two edits of one record, each field comes from the device where it was changed last." };
+    (SyncAbout) => { "Changes move from one of your devices to another without a file or the internet." };
     (SyncIssueNote) => { "Invoices and acts are issued by one device: turn issuing off on the others in Settings, or numbers will repeat." };
     (SyncSendTitle) => { "Send from here" };
     (SyncWhat) => { "What to send" };
@@ -1497,4 +1497,35 @@ macro_rules! en {
     (SyncFilesFirst) => { "This is a file code, and the other device's data isn't here yet. Receive the changes code first, then the files. Nothing was written." };
     (SyncReceiptFirst) => { "Receipt: the code was received, but this is the first code from here on that device, so it's unknown whether it has what was here before {}. If that device wasn't started from a backup or a code with all records, make a code with all records." };
     (SyncIsCode) => { "This is a code, not a receipt: receive it on the other device." };
+    (PasswordShow) => { "Show password" };
+    (More) => { "More" };
+    (SyncAboutMore) => { "One shows a code, the other scans it with the camera or pastes it as text. The code is protected by the backup password and merges like a backup: of two edits of one record, each field comes from the device where it was changed last." };
+    (BackupRestoreAboutMore) => { "Of two edits of one record, each field comes from the one where it was changed last." };
+    (BackupPartsLeftMore) => { "A new document gets its number from what is already in. You can pick all the remaining files at once, and while this screen is open, we won't ask for the password again." };
+    (BackupDropHint) => { "Or drop the backup files here\u{A0}— all parts at once." };
+    (BackupChainAt) => { "File {} of {}." };
+    (BackupChainFailed) => { "The file {} wasn't restored." };
+    (BackupChainRest) => { "The files chosen after it weren't touched: choose them again." };
+    (BackupMakeAgain) => { "Make the backup again" };
+    (BackupSyncInstead) => { "New device? Move data without a file" };
+    (WelcomeFromDevice) => { "Move from another device" };
+    (SyncWay) => { "What to do on this device" };
+    (SyncSendHint) => { "Show a code of the changes for the other device to scan or paste." };
+    (SyncReceiveHint) => { "Scan the other device's code with the camera or paste it as text." };
+    (SyncPasswordHint) => { "At least {} characters. This is the backup password: the other device will ask for the same one to take the code, and backups from here will use it too. It isn't stored anywhere, and a forgotten one can't be recovered." };
+    (SyncTune) => { "Adjust" };
+    (SyncWhatFirst) => { "All records go in: nothing has been sent from here yet." };
+    (SyncWhatNew) => { "What's new since the last transfer goes in: changes since {}." };
+    (SyncWhatDay) => { "Changes since {} go in." };
+    (SyncWhatAll) => { "All records go in." };
+    (SyncMadeQr) => { "QR codes: {}, one round takes about {}\u{A0}s." };
+    (SyncShare) => { "Send the code" };
+    (SyncSharePart) => { "Send part {} of {}" };
+    (SyncShareFailed) => { "Couldn't send the code. Try again or copy it." };
+    (SyncPasteNow) => { "Paste" };
+    (SyncPasteFailed) => { "Couldn't read the clipboard. Paste into the field yourself: long-press it or use the keyboard." };
+    (SyncEntryLast) => { "Last exchange: {}" };
+    (SyncCarryNote) => { "Moving from here to the installed app? Make the code and copy it, then in the app open “Another device” and tap “Paste”." };
+    (InstallCarry) => { "Already working in this tab? The installed app won't see its data: move it with a code, without a file." };
+    (InstallCarryButton) => { "Move to the app" };
 }

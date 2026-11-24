@@ -29,6 +29,7 @@ use wasm_bindgen::JsCast;
 use web_sys::{HtmlElement, KeyboardEvent};
 
 use super::form::Forms;
+use super::route::Screen;
 use super::tr;
 use crate::platform::pwa::{self as browser, Browser, Event, Pwa};
 use crate::store::device::Device;
@@ -571,6 +572,27 @@ pub fn InstallSection(lang: ReadSignal<Lang>, program: Program) -> impl IntoView
             }
         })
     }
+}
+
+/// Данные вкладки — в установленную программу (задача 124): на iPhone, iPad
+/// и Mac она их не увидит (Правило 6), и карточка ведёт перенести их кодом на
+/// «Другом устройстве» — без файла и без камеры. Карточкой главного экрана из
+/// части книги, а не в разделе «Установка»: часть грузится, только когда
+/// в базе есть данные, — ровно когда переносить есть что, — а в главном wasm
+/// этот блок стоил бы ему около килобайта (Правило 1; замер задачи 124).
+/// `browser` — чтобы тест окна мог назвать любой.
+#[component]
+pub fn CarryCard(lang: ReadSignal<Lang>, browser: Browser) -> impl IntoView {
+    (browser.install_first() && !browser::installed()).then(|| {
+        view! {
+            <div class="notice">
+                <p>{tr(lang, Key::InstallCarry)}</p>
+                <a class="button secondary" href=Screen::Sync.href()>
+                    <span class="label">{tr(lang, Key::InstallCarryButton)}</span>
+                </a>
+            </div>
+        }
+    })
 }
 
 #[cfg(test)]

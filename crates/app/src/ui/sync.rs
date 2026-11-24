@@ -37,6 +37,14 @@
 //! отправитель снимает её под своими QR-кодами, пока ключ ещё в руках: так он
 //! узнаёт, что код принят, а о дыре — с какого дня сделать новый, и этот день
 //! сам встаёт в поле.
+//!
+//! Экран начинается с выбора (задача 124): плитки «Передать отсюда» и
+//! «Принять сюда», дальше — только выбранный путь с одной главной кнопкой;
+//! пустой программе — сразу «Принять» ([`Ways`]). Что войдёт в код — строкой,
+//! а день — под «Настроить»; код текстом уходит в меню «Поделиться», а на
+//! приёме — «Вставить» из буфера; формы пароля — с логином для менеджера
+//! паролей (`ui/password.rs`). Когда был последний обмен, говорит строка
+//! профиля (`Device::sync_last`).
 
 use std::fmt::Write as _;
 use std::rc::Rc;
@@ -61,12 +69,15 @@ use super::backup::{Backups, IssuerAsk, Problem, counted, key_for, who};
 use super::form::Forms;
 use super::icon::{Icon, icon};
 use super::office::Office;
+use super::password::{PasswordInput, PasswordLogin, PasswordShow};
 use super::route::{Router, Screen};
 use super::split::{screen, split};
 use super::storage::Storage;
 use super::{Base, tr};
 use crate::platform::camera::{Camera, CameraError};
 use crate::platform::crypto::{self, CryptoError};
+use crate::platform::pwa::{self, Browser};
+use crate::platform::share::{self, ShareError};
 use crate::platform::{clipboard, clock};
 use crate::store::backup::{self as stored, Merged, OtherIe, Restored};
 use crate::store::device::Device;
@@ -86,14 +97,25 @@ pub struct Ctx {
     pub router: Router,
 }
 
-/// Строка «Другое устройство» в группе «Программа» на экране профиля.
+/// Строка «Другое устройство» в группе «Программа» на экране профиля: день
+/// последнего обмена (задача 124, `Device::sync_last`), а не было — что
+/// это. Перечитывается, когда показан профиль: обмен делают на соседнем
+/// экране. В главном wasm — только чтение одной записи и дата (Правило 1).
 #[component]
-pub fn SyncEntry(lang: ReadSignal<Lang>) -> impl IntoView {
+pub fn SyncEntry(lang: ReadSignal<Lang>, router: Router) -> impl IntoView {
+    let meta = move || {
+        router.shows(Screen::Profile);
+        let lang = lang.get();
+        match Device::new().sync_last().and_then(clock::local_date) {
+            Some(day) => fill(t(lang, Key::SyncEntryLast), &[&i18n::date(lang, day)]),
+            None => t(lang, Key::SyncEntryAbout).to_owned(),
+        }
+    };
     view! {
         <a class="entry" href=Screen::Sync.href()>
             <span class="entry-main">
                 <span class="entry-title">{tr(lang, Key::SyncTitle)}</span>
-                <span class="entry-meta">{tr(lang, Key::SyncEntryAbout)}</span>
+                <span class="entry-meta">{meta}</span>
             </span>
             {icon(Icon::Forward)}
         </a>
@@ -127,20 +149,99 @@ split! {
 /// и принимать некуда.
 #[component]
 fn SyncBody(ctx: Ctx) -> impl IntoView {
-    let lang = ctx.lang;
     let ready = move || matches!(ctx.storage.get(), Storage::Ready(_));
     view! {
         <Show when=ready>
-            <p>{tr(lang, Key::SyncAbout)}</p>
-            <p class="hint">
-                {tr(lang, Key::SyncIssueNote)}" "
-                <a href=Screen::Settings.href()>{tr(lang, Key::SettingsTitle)}</a>
-            </p>
-            <h2>{tr(lang, Key::SyncSendTitle)}</h2>
-            <Send ctx />
-            <h2>{tr(lang, Key::SyncReceiveTitle)}</h2>
-            <Receive ctx />
+            <Ways ctx />
         </Show>
+    }
+}
+
+/// Путь на этом устройстве (задача 124).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Way {
+    Send,
+    Receive,
+}
+
+/// Вкладка браузера, данных которой установленная программа не увидит
+/// (iPhone, iPad, Mac; Правило 6), а программа ещё не установлена: отсюда
+/// данные переносят в неё кодом (задача 124).
+fn carrying() -> bool {
+    Browser::detect().install_first() && !pwa::installed()
+}
+
+/// Сначала выбор — две плитки «Передать отсюда» и «Принять сюда», — а дальше
+/// только выбранный путь со своей главной кнопкой (задача 124): до неё два
+/// раздела шли подряд, «Принять» — на полтора экрана ниже, и главных кнопок
+/// было две. Пустой программе передавать нечего: сразу «Принять», без плиток
+/// (как экран копии с 0.0.24); вкладке, откуда переносят в установленную
+/// программу, — сразу «Передать». Пуста ли программа, решается, когда база
+/// открылась, и после принятого кода экран не перестраивается — иначе
+/// пропали бы итог и квитанция. Невыбранный путь спрятан, а не убран:
+/// начатое в нём не пропадает, а круг QR-кодов и камера стоят, пока он не на
+/// виду (`seen`).
+#[component]
+fn Ways(ctx: Ctx) -> impl IntoView {
+    let Ctx { lang, backups, router, .. } = ctx;
+    let empty = !untrack(|| backups.has_data());
+    let carry = !empty && carrying();
+    let way = RwSignal::new(if empty {
+        Some(Way::Receive)
+    } else if carry {
+        Some(Way::Send)
+    } else {
+        None
+    });
+    let seen = move |path: Way| Signal::derive(move || router.shows(Screen::Sync) && way.get() == Some(path));
+    view! {
+        // Первая строка видна, остальное — под «Подробнее» (задача 124).
+        <p>{tr(lang, Key::SyncAbout)}</p>
+        <details class="more">
+            <summary>{tr(lang, Key::More)}</summary>
+            <p>{tr(lang, Key::SyncAboutMore)}</p>
+        </details>
+        <p class="hint">
+            {tr(lang, Key::SyncIssueNote)}" "
+            <a href=Screen::Settings.href()>{tr(lang, Key::SettingsTitle)}</a>
+        </p>
+        {if empty {
+            view! { <h2>{tr(lang, Key::SyncReceiveTitle)}</h2> }.into_any()
+        } else {
+            view! {
+                <div class="choices sync-ways" role="radiogroup" aria-label=move || t(lang.get(), Key::SyncWay)>
+                    <WayChoice lang way path=Way::Send label=Key::SyncSendTitle hint=Key::SyncSendHint />
+                    <WayChoice lang way path=Way::Receive label=Key::SyncReceiveTitle hint=Key::SyncReceiveHint />
+                </div>
+            }
+            .into_any()
+        }}
+        {(!empty).then(|| view! {
+            <div class="sync-way" hidden=move || way.get() != Some(Way::Send)>
+                <Send ctx seen=seen(Way::Send) carry />
+            </div>
+        })}
+        <div class="sync-way" hidden=move || way.get() != Some(Way::Receive)>
+            <Receive ctx seen=seen(Way::Receive) />
+        </div>
+    }
+}
+
+/// Плитка пути — карточкой выбора, как «Где зарегистрирован клиент».
+#[component]
+fn WayChoice(lang: ReadSignal<Lang>, way: RwSignal<Option<Way>>, path: Way, label: Key, hint: Key) -> impl IntoView {
+    view! {
+        <label class="choice-card" data-tilt="">
+            <input
+                type="radio"
+                name="sync-way"
+                class="visually-hidden"
+                prop:checked=move || way.get() == Some(path)
+                on:change=move |_| way.set(Some(path))
+            />
+            <span class="choice-title">{tr(lang, label)} {icon(Icon::Check)}</span>
+            <span class="choice-hint">{tr(lang, hint)}</span>
+        </label>
     }
 }
 
@@ -291,9 +392,11 @@ fn default_day(base: &str) -> Option<Date> {
     )
 }
 
-/// Передать отсюда: что, пароль копий — и код на экране.
+/// Передать отсюда: что, пароль копий — и код на экране. `seen` — путь на
+/// виду: круг QR-кодов и камера квитанции идут только тогда. `carry` —
+/// вкладка, откуда переносят в установленную программу ([`carrying`]).
 #[component]
-fn Send(ctx: Ctx) -> impl IntoView {
+fn Send(ctx: Ctx, seen: Signal<bool>, carry: bool) -> impl IntoView {
     let Ctx {
         lang,
         backups,
@@ -307,18 +410,36 @@ fn Send(ctx: Ctx) -> impl IntoView {
     let several = Device::new().office();
     let everyone = RwSignal::new(several);
     let key_of = move |everyone: bool| if everyone { OFFICE_DB.to_owned() } else { office.open_name() };
-    let first = default_day(&key_of(several));
+    // День по умолчанию (`sync::default_day`): по нему строка над «Настроить»
+    // говорит «новое с прошлой передачи», а не просто день (задача 124).
+    let usual = RwSignal::new(default_day(&key_of(several)));
+    let first = usual.get_untracked();
     let all = RwSignal::new(first.is_none());
     let day = RwSignal::new(first.or_else(clock::today).map(Date::iso).unwrap_or_default());
     // Сменили, чьи изменения, — день по умолчанию того кода.
     let whose = move |chosen: bool| {
         everyone.set(chosen);
         let next = default_day(&key_of(chosen));
+        usual.set(next);
         all.set(next.is_none());
         day.set(next.or_else(clock::today).map(Date::iso).unwrap_or_default());
     };
+    // Что войдёт в код — одной строкой (задача 124): день и «все записи»
+    // нужны редко и свёрнуты под «Настроить».
+    let what = move || {
+        let lang = lang.get();
+        if all.get() {
+            return t(lang, if usual.get().is_none() { Key::SyncWhatFirst } else { Key::SyncWhatAll }).to_owned();
+        }
+        match Date::from_iso(&day.get()) {
+            Some(chosen) if Some(chosen) == usual.get() => fill(t(lang, Key::SyncWhatNew), &[&i18n::date(lang, chosen)]),
+            Some(chosen) => fill(t(lang, Key::SyncWhatDay), &[&i18n::date(lang, chosen)]),
+            None => t(lang, Key::SyncDayMissing).to_owned(),
+        }
+    };
     let password = RwSignal::new(String::new());
     let repeat = RwSignal::new(String::new());
+    let shown = RwSignal::new(false);
     let sending = RwSignal::new_local(Sending::Idle);
     let new_password = move || !backups.key_set();
     let busy = move || matches!(sending.get(), Sending::Busy);
@@ -365,7 +486,11 @@ fn Send(ctx: Ctx) -> impl IntoView {
     };
 
     view! {
+        // Код готов — форма пропадает: так менеджер паролей видит, что она
+        // отправлена (`ui/password.rs`).
         <form class="sync" hidden=move || matches!(sending.get(), Sending::Ready(_)) on:submit=submit>
+            <PasswordLogin />
+            {carry.then(|| view! { <p class="hint">{tr(lang, Key::SyncCarryNote)}</p> })}
             {several.then(|| view! {
                 <fieldset class="group">
                     <legend>{tr(lang, Key::SyncWhose)}</legend>
@@ -379,43 +504,42 @@ fn Send(ctx: Ctx) -> impl IntoView {
                     </label>
                 </fieldset>
             })}
-            <fieldset class="group">
-                <legend>{tr(lang, Key::SyncWhat)}</legend>
-                <label class="choice">
-                    <input type="radio" name="sync-what" prop:checked=move || !all.get() on:change=move |_| all.set(false) />
+            <p class="sync-what">{what}</p>
+            <details class="more sync-tune">
+                <summary>{tr(lang, Key::SyncTune)}</summary>
+                <fieldset class="group">
+                    <legend>{tr(lang, Key::SyncWhat)}</legend>
+                    <label class="choice">
+                        <input type="radio" name="sync-what" prop:checked=move || !all.get() on:change=move |_| all.set(false) />
+                        {tr(lang, Key::SyncSince)}
+                    </label>
+                    <label class="choice">
+                        <input type="radio" name="sync-what" prop:checked=move || all.get() on:change=move |_| all.set(true) />
+                        {tr(lang, Key::SyncAll)}
+                    </label>
+                </fieldset>
+                <label hidden=move || all.get()>
                     {tr(lang, Key::SyncSince)}
+                    <input type="date" max=clock::today().map(Date::iso) bind:value=day />
                 </label>
-                <label class="choice">
-                    <input type="radio" name="sync-what" prop:checked=move || all.get() on:change=move |_| all.set(true) />
-                    {tr(lang, Key::SyncAll)}
-                </label>
-            </fieldset>
-            <label hidden=move || all.get()>
-                {tr(lang, Key::SyncSince)}
-                <input type="date" max=clock::today().map(Date::iso) bind:value=day />
-            </label>
-            <p class="hint" hidden=move || all.get()>{tr(lang, Key::SyncSinceHint)}</p>
+                <p class="hint" hidden=move || all.get()>{tr(lang, Key::SyncSinceHint)}</p>
+            </details>
             {move || if new_password() {
+                // Свои слова под паролем (задача 124): подсказка копии
+                // говорила «спросит при каждой копии» — о копии, а не о коде.
                 view! {
-                    <label>
-                        {tr(lang, Key::BackupNewPassword)}
-                        <input type="password" autocomplete="new-password" bind:value=password />
-                    </label>
-                    <label>
-                        {tr(lang, Key::BackupRepeatPassword)}
-                        <input type="password" autocomplete="new-password" bind:value=repeat />
-                    </label>
+                    <PasswordInput lang label=Key::BackupNewPassword value=password shown fresh=true />
+                    <PasswordInput lang label=Key::BackupRepeatPassword value=repeat shown fresh=true />
+                    <PasswordShow lang shown />
                     <p class="hint">
-                        {counted(lang, Key::BackupPasswordHint, backup::MIN_PASSWORD_CHARS as i64)}
+                        {counted(lang, Key::SyncPasswordHint, backup::MIN_PASSWORD_CHARS as i64)}
                     </p>
                 }
                 .into_any()
             } else {
                 view! {
-                    <label>
-                        {tr(lang, Key::BackupPassword)}
-                        <input type="password" autocomplete="current-password" bind:value=password />
-                    </label>
+                    <PasswordInput lang label=Key::BackupPassword value=password shown />
+                    <PasswordShow lang shown />
                 }
                 .into_any()
             }}
@@ -434,12 +558,14 @@ fn Send(ctx: Ctx) -> impl IntoView {
             Sending::Failed(say) => Some(view! { <p role="alert">{move || say.text(lang.get())}</p> }.into_any()),
             // Код убран — день по умолчанию уже другой: день этого кода.
             Sending::Ready(shown) => Some(view! {
-                <ShownCode ctx shown gap=Callback::new(move |chosen: Date| {
+                <ShownCode ctx seen shown gap=Callback::new(move |chosen: Date| {
                     day.set(chosen.iso());
                     all.set(false);
                 }) close=move || {
                     sending.set(Sending::Idle);
-                    if let Some(next) = default_day(&key_of(everyone.get_untracked())) {
+                    let next = default_day(&key_of(everyone.get_untracked()));
+                    usual.set(next);
+                    if let Some(next) = next {
                         day.set(next.iso());
                         all.set(false);
                     }
@@ -490,6 +616,7 @@ async fn make(ctx: Ctx, typed: &str, repeat: Option<&str>, since: Option<Date>, 
         return Err(Say::Key(Key::SyncNothing));
     }
     device.set_sync_made(&base, now);
+    device.set_sync_last(now);
     // Записи, легшие сюда копией или кодом, код взял, если начат не позже
     // самой ранней: дальше по умолчанию — день этого кода. Начат позже —
     // человек выбрал день сам, и они ждут следующего.
@@ -544,11 +671,12 @@ fn halt(running: StoredValue<bool>, timer: StoredValue<Option<TimeoutHandle>>) {
 /// Код на экране — QR-коды по кругу и текст кусками со «Скопировать»: у кода
 /// изменений и у каждой части кода файлов. `accepted` — квитанция сказала,
 /// что код принят (задача 123): круг стоит и после возврата на экран.
-/// `hint` — подсказка под кодами: когда круг кончится.
+/// `hint` — подсказка под кодами: когда круг кончится. `seen` — путь
+/// «Передать отсюда» на виду (задача 124).
 #[component]
 fn CodeShown(
     lang: ReadSignal<Lang>,
-    router: Router,
+    seen: Signal<bool>,
     qr: Vec<String>,
     side: usize,
     parts: Vec<String>,
@@ -557,16 +685,16 @@ fn CodeShown(
 ) -> impl IntoView {
     let count = qr.len();
     let index = RwSignal::new(0usize);
-    // Круг — сменой через `setTimeout`, пока экран на виду и код не принят:
-    // таймер ставится заново на каждый шаг, а ушедший экран круг
-    // останавливает — и вернувшийся запускает снова (Правило 1: в покое
-    // таймеров нет). Квитанция этого кода круг останавливает навсегда: экран
-    // сказал, что всё дошло, и показывать работу дальше незачем (найдено
-    // человеком 2026-11-24).
+    // Круг — сменой через `setTimeout`, пока путь на виду и код не принят:
+    // таймер ставится заново на каждый шаг, а ушедший экран или выбранное
+    // «Принять сюда» круг останавливает — и вернувшийся запускает снова
+    // (Правило 1: в покое таймеров нет). Квитанция этого кода круг
+    // останавливает навсегда: экран сказал, что всё дошло, и показывать работу
+    // дальше незачем (найдено человеком 2026-11-24).
     let running = StoredValue::new(false);
     let timer = StoredValue::new(None::<TimeoutHandle>);
     Effect::new(move |_| {
-        let go = router.shows(Screen::Sync) && !accepted.get();
+        let go = seen.get() && !accepted.get();
         if go && count > 1 && !running.get_value() {
             running.set_value(true);
             cycle(index, count, running, timer);
@@ -577,8 +705,12 @@ fn CodeShown(
     on_cleanup(move || halt(running, timer));
     let path = move || qr.get(index.get()).cloned().unwrap_or_default();
     let copied = RwSignal::new(None::<bool>);
+    let share_failed = RwSignal::new(false);
     let total = parts.len();
     let all_text = parts.join("\n\n");
+    // «Отправить» — где меню «Поделиться» берёт текст (задача 124): код —
+    // в мессенджер одним нажатием, без «Скопировать» и вставки там.
+    let shares = parts.first().is_some_and(|part| share::can_share_text(part));
     view! {
         <figure class="sync-qr">
             <svg viewBox=format!("0 0 {side} {side}") role="img" aria-label=move || t(lang.get(), Key::SyncQrLabel)>
@@ -596,6 +728,7 @@ fn CodeShown(
         <p>{tr(lang, Key::SyncTextAbout)}</p>
         <div class="actions">
             {parts.into_iter().enumerate().map(|(i, part)| {
+                let text = part.clone();
                 // В буфер — в самом нажатии, до первого `await` (Правило 6).
                 let copy = move |_: MouseEvent| {
                     let written = clipboard::copy(&part);
@@ -603,17 +736,38 @@ fn CodeShown(
                         copied.set(Some(written.await.is_ok()));
                     });
                 };
+                // Меню — тоже в самом нажатии: оно тратит его и при отказе
+                // (`platform::share`). Закрытое меню молчит.
+                let send = move |_: MouseEvent| {
+                    share_failed.set(false);
+                    let sent = share::share_text(&text);
+                    leptos::task::spawn_local(async move {
+                        if sent.await == Err(ShareError::Failed) {
+                            share_failed.set(true);
+                        }
+                    });
+                };
+                // Подпись кнопки: у единственного куска — без номера.
+                let numbered = move |whole: Key, piece: Key| {
+                    move || {
+                        let lang = lang.get();
+                        if total == 1 {
+                            t(lang, whole).to_owned()
+                        } else {
+                            fill(t(lang, piece), &[&i18n::integer(lang, i as i64 + 1), &i18n::integer(lang, total as i64)])
+                        }
+                    }
+                };
                 view! {
+                    {shares.then(|| view! {
+                        <button type="button" class="secondary" on:click=send>
+                            {icon(Icon::Share)}
+                            <span class="label">{numbered(Key::SyncShare, Key::SyncSharePart)}</span>
+                        </button>
+                    })}
                     <button type="button" class="secondary" on:click=copy>
                         {icon(Icon::Copy)}
-                        <span class="label">{move || {
-                            let lang = lang.get();
-                            if total == 1 {
-                                t(lang, Key::SyncCopy).to_owned()
-                            } else {
-                                fill(t(lang, Key::SyncCopyPart), &[&i18n::integer(lang, i as i64 + 1), &i18n::integer(lang, total as i64)])
-                            }
-                        }}</span>
+                        <span class="label">{numbered(Key::SyncCopy, Key::SyncCopyPart)}</span>
                     </button>
                 }
             }).collect_view()}
@@ -623,6 +777,7 @@ fn CodeShown(
                 {tr(lang, if done { Key::SyncCopied } else { Key::SyncCopyFailed })}
             </p>
         })}
+        {move || share_failed.get().then(|| view! { <p role="alert">{tr(lang, Key::SyncShareFailed)}</p> })}
         <details class="sync-text">
             <summary>{tr(lang, Key::SyncTextLabel)}</summary>
             <textarea readonly rows="5" prop:value=all_text></textarea>
@@ -700,8 +855,14 @@ async fn make_files(ctx: Ctx, shown: Rc<Shown>) -> Result<FilesShown, Say> {
 /// частями вместо кода изменений. `gap` — квитанция назвала дыру: день,
 /// с которого сделать новый код.
 #[component]
-fn ShownCode(ctx: Ctx, shown: Rc<Shown>, gap: Callback<Date>, close: impl Fn() + Copy + 'static) -> impl IntoView {
-    let Ctx { lang, router, .. } = ctx;
+fn ShownCode(
+    ctx: Ctx,
+    seen: Signal<bool>,
+    shown: Rc<Shown>,
+    gap: Callback<Date>,
+    close: impl Fn() + Copy + 'static,
+) -> impl IntoView {
+    let Ctx { lang, .. } = ctx;
     let summary = {
         let (since, changed) = (shown.since, shown.changed as i64);
         move || {
@@ -711,6 +872,18 @@ fn ShownCode(ctx: Ctx, shown: Rc<Shown>, gap: Callback<Date>, close: impl Fn() +
                 None => fill(t(lang, Key::SyncMadeAll), &[&i18n::integer(lang, changed)]),
             }
         }
+    };
+    // Сколько QR-кодов и сколько идёт круг (задача 124): у кода в 32 КиБ их
+    // около ста двадцати, и пропущенный ждёт до минуты, — человек знает это
+    // до того, как поднял камеру. У одного QR-кода круга нет.
+    let codes = shown.qr.len();
+    let round = move || {
+        let lang = lang.get();
+        let seconds = (QR_STEP.as_millis() * codes as u128).div_ceil(1000);
+        fill(
+            t(lang, Key::SyncMadeQr),
+            &[&i18n::integer(lang, codes as i64), &i18n::integer(lang, i64::try_from(seconds).unwrap_or(i64::MAX))],
+        )
     };
     let files = RwSignal::new_local(FilesState::Off);
     let source = StoredValue::new_local(Rc::clone(&shown));
@@ -736,6 +909,7 @@ fn ShownCode(ctx: Ctx, shown: Rc<Shown>, gap: Callback<Date>, close: impl Fn() +
     let accepted = RwSignal::new(false);
     view! {
         <p role="status">{summary}</p>
+        {(codes > 1).then(|| view! { <p class="hint">{round}</p> })}
         {(shown.skipped > 0).then(|| view! {
             <p class="hint">{counted(lang, Key::SyncSkipped, shown.skipped as i64)}</p>
         })}
@@ -758,7 +932,7 @@ fn ShownCode(ctx: Ctx, shown: Rc<Shown>, gap: Callback<Date>, close: impl Fn() +
                     <p class="hint">{tr(lang, Key::SyncFilesHint)}</p>
                     // Квитанции у кода файлов нет: круг части стоит, когда
                     // она убрана с экрана.
-                    <CodeShown lang router qr side parts=text accepted=Signal::stored(false) hint=Key::SyncFilesQrHint />
+                    <CodeShown lang seen qr side parts=text accepted=Signal::stored(false) hint=Key::SyncFilesQrHint />
                     <div class="actions">
                         <button type="button" class="secondary" disabled={at == 0} on:click=move |_| step(at.saturating_sub(1))>
                             <span class="label">{tr(lang, Key::SyncFilesPrev)}</span>
@@ -776,7 +950,7 @@ fn ShownCode(ctx: Ctx, shown: Rc<Shown>, gap: Callback<Date>, close: impl Fn() +
             state => {
                 let (qr, side, parts) = main.get_value();
                 view! {
-                    <CodeShown lang router qr side parts accepted=accepted.into() hint=Key::SyncQrHint />
+                    <CodeShown lang seen qr side parts accepted=accepted.into() hint=Key::SyncQrHint />
                     {(shown_skipped(&source) > 0).then(|| view! {
                         <div class="actions">
                             <button type="button" class="secondary" disabled=matches!(state, FilesState::Busy) on:click=build>
@@ -789,7 +963,7 @@ fn ShownCode(ctx: Ctx, shown: Rc<Shown>, gap: Callback<Date>, close: impl Fn() +
                         FilesState::Failed(say) => Some(view! { <p role="alert">{move || say.text(lang.get())}</p> }.into_any()),
                         FilesState::Off | FilesState::On(..) => None,
                     }}
-                    <Reply lang router shown=source.get_value() gap accepted />
+                    <Reply lang seen shown=source.get_value() gap accepted />
                 }
                 .into_any()
             }
@@ -824,15 +998,16 @@ enum Replying {
 /// принят, и круг QR-кодов стоит; квитанция другого кода и нечитаемая его не
 /// трогают — этот код, может быть, ещё не сняли.
 #[component]
-fn Reply(lang: ReadSignal<Lang>, router: Router, shown: Rc<Shown>, gap: Callback<Date>, accepted: RwSignal<bool>) -> impl IntoView {
+fn Reply(lang: ReadSignal<Lang>, seen: Signal<bool>, shown: Rc<Shown>, gap: Callback<Date>, accepted: RwSignal<bool>) -> impl IntoView {
     let replying = RwSignal::new_local(Replying::Waiting);
     let collector = StoredValue::new_local(Collector::default());
     let key = StoredValue::new_local(Rc::clone(&shown.key));
     let (created, base, since) = (shown.created, StoredValue::new(shown.base.clone()), shown.since);
     let pasted = RwSignal::new(String::new());
-    // Ушли с экрана — камера гаснет.
+    let paste_failed = RwSignal::new(false);
+    // Ушли с экрана или с пути — камера гаснет.
     Effect::new(move |_| {
-        if !router.shows(Screen::Sync) && replying.with_untracked(|state| matches!(state, Replying::Scanning)) {
+        if !seen.get() && replying.with_untracked(|state| matches!(state, Replying::Scanning)) {
             replying.set(Replying::Waiting);
         }
     });
@@ -896,6 +1071,23 @@ fn Reply(lang: ReadSignal<Lang>, router: Router, shown: Rc<Shown>, gap: Callback
             read(bytes);
         }
     };
+    // Квитанция из буфера — в самом нажатии, до первого `await` (задача 124,
+    // `platform::clipboard::paste`).
+    let paste_now = move |_: MouseEvent| {
+        paste_failed.set(false);
+        let read = clipboard::paste();
+        leptos::task::spawn_local(async move {
+            match read.await {
+                Ok(text) => {
+                    pasted.set(text.clone());
+                    for found in sync::frames_in_text(&text) {
+                        take(found);
+                    }
+                }
+                Err(()) => paste_failed.set(true),
+            }
+        });
+    };
     view! {
         <p class="hint">{tr(lang, Key::SyncReceiptAbout)}</p>
         {move || match replying.get() {
@@ -915,7 +1107,11 @@ fn Reply(lang: ReadSignal<Lang>, router: Router, shown: Rc<Shown>, gap: Callback
                     <button type="button" class="secondary" on:click=move |_| replying.set(Replying::Scanning)>
                         <span class="label">{tr(lang, Key::SyncReceiptScan)}</span>
                     </button>
+                    <button type="button" class="secondary" on:click=paste_now>
+                        <span class="label">{tr(lang, Key::SyncPasteNow)}</span>
+                    </button>
                 </div>
+                {move || paste_failed.get().then(|| view! { <p role="alert">{tr(lang, Key::SyncPasteFailed)}</p> })}
                 <label class="sync-paste sync-reply">
                     {tr(lang, Key::SyncReceiptPaste)}
                     <textarea
@@ -1031,10 +1227,11 @@ enum Receiving {
     Failed(Say),
 }
 
-/// Принять сюда: камера или текст — пароль — слияние.
+/// Принять сюда: камера или текст — пароль — слияние. `seen` — путь на виду:
+/// камера горит только тогда.
 #[component]
-fn Receive(ctx: Ctx) -> impl IntoView {
-    let Ctx { lang, forms, router, .. } = ctx;
+fn Receive(ctx: Ctx, seen: Signal<bool>) -> impl IntoView {
+    let Ctx { lang, forms, .. } = ctx;
     let receiving = RwSignal::new_local(Receiving::Idle);
     let collector = StoredValue::new_local(Collector::default());
     // Части кода файлов (задача 116): сколько собрано из скольких.
@@ -1046,14 +1243,16 @@ fn Receive(ctx: Ctx) -> impl IntoView {
     // Сколько кадров собрано из скольких — для слов; (0, 0) — ни одного.
     let progress = RwSignal::new((0usize, 0usize));
     let pasted = RwSignal::new(String::new());
+    let paste_failed = RwSignal::new(false);
     let password = RwSignal::new(String::new());
+    let shown = RwSignal::new(false);
     forms.hold_while(move || {
         password.with(|text| !text.is_empty())
             || receiving.with(|state| matches!(state, Receiving::Busy | Receiving::Password(..) | Receiving::Scanning))
     });
-    // Ушли с экрана — камера гаснет: сканер снимается.
+    // Ушли с экрана или с пути — камера гаснет: сканер снимается.
     Effect::new(move |_| {
-        if !router.shows(Screen::Sync) && receiving.with_untracked(|state| matches!(state, Receiving::Scanning)) {
+        if !seen.get() && receiving.with_untracked(|state| matches!(state, Receiving::Scanning)) {
             receiving.set(Receiving::Idle);
         }
     });
@@ -1158,6 +1357,22 @@ fn Receive(ctx: Ctx) -> impl IntoView {
             take(found);
         }
     };
+    // Код из буфера — в самом нажатии, до первого `await` (задача 124,
+    // `platform::clipboard::paste`): переслан себе мессенджером, а вставлять
+    // жестом в поле на телефоне — три касания.
+    let paste_now = move |_: MouseEvent| {
+        paste_failed.set(false);
+        let read = clipboard::paste();
+        leptos::task::spawn_local(async move {
+            match read.await {
+                Ok(text) => {
+                    pasted.set(text.clone());
+                    on_paste(text);
+                }
+                Err(()) => paste_failed.set(true),
+            }
+        });
+    };
 
     let submit = move |event: SubmitEvent| {
         event.prevent_default();
@@ -1192,12 +1407,13 @@ fn Receive(ctx: Ctx) -> impl IntoView {
 
     view! {
         {move || match receiving.get() {
+            // Принят — форма сменяется итогом: так менеджер паролей видит, что
+            // она отправлена, и подставит тот же пароль копий (`ui/password.rs`).
             Receiving::Password(_, problem) => view! {
                 <form class="sync" on:submit=submit>
-                    <label>
-                        {tr(lang, Key::SyncPassword)}
-                        <input type="password" autocomplete="current-password" bind:value=password />
-                    </label>
+                    <PasswordLogin />
+                    <PasswordInput lang label=Key::SyncPassword value=password shown />
+                    <PasswordShow lang shown />
                     {problem.map(|problem| view! { <p role="alert">{move || problem.text(lang.get())}</p> })}
                     <div class="actions">
                         <button type="submit"><span class="label">{tr(lang, Key::SyncAccept)}</span></button>
@@ -1226,7 +1442,11 @@ fn Receive(ctx: Ctx) -> impl IntoView {
                     <button type="button" on:click=move |_| receiving.set(Receiving::Scanning)>
                         <span class="label">{tr(lang, Key::SyncScan)}</span>
                     </button>
+                    <button type="button" class="secondary" on:click=paste_now>
+                        <span class="label">{tr(lang, Key::SyncPasteNow)}</span>
+                    </button>
                 </div>
+                {move || paste_failed.get().then(|| view! { <p role="alert">{tr(lang, Key::SyncPasteFailed)}</p> })}
                 <label class="sync-paste">
                     {tr(lang, Key::SyncPaste)}
                     <textarea
@@ -1392,6 +1612,8 @@ async fn accept(ctx: Ctx, sealed: &Sealed, secret: Secret) -> Result<(Accepted, 
         received.note(header.device(), header.created().min(now));
         device.set_sync_received(&base, &received);
     }
+    // Строка профиля «Последний обмен» (задача 124) — и о коде файлов.
+    device.set_sync_last(now);
     // Своего пароля у устройства нет — берётся пароль кода: человек только что
     // показал, что знает его, а коды отсюда пойдут под ним же туда. Только
     // у устройства, которое не было конторой, как у копии: у конторы пароль
