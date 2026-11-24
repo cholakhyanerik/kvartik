@@ -1551,4 +1551,7 @@ macro_rules! en {
     (SyncBackTook) => { "The other device’s code back was taken." };
     (SyncBackOther) => { "This code is not a reply to the code from here: receive it under “Receive here”." };
     (SyncBackSkipped) => { "Ledger files and logos don't go into the code back; changed ones: {}. A file code from “Send from here” or a backup file will carry them." };
+    (BackupFromFolder) => { "From the automatic backup folder…" };
+    (BackupFolderEmpty) => { "There are no Kvartik automatic backups in this folder. Choose the “Kvartik” folder they were saved to, or the folder it is in." };
+    (BackupFolderUnread) => { "The browser didn't let the app read this folder. Choose it again or choose a backup file." };
 }

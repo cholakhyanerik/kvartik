@@ -139,18 +139,61 @@ pub fn file_name(day: Date, tag: DeviceTag) -> String {
 /// (шапка модуля); `None` — имя не его: чужое, другого устройства или
 /// похожее, но не по образцу целиком.
 pub fn day_of(name: &str, tag: DeviceTag) -> Option<Date> {
+    named(name).filter(|named| named.tag == tag).map(|named| named.day)
+}
+
+/// Файл автокопии любого устройства: день, метка и часть.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Named {
+    pub day: Date,
+    pub tag: DeviceTag,
+    /// Номер части и их число; `None` — копия одним файлом.
+    pub part: Option<(u16, u16)>,
+}
+
+/// Файл автокопии по имени целиком — как его пишут [`file_name`]
+/// и `backup::part_file_name`, — любого устройства; `None` — имя не
+/// автокопии или похожее, но не по образцу.
+pub fn named(name: &str) -> Option<Named> {
     let rest = name.strip_prefix(PREFIX)?.strip_suffix(SUFFIX)?;
     let (day, mark) = rest.split_at_checked(10)?;
     let mark = mark.strip_prefix('-')?;
-    let part = match mark.split_at_checked(4) {
-        Some((mark, "")) => mark == tag.as_str(),
-        Some((mark, part)) => {
-            mark == tag.as_str() && part.strip_prefix('-').and_then(super::backup::part_of_name).is_some()
-        }
-        None => false,
+    let (tag, part) = match mark.split_at_checked(4)? {
+        (tag, "") => (tag, None),
+        (tag, part) => (tag, Some(super::backup::part_of_name(part.strip_prefix('-')?)?)),
     };
-    part.then_some(())?;
-    Date::from_iso(day)
+    Some(Named {
+        day: Date::from_iso(day)?,
+        tag: DeviceTag::parse(tag)?,
+        part,
+    })
+}
+
+/// Какие файлы папки восстановить (задача 124, п. 20): копию самого свежего
+/// файла автокопии — все её части по порядку номеров. Свежий — по моменту
+/// изменения файла, а не по дню в имени: дню верить нельзя ([`stale`]),
+/// а в общую папку облака пишут два компьютера, и у обоих сегодняшний день.
+/// Части той же копии — того же дня и устройства и с тем же числом частей:
+/// прежняя копия дня, которую не убрали, сюда не попадёт. `files` — имя
+/// и момент изменения файла в миллисекундах; чужие имена не берутся. Пусто —
+/// автокопий в папке нет.
+pub fn newest(files: &[(String, i64)]) -> Vec<&str> {
+    let ours: Vec<(Named, i64, &str)> = files
+        .iter()
+        .filter_map(|(name, at)| Some((named(name)?, *at, name.as_str())))
+        .collect();
+    // Равные моменты — имя побольше: выбор не зависит от порядка в папке.
+    let Some(&(last, _, _)) = ours.iter().max_by(|a, b| a.1.cmp(&b.1).then_with(|| a.2.cmp(b.2))) else {
+        return Vec::new();
+    };
+    let of = |named: &Named| named.part.map(|(_, of)| of);
+    let mut copy: Vec<(u16, &str)> = ours
+        .iter()
+        .filter(|(named, _, _)| named.day == last.day && named.tag == last.tag && of(named) == of(&last))
+        .map(|(named, _, name)| (named.part.map_or(1, |(number, _)| number), *name))
+        .collect();
+    copy.sort_unstable();
+    copy.into_iter().map(|(_, name)| name).collect()
 }
 
 /// Файлы этого устройства, которые пора убрать: все свои не позже дня

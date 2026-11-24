@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.190",
+      "date": "2026-11-24",
+      "hy": [
+        "Պատճենը կարելի է վերականգնել ավտոմատ պատճենների թղթապանակից (Chrome և Edge համակարգչում). ընտրեք «Kvartik» թղթապանակը կամ այն թղթապանակը, որտեղ այն գտնվում է, և կվերականգնվի ամենաթարմ պատճենը՝ իր բոլոր մասերով։"
+      ],
+      "ru": [
+        "Копию можно восстановить прямо из папки автокопий (Chrome и Edge на компьютере): выберите папку «Kvartik» или ту, где она лежит, — и ляжет самая свежая копия со всеми частями."
+      ],
+      "en": [
+        "A backup can now be restored straight from the automatic backup folder (Chrome and Edge on a computer): choose the “Kvartik” folder or the folder it is in, and the newest backup lands with all its parts."
+      ]
+    },
+    {
       "version": "0.0.189",
       "date": "2026-11-24",
       "hy": [
@@ -266,19 +279,6 @@
       ],
       "en": [
         "Two edits of one record on two devices no longer erase each other: a payment marked on the phone and an SRC mark set on the computer are both kept after a transfer code or a backup — each field comes from the device where it was changed last."
-      ]
-    },
-    {
-      "version": "0.0.170",
-      "date": "2026-11-22",
-      "hy": [
-        "Ծրագրում ոչինչ չի փոխվել. կայքում հայտնվել է «Շրջանառության հարկ — դրույքաչափեր և ժամկետներ» էջը՝ դրույքաչափերով, շեմով, ժամկետներով, հաշվարկի օրինակով և ԿԲ փոխարժեքի կանոնով, յուրաքանչյուր թվի մոտ՝ օրենքի հոդվածը։"
-      ],
-      "ru": [
-        "В программе ничего не изменилось: на сайте появилась страница «Налог с оборота — ставки и сроки» со ставками, порогом, сроками, примером расчёта и правилом курса ЦБ, у каждого числа — статья закона."
-      ],
-      "en": [
-        "Nothing changed in the app: the website has a new page, “Turnover tax — rates and deadlines”, with rates, the threshold, deadlines, a worked example and the CBA rate rule, each number with its article of law."
       ]
     }
   ]

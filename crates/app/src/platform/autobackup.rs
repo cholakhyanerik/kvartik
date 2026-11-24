@@ -223,7 +223,20 @@ fn readwrite() -> Object {
 /// для него последнюю выбранную папку и открывает выбор на ней;
 /// `startIn` — «Документы», если такой памяти ещё нет.
 pub fn pick() -> impl Future<Output = Result<FileSystemDirectoryHandle, PickError>> + 'static {
-    let options = readwrite();
+    pick_with(readwrite())
+}
+
+/// Открыть выбор папки, чтобы восстановить из неё автокопию (задача 124,
+/// п. 20): только чтение — браузер спрашивает «просмотреть файлы», а не
+/// «править». Выбор открывается на папке автокопии: `id` тот же. Зовётся,
+/// как [`pick`], в самом обработчике нажатия.
+pub fn pick_to_read() -> impl Future<Output = Result<FileSystemDirectoryHandle, PickError>> + 'static {
+    let options = Object::new();
+    let _ = Reflect::set(&options, &"mode".into(), &"read".into());
+    pick_with(options)
+}
+
+fn pick_with(options: Object) -> impl Future<Output = Result<FileSystemDirectoryHandle, PickError>> + 'static {
     let _ = Reflect::set(&options, &"id".into(), &"kvartik-autobackup".into());
     let _ = Reflect::set(&options, &"startIn".into(), &"documents".into());
     let started = web_sys::window()
@@ -341,6 +354,52 @@ pub async fn names(folder: &FileSystemDirectoryHandle, prefix: &str) -> Result<V
             }
         }
     }
+}
+
+/// Папка `name` внутри `folder`, если она есть: не создаётся — восстановление
+/// только читает (задача 124, п. 20). Нет её или так назван файл — `None`.
+///
+/// Вызовы — те же, что у записи, с параметрами без `create`, а `getFile`
+/// и `lastModified` ([`modified`]) — через `Reflect`: своя привязка `web-sys`
+/// прибавила бы импорт главному wasm, хотя зовёт её только часть копии
+/// (Правило 6, «Импорт JS — в главном wasm»).
+pub async fn existing_subfolder(folder: &FileSystemDirectoryHandle, child: &str) -> Result<Option<FileSystemDirectoryHandle>, FolderError> {
+    match folder.get_directory_handle_with_options(child, &FileSystemGetDirectoryOptions::new()).await {
+        Ok(found) => found.dyn_into().map(Some).map_err(|value| failure("getDirectoryHandle", &value)),
+        Err(error) if matches!(name(&error).as_deref(), Some("NotFoundError" | "TypeMismatchError")) => Ok(None),
+        Err(error) => Err(failure("getDirectoryHandle", &error)),
+    }
+}
+
+/// Файлы папки, чьё имя начинается с `prefix`, — `File` браузера: имя
+/// и момент изменения сразу, а байты — когда их прочитают, по одному
+/// (`platform::file::read`).
+pub async fn files(folder: &FileSystemDirectoryHandle, prefix: &str) -> Result<Vec<web_sys::File>, FolderError> {
+    let options = FileSystemGetFileOptions::new();
+    let mut found = Vec::new();
+    for file in names(folder, prefix).await? {
+        let handle: FileSystemFileHandle = settle("getFileHandle", folder.get_file_handle_with_options(&file, &options)).await?;
+        let get = Reflect::get(&handle, &"getFile".into()).map_err(|error| failure("getFile", &error))?;
+        let started = get
+            .unchecked_into::<js_sys::Function>()
+            .call0(&handle)
+            .map_err(|error| failure("getFile", &error))?;
+        let file = started
+            .unchecked_into::<Promise>()
+            .await
+            .map_err(|error| failure("getFile", &error))?;
+        // `getFile` отдаёт `File`: проверка `instanceof` стоила бы импорта.
+        found.push(file.unchecked_into());
+    }
+    Ok(found)
+}
+
+/// Момент изменения файла в миллисекундах; не прочитан — ноль.
+pub fn modified(file: &web_sys::File) -> i64 {
+    Reflect::get(file, &"lastModified".into())
+        .ok()
+        .and_then(|value| value.as_f64())
+        .map_or(0, |millis| millis as i64)
 }
 
 /// Убрать файл `file` из папки. Его уже нет — тоже хорошо, и не повод для

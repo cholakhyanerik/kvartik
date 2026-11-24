@@ -948,6 +948,13 @@ section > .button + p {
   margin-top: var(--space-6);
 }
 
+/* «Из папки автокопий…» рядом с «Восстановить из копии…» (задача 124,
+   п. 20): в узком окне подпись в две строки — слева, как у выбора файла. */
+button.link.from-folder {
+  justify-content: start;
+  text-align: start;
+}
+
 /* Форма: поля друг под другом, подпись над полем. */
 form {
   display: grid;

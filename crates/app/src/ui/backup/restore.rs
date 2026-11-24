@@ -39,6 +39,7 @@ use wasm_bindgen::JsCast;
 use web_sys::File;
 
 use super::*;
+use crate::platform::autobackup as folders;
 
 /// Ключ прошлой части копии (задача 117): у частей одной копии один замок.
 /// Живёт, пока открыт экран копии и легли не все части: ключа не сохраняет
@@ -348,6 +349,31 @@ pub(super) fn RestoreBackup(
         next();
     };
 
+    // Из папки автокопий (задача 124, п. 20) — Chrome и Edge на компьютере:
+    // самая свежая копия со всеми частями — той же цепочкой, что выбранные
+    // разом файлы. Выбор папки — в самом нажатии, до первого `await`.
+    let from_folder = move |_: MouseEvent| {
+        let picking = folders::pick_to_read();
+        leptos::task::spawn_local(async move {
+            let folder = match picking.await {
+                Ok(folder) => folder,
+                Err(folders::PickError::Cancelled) => return,
+                Err(folders::PickError::Failed) => return restoring.set(Restoring::Failed(Problem::Say(Key::AutoPickFailed))),
+            };
+            restoring.set(Restoring::Busy);
+            let found = newest_in(&folder).await;
+            if !matches!(&found, Ok(files) if !files.is_empty()) {
+                // Итог прошлой цепочки к этой папке не относится.
+                chain.set_value(Chain::default());
+            }
+            match found {
+                Ok(files) if files.is_empty() => restoring.set(Restoring::Failed(Problem::Say(Key::BackupFolderEmpty))),
+                Ok(files) => take(files),
+                Err(_) => restoring.set(Restoring::Failed(Problem::Say(Key::BackupFolderUnread))),
+            }
+        });
+    };
+
     // Файлы — при выборе: читает их цепочка по одному (`platform::file::read`).
     let on_file = move |event: Event| {
         let input: HtmlInputElement = event_target(&event);
@@ -606,6 +632,12 @@ pub(super) fn RestoreBackup(
                         on:change=on_file
                     />
                 </label>
+                // Папка автокопий — там, где автокопия есть (задача 124, п. 20).
+                {folders::available().then(|| view! {
+                    <button type="button" class="link from-folder" on:click=from_folder>
+                        <span class="label">{tr(lang, Key::BackupFromFolder)}</span>
+                    </button>
+                })}
                 <p class="hint drop-hint">{tr(lang, Key::BackupDropHint)}</p>
                 {match state {
                     Restoring::Done(restored, after, laid) => Some(landed_words(restored, after, laid)),
@@ -653,6 +685,26 @@ pub(super) fn RestoreBackup(
             .into_any(),
         }}
     }
+}
+
+/// Файлы самой свежей автокопии (`autobackup::newest`) в выбранной папке, а нет
+/// их там — в её «Kvartik»: выбирают и саму папку автокопии, и ту, где она
+/// лежит. По порядку частей.
+async fn newest_in(folder: &web_sys::FileSystemDirectoryHandle) -> Result<Vec<File>, folders::FolderError> {
+    use kvartik_core::format::autobackup::{FOLDER, PREFIX, newest, own_folder};
+    let mut found = folders::files(folder, PREFIX).await?;
+    if found.is_empty()
+        && !own_folder(&folder.name())
+        && let Some(own) = folders::existing_subfolder(folder, FOLDER).await?
+    {
+        found = folders::files(&own, PREFIX).await?;
+    }
+    // Момент изменения — миллисекунды, целым числом.
+    let named: Vec<(String, i64)> = found.iter().map(|file| (file.name(), folders::modified(file))).collect();
+    Ok(newest(&named)
+        .into_iter()
+        .filter_map(|name| found.iter().find(|file| file.name() == name).cloned())
+        .collect())
 }
 
 /// Расшифровать копию и слить с базой — или остановиться на вопросе: копия

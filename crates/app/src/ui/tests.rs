@@ -2472,3 +2472,166 @@ async fn the_skip_link_leads_past_the_menu() {
     documents::forget_device();
     assert!(wrong.is_empty(), "«К содержимому»: {wrong:#?}");
 }
+
+/// Копия базы программы, как её пишет автокопия, — тексты файлов: одним или
+/// частями по `limit` открытого текста.
+async fn sealed_sheets(password: &str, limit: usize) -> Vec<String> {
+    use crate::platform::crypto;
+    use kvartik_core::format::backup::{Header, KDF_ITERATIONS, KINDS, SALT_BYTES};
+    let store = crate::store::Store::open(|_| {}).await.expect("база открыта");
+    let salt = crypto::random(SALT_BYTES).expect("соль");
+    let key = crypto::derive(&crypto::normalize(password), &salt, KDF_ITERATIONS).await.expect("ключ");
+    let header = Header::new(env!("CARGO_PKG_VERSION"), crate::platform::clock::now());
+    let sealing = crate::store::backup::Sealing {
+        header: &header,
+        key: &key,
+        salt: &salt,
+        iterations: KDF_ITERATIONS,
+        limit,
+    };
+    let made = crate::store::backup::make(&store, KINDS, &sealing).await;
+    made.map(|made| made.sheets.into_iter().map(|sheet| sheet.text).collect()).unwrap_or_default()
+}
+
+/// База программы с нуля: профиль и клиенты `clients`.
+async fn seed_clients(profile: &Profile, clients: &[&Client]) {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let mut writes = Writes::default();
+    writes.insert(profile);
+    for client in clients {
+        writes.insert(*client);
+    }
+    documents::commit(writes).await;
+}
+
+/// Восстановить из папки автокопий (задача 124, п. 20). Окна выбора папки
+/// в headless-браузере нет, поэтому выбор отдаёт личную файловую систему
+/// сайта (OPFS) — настоящую папку браузера. Папка без автокопий — словами;
+/// из «Kvartik» внутри выбранной ложится самая свежая копия по моменту файла,
+/// а не по дню в имени, всеми частями одной цепочкой с паролем один раз,
+/// а прежняя копия другого компьютера не ложится.
+#[wasm_bindgen_test]
+async fn the_newest_auto_backup_lands_from_its_folder() {
+    use crate::platform::autobackup as folders;
+    let lang = Lang::Ru;
+    let password = "Пароль автокопий задачи 124 из папки";
+    let window = web_sys::window().expect("окно");
+    let root: web_sys::FileSystemDirectoryHandle = window
+        .navigator()
+        .storage()
+        .get_directory()
+        .await
+        .expect("папка сайта")
+        .unchecked_into();
+    let clear = |root: web_sys::FileSystemDirectoryHandle| async move {
+        let options = web_sys::FileSystemRemoveOptions::new();
+        options.set_recursive(true);
+        let _ = root.remove_entry_with_options("Kvartik", &options).await;
+    };
+    clear(root.clone()).await;
+    let picker = js_sys::Function::new_no_args("return navigator.storage.getDirectory();");
+    js_sys::Reflect::set(&window, &"showDirectoryPicker".into(), &picker).expect("выбор папки подменён");
+    let mut wrong = Vec::new();
+
+    // Прежняя копия другого компьютера — с клиентом, которого в свежей нет;
+    // свежая — частями, по клиенту на часть.
+    let now = crate::platform::clock::now();
+    let profile = Profile::save(None, documents::profile(), now).expect("годный профиль").expect("новый");
+    let named = |name: &str| {
+        let data = ClientData {
+            name: Line::new(name).expect("имя"),
+            ..documents::acme()
+        };
+        Client::create(data, now).expect("годный клиент")
+    };
+    let (old_client, first, second) = (named("Old Client Ltd"), named("Beispiel GmbH"), named("Example LLC"));
+    seed_clients(&profile, &[&old_client]).await;
+    let old = sealed_sheets(password, kvartik_core::format::backup::PART_PLAIN_BYTES).await;
+    seed_clients(&profile, &[&first, &second]).await;
+    let fresh = sealed_sheets(password, 1).await;
+    if old.len() != 1 || fresh.len() < 2 {
+        wrong.push(format!("копии не те: {} и {} файлов", old.len(), fresh.len()));
+    }
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let device = Device::new();
+    device.set_ui_lang(lang);
+
+    let (host, mounted) = mount_at("#/backup");
+    let mut from_folder = None;
+    for _ in 0..100 {
+        from_folder = button(&host, &[t(lang, Key::BackupFromFolder)]);
+        if from_folder.is_some() {
+            break;
+        }
+        sleep(50).await;
+    }
+    match &from_folder {
+        Some(button) => button.click(),
+        None => wrong.push("нет «Из папки автокопий»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::BackupFolderEmpty)).await {
+        wrong.push(format!("о папке без автокопий — молча: «{}»", section_text(&host, "backup")));
+    }
+
+    // Прежняя копия записана раньше, хотя день в её имени позже.
+    match folders::subfolder(&root, "Kvartik").await {
+        Ok(kvartik) => {
+            let mut written = folders::write(&kvartik, "kvartik-auto-2026-11-03-1a2b.json", old.concat().as_bytes()).await.is_ok();
+            sleep(30).await;
+            for (at, text) in fresh.iter().enumerate().rev() {
+                let name = format!("kvartik-auto-2026-11-02-00ff-{}of{}.json", at + 1, fresh.len());
+                written &= folders::write(&kvartik, &name, text.as_bytes()).await.is_ok();
+            }
+            if !written {
+                wrong.push("файлы автокопий не записались".to_owned());
+            }
+        }
+        Err(error) => wrong.push(format!("папки «Kvartik» нет: {error:?}")),
+    }
+    if let Some(button) = button(&host, &[t(lang, Key::BackupFromFolder)]) {
+        button.click();
+    }
+    let mut asked = None;
+    for _ in 0..200 {
+        asked = field(&host, t(lang, Key::BackupFilePassword), 0);
+        if asked.is_some() {
+            break;
+        }
+        sleep(50).await;
+    }
+    match asked {
+        Some(input) => {
+            type_into(&input, password);
+            match button(&host, &[t(lang, Key::BackupRestore)]) {
+                Some(restore) => restore.click(),
+                None => wrong.push("нет «Восстановить»".to_owned()),
+            }
+        }
+        None => wrong.push(format!("пароль копии не спрошен: «{}»", section_text(&host, "backup"))),
+    }
+    let of = fresh.len().to_string();
+    let all = fill(t(lang, Key::BackupPartsAll), &[&of, &of]);
+    if !wait_for(&host, &all).await {
+        wrong.push(format!("легли не все части: «{}»", section_text(&host, "backup")));
+    }
+    match stored_clients().await {
+        Ok(clients) => {
+            let has = |client: &Client| clients.iter().any(|known| known.id() == client.id());
+            if !has(&first) || !has(&second) {
+                wrong.push("свежая копия легла не вся".to_owned());
+            }
+            if has(&old_client) {
+                wrong.push("легла прежняя копия другого компьютера".to_owned());
+            }
+        }
+        Err(error) => wrong.push(format!("клиенты не читаются: {error:?}")),
+    }
+    drop(mounted);
+    host.remove();
+    let _ = js_sys::Reflect::delete_property(&window, &"showDirectoryPicker".into());
+    clear(root).await;
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "из папки автокопий: {wrong:#?}");
+}

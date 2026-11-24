@@ -329,3 +329,86 @@ fn device_tag_is_four_lowercase_hex_digits() {
     let accepted: Vec<&str> = bad.into_iter().filter(|text| DeviceTag::parse(text).is_some()).collect();
     assert!(accepted.is_empty(), "приняты: {accepted:?}");
 }
+
+/// Имя файла — с моментом его изменения, как их даёт папка.
+fn files(list: &[(&str, i64)]) -> Vec<(String, i64)> {
+    list.iter().map(|(name, at)| ((*name).to_owned(), *at)).collect()
+}
+
+#[test]
+fn any_device_names_are_read() {
+    assert_eq!(
+        named("kvartik-auto-2026-11-03-1a2b.json"),
+        Some(Named { day: day(2026, 11, 3), tag: tag("1a2b"), part: None })
+    );
+    assert_eq!(
+        named("kvartik-auto-2026-11-03-00ff-2of3.json"),
+        Some(Named { day: day(2026, 11, 3), tag: tag("00ff"), part: Some((2, 3)) })
+    );
+    for foreign in [
+        "kvartik-2026-11-03.json",
+        "kvartik-auto-2026-11-03-1a2b.json.crswap",
+        "kvartik-auto-2026-11-03-1A2B.json",
+        "kvartik-auto-2026-11-03-1a2b-0of3.json",
+        "kvartik-auto-2026-11-03-1a2b-4of3.json",
+        "kvartik-auto-2026-11-03-1a2b-1of3 (1).json",
+        "kvartik-auto-2026-02-30-1a2b.json",
+        "kvartik-auto-2026-11-03-1a2.json",
+    ] {
+        assert_eq!(named(foreign), None, "{foreign}");
+    }
+}
+
+#[test]
+fn the_newest_copy_comes_whole_and_in_order() {
+    // Части — не по порядку папки, а по номерам.
+    let folder = files(&[
+        ("kvartik-auto-2026-11-03-1a2b-3of3.json", 30),
+        ("kvartik-auto-2026-11-03-1a2b-1of3.json", 31),
+        ("kvartik-auto-2026-11-02-1a2b.json", 10),
+        ("kvartik-auto-2026-11-03-1a2b-2of3.json", 32),
+        ("notes.txt", 99),
+    ]);
+    assert_eq!(
+        newest(&folder),
+        [
+            "kvartik-auto-2026-11-03-1a2b-1of3.json",
+            "kvartik-auto-2026-11-03-1a2b-2of3.json",
+            "kvartik-auto-2026-11-03-1a2b-3of3.json",
+        ]
+    );
+    // Одним файлом.
+    let folder = files(&[("kvartik-auto-2026-11-02-1a2b.json", 10), ("kvartik-auto-2026-11-01-1a2b.json", 5)]);
+    assert_eq!(newest(&folder), ["kvartik-auto-2026-11-02-1a2b.json"]);
+    assert!(newest(&files(&[("kvartik-2026-11-03.json", 1)])).is_empty());
+    assert!(newest(&[]).is_empty());
+}
+
+#[test]
+fn the_newest_is_by_the_file_not_by_the_day_in_its_name() {
+    // Два компьютера в одной папке облака, у второго день в имени раньше —
+    // часы ушли назад, — но записан он позже.
+    let folder = files(&[
+        ("kvartik-auto-2026-11-03-1a2b.json", 100),
+        ("kvartik-auto-2026-11-02-00ff.json", 200),
+    ]);
+    assert_eq!(newest(&folder), ["kvartik-auto-2026-11-02-00ff.json"]);
+}
+
+#[test]
+fn an_older_copy_of_the_same_day_stays_out() {
+    // Утром копия была из трёх частей, к вечеру — из двух, а утренние
+    // не убраны: берётся вечерняя, и только её части.
+    let folder = files(&[
+        ("kvartik-auto-2026-11-03-1a2b-1of3.json", 10),
+        ("kvartik-auto-2026-11-03-1a2b-2of3.json", 11),
+        ("kvartik-auto-2026-11-03-1a2b-3of3.json", 12),
+        ("kvartik-auto-2026-11-03-1a2b-1of2.json", 50),
+        ("kvartik-auto-2026-11-03-1a2b-2of2.json", 51),
+        ("kvartik-auto-2026-11-03-00ff-1of2.json", 20),
+    ]);
+    assert_eq!(
+        newest(&folder),
+        ["kvartik-auto-2026-11-03-1a2b-1of2.json", "kvartik-auto-2026-11-03-1a2b-2of2.json"]
+    );
+}
