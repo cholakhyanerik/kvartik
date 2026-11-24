@@ -581,18 +581,34 @@ pub fn InstallSection(lang: ReadSignal<Lang>, program: Program) -> impl IntoView
 /// в базе есть данные, — ровно когда переносить есть что, — а в главном wasm
 /// этот блок стоил бы ему около килобайта (Правило 1; замер задачи 124).
 /// `browser` — чтобы тест окна мог назвать любой.
+///
+/// Навсегда она не стоит (ревью задачи 124): «Скрыть» убирает её, а первый
+/// код, сделанный на этой вкладке для переноса, — тоже: записью устройства
+/// (`Device::carry_closed`), и после перезагрузки.
 #[component]
 pub fn CarryCard(lang: ReadSignal<Lang>, browser: Browser) -> impl IntoView {
-    (browser.install_first() && !browser::installed()).then(|| {
-        view! {
-            <div class="notice">
-                <p>{tr(lang, Key::InstallCarry)}</p>
-                <a class="button secondary" href=Screen::Sync.href()>
-                    <span class="label">{tr(lang, Key::InstallCarryButton)}</span>
-                </a>
-            </div>
-        }
-    })
+    let shown = RwSignal::new(browser.install_first() && !browser::installed() && !Device::new().carry_closed());
+    let hide = move |_| {
+        Device::new().set_carry_closed();
+        shown.set(false);
+    };
+    move || {
+        shown.get().then(|| {
+            view! {
+                <div class="notice">
+                    <p>{tr(lang, Key::InstallCarry)}</p>
+                    <div class="actions">
+                        <a class="button secondary" href=Screen::Sync.href()>
+                            <span class="label">{tr(lang, Key::InstallCarryButton)}</span>
+                        </a>
+                        <button type="button" class="link" on:click=hide>
+                            <span class="label">{tr(lang, Key::InstallCarryHide)}</span>
+                        </button>
+                    </div>
+                </div>
+            }
+        })
+    }
 }
 
 #[cfg(test)]

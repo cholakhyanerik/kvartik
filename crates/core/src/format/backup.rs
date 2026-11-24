@@ -1770,6 +1770,59 @@ pub fn client_file_name(tin: Option<&Tin>, today: Date) -> String {
     )
 }
 
+/// Похоже ли имя выбранного файла на копию для клиента
+/// ([`client_file_name`]): `kvartik-<ՀՎՀՀ или ip>-<день>.json`, и частями —
+/// `…-1of3.json`. Окно по нему не ставит в форму её пароля логин для менеджера
+/// паролей (задача 124): пароль такой копии — разовый, и менеджер предложил бы
+/// записать его поверх пароля копий. Имя файла назначает не программа, а
+/// человек и браузер: прощаются пробелы по краям, расширение любым регистром
+/// и пометка копии при повторном скачивании — `(1)`, ` (2)` у Chrome
+/// и Firefox, ` 2` у «Файлов» iPhone. Ошибка в обе стороны безвредна: окно
+/// спросит пароль так же, только с логином или без.
+pub fn is_client_file_name(name: &str) -> bool {
+    let name = name.trim();
+    let Some(stem) = name
+        .len()
+        .checked_sub(".json".len())
+        .filter(|&at| name.is_char_boundary(at) && name[at..].eq_ignore_ascii_case(".json"))
+        .map(|at| &name[..at])
+    else {
+        return false;
+    };
+    let stem = without_copy_mark(stem.trim_end());
+    // Часть копии — `-1of3` в конце.
+    let stem = match stem.rsplit_once('-') {
+        Some((head, tail)) if part_of_name(tail).is_some() => head,
+        _ => stem,
+    };
+    let Some(rest) = stem.strip_prefix("kvartik-") else {
+        return false;
+    };
+    let pieces: Vec<&str> = rest.split('-').collect();
+    let digits = |text: &str, len: usize| text.len() == len && text.bytes().all(|byte| byte.is_ascii_digit());
+    match pieces.as_slice() {
+        [who, year, month, day] => {
+            (*who == "ip" || digits(who, Tin::DIGITS)) && digits(year, 4) && digits(month, 2) && digits(day, 2)
+        }
+        _ => false,
+    }
+}
+
+/// Имя без пометки повторного скачивания в конце: `(1)`, ` (2)`, ` 2`.
+fn without_copy_mark(stem: &str) -> &str {
+    let numbered = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
+    if let Some(inner) = stem.strip_suffix(')')
+        && let Some((head, number)) = inner.rsplit_once('(')
+        && numbered(number)
+    {
+        return head.trim_end();
+    }
+    match stem.rsplit_once(' ') {
+        Some((head, number)) if numbered(number) => head.trim_end(),
+        _ => stem,
+    }
+}
+
 /// Копия всех ИП (задача 38): в ней записи конторы — ИП списка или ключ
 /// «Pro» — или записи с меткой базы. Такую окно кладёт по ИП
 /// (`format::office::route`), а не в открытую базу: запись конторы в базе ИП

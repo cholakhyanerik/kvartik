@@ -512,6 +512,20 @@ impl Device {
         self.set("sync_last", &at.unix_millis().to_string())
     }
 
+    /// Убрана ли карточка переноса данных вкладки в установленную программу
+    /// (`ui::pwa::CarryCard`, задача 124): «Скрыть» или первый код, сделанный
+    /// на этой вкладке для переноса. Своя запись, а не `sync_last`: тот ставит
+    /// и обычный обмен двух устройств.
+    pub fn carry_closed(&self) -> bool {
+        self.get("carry_closed").is_some()
+    }
+
+    /// Убрать карточку переноса. `false` — `localStorage` отказал: она
+    /// встанет при следующем открытии.
+    pub fn set_carry_closed(&self) -> bool {
+        self.set("carry_closed", "1")
+    }
+
     /// База ИП, открытая на устройстве последней, — для новой вкладки;
     /// `None` — не помнит.
     pub fn base(&self) -> Option<String> {

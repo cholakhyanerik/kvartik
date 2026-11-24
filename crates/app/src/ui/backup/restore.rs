@@ -386,6 +386,7 @@ pub(super) fn RestoreBackup(
     });
 
     let submit = move |event: SubmitEvent| {
+        conceal(&event, shown);
         event.prevent_default();
         let Restoring::Password(sealed, _) = restoring.get_untracked() else {
             return;
@@ -522,6 +523,11 @@ pub(super) fn RestoreBackup(
                         &[&i18n::integer(lang, i64::from(part.number())), &i18n::integer(lang, i64::from(part.of()))],
                     )
                 });
+                // Копия для клиента — без логина (ревью задачи 124): её пароль
+                // разовый, и менеджер паролей предложил бы «Обновить пароль»
+                // записи Kvartik — согласие заменило бы в нём пароль копий
+                // чужим. Узнаётся она по имени файла (`backup::is_client_file_name`).
+                let login = !chain.with_value(|chain| backup::is_client_file_name(&chain.name));
                 view! {
                     {chain_at}
                     {info.map(|info| view! { <p>{info}</p> })}
@@ -529,7 +535,7 @@ pub(super) fn RestoreBackup(
                     // Легла — форма сменяется итогом: так менеджер паролей
                     // видит, что она отправлена (`ui/password.rs`).
                     <form class="backup" on:submit=submit>
-                        <PasswordLogin />
+                        {login.then(|| view! { <PasswordLogin /> })}
                         <PasswordInput lang label=Key::BackupFilePassword value=password shown />
                         <PasswordShow lang shown />
                         {problem.map(|problem| view! {

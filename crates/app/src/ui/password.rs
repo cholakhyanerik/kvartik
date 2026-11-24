@@ -24,7 +24,9 @@
 //! зовут (Правило 1).
 
 use kvartik_core::i18n::{Key, Lang};
+use leptos::ev::SubmitEvent;
 use leptos::prelude::*;
+use wasm_bindgen::JsCast;
 // `autocorrect` (Safari) нет в списке атрибутов Leptos.
 use leptos::tachys::html::attribute::custom::custom_attribute;
 
@@ -65,6 +67,25 @@ pub fn PasswordInput(
                 {..custom_attribute("autocorrect", "off")}
             />
         </label>
+    }
+}
+
+/// Перед отправкой формы — снова точки (ревью задачи 124): при отмеченном
+/// «Показать пароль» поле текстовое, и браузер запомнил бы фразу как обычный
+/// ввод (GOV.UK Design System, «Password input»: при отправке вернуть тип
+/// `password`; сверено 2026-11-24). Флажок снимается, а тип ставится и прямо
+/// в DOM: Leptos сменит его следующей микрозадачей (`RenderEffect`, по
+/// исходникам reactive_graph 0.2.16), а браузер смотрит на поля в самом
+/// `submit`. Звать первой строкой обработчика отправки.
+pub fn conceal(event: &SubmitEvent, shown: RwSignal<bool>) {
+    shown.set(false);
+    let Some(form) = event.target().and_then(|target| target.dyn_into::<web_sys::Element>().ok()) else {
+        return;
+    };
+    while let Ok(Some(field)) = form.query_selector(r#"input[type="text"][autocomplete$="password"]"#) {
+        if field.set_attribute("type", "password").is_err() {
+            break;
+        }
     }
 }
 

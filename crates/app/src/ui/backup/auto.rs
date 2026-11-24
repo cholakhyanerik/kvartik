@@ -132,6 +132,7 @@ pub(super) fn AutoSection(lang: ReadSignal<Lang>, backups: Backups, forms: Forms
         repeat.set(String::new());
     };
     let enable = move |event: SubmitEvent| {
+        conceal(&event, shown);
         event.prevent_default();
         let Some((folder, place)) = chosen.get_value() else {
             return;
@@ -170,6 +171,7 @@ pub(super) fn AutoSection(lang: ReadSignal<Lang>, backups: Backups, forms: Forms
         });
     };
     let check = move |event: SubmitEvent| {
+        conceal(&event, shown_check);
         event.prevent_default();
         if busy.get_untracked() {
             return;

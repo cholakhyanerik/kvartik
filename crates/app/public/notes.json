@@ -1,6 +1,25 @@
 {
   "notes": [
     {
+      "version": "0.0.185",
+      "date": "2026-11-24",
+      "hy": [
+        "Safari-ի ներդիրից տեղադրված ծրագիր տեղափոխելիս, եթե տվյալները չեն տեղավորվում կոդում, ծրագիրն այլևս չի առաջարկում ավելի ուշ օր, այլ տանում է պատճենի ֆայլին. այդպես կտեղափոխվի ամբողջը՝ մատյանի ֆայլերով։ Նույն iPhone-ում կոդը պատճենվում է մեկ կոճակով՝ «Պատճենել ամբողջ կոդը»։",
+        "«Ցույց տալ գաղտնաբառը» նշված լինելու դեպքում գաղտնաբառը ձևից գնում է կրկին թաքցված, իսկ հաճախորդի պատճենը վերականգնելիս գաղտնաբառերի կառավարիչն այլևս չի առաջարկում փոխել պատճենների գաղտնաբառը։",
+        "«Վերջին փոխանակումը» պրոֆիլում նշվում է, երբ կոդն ընդունվել է, ոչ թե երբ այն պարզապես պատրաստվել է։"
+      ],
+      "ru": [
+        "При переносе из вкладки Safari в установленную программу код, в который не помещаются данные, больше не советует выбрать день позже, а ведёт на копию файлом: так переедет всё, с файлами книги. На том же iPhone код копируется одной кнопкой «Скопировать весь код».",
+        "Пароль с отмеченным «Показать пароль» уходит из формы снова скрытым, а восстановление копии для клиента больше не предлагает менеджеру паролей заменить пароль копий.",
+        "«Последний обмен» в профиле ставится, когда код приняли, а не когда его просто сделали."
+      ],
+      "en": [
+        "When you move from a Safari tab to the installed app and the data doesn’t fit in a code, the app no longer suggests a later day; it points to a backup file, so everything moves, ledger files included. On the same iPhone the code is copied with one button, “Copy the whole code”.",
+        "A password shown with “Show password” is hidden again when the form is sent, and restoring a client’s backup no longer offers the password manager to replace the backup password.",
+        "“Last exchange” in the profile is set when the code is taken, not when it is just made."
+      ]
+    },
+    {
       "version": "0.0.184",
       "date": "2026-11-24",
       "hy": [
@@ -257,19 +276,6 @@
       ],
       "en": [
         "A new “Another device” screen (Profile): changes move from one of your devices to another without a file or the internet. One makes a code under the backup password and shows it as QR codes and text; the other scans it with the camera or pastes the text and receives it — records merge like a backup. Ledger files and logos travel with a backup file."
-      ]
-    },
-    {
-      "version": "0.0.165",
-      "date": "2026-11-21",
-      "hy": [
-        "Թարմացվել է գաղտնիության քաղաքականությունը՝ 22.11.2026 խմբագրությամբ. 5-րդ կետում ասված է, ինչի համար է վաճառողը պահում կարծիքներով, հարցերով և առաջարկներով նամակները, և որ դրանք ջնջում է պատասխանից մեկ տարի անց։ Նախորդ խմբագրությունը մնում է կայքում՝ իր հասցեով։"
-      ],
-      "ru": [
-        "Обновлена политика конфиденциальности, редакция от 22.11.2026: в п. 5 сказано, для чего продавец держит письма с отзывами, вопросами и предложениями и что удаляет их через год после ответа. Прежняя редакция остаётся на сайте по своему адресу."
-      ],
-      "en": [
-        "The privacy policy has a new edition of November 22, 2026: section 5 now says what the seller uses letters with feedback, questions and suggestions for and that they are deleted a year after the reply. The earlier edition stays on the site at its own address."
       ]
     }
   ]

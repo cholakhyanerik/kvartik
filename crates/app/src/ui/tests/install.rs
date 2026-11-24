@@ -262,6 +262,53 @@ async fn install_offers_to_carry_the_tab_data() {
     use crate::ui::pwa::CarryCard;
     let lang = Lang::Ru;
     let mut wrong = Vec::new();
+    let forget = || {
+        if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
+            let _ = storage.remove_item("kvartik.carry_closed");
+        }
+    };
+    forget();
+    let mount_card = |browser: Browser| {
+        let page = web_sys::window().and_then(|window| window.document()).expect("документ есть");
+        let host: HtmlElement = page.create_element("div").expect("создаётся").unchecked_into();
+        page.body().expect("есть <body>").append_child(&host).expect("вставляется");
+        let mounted = leptos::mount::mount_to(host.clone(), move || {
+            let (lang, _) = signal(lang);
+            view! { <CarryCard lang browser /> }
+        });
+        (host, mounted)
+    };
+    // «Скрыть» убирает карточку — и после перезагрузки (ревью задачи 124):
+    // иначе она стояла бы на главном каждой вкладки Safari навсегда.
+    let (host, mounted) = mount_card(Browser::SafariTouch);
+    sleep(50).await;
+    let hide = host
+        .query_selector_all("button")
+        .ok()
+        .and_then(|buttons| {
+            (0..buttons.length())
+                .filter_map(|at| buttons.item(at))
+                .find(|button| button.text_content().is_some_and(|text| text.trim() == t(lang, Key::InstallCarryHide)))
+        })
+        .map(JsCast::unchecked_into::<HtmlElement>);
+    match hide {
+        Some(hide) => hide.click(),
+        None => wrong.push("у карточки переноса нет «Скрыть»".to_owned()),
+    }
+    sleep(50).await;
+    if host.text_content().unwrap_or_default().contains(t(lang, Key::InstallCarry)) {
+        wrong.push("«Скрыть» не убрало карточку".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    let (host, mounted) = mount_card(Browser::SafariTouch);
+    sleep(50).await;
+    if host.text_content().unwrap_or_default().contains(t(lang, Key::InstallCarry)) {
+        wrong.push("скрытая карточка переноса вернулась после перезагрузки".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    forget();
     let cases = [
         (Browser::SafariTouch, true),
         (Browser::OtherTouch, true),
@@ -270,13 +317,7 @@ async fn install_offers_to_carry_the_tab_data() {
         (Browser::ChromeAndroid, false),
     ];
     for (browser, offered) in cases {
-        let page = web_sys::window().and_then(|window| window.document()).expect("документ есть");
-        let host: HtmlElement = page.create_element("div").expect("создаётся").unchecked_into();
-        page.body().expect("есть <body>").append_child(&host).expect("вставляется");
-        let mounted = leptos::mount::mount_to(host.clone(), move || {
-            let (lang, _) = signal(lang);
-            view! { <CarryCard lang browser /> }
-        });
+        let (host, mounted) = mount_card(browser);
         sleep(50).await;
         let link = host.query_selector(r##"a[href="#/sync"]"##).ok().flatten();
         let said = host.text_content().unwrap_or_default().contains(t(lang, Key::InstallCarry));

@@ -2144,6 +2144,44 @@ fn client_file_name_carries_the_tin() {
     assert_eq!(client_file_name(None, day(2027, 1, 5)), "kvartik-ip-2027-01-05.json");
 }
 
+/// Копию для клиента узнают по имени файла (задача 124) — и частями,
+/// и с пометкой повторного скачивания, и с расширением любым регистром;
+/// копия программы, автокопия и чужие файлы — не она. Проверка собирает
+/// провалы и говорит их разом.
+#[test]
+fn a_client_copy_is_told_by_its_file_name() {
+    let tin = Tin::parse("07654321").expect("годный ՀՎՀՀ");
+    let named = client_file_name(Some(&tin), day(2026, 11, 24));
+    let parts = part_file_name(&named, Some(part(2, 3)));
+    let mut wrong = Vec::new();
+    for (name, client) in [
+        (named.as_str(), true),
+        (parts.as_str(), true),
+        ("kvartik-ip-2027-01-05.json", true),
+        ("kvartik-07654321-2026-11-24 (1).json", true),
+        ("kvartik-07654321-2026-11-24(2).json", true),
+        ("kvartik-07654321-2026-11-24 2.json", true),
+        ("kvartik-07654321-2026-11-24-1of2 (1).json", true),
+        ("  kvartik-07654321-2026-11-24.JSON ", true),
+        ("kvartik-2026-11-24.json", false),
+        ("kvartik-2026-11-24-1of3.json", false),
+        ("kvartik-2026-11-24 (1).json", false),
+        ("kvartik-auto-2026-11-24-ab12.json", false),
+        ("kvartik-1234567-2026-11-24.json", false),
+        ("kvartik-07654321-2026-11.json", false),
+        ("kvartik-07654321-2026-11-24.txt", false),
+        ("kvartik-07654321-2026-11-24", false),
+        ("Kvartik-07654321-2026-11-24.json", false),
+        ("отчёт.json", false),
+        ("", false),
+    ] {
+        if is_client_file_name(name) != client {
+            wrong.push(format!("«{name}»: {}", !client));
+        }
+    }
+    assert!(wrong.is_empty(), "копия для клиента по имени: {wrong:#?}");
+}
+
 /// Копию всех ИП узнают по записям конторы или по меткам базы; копия одного
 /// ИП — без них.
 #[test]

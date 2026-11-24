@@ -160,6 +160,7 @@ pub(super) fn ClientCopy(lang: ReadSignal<Lang>, backups: Backups, forms: Forms)
             || matches!(making.get(), Making::Busy)
     });
     let submit = move |event: SubmitEvent| {
+        conceal(&event, shown);
         event.prevent_default();
         if busy() {
             return;
@@ -291,6 +292,7 @@ pub(super) fn MakeBackup(
     });
 
     let submit = move |event: SubmitEvent| {
+        conceal(&event, shown);
         event.prevent_default();
         if busy() {
             return;

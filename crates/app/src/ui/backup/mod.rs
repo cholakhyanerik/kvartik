@@ -60,7 +60,7 @@ use web_sys::{FileSystemDirectoryHandle, HtmlInputElement};
 use super::form::Forms;
 use super::icon::{Icon, icon};
 use super::office::Office;
-use super::password::{PasswordInput, PasswordLogin, PasswordShow};
+use super::password::{PasswordInput, PasswordLogin, PasswordShow, conceal};
 use super::route::{Router, Screen};
 use super::split::{Task, screen, split};
 use super::storage::{Storage, error_key};

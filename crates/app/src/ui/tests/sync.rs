@@ -32,6 +32,7 @@ fn other_device() {
             "issue_elsewhere",
             "issue_at",
             "sync_last",
+            "carry_closed",
         ] {
             let _ = storage.remove_item(&format!("kvartik.{name}"));
         }
@@ -209,9 +210,32 @@ async fn a_code_carries_all_records_to_another_device() {
         wrong.push("база получателя не открылась".to_owned());
     }
     if let Some(input) = paste(&host, lang, &code, &mut wrong).await {
+        // Пароль показан, а отправлен — снова точками (ревью задачи 124):
+        // текстовое поле браузер запомнил бы как обычный ввод.
+        match host.query_selector("#sync form.sync label.choice input[type=checkbox]").ok().flatten() {
+            Some(show) => show.unchecked_into::<HtmlElement>().click(),
+            None => wrong.push("у пароля приёма нет «Показать пароль»".to_owned()),
+        }
+        for _ in 0..20 {
+            if input.type_() == "text" {
+                break;
+            }
+            sleep(10).await;
+        }
+        if input.type_() != "text" {
+            wrong.push(format!("«Показать пароль» не показал: {}", input.type_()));
+        }
         accept(&host, lang, &input, "не тот пароль совсем не тот");
         if !wait_for(&host, t(lang, Key::SyncWrongPassword)).await {
             wrong.push("неверный пароль не назван".to_owned());
+        }
+        let field = host
+            .query_selector(r#"#sync form.sync input[autocomplete="current-password"]"#)
+            .ok()
+            .flatten()
+            .map(JsCast::unchecked_into::<HtmlInputElement>);
+        if field.as_ref().is_none_or(|field| field.type_() != "password") {
+            wrong.push(format!("после отправки пароль виден: {:?}", field.map(|field| field.type_())));
         }
         match password_field(&host, t(lang, Key::SyncPassword)) {
             Some(input) => accept(&host, lang, &input, PASSWORD),
@@ -838,7 +862,8 @@ fn visible(host: &HtmlElement, selector: &str) -> bool {
 /// для менеджера паролей, что войдёт — строкой, своя подсказка пароля,
 /// а «Показать пароль» делает поле текстовым. Готовый код называет число
 /// QR-кодов и круг, круг стоит, пока выбрано «Принять сюда», а строка
-/// профиля называет день последнего обмена — сегодняшний.
+/// профиля называет день последнего обмена — не когда код сделан, а когда
+/// пришла квитанция, что его приняли (ревью задачи 124).
 #[wasm_bindgen_test]
 async fn the_screen_starts_with_a_choice() {
     let lang = Lang::Ru;
@@ -941,7 +966,8 @@ async fn the_screen_starts_with_a_choice() {
         _ => wrong.push("нет поля пароля или «Показать пароль»".to_owned()),
     }
     // Готовый код — с числом QR-кодов и кругом.
-    if make(&host, lang, true, &mut wrong).await.is_some() {
+    let code = make(&host, lang, true, &mut wrong).await;
+    if code.is_some() {
         let round = t(lang, Key::SyncMadeQr).split("{}").next().unwrap_or_default();
         if qr_caption(&host).is_some() && !section_text(&host, "sync").contains(round) {
             wrong.push(format!("у кода нет «{round}»"));
@@ -965,11 +991,46 @@ async fn the_screen_starts_with_a_choice() {
             wrong.push("код спрятан, а круг QR-кодов идёт".to_owned());
         }
     }
+    // Код сделан, но его никто не снял — обмена ещё не было (ревью задачи
+    // 124): строка профиля прежняя.
+    let profile_row = |host: &HtmlElement| {
+        host.query_selector(&format!(r#"#profile a.entry[href="{}"]"#, Screen::Sync.href()))
+            .ok()
+            .flatten()
+            .and_then(|row| row.text_content())
+            .unwrap_or_default()
+    };
+    // Строку экран перечитывает, когда показан профиль, — дождаться экрана,
+    // а не читать прежнюю строку.
     crate::platform::set_hash(&Screen::Profile.href());
-    let today = clock::today().expect("часы с датой");
-    let last = fill(t(lang, Key::SyncEntryLast), &[&kvartik_core::i18n::date(lang, today)]);
-    if !wait_for(&host, &last).await {
-        wrong.push(format!("строка профиля не сказала «{last}»: «{}»", section_text(&host, "profile")));
+    for _ in 0..100 {
+        if shown_screens(&host) == [Screen::Profile.id()] {
+            break;
+        }
+        sleep(10).await;
+    }
+    sleep(100).await;
+    if !profile_row(&host).contains(t(lang, Key::SyncEntryAbout)) {
+        wrong.push(format!("код никто не снял, а строка профиля: «{}»", profile_row(&host)));
+    }
+    // Квитанция «принято» — обмен был: строка называет день.
+    if let Some((header, key)) = match &code {
+        Some(code) => opened_code(code).await,
+        None => None,
+    } {
+        crate::platform::set_hash(&Screen::Sync.href());
+        choose_way(&host, true);
+        let whole = kvartik_core::format::sync::Receipt::new(&header, RecordId::random(), kvartik_core::format::sync::Continuity::Whole);
+        paste_reply(&host, &receipt_text(&key, &whole).await, &mut wrong).await;
+        if !wait_for(&host, t(lang, Key::SyncReceiptWhole)).await {
+            wrong.push("квитанция «всё дошло» не принята".to_owned());
+        }
+        crate::platform::set_hash(&Screen::Profile.href());
+        let today = clock::today().expect("часы с датой");
+        let last = fill(t(lang, Key::SyncEntryLast), &[&kvartik_core::i18n::date(lang, today)]);
+        if !wait_for(&host, &last).await {
+            wrong.push(format!("квитанция пришла, а строка профиля не сказала «{last}»: «{}»", profile_row(&host)));
+        }
     }
     drop(mounted);
     host.remove();
@@ -977,4 +1038,144 @@ async fn the_screen_starts_with_a_choice() {
     crate::platform::set_hash("");
     documents::forget_device();
     assert!(wrong.is_empty(), "выбор пути: {wrong:#?}");
+}
+
+/// База, у которой код всех записей больше `sync::MAX_CODE_BYTES`: профиль
+/// и шестьдесят клиентов с адресами из случайных букв — их не сжать.
+async fn big_base() {
+    documents::fresh_base_with_client().await;
+    let mut writes = crate::store::Writes::default();
+    let letters = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let mut seed: u64 = 0x2545_F491_4F6C_DD1D;
+    let now = clock::now();
+    for _ in 0..60 {
+        let address: String = (0..900)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                char::from(letters[(seed % letters.len() as u64) as usize])
+            })
+            .collect();
+        let data = kvartik_core::model::client::ClientData {
+            address: kvartik_core::model::text::Lines::new(&address).expect("адрес"),
+            ..documents::acme()
+        };
+        writes.insert(&kvartik_core::model::client::Client::create(data, now).expect("годный клиент"));
+    }
+    documents::commit(writes).await;
+}
+
+/// Сделать код на экране переноса: новый пароль копий с повтором и «Сделать
+/// код».
+fn make_carry_code(host: &HtmlElement, lang: Lang, wrong: &mut Vec<String>) {
+    for label in [Key::BackupNewPassword, Key::BackupRepeatPassword] {
+        match password_field(host, t(lang, label)) {
+            Some(input) => type_into(&input, PASSWORD),
+            None => wrong.push(format!("перенос: нет поля {label:?}")),
+        }
+    }
+    match sync_button(host, t(lang, Key::SyncMake)) {
+        Some(make) => make.click(),
+        None => wrong.push("перенос: нет «Сделать код»".to_owned()),
+    }
+}
+
+/// Перенос из вкладки Safari в установленную программу (ревью задачи 124):
+/// экран сразу открывает «Передать» со словами о переносе; у готового кода
+/// одна главная кнопка — «Скопировать весь код», без кусков; сделанный код
+/// убирает карточку переноса. А код больше предела не советует день позже —
+/// старое осталось бы во вкладке, которую Safari сотрёт, — а ведёт на копию
+/// файлом.
+#[wasm_bindgen_test]
+async fn carrying_from_a_tab_moves_everything() {
+    let lang = Lang::Ru;
+    let mut wrong = Vec::new();
+    crate::ui::sync::CARRYING.with(|carrying| carrying.set(true));
+    documents::fresh_base_with_client().await;
+    other_device();
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at("#/sync");
+    if !opened(&host, lang).await {
+        wrong.push("база не открылась".to_owned());
+    }
+    for _ in 0..100 {
+        if visible(&host, "form.sync") {
+            break;
+        }
+        sleep(50).await;
+    }
+    if !visible(&host, "form.sync") {
+        wrong.push("вкладка переноса не открыла «Передать отсюда»".to_owned());
+    }
+    if !section_text(&host, "sync").contains(t(lang, Key::SyncCarryNote)) {
+        wrong.push("нет слов о переносе".to_owned());
+    }
+    make_carry_code(&host, lang, &mut wrong);
+    if find(&host, ".sync-qr path").await.is_none() {
+        wrong.push(format!("код переноса не готов: «{}»", section_text(&host, "sync")));
+    }
+    if sync_button(&host, t(lang, Key::SyncCopyAll)).is_none() {
+        wrong.push("нет «Скопировать весь код»".to_owned());
+    }
+    let piece = t(lang, Key::SyncCopyPart).split("{}").next().unwrap_or_default().to_owned();
+    let pieces = host
+        .query_selector_all("#sync button")
+        .map(|buttons| {
+            (0..buttons.length())
+                .filter_map(|at| buttons.item(at))
+                .filter_map(|node| node.text_content())
+                .filter(|text| text.trim() == t(lang, Key::SyncCopy) || text.trim().starts_with(&piece))
+                .count()
+        })
+        .unwrap_or(0);
+    if pieces > 0 {
+        wrong.push(format!("при переносе — кнопки кусков: {pieces}"));
+    }
+    if !Device::new().carry_closed() {
+        wrong.push("код переноса сделан, а карточка переноса не убрана".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+
+    // Код больше предела — путь копией, а не день позже.
+    big_base().await;
+    other_device();
+    let (host, mounted) = mount_at("#/sync");
+    if !opened(&host, lang).await {
+        wrong.push("большая база не открылась".to_owned());
+    }
+    for _ in 0..100 {
+        if visible(&host, "form.sync") {
+            break;
+        }
+        sleep(50).await;
+    }
+    make_carry_code(&host, lang, &mut wrong);
+    let carry_words = t(lang, Key::SyncCarryTooLarge).split("{}").next().unwrap_or_default().to_owned();
+    let day_words = t(lang, Key::SyncTooLarge).split("{}").next().unwrap_or_default().to_owned();
+    let mut said = false;
+    for _ in 0..300 {
+        said = section_text(&host, "sync").contains(&carry_words);
+        if said {
+            break;
+        }
+        sleep(50).await;
+    }
+    if !said {
+        wrong.push(format!("большой код при переносе — без пути копией: «{}»", section_text(&host, "sync")));
+    }
+    if section_text(&host, "sync").contains(&day_words) {
+        wrong.push("при переносе — совет выбрать день позже".to_owned());
+    }
+    if !visible(&host, &format!(r#"a[href="{}"]"#, Screen::Backup.href())) {
+        wrong.push("большой код при переносе — без ссылки на копию".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    crate::ui::sync::CARRYING.with(|carrying| carrying.set(false));
+    other_device();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "перенос из вкладки: {wrong:#?}");
 }

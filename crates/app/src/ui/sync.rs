@@ -69,14 +69,13 @@ use super::backup::{Backups, IssuerAsk, Problem, counted, key_for, who};
 use super::form::Forms;
 use super::icon::{Icon, icon};
 use super::office::Office;
-use super::password::{PasswordInput, PasswordLogin, PasswordShow};
+use super::password::{PasswordInput, PasswordLogin, PasswordShow, conceal};
 use super::route::{Router, Screen};
 use super::split::{screen, split};
 use super::storage::Storage;
 use super::{Base, tr};
 use crate::platform::camera::{Camera, CameraError};
 use crate::platform::crypto::{self, CryptoError};
-use crate::platform::pwa::{self, Browser};
 use crate::platform::share::{self, ShareError};
 use crate::platform::{clipboard, clock};
 use crate::store::backup::{self as stored, Merged, OtherIe, Restored};
@@ -167,8 +166,22 @@ enum Way {
 /// Вкладка браузера, данных которой установленная программа не увидит
 /// (iPhone, iPad, Mac; Правило 6), а программа ещё не установлена: отсюда
 /// данные переносят в неё кодом (задача 124).
+#[cfg(not(test))]
 fn carrying() -> bool {
+    use crate::platform::pwa::{self, Browser};
     Browser::detect().install_first() && !pwa::installed()
+}
+
+// Браузерные тесты окна идут в headless Chrome и Firefox — вкладки Safari там
+// нет, и перенос тест включает сам.
+#[cfg(test)]
+thread_local! {
+    pub(super) static CARRYING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+fn carrying() -> bool {
+    CARRYING.with(std::cell::Cell::get)
 }
 
 /// Сначала выбор — две плитки «Передать отсюда» и «Принять сюда», — а дальше
@@ -454,6 +467,7 @@ fn Send(ctx: Ctx, seen: Signal<bool>, carry: bool) -> impl IntoView {
     });
 
     let submit = move |event: SubmitEvent| {
+        conceal(&event, shown);
         event.prevent_default();
         if busy() {
             return;
@@ -477,6 +491,11 @@ fn Send(ctx: Ctx, seen: Signal<bool>, carry: bool) -> impl IntoView {
             if outcome.is_ok() {
                 password.set(String::new());
                 repeat.set(String::new());
+                // Код переноса сделан — карточка переноса на главном больше не
+                // нужна (`ui::pwa::CarryCard`, ревью задачи 124).
+                if carry {
+                    Device::new().set_carry_closed();
+                }
             }
             sending.set(match outcome {
                 Ok(shown) => Sending::Ready(Rc::new(shown)),
@@ -555,10 +574,27 @@ fn Send(ctx: Ctx, seen: Signal<bool>, carry: bool) -> impl IntoView {
             Sending::Failed(say @ Say::Key(Key::SyncNothing)) => {
                 Some(view! { <p role="status">{move || say.text(lang.get())}</p> }.into_any())
             }
+            // Перенос из вкладки, а код больше предела (ревью задачи 124): не
+            // «выберите день позже» — старое осталось бы во вкладке, которую
+            // Safari сотрёт, а человек решил бы, что перенёс всё. Копией файлом
+            // переедет всё, и файлы книги тоже.
+            Sending::Failed(Say::TooLarge(bytes)) if carry => Some(view! {
+                <p role="alert">{move || {
+                    let lang = lang.get();
+                    fill(
+                        t(lang, Key::SyncCarryTooLarge),
+                        &[
+                            &i18n::integer(lang, bytes.div_ceil(1024) as i64),
+                            &i18n::integer(lang, (MAX_CODE_BYTES / 1024) as i64),
+                        ],
+                    )
+                }}</p>
+                <a class="button" href=Screen::Backup.href()><span class="label">{tr(lang, Key::BackupGoTo)}</span></a>
+            }.into_any()),
             Sending::Failed(say) => Some(view! { <p role="alert">{move || say.text(lang.get())}</p> }.into_any()),
             // Код убран — день по умолчанию уже другой: день этого кода.
             Sending::Ready(shown) => Some(view! {
-                <ShownCode ctx seen shown gap=Callback::new(move |chosen: Date| {
+                <ShownCode ctx seen carry shown gap=Callback::new(move |chosen: Date| {
                     day.set(chosen.iso());
                     all.set(false);
                 }) close=move || {
@@ -616,7 +652,9 @@ async fn make(ctx: Ctx, typed: &str, repeat: Option<&str>, since: Option<Date>, 
         return Err(Say::Key(Key::SyncNothing));
     }
     device.set_sync_made(&base, now);
-    device.set_sync_last(now);
+    // «Последний обмен» — не здесь: код, который никто не снял, обменом не
+    // был (ревью задачи 124). Его ставят квитанция «принято» (`Reply`)
+    // и принятый код (`accept`).
     // Записи, легшие сюда копией или кодом, код взял, если начат не позже
     // самой ранней: дальше по умолчанию — день этого кода. Начат позже —
     // человек выбрал день сам, и они ждут следующего.
@@ -682,6 +720,8 @@ fn CodeShown(
     parts: Vec<String>,
     accepted: Signal<bool>,
     hint: Key,
+    /// Перенос из вкладки в установленную программу ([`carrying`]).
+    carry: bool,
 ) -> impl IntoView {
     let count = qr.len();
     let index = RwSignal::new(0usize);
@@ -727,7 +767,27 @@ fn CodeShown(
         <p class="hint">{tr(lang, hint)}</p>
         <p>{tr(lang, Key::SyncTextAbout)}</p>
         <div class="actions">
-            {parts.into_iter().enumerate().map(|(i, part)| {
+            // Перенос из вкладки в программу на том же устройстве (ревью
+            // задачи 124): одна главная кнопка — весь текст разом. Приём
+            // разбирает все части из одной вставки (`sync::frames_in_text`),
+            // а код в 32 КиБ — около двенадцати кругов «скопировать —
+            // вставить».
+            {carry.then(|| {
+                let whole = all_text.clone();
+                let copy_all = move |_: MouseEvent| {
+                    let written = clipboard::copy(&whole);
+                    leptos::task::spawn_local(async move {
+                        copied.set(Some(written.await.is_ok()));
+                    });
+                };
+                view! {
+                    <button type="button" on:click=copy_all>
+                        {icon(Icon::Copy)}
+                        <span class="label">{tr(lang, Key::SyncCopyAll)}</span>
+                    </button>
+                }
+            })}
+            {(!carry).then(|| parts.into_iter().enumerate().map(|(i, part)| {
                 let text = part.clone();
                 // В буфер — в самом нажатии, до первого `await` (Правило 6).
                 let copy = move |_: MouseEvent| {
@@ -770,7 +830,7 @@ fn CodeShown(
                         <span class="label">{numbered(Key::SyncCopy, Key::SyncCopyPart)}</span>
                     </button>
                 }
-            }).collect_view()}
+            }).collect_view())}
         </div>
         {move || copied.get().map(|done| view! {
             <p role=if done { "status" } else { "alert" }>
@@ -858,6 +918,7 @@ async fn make_files(ctx: Ctx, shown: Rc<Shown>) -> Result<FilesShown, Say> {
 fn ShownCode(
     ctx: Ctx,
     seen: Signal<bool>,
+    carry: bool,
     shown: Rc<Shown>,
     gap: Callback<Date>,
     close: impl Fn() + Copy + 'static,
@@ -932,7 +993,7 @@ fn ShownCode(
                     <p class="hint">{tr(lang, Key::SyncFilesHint)}</p>
                     // Квитанции у кода файлов нет: круг части стоит, когда
                     // она убрана с экрана.
-                    <CodeShown lang seen qr side parts=text accepted=Signal::stored(false) hint=Key::SyncFilesQrHint />
+                    <CodeShown lang seen qr side parts=text accepted=Signal::stored(false) hint=Key::SyncFilesQrHint carry />
                     <div class="actions">
                         <button type="button" class="secondary" disabled={at == 0} on:click=move |_| step(at.saturating_sub(1))>
                             <span class="label">{tr(lang, Key::SyncFilesPrev)}</span>
@@ -950,7 +1011,7 @@ fn ShownCode(
             state => {
                 let (qr, side, parts) = main.get_value();
                 view! {
-                    <CodeShown lang seen qr side parts accepted=accepted.into() hint=Key::SyncQrHint />
+                    <CodeShown lang seen qr side parts accepted=accepted.into() hint=Key::SyncQrHint carry />
                     {(shown_skipped(&source) > 0).then(|| view! {
                         <div class="actions">
                             <button type="button" class="secondary" disabled=matches!(state, FilesState::Busy) on:click=build>
@@ -1047,6 +1108,9 @@ fn Reply(lang: ReadSignal<Lang>, seen: Signal<bool>, shown: Rc<Shown>, gap: Call
                     if !accepted.get_untracked() {
                         accepted.set(true);
                     }
+                    // Код сняли — это и есть обмен (ревью задачи 124): строка
+                    // профиля «Последний обмен».
+                    device.set_sync_last(clock::now());
                 }
                 Acked::Other => {}
             }
@@ -1375,6 +1439,7 @@ fn Receive(ctx: Ctx, seen: Signal<bool>) -> impl IntoView {
     };
 
     let submit = move |event: SubmitEvent| {
+        conceal(&event, shown);
         event.prevent_default();
         let Receiving::Password(sealed, _) = receiving.get_untracked() else {
             return;

@@ -1525,7 +1525,10 @@ macro_rules! en {
     (SyncPasteNow) => { "Paste" };
     (SyncPasteFailed) => { "Couldn't read the clipboard. Paste into the field yourself: long-press it or use the keyboard." };
     (SyncEntryLast) => { "Last exchange: {}" };
-    (SyncCarryNote) => { "Moving from here to the installed app? Make the code and copy it, then in the app open “Another device” and tap “Paste”." };
+    (SyncCarryNote) => { "Moving from here to the installed app? Make the code and tap “Copy the whole code”, then in the app open “Another device” and tap “Paste”. Ledger files and logos don’t move with a code\u{A0}— a backup file moves them." };
     (InstallCarry) => { "Already working in this tab? The installed app won't see its data: move it with a code, without a file." };
     (InstallCarryButton) => { "Move to the app" };
+    (SyncCarryTooLarge) => { "There is more data than a code can hold: {}\u{A0}KB of {}. Move everything with a backup file: on the backup screen, “Make a backup” and “Send or save to Files”, then in the app “Restore from a backup…”. A code from a later day would move only what’s new, and Safari erases the rest if you don’t come back here for a while." };
+    (SyncCopyAll) => { "Copy the whole code" };
+    (InstallCarryHide) => { "Hide" };
 }

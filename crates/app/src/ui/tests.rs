@@ -2310,13 +2310,50 @@ async fn a_chosen_backup_hides_making_one() {
     if host.inner_text().contains(t(lang, Key::BackupNewPassword)) {
         wrong.push("пока выбран файл копии — «Придумайте пароль копий»".to_owned());
     }
-    // Пароль файла — с логином для менеджера паролей (задача 124).
-    if host.query_selector(r#"#backup form.backup:not([hidden]) input[autocomplete="username"][hidden]"#).ok().flatten().is_none() {
-        wrong.push("у пароля копии нет логина для менеджера паролей".to_owned());
+    // Пароль файла — с логином для менеджера паролей (задача 124). Форма —
+    // та, где поле пароля копии: у «Сделать копию» логин свой.
+    let restore_form = async |host: &HtmlElement| {
+        for _ in 0..100 {
+            if let Some(form) = field(host, t(lang, Key::BackupFilePassword), 0).and_then(|input| input.closest("form").ok().flatten()) {
+                return Some(form);
+            }
+            sleep(50).await;
+        }
+        None
+    };
+    let login = r#"input[autocomplete="username"][hidden]"#;
+    match restore_form(&host).await {
+        Some(form) if form.query_selector(login).ok().flatten().is_some() => {}
+        Some(_) => wrong.push("у пароля копии нет логина для менеджера паролей".to_owned()),
+        None => wrong.push("нет формы пароля копии".to_owned()),
     }
     match button(&host, &[t(lang, Key::Cancel)]) {
         Some(cancel) => cancel.click(),
         None => wrong.push("нет «Отмены» у пароля копии".to_owned()),
+    }
+    // А у копии для клиента — без него (ревью задачи 124): её пароль разовый,
+    // и менеджер предложил бы записать его поверх пароля копий.
+    sleep(100).await;
+    match backup_file(&host).await {
+        Some(input) => {
+            choose_file(
+                &input,
+                "kvartik-07654321-2026-10-12 (1).json",
+                include_str!("../../../core/tests/backups/v2/kvartik-2026-10-12.json"),
+            );
+            match restore_form(&host).await {
+                Some(form) if form.query_selector(login).ok().flatten().is_some() => {
+                    wrong.push("у пароля копии для клиента — логин для менеджера паролей".to_owned());
+                }
+                Some(_) => {}
+                None => wrong.push("копия для клиента не открылась".to_owned()),
+            }
+            match button(&host, &[t(lang, Key::Cancel)]) {
+                Some(cancel) => cancel.click(),
+                None => wrong.push("нет «Отмены» у пароля копии для клиента".to_owned()),
+            }
+        }
+        None => wrong.push("нет поля выбора копии после «Отмены»".to_owned()),
     }
     sleep(200).await;
     if !shown_button(&host, make) {

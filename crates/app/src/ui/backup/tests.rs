@@ -796,3 +796,34 @@ async fn reminder_follows_the_day_of_the_last_copy() {
     forget_device();
     assert!(wrong.is_empty(), "напоминания: {wrong:#?}");
 }
+
+/// У копии для клиента нет логина для менеджера паролей (задача 124): её
+/// пароль разовый, и менеджер не должен записать его поверх пароля копий. А
+/// поля пароля у неё есть — тест смотрит на настоящую форму.
+#[wasm_bindgen_test]
+async fn the_client_copy_has_no_login() {
+    let page = web_sys::window().and_then(|window| window.document()).expect("документ есть");
+    let host: web_sys::HtmlElement = wasm_bindgen::JsCast::unchecked_into(page.create_element("div").expect("создаётся"));
+    page.body().expect("есть <body>").append_child(&host).expect("вставляется");
+    let mounted = leptos::mount::mount_to(host.clone(), move || {
+        let (lang, _) = signal(Lang::Ru);
+        let backups = Backups::new(Base::new());
+        view! { <ClientCopy lang backups forms=Forms::new() /> }
+    });
+    let mut wrong = Vec::new();
+    for _ in 0..50 {
+        if host.query_selector(r#"input[autocomplete="new-password"]"#).ok().flatten().is_some() {
+            break;
+        }
+        crate::platform::pause::breathe().await;
+    }
+    if host.query_selector(r#"input[autocomplete="new-password"]"#).ok().flatten().is_none() {
+        wrong.push("у копии для клиента нет полей пароля".to_owned());
+    }
+    if host.query_selector(r#"input[autocomplete="username"]"#).ok().flatten().is_some() {
+        wrong.push("у копии для клиента — логин для менеджера паролей".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    assert!(wrong.is_empty(), "копия для клиента: {wrong:#?}");
+}
