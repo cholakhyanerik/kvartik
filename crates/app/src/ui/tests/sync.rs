@@ -1291,3 +1291,75 @@ async fn files_beyond_a_series_go_as_a_backup_file() {
     documents::forget_device();
     assert!(wrong.is_empty(), "файлы копией: {wrong:#?}");
 }
+
+/// QR-коды на весь экран (задача 124, п. 17): кнопка под кодом открывает окно
+/// с тем же кодом, словами о яркости и подписью круга; Escape и «Свернуть»
+/// его закрывают, а фокус в окне — на кнопке.
+#[wasm_bindgen_test]
+async fn the_qr_code_opens_full_screen() {
+    documents::fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    other_device();
+    Device::new().set_ui_lang(lang);
+    let mut wrong = Vec::new();
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база не открылась".to_owned());
+    }
+    make(&host, lang, true, &mut wrong).await;
+    let open = |host: &HtmlElement, wrong: &mut Vec<String>| match sync_button(host, t(lang, Key::SyncQrFull)) {
+        Some(button) => button.click(),
+        None => wrong.push("нет «QR-код на весь экран»".to_owned()),
+    };
+    open(&host, &mut wrong);
+    let Some(full) = find(&host, ".sync-full").await else {
+        wrong.push("окно QR-кода не открылось".to_owned());
+        drop(mounted);
+        host.remove();
+        assert!(wrong.is_empty(), "QR на весь экран: {wrong:#?}");
+        return;
+    };
+    let small = host.query_selector("#sync .sync-qr path").ok().flatten().and_then(|path| path.get_attribute("d"));
+    let large = full.query_selector("path").ok().flatten().and_then(|path| path.get_attribute("d"));
+    if large.is_none_or(|d| d.is_empty()) || small.is_none() {
+        wrong.push("в окне нет QR-кода".to_owned());
+    }
+    if !full.text_content().unwrap_or_default().contains(t(lang, Key::SyncQrBright)) {
+        wrong.push("в окне нет слов о яркости".to_owned());
+    }
+    sleep(50).await;
+    let focused = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.active_element())
+        .and_then(|element| element.text_content());
+    if focused.as_deref().map(str::trim) != Some(t(lang, Key::SyncQrFullClose)) {
+        wrong.push(format!("фокус в окне не на «Свернуть»: {focused:?}"));
+    }
+    let init = web_sys::KeyboardEventInit::new();
+    init.set_key("Escape");
+    init.set_bubbles(true);
+    let escape = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).expect("создаётся");
+    full.dispatch_event(&escape).expect("отправлено");
+    sleep(50).await;
+    if host.query_selector("#sync .sync-full").ok().flatten().is_some() {
+        wrong.push("Escape не закрыл окно QR-кода".to_owned());
+    }
+    open(&host, &mut wrong);
+    if find(&host, ".sync-full").await.is_none() {
+        wrong.push("окно QR-кода не открылось второй раз".to_owned());
+    }
+    match sync_button(&host, t(lang, Key::SyncQrFullClose)) {
+        Some(close) => close.click(),
+        None => wrong.push("в окне нет «Свернуть»".to_owned()),
+    }
+    sleep(50).await;
+    if host.query_selector("#sync .sync-full").ok().flatten().is_some() {
+        wrong.push("«Свернуть» не закрыло окно QR-кода".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    other_device();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "QR на весь экран: {wrong:#?}");
+}

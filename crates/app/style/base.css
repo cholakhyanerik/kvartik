@@ -3344,6 +3344,48 @@ ul.report-fields {
   margin-top: var(--space-4);
 }
 
+/* QR-коды на весь экран (задача 124, п. 17): на бумаге во всё окно, как
+   превью PDF, — тёмный код на светлом, как можно крупнее; камера другого
+   устройства читает его с метра. Выше меню разделов, как окно «Что нового»,
+   и ниже плашки сбоя. Код — не выше окна за вычетом строк и кнопки под ним. */
+.sync-full {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  box-sizing: border-box;
+  padding: var(--space-4);
+  overflow: auto;
+  background: var(--fill-paper);
+  color: var(--on-fill-paper);
+}
+
+.sync-full svg {
+  display: block;
+  width: min(100%, calc(100vh - 12rem));
+  width: min(100%, calc(100dvh - 12rem));
+  height: auto;
+  shape-rendering: crispEdges;
+}
+
+.sync-full p {
+  margin: 0;
+  max-width: 30rem;
+  text-align: center;
+}
+
+.sync-full-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.sync-full button {
+  width: min(30rem, 100%);
+}
+
 /* Копия и «Другое устройство» быстрее и проще (задача 124). Плитки пути —
    карточки выбора, как у клиента (`.choices`), с воздухом до выбранного
    пути; что войдёт в код — строкой над свёрнутым «Настроить», а выбор дня

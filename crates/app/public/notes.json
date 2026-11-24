@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.188",
+      "date": "2026-11-24",
+      "hy": [
+        "«Այլ սարք» էկրանի QR կոդերը կարելի է բացել ամբողջ էկրանով՝ սպիտակ ֆոնի վրա և հնարավորինս մեծ. մյուս սարքի տեսախցիկը դրանք կարդում է մեկ մետրից։ Բարձրացրեք էկրանի պայծառությունը, և կոդը կկարդացվի ավելի արագ։"
+      ],
+      "ru": [
+        "QR-коды на экране «Другое устройство» можно открыть на весь экран — на белом и как можно крупнее: камера другого устройства читает их с метра. Поднимите яркость экрана, и код прочтётся быстрее."
+      ],
+      "en": [
+        "QR codes on the “Another device” screen can open full screen, on white and as large as possible, so the other device’s camera reads them from a metre away. Turn the screen brightness up and the code is read faster."
+      ]
+    },
+    {
       "version": "0.0.187",
       "date": "2026-11-24",
       "hy": [
@@ -266,19 +279,6 @@
       ],
       "en": [
         "Nothing changed in the app: the website pages now tell search engines and AI assistants what Kvartik is and what a key costs, and Bing and Yandex learn about updated pages right after each release."
-      ]
-    },
-    {
-      "version": "0.0.168",
-      "date": "2026-11-21",
-      "hy": [
-        "Պատճենի էկրանում՝ վերջին պատճենի օրվա տակ, երևում է, թե որքան են կշռում դրանում մատյանի ֆայլերը, և որքանն է գրառումներից հեռացված ֆայլերից. հեռացված ֆայլը նույնպես պահվում է և մտնում է պատճենի մեջ։ 128 ՄԲ-ից մեծ պատճենի դեպքում ծրագիրն այլևս չի խորհուրդ տալիս հեռացնել ֆայլերը. դա պատճենը չէր փոքրացնում։"
-      ],
-      "ru": [
-        "На экране копии под днём последней копии видно, сколько весят в ней файлы книги и сколько из них — убранные из записей: убранный файл тоже хранится и идёт в копию. Когда копия выходит больше 128 МБ, программа больше не советует убрать файлы — копию это не уменьшало."
-      ],
-      "en": [
-        "The backup screen now shows, under the day of the last backup, how much its ledger files weigh and how much of that is files removed from entries: a removed file is kept too and goes into the backup. When a backup comes out over 128 MB, the app no longer suggests removing files — that never made it smaller."
       ]
     }
   ]

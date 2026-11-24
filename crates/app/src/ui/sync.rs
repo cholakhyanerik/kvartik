@@ -62,7 +62,7 @@ use kvartik_core::i18n::{self, Key, Lang, fill, t};
 use kvartik_core::model::date::Date;
 use kvartik_core::model::profile::Profile;
 use kvartik_core::model::record::Timestamp;
-use leptos::ev::{MouseEvent, SubmitEvent};
+use leptos::ev::{KeyboardEvent, MouseEvent, SubmitEvent};
 use leptos::prelude::*;
 
 use super::backup::{Backups, IssuerAsk, Problem, counted, key_for, restored_words, tally_words, who};
@@ -744,7 +744,12 @@ fn CodeShown(
         }
     });
     on_cleanup(move || halt(running, timer));
-    let path = move || qr.get(index.get()).cloned().unwrap_or_default();
+    let frames = StoredValue::new(qr);
+    let path = move || frames.with_value(|qr| qr.get(index.get()).cloned()).unwrap_or_default();
+    let caption = move || {
+        let lang = lang.get();
+        fill(t(lang, Key::SyncQrCount), &[&i18n::integer(lang, index.get() as i64 + 1), &i18n::integer(lang, count as i64)])
+    };
     let copied = RwSignal::new(None::<bool>);
     let share_failed = RwSignal::new(false);
     let total = parts.len();
@@ -752,19 +757,58 @@ fn CodeShown(
     // «Отправить» — где меню «Поделиться» берёт текст (задача 124): код —
     // в мессенджер одним нажатием, без «Скопировать» и вставки там.
     let shares = parts.first().is_some_and(|part| share::can_share_text(part));
+    // QR-коды на весь экран (задача 124, п. 17): камера другого устройства
+    // читает крупный код с метра, а в строке экрана телефона он мелкий. Круг
+    // идёт и там — тот же индекс.
+    let full = RwSignal::new(false);
+    let close_full = NodeRef::<leptos::html::Button>::new();
+    Effect::new(move |_| {
+        if full.get() {
+            request_animation_frame(move || {
+                if let Some(button) = close_full.get_untracked() {
+                    let _ = button.focus();
+                }
+            });
+        }
+    });
     view! {
         <figure class="sync-qr">
             <svg viewBox=format!("0 0 {side} {side}") role="img" aria-label=move || t(lang.get(), Key::SyncQrLabel)>
                 <rect class="sync-qr-paper" width=side height=side />
                 <path class="sync-qr-ink" d=path />
             </svg>
-            {(count > 1).then(|| view! {
-                <figcaption>{move || {
-                    let lang = lang.get();
-                    fill(t(lang, Key::SyncQrCount), &[&i18n::integer(lang, index.get() as i64 + 1), &i18n::integer(lang, count as i64)])
-                }}</figcaption>
-            })}
+            {(count > 1).then(|| view! { <figcaption>{caption}</figcaption> })}
         </figure>
+        <div class="actions">
+            <button type="button" class="secondary" on:click=move |_| full.set(true)>
+                <span class="label">{tr(lang, Key::SyncQrFull)}</span>
+            </button>
+        </div>
+        // Окно поверх программы, как «Что нового»: Escape и «Свернуть»
+        // возвращают код на место, фокус — на кнопке.
+        {move || full.get().then(|| view! {
+            <div
+                class="sync-full"
+                role="dialog"
+                aria-modal="true"
+                aria-label=move || t(lang.get(), Key::SyncQrLabel)
+                on:keydown=move |event: KeyboardEvent| {
+                    if event.key() == "Escape" {
+                        full.set(false);
+                    }
+                }
+            >
+                <svg viewBox=format!("0 0 {side} {side}") role="img" aria-label=move || t(lang.get(), Key::SyncQrLabel)>
+                    <rect class="sync-qr-paper" width=side height=side />
+                    <path class="sync-qr-ink" d=path />
+                </svg>
+                {(count > 1).then(|| view! { <p class="sync-full-count">{caption}</p> })}
+                <p>{tr(lang, Key::SyncQrBright)}</p>
+                <button type="button" class="wide" node_ref=close_full on:click=move |_| full.set(false)>
+                    <span class="label">{tr(lang, Key::SyncQrFullClose)}</span>
+                </button>
+            </div>
+        })}
         <p class="hint">{tr(lang, hint)}</p>
         <p>{tr(lang, Key::SyncTextAbout)}</p>
         <div class="actions">

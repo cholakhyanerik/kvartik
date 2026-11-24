@@ -1542,4 +1542,7 @@ macro_rules! en {
     (TallyFiles) => { "ledger files: {}" };
     (TallyOther) => { "other: {}" };
     (TallyNone) => { "no records" };
+    (SyncQrFull) => { "QR code full screen" };
+    (SyncQrBright) => { "Turn the screen brightness up: the other device’s camera will read the code faster." };
+    (SyncQrFullClose) => { "Close" };
 }
