@@ -597,7 +597,10 @@ async function cardClose(page) {
     const menu = document.querySelector(".app > .nav").getBoundingClientRect();
     return { first: rows[0].getAttribute("href"), last: rows.at(-1).getAttribute("href"),
       height: Math.round(last.top + scrollY + last.height / 2 + menu.height) };`);
-  if (!checks.check("с сетью: в списке документов две строки — для карточки на телефоне", rows)) return;
+  // Ответ — объект строк для следующих шагов, а «да» — что он пришёл: объект
+  // `Checks` успехом не считает (ошибка скрипта страницы — тоже объект).
+  if (!checks.check("с сетью: в списке документов две строки — для карточки на телефоне",
+    typeof rows?.last === "string", rows?.error ?? "")) return;
   await page.send("Emulation.setDeviceMetricsOverride", { ...DEVICES[360], height: rows.height });
   await media("no-preference");
   await go(page, rows.last);

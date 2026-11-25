@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.202",
+      "date": "2026-11-25",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось."
+      ],
+      "en": [
+        "Nothing changed in the app."
+      ]
+    },
+    {
       "version": "0.0.201",
       "date": "2026-11-25",
       "hy": [
@@ -272,19 +285,6 @@
       "en": [
         "When you restore a backup in parts, the app now says which part is in and which one is left, with the mark from the file name, such as “1of2”, and once all are in, that the backup is fully restored. It remembers the restored parts after a page reload too, and asks where to issue invoices and acts only after all parts.",
         "On the “Another device” screen, the QR codes stop once the other device’s receipt says the code was taken, and “Done, hide the code” becomes the main button."
-      ]
-    },
-    {
-      "version": "0.0.182",
-      "date": "2026-11-24",
-      "hy": [
-        "Ծրագրում ոչինչ չի փոխվել։"
-      ],
-      "ru": [
-        "В программе ничего не изменилось."
-      ],
-      "en": [
-        "Nothing changed in the app."
       ]
     }
   ]

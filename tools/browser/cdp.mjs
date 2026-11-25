@@ -313,10 +313,18 @@ export class Page {
 /// Проверки сценария: провалы собираются и выдаются в конце (Правило 2).
 export class Checks {
   constructor() { this.results = []; }
+  /// Проверка `name`: «да» — `true` или другое непустое значение, кроме
+  /// объекта. Объект — это подробности провала (`cond ? true : { … }`) или
+  /// ошибка скрипта страницы (`page.eval` отдаёт её как `{ error }`), и он —
+  /// провал с этими подробностями. До 0.0.202 `!!ok` считал его успехом:
+  /// такой шаг не краснел никогда, даже со скриптом, который не исполнился
+  /// (найдено прогоном на поломанной копии dist/, задача 126).
   check(name, ok, detail = "") {
-    this.results.push({ name, ok: !!ok, detail });
-    console.log(`${ok ? "OK  " : "FAIL"} ${name}${detail ? ` — ${detail}` : ""}`);
-    return !!ok;
+    const passed = ok !== null && typeof ok === "object" ? false : !!ok;
+    const why = detail || (!passed && ok !== null && typeof ok === "object" ? JSON.stringify(ok) : "");
+    this.results.push({ name, ok: passed, detail: why });
+    console.log(`${passed ? "OK  " : "FAIL"} ${name}${why ? ` — ${why}` : ""}`);
+    return passed;
   }
   get failed() { return this.results.filter((r) => !r.ok).length; }
   summary() {
