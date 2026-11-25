@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.194",
+      "date": "2026-11-25",
+      "hy": [
+        "Chrome-ում և Edge-ում «Տեղադրել» կոճակը կուրսորը կոդի դաշտում դնում է նաև այն դեպքում, երբ զննարկիչը չի հասցրել դա անել հենց սեղմման պահին։"
+      ],
+      "ru": [
+        "«Вставить» в Chrome и Edge ставит курсор в поле кода и тогда, когда браузер не успел поставить его в самом нажатии."
+      ],
+      "en": [
+        "“Paste” in Chrome and Edge puts the cursor in the code field even when the browser didn’t manage to do it on the tap itself."
+      ]
+    },
+    {
       "version": "0.0.193",
       "date": "2026-11-25",
       "hy": [
@@ -272,19 +285,6 @@
       ],
       "en": [
         "Nothing changed in the app: one of the libraries it is built from has been updated."
-      ]
-    },
-    {
-      "version": "0.0.174",
-      "date": "2026-11-22",
-      "hy": [
-        "Մատյանի ֆայլերն ու լոգոտիպերը «Այլ սարք» էկրանով այժմ անցնում են առանց պատճենի ֆայլի. կոդից հետո սեղմեք «Ուղարկել ֆայլերը կոդերի շարքով» և ցույց տվեք կոդերը հերթով։"
-      ],
-      "ru": [
-        "Файлы книги и логотипы теперь переходят экраном «Другое устройство» и без файла копии: после кода нажмите «Передать файлы серией кодов» и показывайте коды по очереди."
-      ],
-      "en": [
-        "Ledger files and logos now move through the “Another device” screen without a backup file too: after the code, tap “Send the files as a series of codes” and show the codes one by one."
       ]
     }
   ]

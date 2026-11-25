@@ -1023,10 +1023,19 @@ async fn the_screen_starts_with_a_choice() {
                 if !wait_for(&host, hint).await {
                     wrong.push(format!("«Вставить» в Chromium без слов «{hint}»: «{}»", section_text(&host, "sync")));
                 }
-                let focused = web_sys::window()
-                    .and_then(|window| window.document())
-                    .and_then(|document| document.active_element())
-                    .is_some_and(|element| element.closest(".sync-paste:not(.sync-reply)").ok().flatten().is_some() && element.tag_name() == "TEXTAREA");
+                // Курсор — ждать состояния, а не читать сразу (в CI фокус
+                // встаёт кадром позже).
+                let mut focused = false;
+                for _ in 0..40 {
+                    focused = web_sys::window()
+                        .and_then(|window| window.document())
+                        .and_then(|document| document.active_element())
+                        .is_some_and(|element| element.closest(".sync-paste:not(.sync-reply)").ok().flatten().is_some() && element.tag_name() == "TEXTAREA");
+                    if focused {
+                        break;
+                    }
+                    sleep(50).await;
+                }
                 if !focused {
                     wrong.push("«Вставить» в Chromium не поставило курсор в поле кода".to_owned());
                 }

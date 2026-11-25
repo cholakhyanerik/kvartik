@@ -1585,7 +1585,14 @@ fn paste_into(
     let way = clipboard::paste_way();
     if way != Paste::Read {
         if let Some(area) = area.get_untracked() {
+            // В самом нажатии — так телефон открывает клавиатуру с подсказкой
+            // буфера, — и ещё раз следующим кадром: в CI (headless Chrome на
+            // Linux, 2026-11-25) фокус из нажатия не встал, а кадром позже
+            // встаёт; второй вызов безвреден.
             let _ = area.focus();
+            request_animation_frame(move || {
+                let _ = area.focus();
+            });
         }
         hint.set(Some(match way {
             Paste::Keys { mac: true } => Key::SyncPasteCmd,
