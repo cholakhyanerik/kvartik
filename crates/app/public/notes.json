@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.193",
+      "date": "2026-11-25",
+      "hy": [
+        "Chrome-ում և Edge-ում «Տեղադրել» կոճակն այլևս ինքը չի կարդում սեղմատախտակը. այն կուրսորը դնում է կոդի դաշտում, և կոդը տեղադրում եք Ctrl+V-ով կամ ստեղնաշարի հուշումով։ Եթե նախկինում թույլ էիք տվել կայքին կարդալ սեղմատախտակը, այդ թույլտվությունը կարող եք հանել կայքի կարգավորումներում։"
+      ],
+      "ru": [
+        "В Chrome и Edge «Вставить» больше не читает буфер обмена само: курсор встаёт в поле кода, а вставляете вы — Ctrl+V или из подсказки клавиатуры. Если раньше вы разрешали сайту читать буфер, это разрешение можно убрать в настройках сайта."
+      ],
+      "en": [
+        "In Chrome and Edge, “Paste” no longer reads the clipboard by itself: it puts the cursor in the code field, and you paste — with Ctrl+V or from the keyboard suggestion. If you allowed the site to read the clipboard before, you can remove that permission in the site settings."
+      ]
+    },
+    {
       "version": "0.0.192",
       "date": "2026-11-25",
       "hy": [
@@ -272,19 +285,6 @@
       ],
       "en": [
         "Ledger files and logos now move through the “Another device” screen without a backup file too: after the code, tap “Send the files as a series of codes” and show the codes one by one."
-      ]
-    },
-    {
-      "version": "0.0.173",
-      "date": "2026-11-22",
-      "hy": [
-        "Ով մի քանի ԱՁ է վարում, «Այլ սարք» էկրանի կոդը կարող է տեղափոխել բոլոր ԱՁ-ների փոփոխությունները միանգամից՝ ԱՁ-ների ցանկով և «Pro» բանալիներով, և ոչ թե յուրաքանչյուրինը հերթով։"
-      ],
-      "ru": [
-        "Кто ведёт несколько ИП, тот кодом экрана «Другое устройство» переносит изменения всех ИП разом, со списком ИП и ключами «Pro», а не по очереди."
-      ],
-      "en": [
-        "If you keep several entrepreneurs, a code on the “Another device” screen now carries the changes of all of them at once, with their list and Pro keys, instead of one by one."
       ]
     }
   ]

@@ -1561,4 +1561,7 @@ macro_rules! en {
     (BackupFolderThis) => { "this device\u{A0}— {}" };
     (BackupFolderOther) => { "device “{}”\u{A0}— {}" };
     (BackupFolderMissing) => { "The backup of device “{}” in the folder is not whole: parts {} of {} are missing. The cloud may not have downloaded them yet: restore from the folder again when they appear, and don't issue here until then." };
+    (SyncPasteCtrl) => { "The cursor is in the code field: paste the code with Ctrl+V." };
+    (SyncPasteCmd) => { "The cursor is in the code field: paste the code with Cmd+V." };
+    (SyncPasteKeyboard) => { "The cursor is in the code field: the keyboard will offer what you copied\u{A0}— tap it above the keys." };
 }

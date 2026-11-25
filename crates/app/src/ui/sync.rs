@@ -78,6 +78,7 @@ use crate::platform::camera::{Camera, CameraError};
 use crate::platform::crypto::{self, CryptoError};
 use crate::platform::share::{self, ShareError};
 use crate::platform::awake as platform_awake;
+use crate::platform::clipboard::Paste;
 use crate::platform::{clipboard, clock};
 use crate::store::backup::{self as stored, Merged, OtherIe, Restored};
 use crate::store::device::Device;
@@ -1377,6 +1378,8 @@ fn Reply(ctx: Ctx, seen: Signal<bool>, shown: Rc<Shown>, gap: Callback<Date>, ac
     let (created, base, since) = (shown.created, StoredValue::new(shown.base.clone()), shown.since);
     let pasted = RwSignal::new(String::new());
     let paste_failed = RwSignal::new(false);
+    let paste_hint = RwSignal::new(None::<Key>);
+    let reply_area = NodeRef::<leptos::html::Textarea>::new();
     // Ушли с экрана или с пути — камера гаснет.
     Effect::new(move |_| {
         if !seen.get() && replying.with_untracked(|state| matches!(state, Replying::Scanning)) {
@@ -1482,20 +1485,12 @@ fn Reply(ctx: Ctx, seen: Signal<bool>, shown: Rc<Shown>, gap: Callback<Date>, ac
         let lang = lang.get();
         (count > 1).then(|| fill(t(lang, Key::SyncGot), &[&i18n::integer(lang, got as i64), &i18n::integer(lang, count as i64)]))
     };
-    // Квитанция из буфера — в самом нажатии, до первого `await` (задача 124,
-    // `platform::clipboard::paste`).
+    // Квитанция из буфера — в самом нажатии ([`paste_into`]).
     let paste_now = move |_: MouseEvent| {
-        paste_failed.set(false);
-        let read = clipboard::paste();
-        leptos::task::spawn_local(async move {
-            match read.await {
-                Ok(text) => {
-                    pasted.set(text.clone());
-                    for found in sync::frames_in_text(&text) {
-                        take(found);
-                    }
-                }
-                Err(()) => paste_failed.set(true),
+        paste_into(reply_area, paste_hint, paste_failed, move |text| {
+            pasted.set(text.clone());
+            for found in sync::frames_in_text(&text) {
+                take(found);
             }
         });
     };
@@ -1524,15 +1519,18 @@ fn Reply(ctx: Ctx, seen: Signal<bool>, shown: Rc<Shown>, gap: Callback<Date>, ac
                     </button>
                 </div>
                 {move || paste_failed.get().then(|| view! { <p role="alert">{tr(lang, Key::SyncPasteFailed)}</p> })}
+                {move || paste_hint.get().map(|key| view! { <p class="hint" role="status">{tr(lang, key)}</p> })}
                 <label class="sync-paste sync-reply">
                     {tr(lang, Key::SyncReceiptPaste)}
                     <textarea
                         rows="2"
                         autocomplete="off"
                         spellcheck="false"
+                        node_ref=reply_area
                         prop:value=move || pasted.get()
                         on:input=move |event| {
                             let text = event_target_value(&event);
+                            paste_hint.set(None);
                             pasted.set(text.clone());
                             for found in sync::frames_in_text(&text) {
                                 take(found);
@@ -1569,6 +1567,40 @@ fn Reply(ctx: Ctx, seen: Signal<bool>, shown: Rc<Shown>, gap: Callback<Date>, ac
             .into_any(),
         }}
     }
+}
+
+/// «Вставить» у поля кода (задача 124): в Safari и Firefox — текст из буфера
+/// в самом нажатии, до первого `await` (`platform::clipboard::paste`), в
+/// Chromium — курсор в поле `area` и слова, как вставить самому (решение
+/// человека 2026-11-25: там разрешение на чтение буфера остаётся за сайтом).
+/// `got` — что вставили, `failed` — буфер не отдал текст, `hint` — слова для
+/// Chromium.
+fn paste_into(
+    area: NodeRef<leptos::html::Textarea>,
+    hint: RwSignal<Option<Key>>,
+    failed: RwSignal<bool>,
+    got: impl Fn(String) + 'static,
+) {
+    failed.set(false);
+    let way = clipboard::paste_way();
+    if way != Paste::Read {
+        if let Some(area) = area.get_untracked() {
+            let _ = area.focus();
+        }
+        hint.set(Some(match way {
+            Paste::Keys { mac: true } => Key::SyncPasteCmd,
+            Paste::Keys { mac: false } => Key::SyncPasteCtrl,
+            Paste::Keyboard | Paste::Read => Key::SyncPasteKeyboard,
+        }));
+        return;
+    }
+    let read = clipboard::paste();
+    leptos::task::spawn_local(async move {
+        match read.await {
+            Ok(text) => got(text),
+            Err(()) => failed.set(true),
+        }
+    });
 }
 
 /// Ошибка квитанции — словами.
@@ -1674,6 +1706,8 @@ fn Receive(ctx: Ctx, seen: Signal<bool>) -> impl IntoView {
     let progress = RwSignal::new((0usize, 0usize));
     let pasted = RwSignal::new(String::new());
     let paste_failed = RwSignal::new(false);
+    let paste_hint = RwSignal::new(None::<Key>);
+    let code_area = NodeRef::<leptos::html::Textarea>::new();
     let password = RwSignal::new(String::new());
     let shown = RwSignal::new(false);
     forms.hold_while(move || {
@@ -1791,20 +1825,12 @@ fn Receive(ctx: Ctx, seen: Signal<bool>) -> impl IntoView {
             take(found);
         }
     };
-    // Код из буфера — в самом нажатии, до первого `await` (задача 124,
-    // `platform::clipboard::paste`): переслан себе мессенджером, а вставлять
-    // жестом в поле на телефоне — три касания.
+    // Код из буфера — в самом нажатии ([`paste_into`]): переслан себе
+    // мессенджером, а вставлять жестом в поле на телефоне — три касания.
     let paste_now = move |_: MouseEvent| {
-        paste_failed.set(false);
-        let read = clipboard::paste();
-        leptos::task::spawn_local(async move {
-            match read.await {
-                Ok(text) => {
-                    pasted.set(text.clone());
-                    on_paste(text);
-                }
-                Err(()) => paste_failed.set(true),
-            }
+        paste_into(code_area, paste_hint, paste_failed, move |text| {
+            pasted.set(text.clone());
+            on_paste(text);
         });
     };
 
@@ -1882,15 +1908,18 @@ fn Receive(ctx: Ctx, seen: Signal<bool>) -> impl IntoView {
                     </button>
                 </div>
                 {move || paste_failed.get().then(|| view! { <p role="alert">{tr(lang, Key::SyncPasteFailed)}</p> })}
+                {move || paste_hint.get().map(|key| view! { <p class="hint" role="status">{tr(lang, key)}</p> })}
                 <label class="sync-paste">
                     {tr(lang, Key::SyncPaste)}
                     <textarea
                         rows="3"
                         autocomplete="off"
                         spellcheck="false"
+                        node_ref=code_area
                         prop:value=move || pasted.get()
                         on:input=move |event| {
                             let text = event_target_value(&event);
+                            paste_hint.set(None);
                             pasted.set(text.clone());
                             on_paste(text);
                         }

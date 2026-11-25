@@ -991,15 +991,61 @@ async fn the_screen_starts_with_a_choice() {
     if host.query_selector("#sync input[name=sync-what]").ok().flatten().is_some() {
         wrong.push("в пустой программе есть «Передать отсюда»".to_owned());
     }
-    // Буфер headless-браузер тесту не отдаёт: нажатие не человека.
+    // «Вставить» (решение человека 2026-11-25): в Chromium буфер не читается
+    // вовсе — курсор в поле кода и слова, как вставить самому; в Firefox —
+    // `readText`, а буфер headless-браузер тесту не отдаёт: нажатие не
+    // человека. Чтения буфера тест считает своей обёрткой `readText`.
+    let navigator = web_sys::window().expect("окно").navigator();
+    let data = Reflect::get(&navigator, &"userAgentData".into()).unwrap_or(wasm_bindgen::JsValue::UNDEFINED);
+    let chromium = !data.is_undefined() && !data.is_null();
+    let mac = Reflect::get(&data, &"platform".into()).ok().and_then(|platform| platform.as_string()).is_some_and(|platform| platform == "macOS");
+    js_sys::Function::new_no_args(
+        "window.kvartikReads = 0;
+         const board = navigator.clipboard;
+         if (board) {
+             const read = board.readText.bind(board);
+             Object.defineProperty(board, 'readText', { configurable: true, value: () => { window.kvartikReads++; return read(); } });
+         }",
+    )
+    .call0(&wasm_bindgen::JsValue::NULL)
+    .expect("обёртка");
+    let reads = || {
+        Reflect::get(&web_sys::window().expect("окно"), &"kvartikReads".into())
+            .ok()
+            .and_then(|reads| reads.as_f64())
+            .unwrap_or(-1.0)
+    };
     match sync_button(&host, t(lang, Key::SyncPasteNow)) {
         Some(paste) => {
             paste.click();
-            if !wait_for(&host, t(lang, Key::SyncPasteFailed)).await {
-                wrong.push(format!("«Вставить» без буфера молчит: «{}»", section_text(&host, "sync")));
+            if chromium {
+                let hint = t(lang, if mac { Key::SyncPasteCmd } else { Key::SyncPasteCtrl });
+                if !wait_for(&host, hint).await {
+                    wrong.push(format!("«Вставить» в Chromium без слов «{hint}»: «{}»", section_text(&host, "sync")));
+                }
+                let focused = web_sys::window()
+                    .and_then(|window| window.document())
+                    .and_then(|document| document.active_element())
+                    .is_some_and(|element| element.closest(".sync-paste:not(.sync-reply)").ok().flatten().is_some() && element.tag_name() == "TEXTAREA");
+                if !focused {
+                    wrong.push("«Вставить» в Chromium не поставило курсор в поле кода".to_owned());
+                }
+                if reads() != 0.0 {
+                    wrong.push(format!("«Вставить» в Chromium прочло буфер: {}", reads()));
+                }
+            } else {
+                if !wait_for(&host, t(lang, Key::SyncPasteFailed)).await {
+                    wrong.push(format!("«Вставить» без буфера молчит: «{}»", section_text(&host, "sync")));
+                }
+                if reads() != 1.0 {
+                    wrong.push(format!("«Вставить» в Firefox не прочло буфер: {}", reads()));
+                }
             }
         }
         None => wrong.push("у поля кода нет «Вставить»".to_owned()),
+    }
+    if let Some(board) = Reflect::get(&navigator, &"clipboard".into()).ok().filter(|board| !board.is_undefined()) {
+        let _ = Reflect::delete_property(&board.unchecked_into::<js_sys::Object>(), &"readText".into());
     }
     drop(mounted);
     host.remove();
