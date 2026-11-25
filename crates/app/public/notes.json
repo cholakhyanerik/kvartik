@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.200",
+      "date": "2026-11-25",
+      "hy": [
+        "Երկու պատճենի մասերը, որոնք ընտրվել կամ ուղարկվել են միասին և խառը, այժմ վերականգնվում են ըստ պատճենի. ծրագիրն այլևս բացակայող չի անվանում արդեն վերականգնված մասը, իսկ նոր ծրագրում հարցնում է, թե որտեղ թողարկել հաշիվներն ու ակտերը։"
+      ],
+      "ru": [
+        "Части двух копий, выбранные или отправленные разом вперемешку, теперь ложатся по копиям: программа больше не называет недостающей уже легшую часть, а в новой программе спрашивает, где выпускать счета и акты."
+      ],
+      "en": [
+        "Parts of two backups chosen or shared at once in mixed order are now restored backup by backup: the app no longer calls a part that is already in missing, and in a new app it asks where to issue invoices and acts."
+      ]
+    },
+    {
       "version": "0.0.199",
       "date": "2026-11-25",
       "hy": [
@@ -272,19 +285,6 @@
       "en": [
         "A backup over 128 MB — with a year of receipt photos, for example — can now be made too: the app splits it into several files, parts. Save each one; automatic backup puts the parts side by side in its folder.",
         "Parts are restored one at a time, in any order: the app tells which ones are already in, and while the screen stays open, it restores the next part of the same backup without asking for the password again."
-      ]
-    },
-    {
-      "version": "0.0.180",
-      "date": "2026-11-23",
-      "hy": [
-        "Ծրագրում ոչինչ չի փոխվել։"
-      ],
-      "ru": [
-        "В программе ничего не изменилось."
-      ],
-      "en": [
-        "Nothing changed in the app."
       ]
     }
   ]

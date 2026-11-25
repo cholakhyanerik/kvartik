@@ -1831,13 +1831,7 @@ pub fn client_file_name(tin: Option<&Tin>, today: Date) -> String {
 /// и Firefox, ` 2` у «Файлов» iPhone. Ошибка в обе стороны безвредна: окно
 /// спросит пароль так же, только с логином или без.
 pub fn is_client_file_name(name: &str) -> bool {
-    let name = name.trim();
-    let Some(stem) = name
-        .len()
-        .checked_sub(".json".len())
-        .filter(|&at| name.is_char_boundary(at) && name[at..].eq_ignore_ascii_case(".json"))
-        .map(|at| &name[..at])
-    else {
+    let Some(stem) = json_stem(name) else {
         return false;
     };
     let stem = without_copy_mark(stem.trim_end());
@@ -1857,6 +1851,17 @@ pub fn is_client_file_name(name: &str) -> bool {
         }
         _ => false,
     }
+}
+
+/// Имя файла без `.json` в конце (любым регистром) и пробелов по краям:
+/// имя назначают человек и браузер. `None` — расширение другое.
+fn json_stem(name: &str) -> Option<&str> {
+    let name = name.trim();
+    let at = name
+        .len()
+        .checked_sub(".json".len())
+        .filter(|&at| name.is_char_boundary(at) && name[at..].eq_ignore_ascii_case(".json"))?;
+    Some(&name[..at])
 }
 
 /// Имя без пометки повторного скачивания в конце: `(1)`, ` (2)`, ` 2`.
@@ -1893,6 +1898,63 @@ pub fn shown_name(name: &str) -> String {
         cut -= 1;
     }
     clean[..cut].to_owned()
+}
+
+/// Порядок файлов, выбранных или поделённых разом, в цепочке восстановления
+/// (ревью 0.0.199): части одной копии — рядом и по номеру, с места первой из
+/// них, а копия узнаётся по имени файла ([`part_file_name`]; пометка
+/// повторного скачивания — часть имени копии); остальные файлы — на своих
+/// местах. Запись о легших частях одна — последней копии (`Laid`), — и части
+/// двух копий вперемешку стирали бы её друг у друга: итог называл бы
+/// недостающими уже легшие части, а вопрос, где выпускать, у копии, легшей
+/// в пустую программу, не вставал бы. Имя назначает человек, поэтому это
+/// порядок, а не проверка: переименованные части лягут, как выбраны.
+/// Номера — места в `names`; каждое — один раз.
+pub fn chain_order(names: &[&str]) -> Vec<usize> {
+    let keys: Vec<Option<PartKey<'_>>> = names.iter().map(|name| part_key(name)).collect();
+    let mut taken = vec![false; names.len()];
+    let mut order = Vec::with_capacity(names.len());
+    for at in 0..names.len() {
+        if taken[at] {
+            continue;
+        }
+        let Some(key) = &keys[at] else {
+            taken[at] = true;
+            order.push(at);
+            continue;
+        };
+        let mut parts: Vec<usize> = (at..names.len())
+            .filter(|&other| !taken[other] && keys[other].as_ref().is_some_and(|other| other.copy == key.copy))
+            .collect();
+        parts.sort_by_key(|&other| keys[other].as_ref().map(|other| other.number));
+        for &other in &parts {
+            taken[other] = true;
+        }
+        order.extend(parts);
+    }
+    order
+}
+
+/// Чья это часть и какая — по имени файла.
+struct PartKey<'a> {
+    /// Имя копии без метки части, пометка повторного скачивания и число
+    /// частей: `kvartik-2026-11-23-2of3 (1).json` — `kvartik-2026-11-23`,
+    /// ` (1)` и 3.
+    copy: (&'a str, &'a str, u16),
+    number: u16,
+}
+
+/// Ключ части по имени файла; `None` — имя не части.
+fn part_key(name: &str) -> Option<PartKey<'_>> {
+    let stem = json_stem(name)?;
+    let base = without_copy_mark(stem.trim_end());
+    let mark = &stem[base.len()..];
+    let (copy, tail) = base.rsplit_once('-')?;
+    let (number, of) = part_of_name(tail)?;
+    Some(PartKey {
+        copy: (copy, mark, of),
+        number,
+    })
 }
 
 /// Копия всех ИП (задача 38): в ней записи конторы — ИП списка или ключ

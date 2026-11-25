@@ -2182,6 +2182,31 @@ fn a_client_copy_is_told_by_its_file_name() {
     assert!(wrong.is_empty(), "копия для клиента по имени: {wrong:#?}");
 }
 
+/// Части одной копии в цепочке — рядом и по номеру, с места первой из них,
+/// остальные файлы — на своих местах (ревью 0.0.199): части двух копий
+/// вперемешку стирали бы друг у друга запись о легших частях. Пометка
+/// повторного скачивания и число частей — часть имени копии.
+#[test]
+fn the_parts_of_one_copy_go_together_in_a_chain() {
+    let mut wrong = Vec::new();
+    for (names, order) in [
+        (vec!["a-1of2.json", "b-1of2.json", "a-2of2.json", "b-2of2.json"], vec![0, 2, 1, 3]),
+        (vec!["x.json", "a-2of2.json", "y.json", "a-1of2.json"], vec![0, 3, 1, 2]),
+        (vec!["b-2of2.json", "a-1of2.json", "b-1of2.json"], vec![2, 0, 1]),
+        (vec!["a-1of2 (1).json", "a-1of2.json", "a-2of2 (1).json", "a-2of2.json"], vec![0, 2, 1, 3]),
+        (vec!["a-1of2.json", "a-1of3.json", "a-2of2.json", "a-2of3.JSON "], vec![0, 2, 1, 3]),
+        (vec!["a-1of2.json", "a-1of2.json", "a-2of2.json"], vec![0, 1, 2]),
+        (vec!["kvartik.json", "отчёт.txt", "a-0of2.json", "a-3of2.json"], vec![0, 1, 2, 3]),
+        (vec![], vec![]),
+    ] {
+        let got = chain_order(&names);
+        if got != order {
+            wrong.push(format!("{names:?}: {got:?}, а не {order:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "порядок цепочки: {wrong:#?}");
+}
+
 /// Имя файла окно показывает без управляющих знаков и знаков направления
 /// письма и не длиннее предела — по границе знака (ревью 0.0.199): имя
 /// поделённого файла — чужой текст, а RLO перевернул бы хвост фразы окна.

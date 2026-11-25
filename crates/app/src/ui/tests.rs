@@ -2127,12 +2127,14 @@ async fn a_backup_over_the_limit_is_saved_in_parts() {
     drop(mounted);
     host.remove();
 
-    // Все части разом (задача 124): одним выбором и не по порядку — пароль
-    // спрошен один раз на три части, остальные легли ключом первой. Четвёртый
-    // файл — та же часть 1 ещё раз: копия уже целая, ключ прошлой части
-    // забыт, а пароль, введённый в цепочке, подходит — второй раз его не
-    // спрашивают (задача 124, A2). Где выпускать — спрошено в итоге, хотя
-    // целой копию сделал третий файл, а не последний.
+    // Все части разом (задача 124): одним выбором и не по порядку — цепочка
+    // кладёт их по номеру (`backup::chain_order`, 0.0.200), пароль спрошен
+    // один раз, у части 1, остальные легли ключом первой. Четвёртый файл —
+    // та же часть 1 ещё раз, под именем без метки части, и цепочка его не
+    // двигает: копия уже целая, ключ прошлой части забыт, а пароль, введённый
+    // в цепочке, подходит — второй раз его не спрашивают (задача 124, A2).
+    // Где выпускать — спрошено в итоге, хотя целой копию сделал третий файл,
+    // а не последний.
     // Спрошен ли пароль файла — есть ли его поле: слова «Файл 4 из 4.» видно
     // и на шаге «Восстанавливаем…», до формы (CLAUDE.md, «браузерный тест
     // ждёт состояния»).
@@ -2167,9 +2169,12 @@ async fn a_backup_over_the_limit_is_saved_in_parts() {
     match backup_file(&host).await {
         Some(input) => {
             let chosen = files(&[1, 2, 0, 0]);
-            let chosen: Vec<(&str, &str)> = chosen.iter().map(|(name, text)| (name.as_str(), text.as_str())).collect();
+            let mut chosen: Vec<(&str, &str)> = chosen.iter().map(|(name, text)| (name.as_str(), text.as_str())).collect();
+            if let Some(again) = chosen.last_mut() {
+                again.0 = "kvartik-ещё-раз.json";
+            }
             choose_files(&input, &chosen);
-            if !wait_for(&host, &asked(2)).await {
+            if !wait_for(&host, &asked(1)).await {
                 wrong.push("у выбранных разом не спросили пароль первой".to_owned());
             }
             enter(&host, &mut wrong);
@@ -2197,7 +2202,7 @@ async fn a_backup_over_the_limit_is_saved_in_parts() {
             let mut chosen: Vec<(&str, &str)> = chosen.iter().map(|(name, text)| (name.as_str(), text.as_str())).collect();
             chosen.push(("kvartik-other.json", other.as_str()));
             choose_files(&input, &chosen);
-            if wait_for(&host, &asked(2)).await {
+            if wait_for(&host, &asked(1)).await {
                 enter(&host, &mut wrong);
             }
             let fourth = fill(t(lang, Key::BackupChainAt), &[&n(4), &n(4)]);
@@ -2233,7 +2238,9 @@ async fn a_backup_over_the_limit_is_saved_in_parts() {
     host.remove();
 
     // Битый файл посреди цепочки (ревью задачи 124): назван, следующие не
-    // тронуты, а что легло до него — с частями, которые остались.
+    // тронуты, а что легло до него — с частями, которые остались. Часть 3 —
+    // под именем без метки части: иначе цепочка поставила бы её рядом
+    // с частью 2, до битого файла.
     crate::store::delete_database(crate::store::DB_NAME).await;
     forget(&["parts_laid"]);
     let (host, mounted) = mount_at("#/backup");
@@ -2243,7 +2250,7 @@ async fn a_backup_over_the_limit_is_saved_in_parts() {
             let chosen = [
                 (good[0].0.as_str(), good[0].1.as_str()),
                 ("broken.json", "{}"),
-                (good[1].0.as_str(), good[1].1.as_str()),
+                ("kvartik-часть-три.json", good[1].1.as_str()),
             ];
             choose_files(&input, &chosen);
             if wait_for(&host, &asked(2)).await {
@@ -2283,7 +2290,8 @@ async fn a_backup_over_the_limit_is_saved_in_parts() {
     if !thrown.default_prevented() {
         wrong.push("брошенные файлы браузер открыл бы сам".to_owned());
     }
-    if wait_for(&host, &asked(3)).await {
+    // Брошены 3, 1, 2 — ложатся по номеру, пароль спрошен у части 1.
+    if wait_for(&host, &asked(1)).await {
         enter(&host, &mut wrong);
         said(&host, &all, true, "брошенные на экран", &mut wrong).await;
     } else {
@@ -2703,6 +2711,95 @@ async fn the_parts_of_a_backup_shared_at_once_land_as_one_chain() {
     crate::store::delete_database(crate::store::DB_NAME).await;
     crate::platform::set_hash("");
     assert!(wrong.is_empty(), "поделённые части: {wrong:#?}");
+}
+
+/// Части двух копий, выбранные разом вперемешку (ревью 0.0.199): цепочка
+/// кладёт части одной копии рядом и по номеру (`backup::chain_order`), и обе
+/// копии легли целиком, пароль спрошен один раз, а вопрос, где выпускать,
+/// у копии в пустую программу задан. Вперемешку часть одной копии стирала
+/// запись о легших частях другой: итог называл недостающей уже легшую часть,
+/// а вопроса не было.
+#[wasm_bindgen_test]
+async fn parts_of_two_copies_chosen_mixed_land_whole() {
+    use kvartik_core::i18n;
+    let lang = Lang::Ru;
+    let password = "Пароль копий задачи 124 двух копий вперемешку";
+    let forget = || {
+        if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
+            for name in ["lang", "backup_key", "last_backup", "last_size", "parts_laid", "trial_data"] {
+                let _ = storage.remove_item(&format!("kvartik.{name}"));
+            }
+        }
+    };
+    forget();
+    let mut wrong = Vec::new();
+    // Две копии одного ИП частями — по клиенту на часть.
+    let now = crate::platform::clock::now();
+    let profile = Profile::save(None, documents::profile(), now).expect("годный профиль").expect("новый");
+    let named = |name: &str| {
+        let data = ClientData {
+            name: Line::new(name).expect("имя"),
+            ..documents::acme()
+        };
+        Client::create(data, now).expect("годный клиент")
+    };
+    seed_clients(&profile, &[&named("Beispiel GmbH"), &named("Example LLC")]).await;
+    let first = sealed_sheets(password, 1).await;
+    seed_clients(&profile, &[&named("Third Device Ltd"), &named("Fourth Device Ltd")]).await;
+    let second = sealed_sheets(password, 1).await;
+    if first.len() != 2 || second.len() != 2 {
+        wrong.push(format!("частей не по две, а {} и {}", first.len(), second.len()));
+    }
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    Device::new().set_ui_lang(lang);
+    let part = |copy: &[String], at: usize| copy.get(at).cloned().unwrap_or_default();
+    let chosen = [
+        ("kvartik-2026-11-20-1of2.json".to_owned(), part(&first, 0)),
+        ("kvartik-2026-11-21-1of2.json".to_owned(), part(&second, 0)),
+        ("kvartik-2026-11-20-2of2.json".to_owned(), part(&first, 1)),
+        ("kvartik-2026-11-21-2of2.json".to_owned(), part(&second, 1)),
+    ];
+    let chosen: Vec<(&str, &str)> = chosen.iter().map(|(name, text)| (name.as_str(), text.as_str())).collect();
+    let (host, mounted) = mount_at("#/backup");
+    match backup_file(&host).await {
+        Some(input) => choose_files(&input, &chosen),
+        None => wrong.push("нет поля выбора копии".to_owned()),
+    }
+    let mut asked = None;
+    for _ in 0..200 {
+        asked = field(&host, t(lang, Key::BackupFilePassword), 0);
+        if asked.is_some() {
+            break;
+        }
+        sleep(50).await;
+    }
+    match asked {
+        Some(input) => {
+            type_into(&input, password);
+            match button(&host, &[t(lang, Key::BackupRestore)]) {
+                Some(restore) => restore.click(),
+                None => wrong.push("нет «Восстановить»".to_owned()),
+            }
+        }
+        None => wrong.push(format!("копии не открыты: «{}»", section_text(&host, "backup"))),
+    }
+    let n = |number: i64| i18n::integer(lang, number);
+    let all = fill(t(lang, Key::BackupPartsAll), &[&n(2), &n(2)]);
+    if !wait_for(&host, &all).await {
+        wrong.push(format!("копии не легли целиком: нет «{all}» в «{}»", section_text(&host, "backup")));
+    }
+    if !host.text_content().unwrap_or_default().contains(t(lang, Key::BackupIssuerAsk)) {
+        wrong.push("вопрос, где выпускать, не задан".to_owned());
+    }
+    if field(&host, t(lang, Key::BackupFilePassword), 0).is_some() {
+        wrong.push("пароль спрошен второй раз".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    forget();
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    crate::platform::set_hash("");
+    assert!(wrong.is_empty(), "две копии вперемешку: {wrong:#?}");
 }
 
 /// Копия в одно нажатие (задача 124, часть C; решение человека 2026-11-25):

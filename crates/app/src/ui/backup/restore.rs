@@ -114,7 +114,8 @@ struct FolderCopy {
 }
 
 /// Выбранные разом файлы копии (задача 124): ещё не тронутые — по порядку
-/// выбора, какой из скольких ложится сейчас и что легло прошлыми.
+/// выбора, а части одной копии — рядом и по номеру (`backup::chain_order`,
+/// с 0.0.200); какой из скольких ложится сейчас и что легло прошлыми.
 #[derive(Default)]
 struct Chain {
     /// Файлы и чья это копия из папки ([`Chain::copies`]); `None` — файл
@@ -417,7 +418,20 @@ pub(super) fn RestoreBackup(
         });
         next();
     };
-    let take = move |files: Vec<File>| take_copies(files.into_iter().map(|file| (file, None)).collect(), Vec::new());
+    // Выбранные и поделённые разом — части одной копии рядом и по номеру
+    // (`backup::chain_order`, ревью 0.0.199): запись о легших частях одна,
+    // и части двух копий вперемешку стирали бы её друг у друга.
+    let take = move |files: Vec<File>| {
+        let names: Vec<String> = files.iter().map(File::name).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let mut files: Vec<Option<File>> = files.into_iter().map(Some).collect();
+        let ordered = backup::chain_order(&names)
+            .into_iter()
+            .filter_map(|at| files.get_mut(at)?.take())
+            .map(|file| (file, None))
+            .collect();
+        take_copies(ordered, Vec::new());
+    };
     // «Поделиться → Kvartik» на Android (задача 124, часть D): файлы копии из
     // мессенджера — все, и части одной копии тоже, — сразу в цепочку, как
     // выбранные разом.
