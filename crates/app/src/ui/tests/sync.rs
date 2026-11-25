@@ -2459,6 +2459,61 @@ async fn the_settings_ask_after_an_exchange_seen_later() {
     assert!(wrong.is_empty(), "настройки после обмена: {wrong:#?}");
 }
 
+/// Круг QR-кодов после первого круга идёт новыми кадрами fountain-кода, а не
+/// теми же снова (задача 124, часть F): пропущенный кадр не ждёт следующего
+/// круга. На экране за первым кругом — кадры, которых в нём не было.
+#[wasm_bindgen_test]
+async fn the_circle_goes_on_with_new_frames() {
+    let lang = Lang::Ru;
+    documents::fresh_base_with_client().await;
+    other_device();
+    Device::new().set_ui_lang(lang);
+    let mut wrong = Vec::new();
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база не открылась".to_owned());
+    }
+    if make(&host, lang, true, &mut wrong).await.is_none() {
+        wrong.push("код не сделан".to_owned());
+    }
+    let ink = || {
+        host.query_selector(".sync-way:not([hidden]) .sync-qr path.sync-qr-ink")
+            .ok()
+            .flatten()
+            .and_then(|path| path.get_attribute("d"))
+    };
+    let count = host
+        .query_selector(".sync-way:not([hidden]) .sync-qr figcaption")
+        .ok()
+        .flatten()
+        .and_then(|caption| caption.text_content())
+        .and_then(|text| text.rsplit(' ').next().and_then(|n| n.trim().parse::<usize>().ok()))
+        .unwrap_or(0);
+    if count < 2 {
+        wrong.push(format!("в круге меньше двух кадров ({count}): проверять нечего"));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    // Два круга с лишним по 0,5 с.
+    for _ in 0..(count * 2 + 4) * 5 {
+        if let Some(d) = ink() {
+            seen.insert(d);
+        }
+        if seen.len() > count + 1 {
+            break;
+        }
+        sleep(100).await;
+    }
+    if seen.len() <= count {
+        wrong.push(format!("за два круга — только {} разных кадров из {count}: круг повторяет те же", seen.len()));
+    }
+    drop(mounted);
+    host.remove();
+    other_device();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "круг fountain-кода: {wrong:#?}");
+}
+
 /// Встречный код, в котором нести нечего, кроме эха (задача 124, п. 14): у
 /// получателя после того дня ничего своего — только то, что пришло, — и он
 /// говорит «передавать нечего», а не показывает код с тем же самым.

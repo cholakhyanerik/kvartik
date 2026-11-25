@@ -1433,7 +1433,7 @@ macro_rules! en {
     (SyncUnreadable) => { "Records that can't be read and were left out of the code: {}." };
     (SyncNothing) => { "No records have changed since that day\u{A0}— there's nothing to send." };
     (SyncTooLarge) => { "There are more changes than a code holds: {}\u{A0}KB of {}. Pick a later day or move the changes with a backup file." };
-    (SyncQrHint) => { "On the other device, open “Another device” and tap “Scan the QR code”. The codes go round in a loop, so a missed one comes again. Once the other device takes the code, it shows a receipt: scan it or paste its text below, and the loop stops." };
+    (SyncQrHint) => { "On the other device, open “Another device” and tap “Scan the QR code”. The codes keep coming one after another, so there is no need to wait for a missed one: any of them will do\u{A0}— as many as there are, plus one or two. Once the other device takes the code, it shows a receipt: scan it or paste its text below, and the codes stop." };
     (SyncQrCount) => { "Code {} of {}" };
     (SyncQrLabel) => { "QR code with the changes" };
     (SyncTextAbout) => { "Or forward the code as text\u{A0}— to yourself by messenger or email\u{A0}— and paste it on the other device. If there are several parts, paste them all, in any order." };
@@ -1518,7 +1518,7 @@ macro_rules! en {
     (SyncWhatNew) => { "What's new since the last transfer goes in: changes since {}." };
     (SyncWhatDay) => { "Changes since {} go in." };
     (SyncWhatAll) => { "All records go in." };
-    (SyncMadeQr) => { "QR codes: {}, one round takes about {}\u{A0}s." };
+    (SyncMadeQr) => { "QR codes: {}, scanning them takes about {}\u{A0}s." };
     (SyncShare) => { "Send the code" };
     (SyncSharePart) => { "Send part {} of {}" };
     (SyncShareFailed) => { "Couldn't send the code. Try again or copy it." };

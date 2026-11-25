@@ -245,7 +245,7 @@ fn foreign_frames_are_not_taken() {
     assert_eq!(frame(b"KVARTIK code"), Err(FrameError::NotFrame));
     assert_eq!(frame(&[]), Err(FrameError::NotFrame));
     let mut newer = good.clone();
-    newer[3] = FRAME_VERSION + 1;
+    newer[3] = FOUNTAIN_FRAME + 1;
     assert_eq!(frame(&newer), Err(FrameError::Newer));
     let mut beyond = good.clone();
     beyond[8..10].copy_from_slice(&5u16.to_be_bytes());
@@ -254,17 +254,23 @@ fn foreign_frames_are_not_taken() {
     assert_eq!(frame(&good[..FRAME_HEADER]), Err(FrameError::NotFrame));
 }
 
-/// Каждый QR-код передачи — версии 12, и с его модулей читается его кадр.
+/// Каждый QR-код передачи — версии 12, и с его модулей читается его кадр:
+/// первый круг — столько же кадров, сколько кусков, как у кадров версии 1,
+/// а кадр после него — тоже QR-код версии 12 (задача 124, часть F).
 #[test]
 fn qr_codes_carry_the_frames() {
     let code = sample_code(1_000);
     let codes = qr_codes(&code, 9);
-    let frames = super::frames(&code, QR_CHUNK, 9);
-    assert_eq!(codes.len(), frames.len());
-    for (qr_code, frame) in codes.iter().zip(&frames) {
+    assert_eq!(codes.len(), super::frames(&code, QR_CHUNK, 9).len());
+    assert_eq!(codes.len(), qr_count(&code));
+    for (esi, qr_code) in codes.iter().enumerate() {
         assert_eq!(qr_code.version(), QR_VERSION);
-        assert_eq!(qr::read_code(qr_code).as_ref(), Some(frame));
+        let esi = u16::try_from(esi).expect("номер");
+        assert_eq!(qr::read_code(qr_code), Some(qr_frame(&code, 9, esi)));
     }
+    let later = qr_code(&code, 9, 1_000).expect("QR-код");
+    assert_eq!(later.version(), QR_VERSION);
+    assert_eq!(qr::read_code(&later), Some(qr_frame(&code, 9, 1_000)));
 }
 
 /// Куски текста — с меткой, не длиннее сообщения Telegram, только буквы
@@ -905,4 +911,176 @@ fn peers_remember_names_and_issuing() {
     let old = format!(r#"[{{"id":"{a}","name":"\u202eНоутбук","last":5}}]"#);
     let parsed = Peers::parse(&old);
     assert_eq!(parsed.list().first().and_then(|peer| peer.name.as_deref()), Some("Ноутбук"));
+}
+
+
+/// Генератор тестов: свой, чтобы прогоны были повторимы.
+struct Dice(u64);
+
+impl Dice {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    /// Выпало ли с вероятностью `percent` из ста.
+    fn chance(&mut self, percent: u64) -> bool {
+        self.next() % 100 < percent
+    }
+}
+
+/// Код в `len` байтов, непохожий на нули.
+fn noise(len: usize, seed: u64) -> Vec<u8> {
+    let mut dice = Dice(seed);
+    (0..len).map(|_| dice.next() as u8).collect()
+}
+
+/// QR-кадры fountain-кода (версия 2): первые K — куски кода, круг без
+/// пропусков собирает код за те же K кадров, что и прежде.
+#[test]
+fn the_first_round_of_fountain_frames_is_the_code() {
+    let code = noise(MAX_CODE_BYTES, 1);
+    let k = qr_count(&code);
+    assert_eq!(k, MAX_CODE_BYTES.div_ceil(QR_CHUNK));
+    let mut collector = Collector::default();
+    for esi in 0..k {
+        let bytes = qr_frame(&code, 7, u16::try_from(esi).unwrap());
+        let got = frame(&bytes).expect("кадр");
+        assert_eq!(collector.take(got), Took::New);
+        assert_eq!((collector.got(), collector.count()), (esi + 1, k));
+    }
+    assert_eq!(collector.whole(), Some(code));
+}
+
+/// Из любых кадров — с пропусками, повторами и чужими кадрами в середине —
+/// код собирается, а кадров сверх K в среднем нужно немного: записать.
+#[test]
+fn any_k_and_a_few_frames_make_the_code() {
+    let mut wrong = Vec::new();
+    let mut extra = 0usize;
+    let trials = 200;
+    for trial in 0..trials {
+        let len = 1 + (trial * 977) % MAX_CODE_BYTES;
+        let code = noise(len, trial as u64);
+        let id = 1000 + trial as u32;
+        let k = qr_count(&code);
+        let mut dice = Dice(trial as u64 ^ 0xABCD);
+        let mut collector = Collector::default();
+        let mut taken = 0usize;
+        let mut esi = 0u32;
+        // Сначала — только символы сверх K, в случайном порядке номеров:
+        // худший случай для систематического кода.
+        while collector.whole().is_none() && esi < 4 * k as u32 + 64 {
+            let number = (k as u32 + (dice.next() % 60_000) as u32).min(u32::from(u16::MAX)) as u16;
+            let got = frame(&qr_frame(&code, id, number)).expect("кадр");
+            if dice.chance(5) {
+                // Повтор того же кадра ничего не даёт и не мешает.
+                collector.take(got.clone());
+            }
+            collector.take(got);
+            taken += 1;
+            esi += 1;
+        }
+        match collector.whole() {
+            Some(whole) if whole == code => extra += taken - k,
+            Some(_) => wrong.push(format!("код {len} Б собрался не тем")),
+            None => wrong.push(format!("код {len} Б ({k} кусков) не собрался из {taken} кадров")),
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+    // В среднем сверх K — меньше трёх кадров (у случайного линейного кода над
+    // GF(2) ожидание — около 1,6).
+    let mean = extra as f64 / f64::from(trials as u32);
+    assert!(mean < 3.0, "сверх K в среднем {mean:.2} кадра");
+    println!("сверх K в среднем {mean:.2} кадра");
+}
+
+/// Кадр другой передачи начинает сборку заново, кадр версии 1 той же
+/// метки — тоже (это другой вид кода), а кадры обоих видов по отдельности
+/// собираются, как прежде.
+#[test]
+fn fountain_and_plain_frames_do_not_mix() {
+    let code = noise(5_000, 3);
+    let mut collector = Collector::default();
+    collector.take(frame(&qr_frame(&code, 1, 0)).expect("кадр"));
+    let other = frame(&qr_frame(&code, 2, 0)).expect("кадр");
+    assert_eq!(collector.take(other), Took::Restarted);
+    let plain = frame(&frames(&code, QR_CHUNK, 2)[0]).expect("кадр");
+    assert_eq!(collector.take(plain), Took::Restarted);
+    for bytes in frames(&code, QR_CHUNK, 2).iter().skip(1) {
+        collector.take(frame(bytes).expect("кадр"));
+    }
+    assert_eq!(collector.whole(), Some(code));
+}
+
+/// Испорченный кадр версии 2 — не кадр: кусков больше предела, пустой код,
+/// код длиннее предела.
+#[test]
+fn a_broken_fountain_frame_is_not_a_frame() {
+    let code = noise(2_000, 4);
+    let good = qr_frame(&code, 9, 3);
+    assert!(frame(&good).is_ok());
+    let mut tiny = good[..FRAME_HEADER + 1].to_vec();
+    tiny[8..10].copy_from_slice(&u16::try_from(MAX_CODE_BYTES).unwrap().to_be_bytes());
+    assert_eq!(frame(&tiny).map(|_| ()), Err(FrameError::NotFrame), "кусков больше предела");
+    let mut empty = good.clone();
+    empty[8..10].copy_from_slice(&0u16.to_be_bytes());
+    assert_eq!(frame(&empty).map(|_| ()), Err(FrameError::NotFrame), "пустой код");
+    let mut newer = good;
+    newer[3] = 3;
+    assert_eq!(frame(&newer).map(|_| ()), Err(FrameError::Newer));
+}
+
+/// Замер части F (`docs/measurements.md`): код в 32 КиБ, кадр раз в 0,5 с,
+/// камера теряет каждый десятый кадр. Сколько секунд до кода — кругом
+/// кадров версии 1 и fountain-кодом. `cargo test -p kvartik-core
+/// fountain_timing -- --ignored --nocapture`.
+#[test]
+#[ignore = "замер: печатает числа"]
+fn fountain_timing() {
+    let code = noise(MAX_CODE_BYTES, 5);
+    let k = qr_count(&code);
+    let trials = 1000;
+    let mut before = Vec::new();
+    let mut after = Vec::new();
+    let plain = frames(&code, QR_CHUNK, 1);
+    for trial in 0..trials {
+        let mut dice = Dice(trial);
+        let mut collector = Collector::default();
+        let mut shown = 0usize;
+        while collector.whole().is_none() {
+            let bytes = &plain[shown % plain.len()];
+            shown += 1;
+            if !dice.chance(10) {
+                collector.take(frame(bytes).expect("кадр"));
+            }
+        }
+        before.push(shown);
+        let mut dice = Dice(trial ^ 0x5555);
+        let mut collector = Collector::default();
+        let mut shown = 0usize;
+        while collector.whole().is_none() {
+            let bytes = qr_frame(&code, 2 + trial as u32, u16::try_from(shown).unwrap());
+            shown += 1;
+            if !dice.chance(10) {
+                collector.take(frame(&bytes).expect("кадр"));
+            }
+        }
+        after.push(shown);
+    }
+    // Работа шага круга после первого: новый символ и его QR-код.
+    let started = std::time::Instant::now();
+    for esi in 0..200u16 {
+        assert!(qr_code(&code, 3, 1_000 + esi).is_some());
+    }
+    println!("QR-код нового кадра: {:.2} мс", started.elapsed().as_secs_f64() * 1000.0 / 200.0);
+    for (name, list) in [("круг", &mut before), ("fountain", &mut after)] {
+        list.sort_unstable();
+        let mean = list.iter().sum::<usize>() as f64 / list.len() as f64;
+        let p95 = list[list.len() * 95 / 100];
+        println!("{name}: K = {k}, кадров в среднем {mean:.1} ({:.1} с), 95 % — {p95} ({:.1} с)", mean / 2.0, p95 as f64 / 2.0);
+    }
 }

@@ -475,8 +475,8 @@ fn megabytes(lang: Lang, bytes: usize) -> String {
 
 /// Готовый код на экране.
 struct Shown {
-    /// Контуры тёмных модулей каждого QR-кода — для `<path d>`.
-    qr: Vec<String>,
+    /// Круг QR-кодов: контуры для `<path d>`.
+    qr: Circle,
     /// Сторона QR-кода с полем, в модулях.
     side: usize,
     /// Куски текста.
@@ -539,6 +539,46 @@ const QUIET: usize = 4;
 /// Сколько показывается каждый QR-код круга: камера с разбором успевает
 /// снять его дважды-трижды, а круг из 15 кодов — меньше восьми секунд.
 const QR_STEP: Duration = Duration::from_millis(500);
+
+/// Круг QR-кодов кода (задача 124, часть F): первый круг — куски кода,
+/// контурами заранее, а дальше — без конца новые кадры fountain-кода, по
+/// одному на шаг: пропущенный кадр не ждёт следующего круга, хватает любых
+/// числом кусков и ещё одного-двух (`sync::qr_frame`).
+#[derive(Clone)]
+struct Circle {
+    first: Vec<String>,
+    code: std::sync::Arc<[u8]>,
+    id: u32,
+}
+
+impl Circle {
+    fn of(code: &[u8]) -> (Self, usize) {
+        let id = sync::transfer_id();
+        let codes = sync::qr_codes(code, id);
+        let side = codes.first().map_or(0, qr::Code::side) + 2 * QUIET;
+        let circle = Self {
+            first: codes.iter().map(qr_path).collect(),
+            code: std::sync::Arc::from(code),
+            id,
+        };
+        (circle, side)
+    }
+
+    /// Сколько кадров в первом круге — кусков кода.
+    fn len(&self) -> usize {
+        self.first.len()
+    }
+
+    /// Контур кадра шага `step`: после первого круга — новый символ, номер
+    /// которого идёт по кругу в 65 536 — девять часов кадров.
+    fn path(&self, step: usize) -> String {
+        if let Some(path) = self.first.get(step) {
+            return path.clone();
+        }
+        let esi = u16::try_from(step % (usize::from(u16::MAX) + 1)).unwrap_or_default();
+        sync::qr_code(&self.code, self.id, esi).map(|code| qr_path(&code)).unwrap_or_default()
+    }
+}
 
 /// Контур тёмных модулей QR-кода — полосами по строкам, со сдвигом на поле.
 fn qr_path(code: &qr::Code) -> String {
@@ -905,10 +945,9 @@ async fn seal_code(
         Err(Unmade::Failure(failure)) => return Err(Problem::from(failure).into()),
         Err(Unmade::TooLarge(large)) => return Err(Say::TooLarge(large.bytes)),
     };
-    let codes = sync::qr_codes(&made.code, sync::transfer_id());
-    let side = codes.first().map_or(0, qr::Code::side) + 2 * QUIET;
+    let (qr, side) = Circle::of(&made.code);
     let shown = Shown {
-        qr: codes.iter().map(qr_path).collect(),
+        qr,
         side,
         parts: sync::text_parts(&made.code, sync::transfer_id()),
         since,
@@ -945,12 +984,14 @@ thread_local! {
 }
 
 /// Следующий QR-код круга — через [`QR_STEP`], и снова, пока круг идёт.
-fn cycle(index: RwSignal<usize>, count: usize, running: StoredValue<bool>, timer: StoredValue<Option<TimeoutHandle>>) {
+fn cycle(index: RwSignal<usize>, running: StoredValue<bool>, timer: StoredValue<Option<TimeoutHandle>>) {
     let handle = set_timeout_with_handle(
         move || {
             if running.try_get_value() == Some(true) {
-                index.try_update(|i| *i = (*i + 1) % count);
-                cycle(index, count, running, timer);
+                // Шаг идёт дальше первого круга (задача 124, часть F): после
+                // него — новые кадры fountain-кода, а не те же снова.
+                index.try_update(|i| *i = i.wrapping_add(1));
+                cycle(index, running, timer);
             }
         },
         QR_STEP,
@@ -975,7 +1016,7 @@ fn halt(running: StoredValue<bool>, timer: StoredValue<Option<TimeoutHandle>>) {
 fn CodeShown(
     lang: ReadSignal<Lang>,
     seen: Signal<bool>,
-    qr: Vec<String>,
+    qr: Circle,
     side: usize,
     parts: Vec<String>,
     accepted: Signal<bool>,
@@ -1027,7 +1068,7 @@ fn CodeShown(
         wake(go && !tired.get());
         if go && count > 1 && !running.get_value() {
             running.set_value(true);
-            cycle(index, count, running, timer);
+            cycle(index, running, timer);
         } else if !go {
             halt(running, timer);
         }
@@ -1037,10 +1078,13 @@ fn CodeShown(
         wake(false);
     });
     let frames = StoredValue::new(qr);
-    let path = move || frames.with_value(|qr| qr.get(index.get()).cloned()).unwrap_or_default();
+    // Кадр шага — один раз на шаг: его рисуют и строка, и окно на весь экран,
+    // а кадр после первого круга — новый QR-код.
+    let path = Memo::new(move |_| frames.with_value(|qr| qr.path(index.get())));
     let caption = move || {
         let lang = lang.get();
-        fill(t(lang, Key::SyncQrCount), &[&i18n::integer(lang, index.get() as i64 + 1), &i18n::integer(lang, count as i64)])
+        let at = index.get() % count.max(1) + 1;
+        fill(t(lang, Key::SyncQrCount), &[&i18n::integer(lang, at as i64), &i18n::integer(lang, count as i64)])
     };
     let copied = RwSignal::new(None::<bool>);
     let share_failed = RwSignal::new(false);
@@ -1208,7 +1252,7 @@ fn CodeShown(
 
 /// Часть кода файлов на экране: QR-коды и куски текста.
 struct FilePart {
-    qr: Vec<String>,
+    qr: Circle,
     side: usize,
     text: Vec<String>,
 }
@@ -1263,10 +1307,10 @@ async fn make_files(ctx: Ctx, shown: Rc<Shown>) -> Result<FilesShown, Say> {
     let parts = sync::segments(&made.code, sync::transfer_id())
         .iter()
         .map(|segment| {
-            let codes = sync::qr_codes(segment, sync::transfer_id());
+            let (qr, side) = Circle::of(segment);
             FilePart {
-                side: codes.first().map_or(0, qr::Code::side) + 2 * QUIET,
-                qr: codes.iter().map(qr_path).collect(),
+                side,
+                qr,
                 text: sync::text_parts(segment, sync::transfer_id()),
             }
         })

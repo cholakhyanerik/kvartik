@@ -227,7 +227,16 @@ pub const TEXT_PREFIX: &str = "KVARTIK";
 /// QR-код с текстом «Kvartik» иначе читался бы кадром новой версии, и приём
 /// обрывался бы словами «обновите программу» (ревью задачи 110).
 const FRAME_MARK: &[u8; 3] = b"KVF";
-const FRAME_VERSION: u8 = 1;
+
+/// Кадр версии 1 — свой кусок кода: номер и число кадров. Им идут куски
+/// текста и квитанция, а до 0.0.198 — и круг QR-кодов.
+const PLAIN_FRAME: u8 = 1;
+
+/// Кадр версии 2 (с 0.0.198, задача 124, часть F) — символ fountain-кода
+/// круга QR-кодов ([`fountain`]): длина кода и номер символа вместо номера
+/// и числа кадров, шапка той же длины. Прежние версии такой кадр называют
+/// кадром новой версии и просят обновить программу.
+const FOUNTAIN_FRAME: u8 = 2;
 
 /// Самое длинное слово куска текста: метка и кадр с самым большим куском,
 /// буквами и цифрами. Длиннее — не кусок, и разбирать его незачем:
@@ -1030,12 +1039,15 @@ where
 }
 
 /// Кадр кода: чья передача, какой по счёту и сколько их, и кусок кода.
+/// У кадра версии 2 — номер символа fountain-кода, число кусков кода и его
+/// длина (`length`).
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Frame {
     id: u32,
     index: u16,
     count: u16,
     chunk: Vec<u8>,
+    length: Option<u16>,
 }
 
 /// Почему байты — не кадр.
@@ -1064,7 +1076,7 @@ pub fn frames(code: &[u8], chunk: usize, id: u32) -> Vec<Vec<u8>> {
         .map(|(index, piece)| {
             let mut frame = Vec::with_capacity(FRAME_HEADER + piece.len());
             frame.extend_from_slice(FRAME_MARK);
-            frame.push(FRAME_VERSION);
+            frame.push(PLAIN_FRAME);
             frame.extend_from_slice(&id.to_be_bytes());
             frame.extend_from_slice(&u16::try_from(index).unwrap_or(u16::MAX).to_be_bytes());
             frame.extend_from_slice(&count.to_be_bytes());
@@ -1074,20 +1086,38 @@ pub fn frames(code: &[u8], chunk: usize, id: u32) -> Vec<Vec<u8>> {
         .collect()
 }
 
-/// Кадр из байтов QR-кода или куска текста.
+/// Кадр из байтов QR-кода или куска текста: версии 1 или 2.
 pub fn frame(bytes: &[u8]) -> Result<Frame, FrameError> {
     if bytes.len() < 4 || &bytes[..3] != FRAME_MARK {
         return Err(FrameError::NotFrame);
     }
-    if bytes[3] > FRAME_VERSION {
+    if bytes[3] > FOUNTAIN_FRAME {
         return Err(FrameError::Newer);
     }
-    if bytes[3] != FRAME_VERSION || bytes.len() <= FRAME_HEADER || bytes.len() > FRAME_HEADER + TEXT_CHUNK {
+    if bytes[3] == 0 || bytes.len() <= FRAME_HEADER || bytes.len() > FRAME_HEADER + TEXT_CHUNK {
         return Err(FrameError::NotFrame);
     }
     let id = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
-    let index = u16::from_be_bytes([bytes[8], bytes[9]]);
-    let count = u16::from_be_bytes([bytes[10], bytes[11]]);
+    let first = u16::from_be_bytes([bytes[8], bytes[9]]);
+    let second = u16::from_be_bytes([bytes[10], bytes[11]]);
+    let chunk = bytes[FRAME_HEADER..].to_vec();
+    if bytes[3] == FOUNTAIN_FRAME {
+        // Длина кода и номер символа; кусков — по длине куска в кадре, и не
+        // больше, чем у самого длинного кода самыми мелкими кадрами.
+        let length = first;
+        let pieces = fountain::pieces(usize::from(length), chunk.len());
+        if length == 0 || usize::from(length) > MAX_CODE_BYTES || pieces > MAX_FRAMES {
+            return Err(FrameError::NotFrame);
+        }
+        return Ok(Frame {
+            id,
+            index: second,
+            count: u16::try_from(pieces).map_err(|_| FrameError::NotFrame)?,
+            chunk,
+            length: Some(length),
+        });
+    }
+    let (index, count) = (first, second);
     if count == 0 || index >= count || usize::from(count) > MAX_FRAMES {
         return Err(FrameError::NotFrame);
     }
@@ -1095,16 +1125,43 @@ pub fn frame(bytes: &[u8]) -> Result<Frame, FrameError> {
         id,
         index,
         count,
-        chunk: bytes[FRAME_HEADER..].to_vec(),
+        chunk,
+        length: None,
     })
 }
 
-/// QR-коды кода `code`: по кадру в каждом, одной версии — круг не прыгает
+/// Сколько кадров в первом круге QR-кодов кода `code`: его кусков. Дальше
+/// круг идёт новыми символами без конца ([`qr_frame`]).
+pub fn qr_count(code: &[u8]) -> usize {
+    fountain::pieces(code.len(), QR_CHUNK)
+}
+
+/// Кадр `esi` круга QR-кодов кода `code` передачи `id` — версии 2: символ
+/// fountain-кода. Первые [`qr_count`] — куски кода, дальше — их смеси, и
+/// пропущенный кадр не ждёт следующего круга (задача 124, часть F). Длина
+/// кода — двумя байтами: код больше [`MAX_CODE_BYTES`] не делается.
+pub fn qr_frame(code: &[u8], id: u32, esi: u16) -> Vec<u8> {
+    let length = u16::try_from(code.len()).unwrap_or(u16::MAX);
+    let mut frame = Vec::with_capacity(FRAME_HEADER + QR_CHUNK);
+    frame.extend_from_slice(FRAME_MARK);
+    frame.push(FOUNTAIN_FRAME);
+    frame.extend_from_slice(&id.to_be_bytes());
+    frame.extend_from_slice(&length.to_be_bytes());
+    frame.extend_from_slice(&esi.to_be_bytes());
+    frame.extend_from_slice(&fountain::symbol(code, QR_CHUNK, id, esi));
+    frame
+}
+
+/// QR-код кадра `esi` ([`qr_frame`]): одной версии у всех — круг не прыгает
 /// размером.
+pub fn qr_code(code: &[u8], id: u32, esi: u16) -> Option<qr::Code> {
+    qr::encode(&qr_frame(code, id, esi), QR_VERSION, QR_ECC)
+}
+
+/// QR-коды первого круга кода `code` — куски кода кадрами версии 2.
 pub fn qr_codes(code: &[u8], id: u32) -> Vec<qr::Code> {
-    frames(code, QR_CHUNK, id)
-        .iter()
-        .filter_map(|frame| qr::encode(frame, QR_VERSION, QR_ECC))
+    (0..qr_count(code))
+        .filter_map(|esi| qr_code(code, id, u16::try_from(esi).ok()?))
         .collect()
 }
 
@@ -1129,11 +1186,15 @@ pub fn frames_in_text(text: &str) -> Vec<Result<Frame, FrameError>> {
 
 /// Сборка кода из кадров — в любом порядке и с повторами. Кадр другой
 /// передачи начинает сборку заново: значит, на том устройстве сделали
-/// новый код, и он новее.
+/// новый код, и он новее. Кадры версии 2 собирает fountain-код: хватает
+/// любых кусков числом, а не каждого своего (задача 124, часть F); кадр
+/// другой версии той же передачи — тоже заново.
 #[derive(Default, Debug)]
 pub struct Collector {
     id: Option<u32>,
     parts: Vec<Option<Vec<u8>>>,
+    /// Сборка кадров версии 2: длина кода и решатель.
+    fountain: Option<(u16, fountain::Solver)>,
 }
 
 /// Что сборка сделала с кадром.
@@ -1150,15 +1211,35 @@ pub enum Took {
 impl Collector {
     /// Взять кадр.
     pub fn take(&mut self, frame: Frame) -> Took {
-        let same = self.id == Some(frame.id) && self.parts.len() == usize::from(frame.count);
+        let same = self.id == Some(frame.id)
+            && match (&self.fountain, frame.length) {
+                (Some((length, solver)), Some(of)) => {
+                    *length == of && solver.block() == frame.chunk.len() && solver.pieces() == usize::from(frame.count)
+                }
+                (None, None) => self.parts.len() == usize::from(frame.count),
+                _ => false,
+            };
         let took = if same {
             Took::New
         } else {
             let restarted = self.id.is_some();
             self.id = Some(frame.id);
-            self.parts = vec![None; usize::from(frame.count)];
+            match frame.length {
+                Some(length) => {
+                    self.parts = Vec::new();
+                    let solver = fountain::Solver::new(frame.id, usize::from(frame.count), frame.chunk.len());
+                    self.fountain = Some((length, solver));
+                }
+                None => {
+                    self.fountain = None;
+                    self.parts = vec![None; usize::from(frame.count)];
+                }
+            }
             if restarted { Took::Restarted } else { Took::New }
         };
+        if let Some((_, solver)) = &mut self.fountain {
+            return if solver.take(frame.index, &frame.chunk) { took } else { Took::Again };
+        }
         let slot = &mut self.parts[usize::from(frame.index)];
         if slot.is_some() {
             return Took::Again;
@@ -1167,19 +1248,30 @@ impl Collector {
         took
     }
 
-    /// Сколько кадров собрано.
+    /// Сколько кадров собрано: у кадров версии 2 — сколько кусков кода уже
+    /// определено.
     pub fn got(&self) -> usize {
-        self.parts.iter().filter(|part| part.is_some()).count()
+        match &self.fountain {
+            Some((_, solver)) => solver.rank(),
+            None => self.parts.iter().filter(|part| part.is_some()).count(),
+        }
     }
 
-    /// Сколько кадров у кода; 0 — ни одного ещё не было.
+    /// Сколько кадров у кода — у кадров версии 2 сколько кусков; 0 — ни
+    /// одного ещё не было.
     pub fn count(&self) -> usize {
-        self.parts.len()
+        match &self.fountain {
+            Some((_, solver)) => solver.pieces(),
+            None => self.parts.len(),
+        }
     }
 
     /// Код целиком, когда собраны все кадры; `None` — не все или длиннее
     /// предела.
     pub fn whole(&self) -> Option<Vec<u8>> {
+        if let Some((length, solver)) = &self.fountain {
+            return solver.whole(usize::from(*length)).filter(|code| code.len() <= MAX_CODE_BYTES);
+        }
         if self.parts.is_empty() || self.parts.iter().any(Option::is_none) {
             return None;
         }
@@ -1686,6 +1778,8 @@ pub mod base62 {
         Some(out)
     }
 }
+
+mod fountain;
 
 #[cfg(test)]
 mod tests;
