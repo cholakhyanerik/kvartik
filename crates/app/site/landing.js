@@ -67,15 +67,34 @@ if (demo && "IntersectionObserver" in window) {
     }
   }, { rootMargin: "1250px 0px" }).observe(demo);
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches || navigator.connection?.saveData === true;
+  let seen = false;
   if (!still) {
     demo.controls = false;
     new IntersectionObserver((entries) => {
       for (const entry of entries) {
-        if (entry.isIntersecting) demo.play().catch(() => { demo.controls = true; });
+        seen = entry.isIntersecting;
+        if (seen) demo.play().catch(() => { demo.controls = true; });
         else demo.pause();
       }
     }, { threshold: 0.5 }).observe(demo);
   }
+  // Ролик, который браузер скачал, но не смог декодировать (`MediaError` 3),
+  // на следующий `<source>` сам не переходит: перебор источников — только
+  // при сбое загрузки (HTML, «resource selection algorithm»). Так WebM (VP9
+  // 720×1560) стоял на первом кадре и без кнопок в Chrome 158 с видеокартой
+  // машины автора, а MP4 (H.264) там играет (проверено вживую 2026-11-25,
+  // задача 126). Поэтому — WebM прочь и тот же ролик из MP4, а не вышло и
+  // с ним — кнопки, как без скрипта.
+  demo.addEventListener("error", () => {
+    const webm = demo.querySelector('source[type="video/webm"]');
+    if (demo.error?.code === MediaError.MEDIA_ERR_DECODE && webm) {
+      webm.remove();
+      demo.load();
+      if (seen) demo.play().catch(() => { demo.controls = true; });
+    } else {
+      demo.controls = true;
+    }
+  });
 }
 
 // Калькулятор: форма — в разметке страницы, а считает и пишет ответ wasm

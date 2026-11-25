@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.203",
+      "date": "2026-11-25",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось."
+      ],
+      "en": [
+        "Nothing changed in the app."
+      ]
+    },
+    {
       "version": "0.0.202",
       "date": "2026-11-25",
       "hy": [
@@ -269,22 +282,6 @@
         "You can pick all parts of a backup at once, or drop the files onto the backup screen on a computer: they are restored one by one, and the password is asked once.",
         "“Another device” now starts with a choice, “Send from here” or “Receive here”, and then shows only the chosen path. You can send the code as text with “Send” and paste it on the other device with “Paste”.",
         "Password fields have “Show password”, and the browser’s password manager can save the backup password. A new device can be set up without a file, from the first launch and from the empty backup screen."
-      ]
-    },
-    {
-      "version": "0.0.183",
-      "date": "2026-11-24",
-      "hy": [
-        "Պատճենը մասերով վերականգնելիս ծրագիրն այժմ ասում է, թե որ մասն է վերականգնվել և որն է մնացել՝ ֆայլի անվան նշումով, օրինակ՝ «1of2», իսկ երբ վերականգնվել են բոլոր մասերը՝ որ պատճենն ամբողջությամբ վերականգնված է։ Վերականգնված մասերը ծրագիրը հիշում է նաև էջը վերաբեռնելուց հետո։ Հարցը, թե որտեղ թողարկել հաշիվներն ու ակտերը, գալիս է միայն բոլոր մասերից հետո։",
-        "«Այլ սարք» էկրանին QR կոդերը կանգնում են, երբ մյուս սարքի անդորրագիրն ասում է, որ կոդն ընդունված է, իսկ «Պատրաստ է, թաքցնել կոդը» կոճակը դառնում է գլխավորը։"
-      ],
-      "ru": [
-        "При восстановлении копии частями программа теперь говорит, какая часть легла и какая осталась, — с меткой в имени файла, например «1of2», — а когда легли все, что копия восстановлена целиком. Легшие части она помнит и после перезагрузки страницы, а вопрос, где выпускать счета и акты, задаёт только после всех частей.",
-        "На экране «Другое устройство» QR-коды останавливаются, когда квитанция того устройства говорит, что код принят, а «Готово, убрать код» становится главной кнопкой."
-      ],
-      "en": [
-        "When you restore a backup in parts, the app now says which part is in and which one is left, with the mark from the file name, such as “1of2”, and once all are in, that the backup is fully restored. It remembers the restored parts after a page reload too, and asks where to issue invoices and acts only after all parts.",
-        "On the “Another device” screen, the QR codes stop once the other device’s receipt says the code was taken, and “Done, hide the code” becomes the main button."
       ]
     }
   ]
