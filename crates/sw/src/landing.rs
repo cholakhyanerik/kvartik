@@ -73,7 +73,7 @@ use std::path::Path;
 use kvartik_core::i18n::{self, Key, Lang, fill, plural, t};
 use kvartik_core::license::TRIAL_KEY_DAYS;
 use kvartik_core::model::activity::IncomeKind;
-use kvartik_core::model::date::Date;
+use kvartik_core::model::date::{Date, Quarter};
 use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::model::profile::Residency;
 use kvartik_core::release::{
@@ -1206,14 +1206,10 @@ fn deadlines_until(day: Date) -> Option<Date> {
 /// Ответ сверху (задача 126): что налог с оборота выбирают заявлением при
 /// обороте не больше порога и что часть видов деятельности он закрывает —
 /// с днём и кодами записи `turnover_exclusions` (правка человека
-/// 2026-11-25), — ставки строк налога, действующих в день
-/// `day`, «от … до …» — только сама ставка (`Rate::rate`), без нижнего
-/// предела после вычета: предел — не ставка строки, — порог оборота за год
-/// и срок расчёта и уплаты: число месяца после квартала и ближайший после
-/// дня `day` квартал с днём его срока по закону. Число месяца — общее
-/// правило, а не «ближайший срок»: страница собирается не каждый день,
-/// и через месяц «ближайший» стал бы прошлым, а «за IV квартал — до …»
-/// верно всегда. Числа — из того же ядра, что разделы ниже. Чего-то из
+/// 2026-11-25), — ставки строк налога, действующих в день `day`,
+/// «от … до …» — только сама ставка (`Rate::rate`), без нижнего предела
+/// после вычета: предел — не ставка строки, — и четыре дня срока расчёта
+/// и уплаты в году. Числа — из того же ядра, что разделы ниже. Чего-то из
 /// этого в правилах дня нет — нет и абзаца: половина ответа читалась бы
 /// целым.
 fn tax_answer(lang: Lang, all: &rules::Rules, day: Date) -> String {
@@ -1221,19 +1217,22 @@ fn tax_answer(lang: Lang, all: &rules::Rules, day: Date) -> String {
     let lowest = rates_on(all, day).map(|rate| rate.rate).min();
     let highest = rates_on(all, day).map(|rate| rate.rate).max();
     let threshold = rules::on(all.turnover_threshold(), day);
-    // День — по закону (`by_law`), а не перенесённый: абзац цитируют без
-    // списка ниже, где у перенесённого стоит «заплатить надёжнее до него»
-    // (`deadlines::moved`), а перенос уплаты ՊԵԿ не подтверждал (шапка
-    // `tax::deadlines`, «Перенос»). Заплативший до дня по закону не опоздал
-    // ни при каком прочтении, и «до 20-го: … — до 22.01» не спорит с собой.
-    let next = deadlines_until(day).and_then(|until| {
-        deadlines::general(day, until).into_iter().find_map(|deadline| match deadline.kind {
-            deadlines::Kind::Turnover(quarter) => Some((deadline.by_law, quarter)),
-            _ => None,
-        })
+    // Срок квартала — четыре дня года, а не ближайший: страница стоит на дне
+    // сверки правил (`Rules::checked`), а не на дне сборки, и «ближайший»
+    // через месяц стал бы прошлым (решение человека 2026-11-25). Число —
+    // запись `turnover_due` дня `day`, месяцы — первые месяцы кварталов,
+    // с января. День — по закону, без переноса с нерабочего: абзац цитируют
+    // без списка ниже, где у перенесённого стоит «заплатить надёжнее до
+    // него» (`deadlines::moved`), а перенос уплаты ՊԵԿ не подтверждал.
+    let due = rules::on(all.turnover_due(), day).map(|rule| {
+        let mut months: Vec<u8> = (1..=4)
+            .filter_map(|number| Quarter::new(day.year(), number)?.next())
+            .map(|next| next.first_day().month())
+            .collect();
+        months.sort_unstable();
+        let days: Vec<String> = months.into_iter().map(|month| i18n::deadline_day(lang, month, rule.day)).collect();
+        and_list(lang, &days.iter().map(String::as_str).collect::<Vec<_>>())
     });
-    // Число месяца — правило того квартала, чей срок назван.
-    let rule = next.and_then(|(_, quarter)| rules::on(all.turnover_due(), quarter.next()?.first_day()));
     // Коды, закрывающие налог с оборота (НК 254(3)(3.1)), — последней по дню
     // начала записью, действующей в день `day`: «в том числе с … — коды …».
     let excluded = all
@@ -1241,8 +1240,8 @@ fn tax_answer(lang: Lang, all: &rules::Rules, day: Date) -> String {
         .iter()
         .filter(|record| rules::Rule::period(*record).contains(day))
         .max_by_key(|record| record.from);
-    let (Some(lowest), Some(highest), Some(threshold), Some((due, quarter)), Some(rule), Some(excluded)) =
-        (lowest, highest, threshold, next, rule, excluded)
+    let (Some(lowest), Some(highest), Some(threshold), Some(due), Some(excluded)) =
+        (lowest, highest, threshold, due, excluded)
     else {
         return String::new();
     };
@@ -1257,9 +1256,7 @@ fn tax_answer(lang: Lang, all: &rules::Rules, day: Date) -> String {
                 &and_list(lang, &codes),
                 &percent(lowest),
                 &percent(highest),
-                &i18n::month_day(lang, rule.day),
-                &i18n::quarter(lang, quarter),
-                &i18n::date(lang, due),
+                &due,
             ],
         ))
     )
@@ -2260,20 +2257,14 @@ mod tests {
             }
             // Ответ сверху — первым абзацем под заголовком, а под ним
             // оглавление: «от» — самая низкая ставка строк, «до» — самая
-            // высокая, срок — первый срок квартала после дня сверки.
+            // высокая, срок — четыре дня года по записи `turnover_due`.
             let terms = deadlines::general(day, until);
-            let (due, quarter) = terms
-                .iter()
-                .find_map(|deadline| match deadline.kind {
-                    deadlines::Kind::Turnover(quarter) => Some((deadline.by_law, quarter)),
-                    _ => None,
-                })
-                .expect("срок квартала");
             let mut by_rate = rates.clone();
             by_rate.sort_by_key(|rate| rate.rate);
             let threshold = rules::on(all.turnover_threshold(), day).expect("порог");
             let amount = i18n::money(lang, Money::new(threshold.amount, Currency::Amd));
-            let month_day = rules::on(all.turnover_due(), quarter.next().expect("квартал").first_day()).expect("срок").day;
+            let due_day = rules::on(all.turnover_due(), day).expect("срок квартала").day;
+            let days: Vec<String> = [1, 4, 7, 10].map(|month| i18n::deadline_day(lang, month, due_day)).to_vec();
             let excluded = all.turnover_exclusions().last().expect("коды, закрывающие налог с оборота");
             let codes: Vec<&str> = excluded.codes.iter().map(String::as_str).collect();
             let answer = escape(&fill(
@@ -2284,9 +2275,7 @@ mod tests {
                     &and_list(lang, &codes),
                     &percent(by_rate[0].rate),
                     &percent(by_rate[by_rate.len() - 1].rate),
-                    &i18n::month_day(lang, month_day),
-                    &i18n::quarter(lang, quarter),
-                    &i18n::date(lang, due),
+                    &and_list(lang, &days.iter().map(String::as_str).collect::<Vec<_>>()),
                 ],
             ));
             need.push(format!(
@@ -2438,43 +2427,67 @@ mod tests {
     }
 
     /// Ответ сверху (задача 126) — числами, написанными рукой по файлу правил
-    /// версии 2026.12 и календарю, а не теми же вызовами, что у страницы:
-    /// порог 115 000 000 ֏, коды 69, 70, 78.2 и 78.3 с 01.07.2025 (НК
-    /// 254(3)(3.1)), ставки строк от 1 % (высокие технологии) до 20 % (прочие
-    /// доходы при заявлении об общепите), 20-е число — и по-английски «20th».
-    /// И день — по закону, а не перенесённый: срок за II квартал 2025 года —
-    /// 20 июля, воскресенье, перенос — на понедельник, 21-е (НК 261(1),
-    /// 262(1); ՀՕ-180-Ն 32(4)), а абзац, который цитируют без оговорки об
-    /// уплате, называет 20-е. Чего-то из этого в правилах дня нет — до
-    /// 01.07.2025 кодов, до 2025 года ставок, — нет и абзаца, а не его половины.
+    /// версии 2026.12, а не теми же вызовами, что у страницы: заявление
+    /// в КГД (ՊԵԿ), порог 115 000 000 ֏, коды 69, 70, 78.2 и 78.3 с 01.07.2025
+    /// (НК 254(3)(3.1)), ставки строк от 1 % (высокие технологии) до 20 %
+    /// (прочие доходы при заявлении об общепите) и четыре дня срока — 20 января,
+    /// апреля, июля и октября (НК 261(1), 262(1)) — по закону, без переноса.
+    /// Ближайшего квартала в нём нет: страница стоит на дне сверки правил,
+    /// и абзац одинаков в любой день одних правил (решение человека
+    /// 2026-11-25). Чего-то нет в правилах дня — до 01.07.2025 кодов, до
+    /// 2025 года ставок, — нет и абзаца, а не его половины.
     #[test]
-    fn the_answer_names_the_day_by_law() {
+    fn the_answer_names_four_days_by_law() {
         let all = rules::armenia();
         let answer = |lang, year, month, day| tax_answer(lang, all, Date::new(year, month, day).expect("день"));
-        let july = answer(Lang::Ru, 2025, 7, 1);
+        let russian = answer(Lang::Ru, 2026, 11, 25);
         for piece in [
-            "<p class=\"answer\">Налог с оборота\u{a0}— режим, который ИП в Армении выбирает заявлением в ՊԵԿ, \
+            "<p class=\"answer\">Налог с оборота\u{a0}— режим, который ИП в Армении выбирает заявлением в КГД (ՊԵԿ), \
              если оборот и за прошлый, и за текущий год не больше 115\u{a0}000\u{a0}000\u{a0}֏",
             "(ст.\u{a0}254 НК; в том числе с 01.07.2025\u{a0}— коды 69, 70, 78.2 и 78.3).",
             "Ставка\u{a0}— от 1\u{a0}% до 20\u{a0}% дохода квартала",
-            "до 20-го числа месяца после квартала: за II\u{a0}квартал 2025\u{a0}— до 20.07.2025.</p>",
+            "не позднее 20 января, 20 апреля, 20 июля и 20 октября\u{a0}— за квартал, который закончился перед этим месяцем.</p>",
         ] {
-            assert!(july.contains(piece), "нет «{piece}» в {july}");
+            assert!(russian.contains(piece), "нет «{piece}» в {russian}");
         }
-        assert!(!july.contains("21.07.2025"), "перенесённый день в ответе: {july}");
-        let november = answer(Lang::Ru, 2026, 11, 25);
-        assert!(november.contains("за IV\u{a0}квартал 2026\u{a0}— до 20.01.2027."), "{november}");
         let english = answer(Lang::En, 2026, 11, 25);
-        for piece in ["codes 69, 70, 78.2 and 78.3", "by the 20th of the month after the quarter", "by Jan 20, 2027."] {
+        for piece in ["codes 69, 70, 78.2 and 78.3", "no later than January 20, April 20, July 20 and October 20"] {
             assert!(english.contains(piece), "нет «{piece}» в {english}");
         }
         let armenian = answer(Lang::Am, 2026, 11, 25);
-        for piece in ["69, 70, 78.2 և 78.3", "ամսվա 20-ը ներառյալ"] {
+        for piece in ["69, 70, 78.2 և 78.3", "ոչ ուշ, քան հունվարի 20-ը, ապրիլի 20-ը, հուլիսի 20-ը և հոկտեմբերի 20-ը"] {
             assert!(armenian.contains(piece), "нет «{piece}» в {armenian}");
         }
         assert!(!armenian.contains(". "), "латинская точка в армянском ответе: {armenian}");
+        // Ни квартала, ни года срока: абзац одинаков в любой день одних правил.
+        assert_eq!(russian, answer(Lang::Ru, 2027, 3, 1), "ответ зависит от дня");
+        assert!(!russian.contains("квартал 20"), "в ответе назван квартал: {russian}");
         assert_eq!(answer(Lang::Ru, 2025, 6, 30), "", "до кодов 254(3)(3.1)");
         assert_eq!(answer(Lang::Ru, 2024, 6, 1), "", "до ставок 2025 года");
+    }
+
+    /// По-русски ищут «КГД» (решение человека 2026-11-25): на каждой русской
+    /// странице сайта, где есть ՊԵԿ, первое упоминание — «КГД (ՊԵԿ)».
+    /// Юридические тексты — утверждённые файлы, и ՊԵԿ в них нет: правка
+    /// текста была бы новой редакцией.
+    #[test]
+    fn russian_pages_name_the_src_kgd_first() {
+        let mut wrong = Vec::new();
+        let mut seen = 0;
+        for (page, html) in every_page() {
+            if !page.starts_with("Ru ") {
+                continue;
+            }
+            let Some(at) = html.find("ՊԵԿ") else { continue };
+            seen += 1;
+            if !html[..at].ends_with("КГД (") {
+                wrong.push(format!("{page}: первое ՊԵԿ — без «КГД»: …{}…", &html[at.saturating_sub(80)..at + 6]));
+            }
+        }
+        if seen < 3 {
+            wrong.push(format!("ՊԵԿ — только на {seen} русских страницах: проверка ничего не проверила"));
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
     /// Ссылки на законы (задача 126) — только текстом: адрес, акт и статья

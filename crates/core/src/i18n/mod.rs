@@ -35,7 +35,7 @@ mod locale;
 mod ru;
 
 pub use locale::{
-    ParseError, amount, date, day_long, decimal, integer, lumas, money, month_day, month_heading, parse_decimal,
+    ParseError, amount, date, day_long, deadline_day, decimal, integer, lumas, money, month_heading, parse_decimal,
     parse_money, parse_rate, percent, quarter, rate, rate_pair,
 };
 
@@ -2796,14 +2796,14 @@ strings! {
     TaxPageLink;
     TaxPageTitle;
     TaxPageDescription;
-    /// Шаблон: ответ сверху страницы о налоге (задача 126; правка человека
+    /// Шаблон: ответ сверху страницы о налоге (задача 126; правки человека
     /// 2026-11-25) — порог оборота за год, день начала и коды записи
     /// `turnover_exclusions` (`ListAnd`), самая низкая и самая высокая
-    /// ставка строк дня сверки (`Rate::rate`, без нижнего предела), число
-    /// месяца после квартала (`i18n::month_day`), ближайший квартал
-    /// (`i18n::quarter`) и день его срока по закону. Его цитируют
-    /// поисковики и ИИ-ответы: абзац отвечает без остальной страницы и верен
-    /// и после этого дня.
+    /// ставка строк дня сверки (`Rate::rate`, без нижнего предела) и четыре
+    /// дня срока квартала (`i18n::deadline_day`, `ListAnd`). Его цитируют
+    /// поисковики и ИИ-ответы: абзац отвечает без остальной страницы и не
+    /// стареет. По-русски первое упоминание ՊԵԿ на странице сайта —
+    /// «КГД (ՊԵԿ)»: так его ищут.
     TaxPageAnswer;
     /// Подпись оглавления страницы о налоге для диктора (`aria-label`).
     TaxPageContents;
