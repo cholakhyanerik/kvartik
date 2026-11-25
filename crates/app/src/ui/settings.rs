@@ -41,7 +41,7 @@ use kvartik_core::i18n::{self, Key, Lang, fill, t};
 use kvartik_core::model::office::Issuing;
 use kvartik_core::theme::{self, Choice, Low, Paint, Pair, Palette, Pick, Record, Rgb, Sheet};
 use leptos::prelude::*;
-use web_sys::HtmlInputElement;
+
 
 use crate::platform::look;
 use crate::store::DB_NAME;
@@ -208,6 +208,12 @@ pub(super) fn issue_elsewhere_untracked(base: &str) -> bool {
     ELSEWHERE.with(|shared| shared.with_untracked(|issuing| issuing.elsewhere(base)))
 }
 
+/// Включён ли выпуск здесь хоть у одного ИП (`Issuing::somewhere`) — для
+/// кода и квитанции «Другого устройства». Без слежения.
+pub(super) fn issues_somewhere() -> bool {
+    ELSEWHERE.with(|shared| shared.with_untracked(Issuing::somewhere))
+}
+
 /// Одинаков ли выпуск у всех ИП устройства. Отслеживаемое.
 fn issuing_uniform() -> bool {
     ELSEWHERE.with(|shared| shared.with(Issuing::uniform))
@@ -242,6 +248,173 @@ pub(super) fn set_issue_elsewhere(base: Option<&str>, elsewhere: bool) -> bool {
         follow(next);
     }
     saved
+}
+
+/// Кто выпускает счета и акты (задача 124, часть E; решение человека
+/// 2026-11-25) — одной радиокнопкой вместо переключателя: это устройство,
+/// другие — по имени из «Моих устройств» (`sync::Peers`), а их ещё нет —
+/// «другое устройство». Номер выдаёт `Document::next_number` по своей базе,
+/// и двух выпускающих окно молча не делает: другое — выключает выпуск здесь
+/// и говорит, что включить там (на то устройство выбор не передаётся —
+/// кода в обратную сторону может и не быть; решение агента 2026-11-25); «это»,
+/// когда другое при последнем обмене выпускало, — только после «Выпускать
+/// здесь» под словами. `base` — база открытого ИП, `only` — выбор только у
+/// него (ИП несколько), `group` — имя группы радиокнопок на странице.
+/// Сопряжённые устройства (п. 13) встанут в тот же список.
+#[component]
+pub(in crate::ui) fn IssuerChoice(
+    lang: ReadSignal<Lang>,
+    base: String,
+    only: bool,
+    group: &'static str,
+    /// Устройства — сигналом: «Другое устройство» перечитывает их после обмена.
+    peers: Signal<Vec<kvartik_core::format::sync::Peer>>,
+) -> impl IntoView {
+    let base = StoredValue::new(base);
+    let here = move || base.with_value(|base| !issue_elsewhere(base));
+    // Ждёт подтверждения: другое устройство выпускало — его имя.
+    let confirm = RwSignal::new(None::<String>);
+    // Выпуск отдан другому — его имя (пусто — «другому устройству»).
+    let moved = RwSignal::new(None::<String>);
+    // Отказ или отмена — радиокнопки снова по записи, а не по нажатию.
+    let tick = RwSignal::new(0u32);
+    let set = move |elsewhere: bool| {
+        base.with_value(|base| set_issue_elsewhere(only.then_some(base.as_str()), elsewhere))
+    };
+    let nameless = move |lang: Lang| t(lang, Key::SyncDeviceNameless).to_owned();
+    let choose_here = move |_| {
+        // Из записи устройства, а не из списка на экране: экран настроек не
+        // снимается, и список с его первого показа не знал бы обмена после
+        // него — «это устройство» включило бы выпуск без вопроса (ревью
+        // задачи 124).
+        let known = Device::new().peers();
+        let issuing = known.list().iter().find(|peer| peer.issues == Some(true)).cloned();
+        match issuing {
+            Some(peer) => confirm.set(Some(peer.name.unwrap_or_else(|| nameless(lang.get_untracked())))),
+            None => {
+                if set(false) {
+                    moved.set(None);
+                }
+                tick.update(|n| *n += 1);
+            }
+        }
+    };
+    let choose_there = move |name: String| {
+        confirm.set(None);
+        if set(true) {
+            moved.set(Some(name));
+        }
+        tick.update(|n| *n += 1);
+    };
+    // Отмеченная — только та, кому выпуск отдан при последнем обмене.
+    let issuing_peer = move || peers.with(|peers| peers.iter().find(|peer| peer.issues == Some(true)).map(|peer| peer.id));
+    view! {
+        <fieldset class="group issuer">
+            <legend>{tr(lang, Key::SyncIssuerTitle)}</legend>
+            <label class="choice">
+                <input
+                    type="radio"
+                    name=group
+                    value="here"
+                    prop:checked=move || {
+                        tick.get();
+                        here()
+                    }
+                    on:change=choose_here
+                />
+                {tr(lang, Key::SyncIssuerHere)}
+            </label>
+            {move || {
+                let list = peers.get();
+                if list.is_empty() {
+                    view! {
+                        <label class="choice">
+                            <input
+                                type="radio"
+                                name=group
+                                value="elsewhere"
+                                prop:checked=move || {
+                                    tick.get();
+                                    !here()
+                                }
+                                on:change=move |_| choose_there(String::new())
+                            />
+                            {tr(lang, Key::SyncIssuerOther)}
+                        </label>
+                    }
+                    .into_any()
+                } else {
+                    list.into_iter()
+                        .map(|peer| {
+                            let id = peer.id;
+                            let name = peer.name.clone();
+                            let shown = name.clone();
+                            view! {
+                                <label class="choice">
+                                    <input
+                                        type="radio"
+                                        name=group
+                                        value=id.to_string()
+                                        prop:checked=move || {
+                                            tick.get();
+                                            !here() && issuing_peer() == Some(id)
+                                        }
+                                        on:change=move |_| {
+                                            choose_there(name.clone().unwrap_or_else(|| nameless(lang.get_untracked())))
+                                        }
+                                    />
+                                    {move || shown.clone().unwrap_or_else(|| nameless(lang.get()))}
+                                </label>
+                            }
+                        })
+                        .collect_view()
+                        .into_any()
+                }
+            }}
+        </fieldset>
+        {move || confirm.get().map(|name| {
+            let words = name.clone();
+            view! {
+                <div class="notice">
+                    <p role="alert">{move || fill(t(lang.get(), Key::SyncIssuerConfirm), &[&words])}</p>
+                    <div class="actions">
+                        <button
+                            type="button"
+                            on:click=move |_| {
+                                if set(false) {
+                                    moved.set(None);
+                                }
+                                confirm.set(None);
+                                tick.update(|n| *n += 1);
+                            }
+                        >
+                            <span class="label">{tr(lang, Key::SyncIssuerConfirmHere)}</span>
+                        </button>
+                        <button
+                            type="button"
+                            class="secondary"
+                            on:click=move |_| {
+                                confirm.set(None);
+                                tick.update(|n| *n += 1);
+                            }
+                        >
+                            <span class="label">{tr(lang, Key::Cancel)}</span>
+                        </button>
+                    </div>
+                </div>
+            }
+        })}
+        {move || moved.get().map(|name| view! {
+            <p role="status">{move || {
+                let lang = lang.get();
+                if name.is_empty() {
+                    t(lang, Key::SyncIssuerMovedAny).to_owned()
+                } else {
+                    fill(t(lang, Key::SyncIssuerMoved), &[&name])
+                }
+            }}</p>
+        })}
+    }
 }
 
 /// Сигнал — к выбору `next`, только когда он другой: запись того же будила
@@ -473,40 +646,27 @@ fn SettingsPage(lang: ReadSignal<Lang>, look: Look, backups: Backups) -> impl In
         <h2>{tr(lang, Key::SettingsDevice)}</h2>
         <ul class="list">
             <li class="issuing">
-                <label class="switch-row">
-                    <span class="entry-main">
-                        <span class="entry-title">{tr(lang, Key::SettingsIssue)}</span>
-                        <span class="entry-meta">{tr(lang, Key::SettingsIssueHint)}</span>
-                        // ИП несколько — у каждого свой выбор (задача 116):
-                        // бухгалтер выключает выпуск ИП, который выпускает
-                        // сам, и оставляет у остальных. Открытый ИП назван
-                        // над экраном.
-                        {move || several().then(|| view! {
-                            <span class="entry-meta">
-                                {move || t(lang.get(), if issuing_uniform() { Key::SettingsIssueEach } else { Key::SettingsIssueMixed })}
-                            </span>
-                        })}
-                    </span>
-                    <input
-                        type="checkbox"
-                        role="switch"
-                        class="visually-hidden"
-                        prop:checked=move || !issue_elsewhere(&base())
-                        on:change=move |event| {
-                            let here = event_target_checked(&event);
-                            // Один ИП — выбор у всех: добавленный потом ИП
-                            // возьмёт его, как было до задачи 116.
-                            let base = open_name();
-                            let only = untrack(several).then_some(base.as_str());
-                            // Запись не легла — переключатель назад: выпуск
-                            // остался прежним.
-                            if !set_issue_elsewhere(only, !here) {
-                                event_target::<HtmlInputElement>(&event).set_checked(!here);
-                            }
-                        }
-                    />
-                    <span class="switch" aria-hidden="true"></span>
-                </label>
+                <span class="entry-main">
+                    <span class="entry-title">{tr(lang, Key::SettingsIssue)}</span>
+                    <span class="entry-meta">{tr(lang, Key::SettingsIssueHint)}</span>
+                    // ИП несколько — у каждого свой выбор (задача 116):
+                    // бухгалтер выключает выпуск ИП, который выпускает
+                    // сам, и оставляет у остальных. Открытый ИП назван
+                    // над экраном.
+                    {move || several().then(|| view! {
+                        <span class="entry-meta">
+                            {move || t(lang.get(), if issuing_uniform() { Key::SettingsIssueEach } else { Key::SettingsIssueMixed })}
+                        </span>
+                    })}
+                </span>
+                // Одной радиокнопкой вместо переключателя (задача 124, часть
+                // E): кто выпускает — это или другое устройство по имени. Один
+                // ИП — выбор у всех: добавленный потом ИП возьмёт его, как было
+                // до задачи 116.
+                {move || {
+                    let peers = Signal::stored(Device::new().peers().list().to_vec());
+                    view! { <IssuerChoice lang base=base() only=several() group="issuer-settings" peers /> }
+                }}
                 // Выбор открытого ИП — всем: у бухгалтера на втором
                 // компьютере выпуск выключают у всех разом, а не открывая
                 // каждого ИП.

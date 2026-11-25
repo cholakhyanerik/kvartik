@@ -804,13 +804,14 @@ async fn a_device_without_issuing_keeps_drafts_and_names_repeated_numbers() {
     // Выпуск включают на экране настроек — форма, спрятанная за ним, снова
     // с «Выпустить».
     crate::platform::set_hash("#/settings");
-    let switch = "#settings li.issuing input[role=switch]";
-    if !wait_selector(&host, switch).await {
-        wrong.push("на экране настроек нет переключателя выпуска".to_owned());
-    } else if let Some(input) = host.query_selector(switch).ok().flatten() {
+    // Кто выпускает — радиокнопкой (задача 124, часть E).
+    let here = "#settings li.issuing input[type=radio][value=here]";
+    if !wait_selector(&host, here).await {
+        wrong.push("на экране настроек нет выбора, кто выпускает".to_owned());
+    } else if let Some(input) = host.query_selector(here).ok().flatten() {
         let input: web_sys::HtmlInputElement = input.unchecked_into();
         if input.checked() {
-            wrong.push("переключатель выпуска включён, а выпуск выключен".to_owned());
+            wrong.push("«это устройство» отмечено, а выпуск выключен".to_owned());
         }
         input.click();
     }

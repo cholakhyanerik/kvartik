@@ -273,9 +273,14 @@ async fn the_tab_opens_its_ie_and_switches_only_when_free() {
     assert!(wrong.is_empty(), "переход между ИП: {wrong:#?}");
 }
 
-/// Переключатель выпуска на экране настроек.
-fn issue_switch(host: &HtmlElement) -> Option<web_sys::HtmlInputElement> {
-    let found = host.query_selector("#settings li.issuing input[role=switch]").ok().flatten()?;
+/// Радиокнопка выпуска на экране настроек (задача 124, часть E, вместо
+/// переключателя): `here` — «это устройство», иначе — «другое устройство».
+fn issue_choice(host: &HtmlElement, here: bool) -> Option<web_sys::HtmlInputElement> {
+    let value = if here { "here" } else { "elsewhere" };
+    let found = host
+        .query_selector(&format!("#settings li.issuing input[type=radio][value={value}]"))
+        .ok()
+        .flatten()?;
     Some(wasm_bindgen::JsCast::unchecked_into(found))
 }
 
@@ -313,8 +318,8 @@ async fn issuing_is_switched_per_ie() {
     if !wait_for(&host, &bar).await {
         wrong.push("над экраном не назван открытый ИП".to_owned());
     }
-    if !wait_selector(&host, "#settings li.issuing input[role=switch]").await {
-        wrong.push("на экране настроек нет переключателя выпуска".to_owned());
+    if !wait_selector(&host, "#settings li.issuing input[type=radio][value=here]").await {
+        wrong.push("на экране настроек нет выбора, кто выпускает".to_owned());
     }
     if !wait_for(&host, t(lang, Key::SettingsIssueEach)).await {
         wrong.push("при двух ИП не сказано, что выбор у каждого свой".to_owned());
@@ -322,9 +327,9 @@ async fn issuing_is_switched_per_ie() {
     if button(&host, &[t(lang, Key::SettingsIssueAll)]).is_some() {
         wrong.push("«так же у всех», а выпуск и так у всех одинаков".to_owned());
     }
-    match issue_switch(&host) {
-        Some(switch) => switch.click(),
-        None => wrong.push("переключатель выпуска не нажать".to_owned()),
+    match issue_choice(&host, false) {
+        Some(elsewhere) => elsewhere.click(),
+        None => wrong.push("«другое устройство» не нажать".to_owned()),
     }
     let device = Device::new();
     if !wait_until(|| device.issue_elsewhere(second.base())).await {
@@ -347,8 +352,8 @@ async fn issuing_is_switched_per_ie() {
         wrong.push("выпуск у всех одинаков — а слова прежние".to_owned());
     }
     // Включить снова — только у открытого: у другого он остаётся выключенным.
-    match issue_switch(&host) {
-        Some(switch) if !switch.checked() => switch.click(),
+    match issue_choice(&host, true) {
+        Some(here) if !here.checked() => here.click(),
         Some(_) => wrong.push("выпуск выключен, а переключатель включён".to_owned()),
         None => wrong.push("переключатель выпуска не нажать".to_owned()),
     }

@@ -47,7 +47,7 @@
 
 use kvartik_core::format::autobackup::DeviceTag;
 use kvartik_core::format::backup::{DeviceKey, Files, Laid, MAX_PARTS};
-use kvartik_core::format::sync::Received;
+use kvartik_core::format::sync::{Peers, Received};
 use kvartik_core::i18n::Lang;
 use kvartik_core::license::{self, Paid};
 use kvartik_core::model::date::Date;
@@ -510,6 +510,34 @@ impl Device {
     /// скажет прежнее.
     pub fn set_sync_last(&self, at: Timestamp) -> bool {
         self.set("sync_last", &at.unix_millis().to_string())
+    }
+
+    /// Имя этого устройства в «Моих устройствах» (задача 124, часть E):
+    /// его видят и другие устройства — оно идёт в шапке кода и в квитанции.
+    /// `None` — не задано: окно берёт имя по платформе.
+    pub fn device_name(&self) -> Option<String> {
+        self.get("device_name")
+    }
+
+    /// Задать имя (`None` — снова по платформе). `false` — `localStorage`
+    /// отказал.
+    pub fn set_device_name(&self, name: Option<&str>) -> bool {
+        match name {
+            Some(name) => self.set("device_name", name),
+            None => self.remove("device_name"),
+        }
+    }
+
+    /// Устройства, о которых это знает (`sync::Peers`, задача 124, часть E):
+    /// имя, последний обмен, выпускало ли оно счета и акты. Запись устройства:
+    /// в копию она не идёт — у другого устройства свои соседи.
+    pub fn peers(&self) -> Peers {
+        self.get("peers").map(|text| Peers::parse(&text)).unwrap_or_default()
+    }
+
+    /// Запомнить устройства. `false` — `localStorage` отказал.
+    pub fn set_peers(&self, peers: &Peers) -> bool {
+        self.set("peers", &peers.to_text())
     }
 
     /// Убрана ли карточка переноса данных вкладки в установленную программу

@@ -64,6 +64,17 @@
 //! сверено 2026-11-21). Собирает кадры [`Collector`] — в любом порядке и
 //! с повторами: QR-коды идут по кругу, и пропущенный придёт на следующем.
 //!
+//! # Имя устройства и кто выпускает
+//!
+//! С конверта 4 (задача 124, часть E) шапка кода и квитанция несут имя
+//! устройства, которое их сделало, и выпускает ли оно счета и акты
+//! ([`Header::from_device`], [`Receipt::from_device`]): так список «Мои
+//! устройства» видят оба, и о двух выпускающих окно говорит словами. Имя —
+//! чужой ввод: не длиннее [`MAX_NAME_BYTES`] байтов и без управляющих знаков
+//! ([`device_name`]), иначе код не читается. Код и квитанция прежних версий —
+//! без имени: устройство в списке без имени. Устройства, о которых здесь
+//! знают, — запись устройства [`Peers`], не больше [`MAX_PEERS`].
+//!
 //! # Помнится на устройствах
 //!
 //! Каждое устройство — со своим идентификатором. Принимающее помнит, до
@@ -100,8 +111,47 @@ const MARK: &[u8; 3] = b"KVS";
 /// сам конверт или шапка внутри. Код новее программа не читает и говорит
 /// «обновите программу», а не «код испорчен». 2 (0.0.173) — у записи кода
 /// метка базы `base`: код всех ИП (шапка модуля, «Код конторы»); 3 (0.0.174) —
-/// метка `files` у кода файлов (шапка модуля, «Что передаётся»).
-const ENVELOPE: u8 = 3;
+/// метка `files` у кода файлов (шапка модуля, «Что передаётся»); 4 (0.0.197) —
+/// имя устройства и выпускает ли оно (шапка модуля, «Имя устройства»):
+/// прежние версии такой код не примут и скажут «обновите программу».
+const ENVELOPE: u8 = 4;
+
+/// Самое длинное имя устройства в байтах UTF-8: в списке оно — строка,
+/// а квитанция с ним и в самом тяжёлом случае — дыра, моменты в 13 цифр,
+/// имя из кавычек, которые JSON удваивает, — один QR-код версии не больше
+/// [`RECEIPT_QR_VERSION`] (тест `a_named_receipt_is_still_one_qr_code`; ревью
+/// задачи 124).
+pub const MAX_NAME_BYTES: usize = 48;
+
+/// Знак, которого в имени нет: управляющие и знаки направления письма
+/// (U+200E, U+200F, U+202A–U+202E, U+2066–U+2069, U+061C), разделители
+/// строк и абзацев, BOM. Имя встаёт внутрь фразы окна, и незакрытый RLO
+/// перевернул бы её хвост до конца абзаца (UAX #9, X8; ревью задачи 124).
+/// ZWJ и ZWNJ остаются: без них не пишутся некоторые имена.
+const fn hidden(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{061C}' | '\u{2028}' | '\u{2029}' | '\u{FEFF}'
+        )
+}
+
+/// Имя устройства, как его ввёл человек или прислал код: без пробелов по
+/// краям, без управляющих знаков и знаков направления письма, не длиннее
+/// [`MAX_NAME_BYTES`] — длиннее обрезается по границе знака. `None` — пусто.
+/// Имя из кода, квитанции и записи устройства проходит через неё же, а не
+/// отвергает код: ужесточённое правило имени иначе сделало бы испорченными
+/// коды прежних версий вместе с их записями (ревью задачи 124).
+pub fn device_name(text: &str) -> Option<String> {
+    let clean: String = text.chars().filter(|&c| !hidden(c)).collect();
+    let clean = clean.trim();
+    let mut cut = clean.len().min(MAX_NAME_BYTES);
+    while !clean.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let name = clean[..cut].trim_end();
+    (!name.is_empty()).then(|| name.to_owned())
+}
 
 /// Метка открытого текста кода — как `kvartik-backup` у файла копии.
 const PLAIN_MARK: &str = "kvartik-sync";
@@ -583,6 +633,11 @@ pub struct Header {
     since: Option<Timestamp>,
     /// Код файлов (шапка модуля): ряд изменений он не продолжает и не рвёт.
     files: bool,
+    /// Имя устройства, которое код сделало; `None` — его нет (код до
+    /// конверта 4).
+    name: Option<String>,
+    /// Выпускает ли оно счета и акты этого кода; `None` — неизвестно.
+    issues: Option<bool>,
 }
 
 impl Header {
@@ -595,7 +650,30 @@ impl Header {
             device,
             since,
             files: false,
+            name: None,
+            issues: None,
         }
+    }
+
+    /// Та же шапка с именем устройства и тем, выпускает ли оно (задача 124,
+    /// часть E). Имя — через [`device_name`].
+    #[must_use]
+    pub fn from_device(self, name: &str, issues: bool) -> Self {
+        Self {
+            name: device_name(name),
+            issues: Some(issues),
+            ..self
+        }
+    }
+
+    /// Имя устройства, которое код сделало.
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    /// Выпускает ли оно счета и акты; `None` — неизвестно.
+    pub const fn issues(&self) -> Option<bool> {
+        self.issues
     }
 
     /// Та же шапка у кода файлов.
@@ -640,6 +718,10 @@ struct PlainOut<'a> {
     since: Option<Timestamp>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     files: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    issues: Option<bool>,
     records: Vec<RecordOut<'a>>,
 }
 
@@ -664,6 +746,11 @@ struct PlainIn<'a> {
     /// С конверта 3 (0.0.174); у прежних — нет.
     #[serde(default)]
     files: bool,
+    /// С конверта 4 (0.0.197); у прежних — нет.
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    issues: Option<bool>,
     #[serde(borrow)]
     records: Vec<RecordIn<'a>>,
 }
@@ -711,6 +798,8 @@ where
         device: header.device,
         since: header.since,
         files: header.files,
+        name: header.name.as_deref(),
+        issues: header.issues,
         records: entries
             .iter()
             .map(|entry| RecordOut {
@@ -909,6 +998,7 @@ where
     if !backup::is_app_version(&fields.app_version) {
         return Err(damaged("версия программы в шапке — не номер версии"));
     }
+    let name = fields.name.as_deref().and_then(device_name);
     let mut seen = std::collections::BTreeSet::new();
     let mut entries = Vec::with_capacity(fields.records.len());
     let mut meter = Meter::new(pause);
@@ -932,6 +1022,8 @@ where
             device: fields.device,
             since: fields.since,
             files: fields.files,
+            name,
+            issues: fields.issues,
         },
         entries,
     })
@@ -1147,6 +1239,63 @@ impl Received {
     }
 }
 
+/// Устройство, о котором это знает (задача 124, часть E): имя, когда был
+/// последний обмен с ним по часам этого устройства и выпускало ли оно тогда
+/// счета и акты.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct Peer {
+    pub id: RecordId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub last: Timestamp,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issues: Option<bool>,
+}
+
+/// Устройства, о которых это знает, — запись устройства, текстом JSON, свежие
+/// первыми, не больше [`MAX_PEERS`]. Нечитаемая запись — пустой список:
+/// это память о соседях, а не данные.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct Peers {
+    list: Vec<Peer>,
+}
+
+impl Peers {
+    /// Из записи устройства.
+    pub fn parse(text: &str) -> Self {
+        let list: Vec<Peer> = serde_json::from_str(text).unwrap_or_default();
+        let list = list
+            .into_iter()
+            .map(|peer| Peer {
+                name: peer.name.as_deref().and_then(device_name),
+                ..peer
+            })
+            .take(MAX_PEERS)
+            .collect();
+        Self { list }
+    }
+
+    /// Запись для устройства.
+    pub fn to_text(&self) -> String {
+        serde_json::to_string(&self.list).unwrap_or_default()
+    }
+
+    /// Устройства — свежие первыми.
+    pub fn list(&self) -> &[Peer] {
+        &self.list
+    }
+
+    /// Был обмен с устройством `id` в момент `at`: его имя и выпускает ли оно —
+    /// пришедшие новее прежних, а нет их (код прежней версии) — прежние.
+    pub fn note(&mut self, id: RecordId, name: Option<&str>, at: Timestamp, issues: Option<bool>) {
+        let known = self.list.iter().position(|peer| peer.id == id).map(|at| self.list.remove(at));
+        let name = name.and_then(device_name).or_else(|| known.as_ref().and_then(|peer| peer.name.clone()));
+        let issues = issues.or_else(|| known.as_ref().and_then(|peer| peer.issues));
+        self.list.insert(0, Peer { id, name, last: at, issues });
+        self.list.truncate(MAX_PEERS);
+    }
+}
+
 /// Цел ли ряд изменений от отправителя. В квитанции — `"whole"`, `"first"`
 /// или `{"gap":{"got":…}}`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -1176,8 +1325,9 @@ pub fn continuity(since: Option<Timestamp>, got: Option<Timestamp>) -> Continuit
 /// Метка квитанции: первые три байта и версия её конверта (задача 116).
 const RECEIPT_MARK: &[u8; 3] = b"KVR";
 
-/// Версия конверта квитанции.
-const RECEIPT_ENVELOPE: u8 = 1;
+/// Версия конверта квитанции: 2 (0.0.197) — имя принявшего устройства и
+/// выпускает ли оно (шапка модуля, «Имя устройства»).
+const RECEIPT_ENVELOPE: u8 = 2;
 
 /// Метка открытого текста квитанции.
 const RECEIPT_PLAIN_MARK: &str = "kvartik-receipt";
@@ -1206,6 +1356,12 @@ pub struct Receipt {
     code: Timestamp,
     /// Цел ли ряд ([`Continuity`]) — так, как его видит принявший.
     taken: Continuity,
+    /// Имя принявшего устройства (с конверта 2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    /// Выпускает ли оно счета и акты (с конверта 2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    issues: Option<bool>,
 }
 
 impl Receipt {
@@ -1218,7 +1374,35 @@ impl Receipt {
             receiver,
             code: header.created,
             taken: continuity,
+            name: None,
+            issues: None,
         }
+    }
+
+    /// Та же квитанция с именем принявшего устройства и тем, выпускает ли оно
+    /// (задача 124, часть E).
+    #[must_use]
+    pub fn from_device(self, name: &str, issues: bool) -> Self {
+        Self {
+            name: device_name(name),
+            issues: Some(issues),
+            ..self
+        }
+    }
+
+    /// Устройство, принявшее код.
+    pub const fn receiver(&self) -> RecordId {
+        self.receiver
+    }
+
+    /// Его имя.
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    /// Выпускает ли оно счета и акты; `None` — неизвестно.
+    pub const fn issues(&self) -> Option<bool> {
+        self.issues
     }
 
     /// Открытый текст — то, что окно шифрует ключом кода.
@@ -1236,7 +1420,8 @@ impl Receipt {
         if receipt.file != RECEIPT_PLAIN_MARK {
             return Err(damaged("квитанция не та"));
         }
-        Ok(receipt)
+        let name = receipt.name.as_deref().and_then(device_name);
+        Ok(Self { name, ..receipt })
     }
 }
 
@@ -1318,13 +1503,22 @@ pub fn open_receipt(bytes: &[u8]) -> Result<SealedReceipt, CodeError> {
     })
 }
 
+/// Самая большая версия QR-кода квитанции — на две больше кода
+/// [`QR_VERSION`]: квитанция с дырой, моментами в 13 цифр и именем в
+/// [`MAX_NAME_BYTES`] — 309 байтов кадра, а с именем из кавычек — 357, когда
+/// версия 12 уровня M вмещает 287, а 14 — 362 (ревью задачи 124: до него
+/// такой квитанции не было вовсе, ни QR-кодом, ни текстом). Квитанция стоит
+/// на экране одна и не кругом, и снять версию 13 или 14 камере не труднее;
+/// обычно она меньше версии кода.
+pub const RECEIPT_QR_VERSION: u8 = QR_VERSION + 2;
+
 /// QR-код квитанции `sealed` — одним кадром, самой малой версии, что её
 /// вмещает, а не версией кода [`QR_VERSION`]: квитанция в пару сотен байтов,
 /// и с меньшим числом модулей каждый крупнее — камере её снять проще. `None`
 /// — квитанция длиннее одного кадра: такой программа не делает.
 pub fn receipt_qr(sealed: &[u8], id: u32) -> Option<qr::Code> {
     let frame = frames(sealed, sealed.len(), id).into_iter().next()?;
-    (1..=QR_VERSION)
+    (1..=RECEIPT_QR_VERSION)
         .find(|&version| qr::capacity(version, QR_ECC) >= frame.len())
         .and_then(|version| qr::encode(&frame, version, QR_ECC))
 }

@@ -33,6 +33,8 @@ fn other_device() {
             "issue_at",
             "sync_last",
             "carry_closed",
+            "peers",
+            "device_name",
         ] {
             let _ = storage.remove_item(&format!("kvartik.{name}"));
         }
@@ -2165,6 +2167,296 @@ async fn a_code_shared_from_a_messenger_lands_in_the_field() {
     crate::platform::set_hash("");
     documents::forget_device();
     assert!(wrong.is_empty(), "поделённый код: {wrong:#?}");
+}
+
+/// Текст «Моих устройств» на экране (задача 124, часть E).
+fn devices_text(host: &HtmlElement) -> String {
+    host.query_selector("#sync .sync-devices")
+        .ok()
+        .flatten()
+        .and_then(|section| section.text_content())
+        .unwrap_or_default()
+}
+
+/// «Мои устройства» (задача 124, часть E): имя устройства идёт в шапке кода
+/// и в квитанции — принявшее видит отправителя по имени, а отправитель,
+/// сняв квитанцию, — принявшее; о том, что выпускают оба, оба говорят
+/// словами.
+#[wasm_bindgen_test]
+async fn devices_know_each_other_by_name() {
+    use kvartik_core::format::sync;
+    let lang = Lang::Ru;
+    documents::fresh_base_with_client().await;
+    other_device();
+    Device::new().set_ui_lang(lang);
+    Device::new().set_device_name(Some("Ноутбук Арама"));
+    let mut wrong = Vec::new();
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база отправителя не открылась".to_owned());
+    }
+    let code = make(&host, lang, true, &mut wrong).await.unwrap_or_default();
+    let sender = device_records();
+    match opened_code(&code).await {
+        Some((header, key)) => {
+            if (header.name(), header.issues()) != (Some("Ноутбук Арама"), Some(true)) {
+                wrong.push(format!("в шапке кода не то устройство: {:?} {:?}", header.name(), header.issues()));
+            }
+            // Квитанция принявшего с его именем: отправитель видит его в списке
+            // и что выпускают оба.
+            let receipt = sync::Receipt::new(&header, RecordId::random(), sync::Continuity::Whole).from_device("iPhone Анны", true);
+            paste_reply(&host, &receipt_text(&key, &receipt).await, &mut wrong).await;
+            if !wait_for(&host, t(lang, Key::SyncReceiptWhole)).await {
+                wrong.push("квитанция не принята".to_owned());
+            }
+            let mut listed = false;
+            for _ in 0..40 {
+                listed = devices_text(&host).contains("iPhone Анны");
+                if listed {
+                    break;
+                }
+                sleep(50).await;
+            }
+            if !listed {
+                wrong.push(format!("отправитель не видит принявшего по имени: «{}»", devices_text(&host)));
+            }
+            let both = fill(t(lang, Key::SyncIssuerBoth), &["iPhone Анны"]);
+            if !section_text(&host, "sync").contains(&both) {
+                wrong.push(format!("о двух выпускающих у отправителя — молча: «{}»", section_text(&host, "sync")));
+            }
+        }
+        None => wrong.push("код не открылся".to_owned()),
+    }
+    drop(mounted);
+    host.remove();
+
+    // Принявшее: видит отправителя по имени и что тот выпускает.
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    other_device();
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база получателя не открылась".to_owned());
+    }
+    if let Some(input) = paste(&host, lang, &code, &mut wrong).await {
+        accept(&host, lang, &input, PASSWORD);
+        if !wait_for(&host, t(lang, Key::SyncReceiptTitle)).await {
+            wrong.push(format!("код не лёг: «{}»", section_text(&host, "sync")));
+        }
+    }
+    let mut listed = false;
+    for _ in 0..40 {
+        let text = devices_text(&host);
+        listed = text.contains("Ноутбук Арама") && text.contains(t(lang, Key::SyncDeviceIssues));
+        if listed {
+            break;
+        }
+        sleep(50).await;
+    }
+    if !listed {
+        wrong.push(format!("принявшее не видит отправителя по имени: «{}»", devices_text(&host)));
+    }
+    let peers = Device::new().peers();
+    if !peers.list().iter().any(|peer| peer.name.as_deref() == Some("Ноутбук Арама") && peer.issues == Some(true)) {
+        wrong.push(format!("устройство не запомнило отправителя: {peers:?}"));
+    }
+    drop(mounted);
+    host.remove();
+    restore_device(&sender);
+    other_device();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "мои устройства: {wrong:#?}");
+}
+
+/// Код прежней версии — без имени устройства — принимается, как раньше,
+/// а устройство в списке — без имени (задача 124, часть E).
+#[wasm_bindgen_test]
+async fn an_old_code_without_a_name_is_taken() {
+    use kvartik_core::format::backup::{KDF_ITERATIONS, SALT_BYTES};
+    use kvartik_core::format::sync;
+    let lang = Lang::Ru;
+    documents::fresh_base_with_client().await;
+    other_device();
+    Device::new().set_ui_lang(lang);
+    let mut wrong = Vec::new();
+    // Код без имени — как его сделала бы 0.0.196.
+    let salt = crate::platform::crypto::random(SALT_BYTES).expect("соль");
+    let key = crate::platform::crypto::derive(&crate::platform::crypto::normalize(PASSWORD), &salt, KDF_ITERATIONS)
+        .await
+        .expect("ключ");
+    let header = sync::Header::new("0.0.196", clock::now(), RecordId::random(), None);
+    let store = crate::store::Store::open(|_| {}).await.expect("база открыта");
+    let sealing = crate::store::sync::Sealing {
+        header: &header,
+        key: &key,
+        salt: &salt,
+        iterations: KDF_ITERATIONS,
+        echo: None,
+    };
+    let old = match crate::store::sync::make(&store, &sealing).await {
+        Ok(made) => sync::text_parts(&made.code, 1).join("\n"),
+        Err(_) => {
+            wrong.push("код прежней версии не собрался".to_owned());
+            String::new()
+        }
+    };
+    drop(store);
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база получателя не открылась".to_owned());
+    }
+    if let Some(input) = paste(&host, lang, &old, &mut wrong).await {
+        accept(&host, lang, &input, PASSWORD);
+        if !wait_for(&host, t(lang, Key::SyncReceiptTitle)).await {
+            wrong.push(format!("код прежней версии не лёг: «{}»", section_text(&host, "sync")));
+        }
+    }
+    let mut listed = false;
+    for _ in 0..40 {
+        listed = devices_text(&host).contains(t(lang, Key::SyncDeviceNameless));
+        if listed {
+            break;
+        }
+        sleep(50).await;
+    }
+    if !listed {
+        wrong.push(format!("устройство без имени не в списке: «{}»", devices_text(&host)));
+    }
+    drop(mounted);
+    host.remove();
+    other_device();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "код без имени: {wrong:#?}");
+}
+
+/// Двух выпускающих окно молча не делает (задача 124, часть E): выбрали
+/// другое устройство — выпуск здесь выключен и сказано, что включить там;
+/// выбрали это, а другое выпускало при последнем обмене, — сначала слова,
+/// и только «Выпускать здесь» включает выпуск, а «Отмена» — нет.
+#[wasm_bindgen_test]
+async fn issuing_never_lands_on_two_devices_silently() {
+    use kvartik_core::format::sync::Peers;
+    let lang = Lang::Ru;
+    documents::fresh_base_with_client().await;
+    other_device();
+    Device::new().set_ui_lang(lang);
+    crate::ui::settings::set_issue_elsewhere(None, false);
+    let laptop = RecordId::random();
+    let mut peers = Peers::default();
+    peers.note(laptop, Some("Ноутбук"), clock::now(), Some(true));
+    Device::new().set_peers(&peers);
+    let mut wrong = Vec::new();
+    let (host, mounted) = mount_at("#/sync");
+    let radio = |value: &str| {
+        host.query_selector(&format!("#sync .sync-devices input[type=radio][value=\"{value}\"]"))
+            .ok()
+            .flatten()
+            .map(JsCast::unchecked_into::<HtmlInputElement>)
+    };
+    let mut found = None;
+    for _ in 0..100 {
+        found = radio(&laptop.to_string());
+        if found.is_some() {
+            break;
+        }
+        sleep(50).await;
+    }
+    match found {
+        Some(peer) => peer.click(),
+        None => wrong.push(format!("в «Моих устройствах» нет «Ноутбука»: «{}»", devices_text(&host))),
+    }
+    if !documents::wait_until(|| Device::new().issue_elsewhere(crate::store::DB_NAME)).await {
+        wrong.push("выбрали другое устройство — а выпуск здесь не выключен".to_owned());
+    }
+    let moved = fill(t(lang, Key::SyncIssuerMoved), &["Ноутбук"]);
+    if !wait_for(&host, &moved).await {
+        wrong.push(format!("не сказано, что включить там: «{}»", devices_text(&host)));
+    }
+    let confirm = fill(t(lang, Key::SyncIssuerConfirm), &["Ноутбук"]);
+    match radio("here") {
+        Some(here) => here.click(),
+        None => wrong.push("нет «это устройство»".to_owned()),
+    }
+    if !wait_for(&host, &confirm).await {
+        wrong.push(format!("«это устройство» без слов о другом выпускающем: «{}»", devices_text(&host)));
+    }
+    if !Device::new().issue_elsewhere(crate::store::DB_NAME) {
+        wrong.push("выпуск включился здесь без подтверждения".to_owned());
+    }
+    match button(&host, &[t(lang, Key::Cancel)]) {
+        Some(cancel) => cancel.click(),
+        None => wrong.push("нет «Отмены»".to_owned()),
+    }
+    sleep(100).await;
+    if !Device::new().issue_elsewhere(crate::store::DB_NAME) {
+        wrong.push("«Отмена» включила выпуск".to_owned());
+    }
+    if radio("here").is_some_and(|here| here.checked()) {
+        wrong.push("после «Отмены» «это устройство» осталось отмеченным".to_owned());
+    }
+    if let Some(here) = radio("here") {
+        here.click();
+    }
+    // Слова встают следующим кадром, а не в самом нажатии.
+    if !wait_for(&host, &confirm).await {
+        wrong.push("второй выбор «это устройство» — без слов".to_owned());
+    }
+    match button(&host, &[t(lang, Key::SyncIssuerConfirmHere)]) {
+        Some(yes) => yes.click(),
+        None => wrong.push("нет «Выпускать здесь»".to_owned()),
+    }
+    if !documents::wait_until(|| !Device::new().issue_elsewhere(crate::store::DB_NAME)).await {
+        wrong.push("«Выпускать здесь» не включило выпуск".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    crate::ui::settings::set_issue_elsewhere(None, false);
+    other_device();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "один выпускающий: {wrong:#?}");
+}
+
+/// Экран настроек не снимается, и обмен после его первого показа он узнаёт
+/// из записи устройства в самом нажатии (ревью задачи 124): выпускает другое
+/// устройство — «это устройство» сначала спрашивает.
+#[wasm_bindgen_test]
+async fn the_settings_ask_after_an_exchange_seen_later() {
+    use kvartik_core::format::sync::Peers;
+    let lang = Lang::Ru;
+    documents::fresh_base_with_client().await;
+    other_device();
+    Device::new().set_ui_lang(lang);
+    crate::ui::settings::set_issue_elsewhere(None, true);
+    let mut wrong = Vec::new();
+    let (host, mounted) = mount_at("#/settings");
+    let here = "#settings li.issuing input[type=radio][value=here]";
+    if !documents::wait_selector(&host, here).await {
+        wrong.push("на экране настроек нет «это устройство»".to_owned());
+    }
+    // Обмен — уже после показа настроек.
+    let mut peers = Peers::default();
+    peers.note(RecordId::random(), Some("Телефон"), clock::now(), Some(true));
+    Device::new().set_peers(&peers);
+    if let Some(input) = host.query_selector(here).ok().flatten() {
+        input.unchecked_into::<HtmlInputElement>().click();
+    }
+    let confirm = fill(t(lang, Key::SyncIssuerConfirm), &["Телефон"]);
+    if !wait_for(&host, &confirm).await {
+        wrong.push(format!("«это устройство» в настройках — без слов о выпускающем телефоне: «{}»", section_text(&host, "settings")));
+    }
+    if !Device::new().issue_elsewhere(crate::store::DB_NAME) {
+        wrong.push("выпуск включился здесь без подтверждения".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    crate::ui::settings::set_issue_elsewhere(None, false);
+    other_device();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "настройки после обмена: {wrong:#?}");
 }
 
 /// Встречный код, в котором нести нечего, кроме эха (задача 124, п. 14): у

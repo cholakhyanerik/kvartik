@@ -3417,6 +3417,21 @@ ul.report-fields {
   margin-top: 0;
 }
 
+/* «Мои устройства» (задача 124, часть E) — своим разделом под путями:
+   заголовок, имя этого устройства, список и выбор, кто выпускает, — с
+   воздухом между ними, а не встык. */
+.sync-devices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-7);
+}
+
+.sync-devices > h2,
+.sync-devices > p {
+  margin: 0;
+}
+
 .sync-what {
   margin: 0;
 }

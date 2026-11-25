@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.197",
+      "date": "2026-11-25",
+      "hy": [
+        "«Այլ սարք» էկրանին՝ «Իմ սարքերը». այս և մյուս սարքերի անունները, վերջին փոխանակման օրը և թե որն է թողարկում հաշիվներն ու ակտերը։ Թողարկող սարքն ընտրում եք այստեղ կամ կարգավորումներում, և ծրագիրը թույլ չի տա, որ երկու սարք լուռ թողարկեն։ Կոդերը նոր տարբերակի են. նախկին տարբերակը կխնդրի թարմացնել էջը։"
+      ],
+      "ru": [
+        "«Мои устройства» на экране «Другое устройство»: имена этого и других устройств, день последнего обмена и кто выпускает счета и акты. Выпускающее устройство выбирают здесь или в настройках, и молча выпускать на двух программа не даст. Коды — новой версии: прежняя версия программы попросит перезагрузить страницу."
+      ],
+      "en": [
+        "“My devices” on the “Another device” screen: names of this and other devices, the day of the last exchange and which one issues invoices and acts. You choose the issuing device here or in Settings, and the app won’t let two devices issue silently. Codes are of a new version: an earlier version of the app will ask you to reload the page."
+      ]
+    },
+    {
       "version": "0.0.196",
       "date": "2026-11-25",
       "hy": [
@@ -272,19 +285,6 @@
       ],
       "en": [
         "Nothing changed in the app."
-      ]
-    },
-    {
-      "version": "0.0.177",
-      "date": "2026-11-23",
-      "hy": [
-        "Համակարգչում երեք տողով կոճակի տակ, օրինակ՝ «Ակտ այս հաշվի համար», այլևս չի երևում նույն մակագրության կրկնօրինակը, իսկ մկնիկի տակ մակագրությունը թերթվում է առանց խառնվելու։"
-      ],
-      "ru": [
-        "На компьютере под кнопкой с подписью в три строки, например «Ակտ այս հաշվի համար» в армянском окне, больше не видно второй копии надписи, а под мышью подпись перелистывается, не путаясь сама с собой."
-      ],
-      "en": [
-        "On a computer, a button whose label wraps to three lines, like “Ակտ այս հաշվի համար” in the Armenian window, no longer shows a second copy of the label, and under the mouse the label flips without overlapping itself."
       ]
     }
   ]

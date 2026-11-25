@@ -1418,7 +1418,7 @@ macro_rules! en {
     (SyncTitle) => { "Another device" };
     (SyncEntryAbout) => { "Pass changes on by code, without a file" };
     (SyncAbout) => { "Changes move from one of your devices to another without a file or the internet." };
-    (SyncIssueNote) => { "Invoices and acts are issued by one device: turn issuing off on the others in Settings, or numbers will repeat." };
+    (SyncIssueNote) => { "Invoices and acts are issued by one device, or numbers will repeat. Choose it below; the same choice is in Settings." };
     (SyncSendTitle) => { "Send from here" };
     (SyncWhat) => { "What to send" };
     (SyncSince) => { "Changes since this day" };
@@ -1566,4 +1566,21 @@ macro_rules! en {
     (SyncPasteKeyboard) => { "The cursor is in the code field: the keyboard will offer what you copied\u{A0}— tap it above the keys." };
     (BackupOneTap) => { "A backup takes one tap: this device keeps the key of the backup password and asks for the password itself once every 30 days, so you don't forget it." };
     (BackupOneTapLost) => { "The backup password key is no longer on this device\u{A0}— enter the backup password." };
+    (SyncDevicesTitle) => { "My devices" };
+    (SyncDeviceThis) => { "Name of this device" };
+    (SyncDeviceNameless) => { "Unnamed device" };
+    (SyncDeviceIssues) => { "issues invoices and acts" };
+    (SyncDeviceIphone) => { "iPhone" };
+    (SyncDeviceIpad) => { "iPad" };
+    (SyncDeviceMac) => { "Mac" };
+    (SyncDeviceAndroid) => { "Android" };
+    (SyncDeviceComputer) => { "Computer" };
+    (SyncIssuerTitle) => { "Invoices and acts are issued by" };
+    (SyncIssuerHere) => { "this device" };
+    (SyncIssuerOther) => { "another device" };
+    (SyncIssuerMoved) => { "Issuing is off here. Turn it on on “{}”: in “My devices” on the “Another device” screen, or in Settings." };
+    (SyncIssuerMovedAny) => { "Issuing is off here. Turn it on on the device where you issue invoices and acts: in “My devices” or in Settings." };
+    (SyncIssuerConfirm) => { "“{}” issued invoices and acts at the last exchange. Issue here only if issuing is off there\u{A0}— or numbers will repeat." };
+    (SyncIssuerConfirmHere) => { "Issue here" };
+    (SyncIssuerBoth) => { "Both devices issue invoices and acts\u{A0}— this one and “{}”, so numbers will repeat. Keep issuing on one: “My devices” above." };
 }

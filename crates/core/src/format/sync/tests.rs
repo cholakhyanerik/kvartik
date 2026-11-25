@@ -465,7 +465,7 @@ fn a_receipt_is_one_qr_code() {
     assert_eq!(open_receipt(&code), Err(CodeError::NotCode));
     assert_eq!(payload(b"KV"), Payload::Other);
     let mut newer = sealed.clone();
-    newer[3] = 2;
+    newer[3] = RECEIPT_ENVELOPE + 1;
     assert_eq!(open_receipt(&newer), Err(CodeError::Newer));
     let mut wrong = Vec::new();
     for (name, bytes) in [
@@ -770,4 +770,139 @@ fn the_files_estimate_is_close_and_not_below() {
     let picked = pick(base.raw(), None).expect("собрано");
     assert!(!files_fit(picked.skipped_bytes()), "файл больше серии");
     assert_eq!(picked.skipped(), 1);
+}
+
+/// Имя устройства (задача 124, часть E): без пробелов по краям и управляющих
+/// знаков, не длиннее предела в байтах — по границе знака, а пустое — нет
+/// имени.
+#[test]
+fn a_device_name_is_cleaned_and_cut() {
+    assert_eq!(device_name("  Ноутбук\u{7} "), Some("Ноутбук".to_owned()));
+    // Знаки направления письма перевернули бы фразу окна вокруг имени.
+    assert_eq!(device_name("\u{202E}MacBook\u{2067} Pro\u{200F}\u{2028}"), Some("MacBook Pro".to_owned()));
+    assert_eq!(device_name("\u{202E} \u{200E}"), None);
+    // А ZWNJ остаётся.
+    assert_eq!(device_name("a\u{200C}b"), Some("a\u{200C}b".to_owned()));
+    assert_eq!(device_name(" \t "), None);
+    let long = "Ա".repeat(40);
+    let cut = device_name(&long).expect("имя");
+    assert!(cut.len() <= MAX_NAME_BYTES && long.starts_with(&cut));
+    assert_eq!(cut.chars().count(), MAX_NAME_BYTES / 2);
+}
+
+/// Шапка кода несёт имя устройства и выпускает ли оно (конверт 4), а код
+/// прежней версии — без них читается, как раньше: имени нет. Имя, которого
+/// `device_name` не сделал бы, чистится им же, а код читается: правило имени
+/// строже — коды прежних версий не порча.
+#[test]
+fn the_header_names_the_device() {
+    let (base, _) = sample();
+    let picked = pick(base.raw(), None).expect("собрано");
+    let header = Header::new("0.0.197", at(9_000), RecordId::random(), None).from_device(" iPhone Анны ", false);
+    let packed = pack(&header, picked.entries()).expect("помещается");
+    let code = seal(&lock(), &packed);
+    let got = read(&open(&code).expect("открыт"), &packed).expect("прочитан");
+    assert_eq!(got.header().name(), Some("iPhone Анны"));
+    assert_eq!(got.header().issues(), Some(false));
+
+    let old = Header::new("0.0.196", at(9_000), RecordId::random(), None);
+    let packed = pack(&old, picked.entries()).expect("помещается");
+    let got = read(&open(&seal(&lock(), &packed)).expect("открыт"), &packed).expect("прочитан");
+    assert_eq!((got.header().name(), got.header().issues()), (None, None));
+
+    let forged = Header {
+        name: Some(" не\u{1}имя\u{202E} ".to_owned()),
+        ..header
+    };
+    let packed = pack(&forged, picked.entries()).expect("помещается");
+    let got = read(&open(&seal(&lock(), &packed)).expect("открыт"), &packed).expect("прочитан");
+    assert_eq!(got.header().name(), Some("неимя"));
+    let blank = Header {
+        name: Some("\u{202E} ".to_owned()),
+        ..got.header().clone()
+    };
+    let packed = pack(&blank, picked.entries()).expect("помещается");
+    let got = read(&open(&seal(&lock(), &packed)).expect("открыт"), &packed).expect("прочитан");
+    assert_eq!(got.header().name(), None);
+}
+
+/// Квитанция с именем принявшего (конверт 2) читается, квитанция прежней
+/// версии — без имени — тоже, а квитанция новее программы — «обновите».
+#[test]
+fn a_receipt_names_the_receiver() {
+    let header = Header::new("0.0.197", at(9_000), RecordId::random(), None);
+    let receiver = RecordId::random();
+    let receipt = Receipt::new(&header, receiver, Continuity::Whole).from_device("Ноутбук", true);
+    let read = Receipt::read(&receipt.plain()).expect("читается");
+    assert_eq!((read.receiver(), read.name(), read.issues()), (receiver, Some("Ноутбук"), Some(true)));
+    let old = format!(
+        r#"{{"file":"kvartik-receipt","sender":"{}","receiver":"{receiver}","code":9000,"taken":"whole"}}"#,
+        header.device()
+    );
+    let read = Receipt::read(old.as_bytes()).expect("прежняя читается");
+    assert_eq!((read.name(), read.issues()), (None, None));
+    let bidi = old.replace(r#""taken":"whole""#, r#""taken":"whole","name":"\u202eiPad ""#);
+    let read = Receipt::read(bidi.as_bytes()).expect("чистится, а не отвергается");
+    assert_eq!(read.name(), Some("iPad"));
+    let sealed = seal_receipt(&[0; 12], &[1; 40]);
+    assert_eq!(sealed[3], 2, "конверт квитанции — 2");
+    assert!(open_receipt(&sealed).is_ok());
+    let mut first = sealed.clone();
+    first[3] = 1;
+    assert!(open_receipt(&first).is_ok(), "квитанцию версии 1 программа читает");
+    let mut newer = sealed;
+    newer[3] = 3;
+    assert_eq!(open_receipt(&newer), Err(CodeError::Newer));
+}
+
+/// Квитанция с самым длинным именем — по-прежнему один QR-код, и в самом
+/// тяжёлом случае: настоящие моменты в 13 цифр, дыра, «не выпускает» и имя из
+/// кавычек или обратных косых, которые JSON удваивает (ревью задачи 124).
+/// Растёт [`MAX_NAME_BYTES`] или поля квитанции — тест краснеет здесь,
+/// а не квитанция пропадает у человека.
+#[test]
+fn a_named_receipt_is_still_one_qr_code() {
+    let header = Header::new("0.0.197", at(1_795_346_426_590), RecordId::random(), None);
+    let gap = Continuity::Gap { got: at(1_795_346_000_000) };
+    let mut wrong = Vec::new();
+    for (name, issues) in [
+        ("Ա".repeat(MAX_NAME_BYTES), true),
+        ("\"".repeat(MAX_NAME_BYTES), false),
+        ("\\".repeat(MAX_NAME_BYTES), false),
+        ("Рабочий ноутбук бухгалтера".to_owned(), false),
+    ] {
+        let receipt = Receipt::new(&header, RecordId::random(), gap).from_device(&name, issues);
+        let ciphertext = [receipt.plain(), vec![0; backup::TAG_BYTES]].concat();
+        let sealed = seal_receipt(&[0; backup::IV_BYTES], &ciphertext);
+        if receipt_qr(&sealed, 1).is_none() {
+            wrong.push(format!("«{name}»: квитанция {} байтов не легла в QR-код", sealed.len()));
+        }
+        if receipt.name() != device_name(&name).as_deref() {
+            wrong.push(format!("«{name}»: имя {:?}", receipt.name()));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Список устройств: свежее — первым, имя и выпуск из кода прежней версии не
+/// стирают известных, больше предела — забывается давнее, нечитаемое — пусто.
+#[test]
+fn peers_remember_names_and_issuing() {
+    let mut peers = Peers::default();
+    let (a, b) = (RecordId::random(), RecordId::random());
+    peers.note(a, Some("Ноутбук"), at(1_000), Some(true));
+    peers.note(b, Some("iPhone"), at(2_000), Some(false));
+    peers.note(a, None, at(3_000), None);
+    let first = &peers.list()[0];
+    assert_eq!((first.id, first.name.as_deref(), first.last, first.issues), (a, Some("Ноутбук"), at(3_000), Some(true)));
+    assert_eq!(Peers::parse(&peers.to_text()), peers);
+    for n in 0..MAX_PEERS + 2 {
+        peers.note(RecordId::random(), None, at(4_000 + n as i64), None);
+    }
+    assert_eq!(peers.list().len(), MAX_PEERS);
+    assert!(Peers::parse("{не json").list().is_empty());
+    // Записанное прежде правило имени не стирает соседа, а чистит имя.
+    let old = format!(r#"[{{"id":"{a}","name":"\u202eНоутбук","last":5}}]"#);
+    let parsed = Peers::parse(&old);
+    assert_eq!(parsed.list().first().and_then(|peer| peer.name.as_deref()), Some("Ноутбук"));
 }

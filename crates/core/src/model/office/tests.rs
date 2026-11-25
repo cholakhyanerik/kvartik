@@ -315,6 +315,20 @@ fn issuing_is_chosen_per_ie() {
     if on_first.all_text() != Some(ALL) || back(&on_first) != on_first {
         wrong.push(format!("включён у первого — записи: {:?} {:?}", on_first.all_text(), on_first.at_text()));
     }
+    // Выпускает ли устройство хоть у одного ИП (задача 124, часть E).
+    let off_both = Issuing::everywhere(true);
+    let cases = [
+        (&Issuing::default(), true),
+        (&off_second, true),
+        (&on_first, true),
+        (&off_both, false),
+        (&Issuing::default().with(&first, true).with(&second, true), true),
+    ];
+    for (issuing, somewhere) in cases {
+        if issuing.somewhere() != somewhere {
+            wrong.push(format!("выпускает ли хоть у одного: {issuing:?} — не {somewhere}"));
+        }
+    }
     let undone = off_second.with(&second, false);
     if !undone.uniform() || undone.all_text().is_some() || undone.at_text().is_some() {
         wrong.push(format!("вернули как было — остались записи: {undone:?}"));

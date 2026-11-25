@@ -66,6 +66,7 @@ use leptos::ev::{KeyboardEvent, MouseEvent, SubmitEvent};
 use leptos::prelude::*;
 
 use super::backup::{Backups, IssuerAsk, Problem, counted, key_for, restored_words, tally_words, who};
+use super::settings::IssuerChoice;
 use super::form::Forms;
 use super::icon::{Icon, icon};
 use super::office::Office;
@@ -213,6 +214,8 @@ fn Ways(ctx: Ctx) -> impl IntoView {
         None
     });
     let seen = move |path: Way| Signal::derive(move || router.shows(Screen::Sync) && way.get() == Some(path));
+    // «Мои устройства» перечитываются после обмена (задача 124, часть E).
+    provide_context(DevicesTick(RwSignal::new(0)));
     view! {
         // Первая строка видна, остальное — под «Подробнее» (задача 124).
         <p>{tr(lang, Key::SyncAbout)}</p>
@@ -220,10 +223,6 @@ fn Ways(ctx: Ctx) -> impl IntoView {
             <summary>{tr(lang, Key::More)}</summary>
             <p>{tr(lang, Key::SyncAboutMore)}</p>
         </details>
-        <p class="hint">
-            {tr(lang, Key::SyncIssueNote)}" "
-            <a href=Screen::Settings.href()>{tr(lang, Key::SettingsTitle)}</a>
-        </p>
         {if empty {
             view! { <h2>{tr(lang, Key::SyncReceiveTitle)}</h2> }.into_any()
         } else {
@@ -243,6 +242,142 @@ fn Ways(ctx: Ctx) -> impl IntoView {
         <div class="sync-way" hidden=move || way.get() != Some(Way::Receive)>
             <Receive ctx seen=seen(Way::Receive) />
         </div>
+        // Под путями, а не над ними: экран начинается с выбора, и на телефоне
+        // список устройств увёл бы плитки за первый экран (глазной прогон
+        // задачи 124, часть E).
+        <Devices ctx />
+    }
+}
+
+/// Имя этого устройства для «Моих устройств» и шапки кода (задача 124, часть
+/// E): заданное человеком — или по платформе: iPhone, iPad, Mac, Android,
+/// «Компьютер».
+fn my_name(lang: Lang) -> String {
+    if let Some(name) = Device::new().device_name().as_deref().and_then(sync::device_name) {
+        return name;
+    }
+    let navigator = web_sys::window().map(|window| window.navigator());
+    let agent = navigator.as_ref().and_then(|navigator| navigator.user_agent().ok()).unwrap_or_default();
+    let touch = navigator.is_some_and(|navigator| navigator.max_touch_points() > 0);
+    let key = if agent.contains("iPad") || (agent.contains("Macintosh") && touch) {
+        Key::SyncDeviceIpad
+    } else if agent.contains("iPhone") {
+        Key::SyncDeviceIphone
+    } else if agent.contains("Android") {
+        Key::SyncDeviceAndroid
+    } else if agent.contains("Macintosh") {
+        Key::SyncDeviceMac
+    } else {
+        Key::SyncDeviceComputer
+    };
+    t(lang, key).to_owned()
+}
+
+/// Выпускает ли это устройство счета и акты хоть у одного ИП — это идёт
+/// в код и квитанцию (`Issuing::somewhere`, ревью задачи 124).
+fn issues_here() -> bool {
+    super::settings::issues_somewhere()
+}
+
+/// Выпускают ли оба — это устройство и то, что выпускает (`theirs`): только
+/// когда ИП один. У конторы выпуск выбран по ИП, и бухгалтер законно
+/// выпускает одних ИП здесь, других там: о нём слова звучали бы на каждом
+/// обмене, а выбрать «это устройство» без вопроса не даёт `IssuerChoice`.
+fn both_issue(ctx: Ctx, theirs: Option<bool>) -> bool {
+    theirs == Some(true) && !ctx.office.several() && !super::settings::issue_elsewhere_untracked(&ctx.office.open_name())
+}
+
+/// Был обмен с устройством `id`: запомнить его имя и выпуск (`sync::Peers`).
+fn note_peer(id: kvartik_core::model::record::RecordId, name: Option<&str>, issues: Option<bool>) {
+    let device = Device::new();
+    // Квитанция или код с идентификатором этого устройства — не другое
+    // устройство: в списке «других» его быть не должно (ревью задачи 124).
+    if id == device.sync_id() {
+        return;
+    }
+    let mut peers = device.peers();
+    peers.note(id, name, clock::now(), issues);
+    device.set_peers(&peers);
+}
+
+/// Обновлять «Мои устройства» после обмена: принятого кода или квитанции.
+#[derive(Clone, Copy)]
+struct DevicesTick(RwSignal<u32>);
+
+/// «Мои устройства» (задача 124, часть E; решение человека 2026-11-25): имя
+/// этого устройства — его видят и другие, — устройства, с которыми был
+/// обмен, с днём последнего, и кто выпускает счета и акты — одной
+/// радиокнопкой (`settings::IssuerChoice`). Здесь, на «Другом устройстве»,
+/// а не в настройках: это об обмене, и после него список под рукой (решение
+/// агента 2026-11-25); в настройках — та же радиокнопка.
+#[component]
+fn Devices(ctx: Ctx) -> impl IntoView {
+    let lang = ctx.lang;
+    let tick = use_context::<DevicesTick>().map_or_else(|| RwSignal::new(0), |tick| tick.0);
+    let name = RwSignal::new(Device::new().device_name().unwrap_or_default());
+    let peers = Signal::derive(move || {
+        tick.get();
+        Device::new().peers().list().to_vec()
+    });
+    let save = move |event: leptos::ev::Event| {
+        let typed = event_target_value(&event);
+        let clean = sync::device_name(&typed);
+        Device::new().set_device_name(clean.as_deref());
+        name.set(clean.unwrap_or_default());
+    };
+    let placeholder = move || my_name(lang.get());
+    let rows = move || {
+        let lang_now = lang.get();
+        peers
+            .get()
+            .into_iter()
+            .map(|peer| {
+                let title = peer.name.clone().unwrap_or_else(|| t(lang_now, Key::SyncDeviceNameless).to_owned());
+                let meta = move || {
+                    let lang = lang.get();
+                    let mut words = clock::local_date(peer.last)
+                        .map(|day| fill(t(lang, Key::SyncEntryLast), &[&i18n::date(lang, day)]))
+                        .unwrap_or_default();
+                    if peer.issues == Some(true) {
+                        words.push_str(" · ");
+                        words.push_str(t(lang, Key::SyncDeviceIssues));
+                    }
+                    words
+                };
+                view! {
+                    <li class="device">
+                        <span class="entry-main">
+                            <span class="entry-title">{title}</span>
+                            <span class="entry-meta">{meta}</span>
+                        </span>
+                    </li>
+                }
+            })
+            .collect_view()
+    };
+    view! {
+        <section class="sync-devices">
+            <h2>{tr(lang, Key::SyncDevicesTitle)}</h2>
+            <label class="device-name">
+                {tr(lang, Key::SyncDeviceThis)}
+                <input
+                    type="text"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder=placeholder
+                    prop:value=move || name.get()
+                    on:change=save
+                />
+            </label>
+            <ul class="list devices">{rows}</ul>
+            <p class="hint">{tr(lang, Key::SyncIssueNote)}</p>
+            // У одного ИП или у всех — тем же правилом, что в настройках:
+            // живых ИП больше одного (ревью задачи 124).
+            {move || {
+                let only = ctx.office.several();
+                view! { <IssuerChoice lang base=ctx.office.open_name() only group="issuer-sync" peers /> }
+            }}
+        </section>
     }
 }
 
@@ -752,7 +887,8 @@ async fn seal_code(
     let base = if office.is_some() { OFFICE_DB.to_owned() } else { ctx.office.open_name() };
     let device = Device::new();
     let now = clock::now();
-    let header = sync::Header::new(env!("CARGO_PKG_VERSION"), now, device.sync_id(), since.map(sync::since_day));
+    let header = sync::Header::new(env!("CARGO_PKG_VERSION"), now, device.sync_id(), since.map(sync::since_day))
+        .from_device(&my_name(ctx.lang.get_untracked()), issues_here());
     let sealing = Sealing {
         header: &header,
         key: &lock.key,
@@ -1098,7 +1234,9 @@ enum FilesState {
 /// и разрезать на части серии.
 async fn make_files(ctx: Ctx, shown: Rc<Shown>) -> Result<FilesShown, Say> {
     let store = ctx.base.get().ok_or(Say::Key(Key::BackupFailed))?;
-    let header = sync::Header::new(env!("CARGO_PKG_VERSION"), clock::now(), Device::new().sync_id(), shown.since_at).for_files();
+    let header = sync::Header::new(env!("CARGO_PKG_VERSION"), clock::now(), Device::new().sync_id(), shown.since_at)
+        .for_files()
+        .from_device(&my_name(ctx.lang.get_untracked()), issues_here());
     let sealing = Sealing {
         header: &header,
         key: &shown.key,
@@ -1384,6 +1522,9 @@ fn Reply(ctx: Ctx, seen: Signal<bool>, shown: Rc<Shown>, gap: Callback<Date>, ac
     let paste_failed = RwSignal::new(false);
     let paste_hint = RwSignal::new(None::<Key>);
     let reply_area = NodeRef::<leptos::html::Textarea>::new();
+    // Оба выпускают (задача 124, часть E): имя того устройства.
+    let both = RwSignal::new(None::<String>);
+    let devices_tick = use_context::<DevicesTick>();
     // Ушли с экрана или с пути — камера гаснет.
     Effect::new(move |_| {
         if !seen.get() && replying.with_untracked(|state| matches!(state, Replying::Scanning)) {
@@ -1406,6 +1547,9 @@ fn Reply(ctx: Ctx, seen: Signal<bool>, shown: Rc<Shown>, gap: Callback<Date>, ac
                 Ok((took, _)) => {
                     if !accepted.get_untracked() {
                         accepted.set(true);
+                    }
+                    if let Some(tick) = devices_tick {
+                        tick.0.try_update(|n| *n += 1);
                     }
                     pasted.set(String::new());
                     Replying::Took(Rc::new(took))
@@ -1457,6 +1601,14 @@ fn Reply(ctx: Ctx, seen: Signal<bool>, shown: Rc<Shown>, gap: Callback<Date>, ac
                     // Код сняли — это и есть обмен (ревью задачи 124): строка
                     // профиля «Последний обмен».
                     device.set_sync_last(clock::now());
+                    // Принявшее — в «Мои устройства» (задача 124, часть E).
+                    note_peer(receipt.receiver(), receipt.name(), receipt.issues());
+                    if let Some(tick) = devices_tick {
+                        tick.0.try_update(|n| *n += 1);
+                    }
+                    if both_issue(ctx, receipt.issues()) {
+                        both.set(Some(receipt.name().unwrap_or_default().to_owned()));
+                    }
                 }
                 Acked::Other => {}
             }
@@ -1500,6 +1652,7 @@ fn Reply(ctx: Ctx, seen: Signal<bool>, shown: Rc<Shown>, gap: Callback<Date>, ac
     };
     view! {
         <p class="hint">{tr(lang, Key::SyncReceiptAbout)}</p>
+        {move || both.get().map(|name| view! { <BothIssue lang name /> })}
         {move || match replying.get() {
             Replying::Scanning => {
                 let found = Callback::new(move |bytes: Vec<u8>| take(sync::frame(&bytes)));
@@ -1637,8 +1790,13 @@ struct ShownReceipt {
 /// Квитанция на код с шапкой `header`, принятый с целостью `continuity`, —
 /// под ключом кода, одним QR-кодом и одним куском текста. `None` — шифр
 /// отказал: код принят, а квитанции нет — отправитель её просто не снимет.
-async fn receipt(key: &crypto::Key, header: &sync::Header, continuity: Continuity) -> Option<ShownReceipt> {
-    let receipt = Receipt::new(header, Device::new().sync_id(), continuity);
+async fn receipt(
+    key: &crypto::Key,
+    header: &sync::Header,
+    continuity: Continuity,
+    (name, issues): (&str, bool),
+) -> Option<ShownReceipt> {
+    let receipt = Receipt::new(header, Device::new().sync_id(), continuity).from_device(name, issues);
     let iv = crypto::random(IV_BYTES).ok()?;
     let ciphertext = crypto::encrypt(key, &iv, &receipt.plain()).await.ok()?;
     let sealed = sync::seal_receipt(&iv, &ciphertext);
@@ -1677,6 +1835,9 @@ struct Accepted {
     /// Код был кодом всех ИП: встречный — тоже, а на код одного ИП — кодом
     /// одного ИП.
     everyone: bool,
+    /// То устройство выпускает счета и акты, и это тоже — его имя (задача
+    /// 124, часть E): номера повторятся.
+    both: Option<String>,
 }
 
 /// Чем открыть код: паролем, который вписал человек, или ключом прошлого
@@ -1713,6 +1874,7 @@ fn Receive(ctx: Ctx, seen: Signal<bool>) -> impl IntoView {
     // файлов того же пароля откроется без второго ввода, а встречный код
     // (задача 124, п. 14) закроется им же.
     let known = StoredValue::new_local(None::<CodeLock>);
+    let devices_tick = use_context::<DevicesTick>();
     // Сколько кадров собрано из скольких — для слов; (0, 0) — ни одного.
     let progress = RwSignal::new((0usize, 0usize));
     let pasted = RwSignal::new(String::new());
@@ -1740,6 +1902,9 @@ fn Receive(ctx: Ctx, seen: Signal<bool>) -> impl IntoView {
             let known_key = matches!(secret, Secret::Known(_));
             let outcome = accept(ctx, &sealed, secret, true).await;
             if let Ok((_, key)) = &outcome {
+                if let Some(tick) = devices_tick {
+                    tick.0.try_update(|n| *n += 1);
+                }
                 let lock = sealed.lock();
                 known.set_value(Some(CodeLock {
                     key: Rc::clone(key),
@@ -1994,8 +2159,22 @@ fn AcceptedWords(lang: ReadSignal<Lang>, accepted: Rc<Accepted>) -> impl IntoVie
         <p role="status">{move || restored_words(lang.get(), &restored, None)}</p>
         {flow}
         {accepted.ahead.then(|| view! { <p class="warning">{tr(lang, Key::BackupAhead)}</p> })}
+        {accepted.both.clone().map(|name| view! { <BothIssue lang name /> })}
         {(accepted.fresh && restored.added > 0).then(|| view! { <IssuerAsk lang /> })}
         {accepted.receipt.clone().map(|receipt| view! { <ReceiptShown lang receipt /> })}
+    }
+}
+
+/// Счета и акты выпускают оба устройства — это и `name` (задача 124, часть
+/// E): номера повторятся, а исправить это можно в «Моих устройствах» выше.
+#[component]
+fn BothIssue(lang: ReadSignal<Lang>, name: String) -> impl IntoView {
+    view! {
+        <p class="warning">{move || {
+            let lang = lang.get();
+            let name = if name.is_empty() { t(lang, Key::SyncDeviceNameless).to_owned() } else { name.clone() };
+            fill(t(lang, Key::SyncIssuerBoth), &[&name])
+        }}</p>
     }
 }
 
@@ -2217,7 +2396,12 @@ async fn accept(ctx: Ctx, sealed: &Sealed, secret: Secret, answer: bool) -> Resu
         ctx.backups.password_set(&opened_with);
         ctx.backups.password_entered();
     }
-    let receipt = if files || !answer { None } else { receipt(&key, &header, continuity).await };
+    let me = (my_name(ctx.lang.get_untracked()), issues_here());
+    let receipt = if files || !answer { None } else { receipt(&key, &header, continuity, (&me.0, me.1)).await };
+    // Устройство кода — в «Мои устройства» (задача 124, часть E), и двое
+    // выпускающих — словами.
+    note_peer(header.device(), header.name(), header.issues());
+    let both = both_issue(ctx, header.issues()).then(|| header.name().unwrap_or_default().to_owned());
     Ok((
         Accepted {
             restored: landed,
@@ -2233,6 +2417,7 @@ async fn accept(ctx: Ctx, sealed: &Sealed, secret: Secret, answer: bool) -> Resu
             unsent,
             echo,
             everyone,
+            both,
         },
         key,
     ))
