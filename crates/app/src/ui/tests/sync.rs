@@ -2143,7 +2143,7 @@ async fn a_code_shared_from_a_messenger_lands_in_the_field() {
 
     crate::store::delete_database(crate::store::DB_NAME).await;
     other_device();
-    super::share_in("text", &[(crate::platform::shared::TEXT, &format!("Kvartik — мой код:\n{code}"))]).await;
+    super::share_in("text", &[("shared-text", &format!("Kvartik — мой код:\n{code}"))]).await;
     crate::platform::set_hash(&Screen::Sync.href());
     let (host, mounted) = mount_at("#/sync");
     let mut asked = false;

@@ -303,6 +303,44 @@ fn wasm_and_service_worker_go_through_the_hook() {
     );
 }
 
+/// «Поделиться → Kvartik» (задача 124, часть D): пределы поделённого в
+/// `sw.js` — числа ядра, а не свои: файл больше `backup::MAX_FILE_BYTES`
+/// программа не откроет, частей у копии не больше `backup::MAX_PARTS`, и окно
+/// читает столько же (`platform::shared`). И файлы берутся все, а не первый:
+/// части одной копии делятся разом (до 0.0.199 вторая пропадала молча), —
+/// но не больше своего предела суммы.
+#[test]
+fn the_share_limits_are_the_core_limits() {
+    use kvartik_core::format::backup::{MAX_FILE_BYTES, MAX_PARTS};
+    let sw = fs::read_to_string(app_dir().join("public/sw.js")).expect("sw.js читается");
+    // `const ИМЯ = 128 * 1024 * 1024;` — произведение множителей.
+    let constant = |name: &str| -> Option<u64> {
+        let line = sw.lines().find(|line| line.starts_with(&format!("const {name} = ")))?;
+        let value = line.strip_suffix(';')?.split(" = ").nth(1)?;
+        value.split(" * ").map(|factor| factor.trim().parse::<u64>().ok()).product()
+    };
+    let mut wrong = Vec::new();
+    if constant("MAX_SHARED_FILE") != Some(MAX_FILE_BYTES) {
+        wrong.push(format!("MAX_SHARED_FILE — {:?}, а не {MAX_FILE_BYTES}", constant("MAX_SHARED_FILE")));
+    }
+    if constant("MAX_SHARED_FILES") != Some(u64::from(MAX_PARTS)) {
+        wrong.push(format!("MAX_SHARED_FILES — {:?}, а не {MAX_PARTS}", constant("MAX_SHARED_FILES")));
+    }
+    if !sw.contains(r#"form.getAll("backup")"#) || sw.contains(r#"form.get("backup")"#) {
+        wrong.push("sw.js берёт не все поделённые файлы".to_owned());
+    }
+    // Сумма — свой предел (ревью 0.0.199): POST на адрес цели принимается
+    // с любой страницы. Самый большой файл копии в него входит.
+    match constant("MAX_SHARED_BYTES") {
+        Some(bytes) if bytes >= MAX_FILE_BYTES => {}
+        other => wrong.push(format!("MAX_SHARED_BYTES — {other:?}, меньше файла копии или нет")),
+    }
+    if !sw.contains("bytes + file.size > MAX_SHARED_BYTES") {
+        wrong.push("sw.js не держит предел суммы поделённых файлов".to_owned());
+    }
+    assert!(wrong.is_empty(), "пределы поделённого: {wrong:#?}");
+}
+
 /// Программа живёт в папке сайта, а корень — лендингу (задачи 65 и 34).
 /// Папку называет одна строка — `public_url` в `Trunk.toml`, а файлы корня
 /// (`public/root/`) и скрипт лендинга знают её сами, и каждый — молча:

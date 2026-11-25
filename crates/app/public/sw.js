@@ -131,21 +131,49 @@ self.addEventListener("message", (event) => {
 const SHARE_PATH = new URL("share", self.location).pathname;
 const SHARED = "kvartik.share";
 // Больше не кладётся: файл копии программа больше 128 МБ не открывает
-// (backup::MAX_FILE_BYTES), а код текстом — не больше мегабайта.
+// (backup::MAX_FILE_BYTES), частей у копии не больше 999 (backup::MAX_PARTS),
+// а код текстом — не больше мегабайта. Всех файлов разом — не больше
+// гигабайта, восьми частей по 128 МБ (решение агента 2026-11-25, ревью
+// 0.0.199): POST на адрес цели service worker принимает с любой страницы, не
+// только из меню «Поделиться», а незабранное лежит в хранилище kvartik.com,
+// общем с базой, до следующего раза. Часть копии сверх предела окно назовёт
+// недостающей, и её выбирают на экране копии. Числа сверяет tests/pwa.rs.
 const MAX_SHARED_FILE = 128 * 1024 * 1024;
+const MAX_SHARED_FILES = 999;
+const MAX_SHARED_BYTES = 1024 * 1024 * 1024;
 const MAX_SHARED_TEXT = 1024 * 1024;
 
 async function shared(request) {
   let to = "./#/sync";
   try {
     const form = await request.formData();
+    // Поделённое прошлый раз, которого окно не забрало (программу закрыли
+    // раньше), — прочь: его файлы легли бы в цепочку рядом с новыми.
+    await caches.delete(SHARED);
     const cache = await caches.open(SHARED);
-    const file = form.get("backup");
-    if (file instanceof File && file.size > 0 && file.size <= MAX_SHARED_FILE) {
-      await cache.put("shared-file", new Response(file));
-      await cache.put("shared-name", new Response(file.name));
+    // Части копии делятся разом (задача 124): все файлы — по номерам с 1,
+    // в порядке мессенджера, а не только первый; цепочке восстановления
+    // порядок частей не важен. Лёг хоть один — экран копии: какие части не
+    // легли, скажет окно. Ключи — договор с окном (platform/shared.rs): его
+    // сторону держат браузерные тесты, эту — tools/browser/check.mjs.
+    const files = [];
+    let bytes = 0;
+    for (const file of form.getAll("backup")) {
+      if (!(file instanceof File) || file.size === 0 || file.size > MAX_SHARED_FILE) {
+        continue;
+      }
+      if (files.length === MAX_SHARED_FILES || bytes + file.size > MAX_SHARED_BYTES) {
+        break;
+      }
+      bytes += file.size;
+      files.push(file);
+    }
+    for (const [at, file] of files.entries()) {
+      await cache.put(`shared-file-${at + 1}`, new Response(file));
+      await cache.put(`shared-name-${at + 1}`, new Response(file.name));
       to = "./?share=file#/backup";
-    } else {
+    }
+    if (files.length === 0) {
       const text = ["text", "title", "url"]
         .map((name) => form.get(name))
         .filter((part) => typeof part === "string" && part.length > 0)

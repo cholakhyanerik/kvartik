@@ -1446,22 +1446,28 @@ async function shareTarget(page) {
     manifest?.action === "share" && manifest?.method === "POST" && manifest?.enctype === "multipart/form-data"
       && JSON.stringify(manifest?.params?.files?.[0]?.accept) === JSON.stringify([".json", "application/json"]),
     JSON.stringify(manifest));
+  // Части копии делятся разом (с 0.0.199): обе — по номерам, а не только первая.
   const file = await page.eval(`const form = new FormData();
-    form.append("backup", new File(["{\\"проба\\":1}"], "kvartik-проба.json", { type: "application/json" }));
+    form.append("backup", new File(["{\\"проба\\":1}"], "kvartik-проба-1of2.json", { type: "application/json" }));
+    form.append("backup", new File(["{\\"проба\\":2}"], "kvartik-проба-2of2.json", { type: "application/json" }));
     const answer = await fetch("share", { method: "POST", body: form, redirect: "manual" });
-    const body = await caches.match("shared-file", { cacheName: "kvartik.share" });
-    const name = await caches.match("shared-name", { cacheName: "kvartik.share" });
-    return { type: answer.type, body: body ? await body.text() : null, name: name ? await name.text() : null };`);
-  checks.check("поделиться: файл копии лёг в кэш поделённого, ответ — переход",
-    file?.type === "opaqueredirect" && file?.body === '{"проба":1}' && file?.name === "kvartik-проба.json", JSON.stringify(file));
-  const text = await page.eval(`await caches.delete("kvartik.share");
-    const form = new FormData();
+    const read = async (key) => {
+      const hit = await caches.match(key, { cacheName: "kvartik.share" });
+      return hit ? await hit.text() : null;
+    };
+    return { type: answer.type, bodies: [await read("shared-file-1"), await read("shared-file-2")],
+      names: [await read("shared-name-1"), await read("shared-name-2")] };`);
+  checks.check("поделиться: обе части копии легли в кэш поделённого, ответ — переход",
+    file?.type === "opaqueredirect" && JSON.stringify(file?.bodies) === JSON.stringify(['{"проба":1}', '{"проба":2}'])
+      && JSON.stringify(file?.names) === JSON.stringify(["kvartik-проба-1of2.json", "kvartik-проба-2of2.json"]), JSON.stringify(file));
+  // Кэш не стёрт: незабранные части прошлого раза service worker убирает сам.
+  const text = await page.eval(`const form = new FormData();
     form.append("text", "Kvartik — мой код: KVARTIKпроба");
     const answer = await fetch("share", { method: "POST", body: form, redirect: "manual" });
     const body = await caches.match("shared-text", { cacheName: "kvartik.share" });
-    const file = await caches.match("shared-file", { cacheName: "kvartik.share" });
+    const file = await caches.match("shared-file-1", { cacheName: "kvartik.share" });
     return { type: answer.type, body: body ? await body.text() : null, file: !!file };`);
-  checks.check("поделиться: текст кода лёг в кэш поделённого, ответ — переход",
+  checks.check("поделиться: текст кода лёг в кэш поделённого, прежние части убраны, ответ — переход",
     text?.type === "opaqueredirect" && text?.body === "Kvartik — мой код: KVARTIKпроба" && text?.file === false, JSON.stringify(text));
   await page.eval(`await caches.delete("kvartik.share"); return true;`);
 }
@@ -1584,7 +1590,8 @@ async function update(page, password) {
   const running = JSON.parse(fs.readFileSync(path.join(DIST, "app/notes.json"), "utf8")).notes[0].version;
   const next = newVersion(DIST, path.join(WORK, "v2"));
   const later = newVersion(next.dir, path.join(WORK, "v3"));
-  const refused = newVersion(later.dir, path.join(WORK, "v4"));
+  const marked = newVersion(later.dir, path.join(WORK, "v3m"));
+  const refused = newVersion(marked.dir, path.join(WORK, "v4"));
   let srv = own(next.dir, PORT, SERVED);
   const NOTICE = TEXT_IN("main", s("UpdateAfterForm"));
   try {
@@ -1625,6 +1632,31 @@ async function update(page, password) {
       await page.waitFor(`return performance.getEntriesByType("navigation")[0]?.type === "reload"
         && document.readyState === "complete" ? true : null;`, 30000));
     await switched(page, later, running, "зашли на страницу");
+
+    // Метка поделённого в адресе (ревью 0.0.199): окно его ещё не забрало,
+    // и версия ждёт, хотя форм нет, — перезагрузка оставила бы поделённые
+    // файлы в памяти ушедшей страницы. Метка — на главном экране: забирают её
+    // только экраны копии и «Другого устройства». Метку сняли — та же версия
+    // включается, как только окно решает снова: здесь — закрыли форму. Заход
+    // на страницу для этого не годится: ждущую версию браузер тогда включает
+    // сам, до окна.
+    await srv.stop();
+    srv = own(marked.dir, PORT, SERVED);
+    await page.eval(`history.replaceState(null, "", "?share=text#/"); window.__old = 1; return true;`);
+    await page.eval(`navigator.serviceWorker.getRegistration().then((r) => r.update()); return true;`);
+    const held = await page.waitFor(`const r = await navigator.serviceWorker.getRegistration();
+      return r.waiting ? true : null;`, 30000);
+    await sleep(1500);
+    checks.check("новая версия: поделённое не забрано — ждёт, страница не перезагрузилась",
+      held && (await page.eval(`return window.__old === 1 && location.search === "?share=text" ? true : null;`)));
+    await page.eval(`history.replaceState(null, "", location.pathname + location.hash); return true;`);
+    await page.eval(SEEN("0.0.1"));
+    const hold = HOLDS[0];
+    checks.check(`новая версия: метки нет — начато ${hold.name}`, await hold.start(page, password));
+    await hold.finish(page);
+    checks.check("новая версия: метки нет — закрыли, страница перезагрузилась сама",
+      await page.waitFor(`return window.__old === undefined && document.readyState === "complete" ? true : null;`, 30000));
+    await switched(page, marked, running, "метки нет");
 
     // Попытка включить эту версию уже была: она ждёт, а страница стоит.
     await srv.stop();

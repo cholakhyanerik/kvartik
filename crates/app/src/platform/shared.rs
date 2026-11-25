@@ -5,7 +5,7 @@
 //! Программа объявляет себя целью «Поделиться» (`share_target` в
 //! `manifest.webmanifest`), и Android шлёт поделённое запросом POST на
 //! `/app/share` — его принимает service worker (`public/sw.js`): кладёт текст
-//! и файл в свой кэш [`CACHE`] и отвечает переходом на «Другое устройство»
+//! и файлы в свой кэш [`CACHE`] и отвечает переходом на «Другое устройство»
 //! или экран копии с меткой `?share=` в адресе. Окно по метке забирает
 //! поделённое отсюда и стирает его: в сеть ничего не уходит, CSP прежний.
 //! Цель «Поделиться» — только у установленной программы и только в Chrome на
@@ -23,12 +23,25 @@ use web_sys::{CacheQueryOptions, File, FilePropertyBag, Response};
 
 /// Кэш поделённого — его же пишет `sw.js`. Не начинается с `kvartik-`:
 /// новая версия программы его не удаляет, а убирает окно, забрав своё.
-pub(crate) const CACHE: &str = "kvartik.share";
+const CACHE: &str = "kvartik.share";
 
-/// Адреса в нём: текст, файл и имя файла — от папки программы, как у `sw.js`.
-pub(crate) const TEXT: &str = "shared-text";
-pub(crate) const FILE: &str = "shared-file";
-pub(crate) const NAME: &str = "shared-name";
+/// Адреса в нём, от папки программы, как у `sw.js`: текст, а файлы и их
+/// имена — с номером с 1 (`shared-file-1`, `shared-name-1`…): частей копии
+/// делятся разом.
+const TEXT: &str = "shared-text";
+const FILE: &str = "shared-file-";
+const NAME: &str = "shared-name-";
+
+/// Адреса файла у `sw.js` 0.0.196–0.0.198: файл один и без номера. Окно
+/// читает и их: поделённое, принятое прежним `sw.js`, может дождаться окна
+/// уже новой версии — её включило прежнее окно, пока не дошло до экрана копии
+/// (ревью 0.0.199), — и без них пропало бы молча.
+const OLD_FILE: &str = "shared-file";
+const OLD_NAME: &str = "shared-name";
+
+/// Больше файлов `sw.js` не кладёт (`MAX_SHARED_FILES`): частей у копии не
+/// больше этого.
+const MAX_FILES: u16 = kvartik_core::format::backup::MAX_PARTS;
 
 /// Что поделили.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -100,19 +113,33 @@ pub async fn take_text() -> Option<String> {
     text
 }
 
-/// Забрать поделённый файл копии — и стереть поделённое, и метку. Тело — как
-/// есть, `Blob`, без чтения в память wasm: копия бывает до 128 МБ, и читает её
-/// цепочка восстановления, когда до неё дошла очередь.
-pub async fn take_file() -> Option<File> {
-    let file = file().await;
+/// Забрать поделённые файлы копии — все, по номерам, — и стереть поделённое,
+/// и метку. Тело — как есть, `Blob`, без чтения в память wasm: часть копии
+/// бывает до 128 МБ, и читает её цепочка восстановления, когда до неё дошла
+/// очередь (задача 122). До 0.0.199 окно брало только первый файл, и вторая
+/// часть копии, поделённая с первой, пропадала молча.
+pub async fn take_files() -> Vec<File> {
+    let mut files = Vec::new();
+    for number in 1..=MAX_FILES {
+        match file(&format!("{FILE}{number}"), &format!("{NAME}{number}")).await {
+            Some(file) => files.push(file),
+            None => break,
+        }
+    }
+    if files.is_empty()
+        && let Some(file) = file(OLD_FILE, OLD_NAME).await
+    {
+        files.push(file);
+    }
     forget().await;
     unmark();
-    file
+    files
 }
 
-async fn file() -> Option<File> {
-    let body = found(FILE).await?;
-    let name = match found(NAME).await {
+/// Файл по адресу тела `body` и имени `name` в кэше поделённого.
+async fn file(body: &str, name: &str) -> Option<File> {
+    let body = found(body).await?;
+    let name = match found(name).await {
         Some(response) => text_of(&response).await,
         None => None,
     }

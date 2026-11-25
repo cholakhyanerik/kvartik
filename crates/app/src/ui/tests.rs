@@ -2534,7 +2534,9 @@ async fn seed_clients(profile: &Profile, clients: &[&Client]) {
 }
 
 /// Положить поделённое в кэш, как его кладёт `sw.js` (задача 124, часть D),
-/// и метку — в адрес: `entries` — адрес в кэше и текст.
+/// и метку — в адрес: `entries` — адрес в кэше и текст. Имя кэша и адреса —
+/// буквами, а не постоянными окна: они договор с `sw.js`, и постоянная,
+/// сменённая в окне, иначе сменилась бы и здесь (ревью 0.0.199).
 pub(super) async fn share_in(mark: &str, entries: &[(&str, &str)]) {
     let put = js_sys::Function::new_with_args(
         "name, entries",
@@ -2544,7 +2546,7 @@ pub(super) async fn share_in(mark: &str, entries: &[(&str, &str)]) {
     for (key, text) in entries {
         list.push(&js_sys::Array::of2(&(*key).into(), &(*text).into()));
     }
-    let done = put.call2(&wasm_bindgen::JsValue::NULL, &crate::platform::shared::CACHE.into(), &list).expect("кэш");
+    let done = put.call2(&wasm_bindgen::JsValue::NULL, &"kvartik.share".into(), &list).expect("кэш");
     let _ = js_sys::Promise::from(done).await;
     if let Some(window) = web_sys::window() {
         let path = window.location().pathname().unwrap_or_default();
@@ -2558,7 +2560,7 @@ pub(super) async fn share_in(mark: &str, entries: &[(&str, &str)]) {
 /// Осталось ли что-то в кэше поделённого и метка в адресе.
 pub(super) async fn share_left() -> (bool, bool) {
     let has = js_sys::Function::new_with_args("name", "return caches.has(name);");
-    let left = match has.call1(&wasm_bindgen::JsValue::NULL, &crate::platform::shared::CACHE.into()) {
+    let left = match has.call1(&wasm_bindgen::JsValue::NULL, &"kvartik.share".into()) {
         Ok(promise) => js_sys::Promise::from(promise).await.ok().and_then(|value| value.as_bool()).unwrap_or(true),
         Err(_) => true,
     };
@@ -2569,7 +2571,8 @@ pub(super) async fn share_left() -> (bool, bool) {
 /// «Поделиться → Kvartik» на Android (задача 124, часть D): файл копии,
 /// поделённый из мессенджера, `sw.js` кладёт в свой кэш и открывает экран
 /// копии с меткой в адресе; окно берёт файл в цепочку восстановления — спрошен
-/// пароль, копия легла, — а кэш и метку стирает.
+/// пароль, копия легла, — а кэш и метку стирает. Файл лежит по адресу
+/// прежнего `sw.js` (0.0.196–0.0.198): окно читает и его (ревью 0.0.199).
 #[wasm_bindgen_test]
 async fn a_backup_shared_from_a_messenger_is_restored() {
     crate::store::delete_database(crate::store::DB_NAME).await;
@@ -2580,11 +2583,10 @@ async fn a_backup_shared_from_a_messenger_is_restored() {
     }
     let mut wrong = Vec::new();
     let sample = include_str!("../../../core/tests/backups/v2/kvartik-2026-10-12.json");
-    share_in(
-        "file",
-        &[(crate::platform::shared::FILE, sample), (crate::platform::shared::NAME, "kvartik-2026-10-12.json")],
-    )
-    .await;
+    // Адреса прежнего `sw.js` (0.0.196–0.0.198), без номера: окно 0.0.199
+    // читает и их — поделённое могло дождаться окна новой версии (ревью
+    // 0.0.199).
+    share_in("file", &[("shared-file", sample), ("shared-name", "kvartik-2026-10-12.json")]).await;
     let (host, mounted) = mount_at("#/backup");
     if !wait_for(&host, t(lang, Key::BackupFilePassword)).await {
         wrong.push(format!("поделённая копия не открыта: «{}»", section_text(&host, "backup")));
@@ -2615,6 +2617,92 @@ async fn a_backup_shared_from_a_messenger_is_restored() {
     crate::store::delete_database(crate::store::DB_NAME).await;
     crate::platform::set_hash("");
     assert!(wrong.is_empty(), "поделённая копия: {wrong:#?}");
+}
+
+/// Части одной копии, поделённые из мессенджера разом (доделка задачи 124,
+/// 0.0.199): `sw.js` кладёт в кэш поделённого все файлы, и окно берёт их все
+/// одной цепочкой — пароль спрошен один раз, вторая часть легла ключом первой,
+/// и копия восстановлена целиком, а кэш и метка стёрты. До 0.0.199 окно
+/// брало только первый файл, и вторая часть пропадала молча.
+#[wasm_bindgen_test]
+async fn the_parts_of_a_backup_shared_at_once_land_as_one_chain() {
+    use kvartik_core::i18n;
+    let lang = Lang::Ru;
+    let password = "Пароль копий задачи 124 для частей из мессенджера";
+    let forget = || {
+        if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
+            for name in ["lang", "backup_key", "last_backup", "last_size", "parts_laid", "trial_data"] {
+                let _ = storage.remove_item(&format!("kvartik.{name}"));
+            }
+        }
+    };
+    forget();
+    let mut wrong = Vec::new();
+    // Копия частями — по клиенту на часть: два клиента — две части.
+    let now = crate::platform::clock::now();
+    let profile = Profile::save(None, documents::profile(), now).expect("годный профиль").expect("новый");
+    let named = |name: &str| {
+        let data = ClientData {
+            name: Line::new(name).expect("имя"),
+            ..documents::acme()
+        };
+        Client::create(data, now).expect("годный клиент")
+    };
+    seed_clients(&profile, &[&named("Beispiel GmbH"), &named("Example LLC")]).await;
+    let parts = sealed_sheets(password, 1).await;
+    if parts.len() != 2 {
+        wrong.push(format!("частей не две, а {}", parts.len()));
+    }
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    Device::new().set_ui_lang(lang);
+    let of = parts.len();
+    let mut entries = Vec::new();
+    for (at, part) in parts.iter().enumerate() {
+        let number = at + 1;
+        entries.push((format!("shared-file-{number}"), part.clone()));
+        entries.push((format!("shared-name-{number}"), format!("kvartik-2026-11-25-{number}of{of}.json")));
+    }
+    let entries: Vec<(&str, &str)> = entries.iter().map(|(key, text)| (key.as_str(), text.as_str())).collect();
+    share_in("file", &entries).await;
+    let (host, mounted) = mount_at("#/backup");
+    let mut asked = None;
+    for _ in 0..200 {
+        asked = field(&host, t(lang, Key::BackupFilePassword), 0);
+        if asked.is_some() {
+            break;
+        }
+        sleep(50).await;
+    }
+    match asked {
+        Some(input) => {
+            type_into(&input, password);
+            match button(&host, &[t(lang, Key::BackupRestore)]) {
+                Some(restore) => restore.click(),
+                None => wrong.push("нет «Восстановить»".to_owned()),
+            }
+        }
+        None => wrong.push(format!("поделённые части не открыты: «{}»", section_text(&host, "backup"))),
+    }
+    // Целиком — только когда легли обе: вторая спросила бы пароль снова или
+    // не пришла бы вовсе — и слов «целиком» не было бы.
+    let n = |number: usize| i18n::integer(lang, number as i64);
+    let all = fill(t(lang, Key::BackupPartsAll), &[&n(of), &n(of)]);
+    if !wait_for(&host, &all).await {
+        wrong.push(format!("части не легли одной цепочкой: нет «{all}» в «{}»", section_text(&host, "backup")));
+    }
+    if field(&host, t(lang, Key::BackupFilePassword), 0).is_some() {
+        wrong.push("пароль спрошен второй раз".to_owned());
+    }
+    let (left, marked) = share_left().await;
+    if left || marked {
+        wrong.push(format!("поделённое не стёрто: кэш {left}, метка {marked}"));
+    }
+    drop(mounted);
+    host.remove();
+    forget();
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    crate::platform::set_hash("");
+    assert!(wrong.is_empty(), "поделённые части: {wrong:#?}");
 }
 
 /// Копия в одно нажатие (задача 124, часть C; решение человека 2026-11-25):

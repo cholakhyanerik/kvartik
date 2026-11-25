@@ -2182,6 +2182,34 @@ fn a_client_copy_is_told_by_its_file_name() {
     assert!(wrong.is_empty(), "копия для клиента по имени: {wrong:#?}");
 }
 
+/// Имя файла окно показывает без управляющих знаков и знаков направления
+/// письма и не длиннее предела — по границе знака (ревью 0.0.199): имя
+/// поделённого файла — чужой текст, а RLO перевернул бы хвост фразы окна.
+/// Имя копии программы при этом не меняется, и копия для клиента узнаётся.
+#[test]
+fn a_shown_file_name_is_clean_and_short() {
+    let mut wrong = Vec::new();
+    let long = "ա".repeat(200);
+    let cut = "ա".repeat(MAX_SHOWN_NAME_BYTES / 2);
+    for (name, shown) in [
+        ("kvartik-2026-11-25-1of2.json", "kvartik-2026-11-25-1of2.json"),
+        ("kvartik-07654321-2026-11-24 (1).json", "kvartik-07654321-2026-11-24 (1).json"),
+        ("Копия\u{202E}nosj.exe", "Копияnosj.exe"),
+        ("a\u{0}b\nc\u{2066}d\u{200F}e\u{FEFF}.json", "abcde.json"),
+        ("zwj\u{200D}ok", "zwj\u{200D}ok"),
+        (long.as_str(), cut.as_str()),
+    ] {
+        let got = shown_name(name);
+        if got != shown {
+            wrong.push(format!("{name:?}: {got:?}, а не {shown:?}"));
+        }
+    }
+    if !is_client_file_name(&shown_name("kvartik-07654321-2026-11-24.json")) {
+        wrong.push("копия для клиента не узнана после чистки имени".to_owned());
+    }
+    assert!(wrong.is_empty(), "имя файла на экране: {wrong:#?}");
+}
+
 /// Копию всех ИП узнают по записям конторы или по меткам базы; копия одного
 /// ИП — без них.
 #[test]

@@ -362,7 +362,9 @@ pub(super) fn RestoreBackup(
             .try_update_value(|chain| {
                 let (file, copy) = chain.left.pop_front()?;
                 chain.at += 1;
-                chain.name = file.name();
+                // Имя — чужой текст: на экране — без управляющих знаков и
+                // знаков направления письма (ревью 0.0.199).
+                chain.name = backup::shown_name(&file.name());
                 chain.copy = copy;
                 Some(file)
             })
@@ -416,13 +418,12 @@ pub(super) fn RestoreBackup(
         next();
     };
     let take = move |files: Vec<File>| take_copies(files.into_iter().map(|file| (file, None)).collect(), Vec::new());
-    // «Поделиться → Kvartik» на Android (задача 124, часть D): файл копии из
-    // мессенджера — сразу в цепочку, как выбранный.
+    // «Поделиться → Kvartik» на Android (задача 124, часть D): файлы копии из
+    // мессенджера — все, и части одной копии тоже, — сразу в цепочку, как
+    // выбранные разом.
     if shared::marked() == Some(Shared::File) {
         leptos::task::spawn_local(async move {
-            if let Some(file) = shared::take_file().await {
-                take(vec![file]);
-            }
+            take(shared::take_files().await);
         });
     }
 
