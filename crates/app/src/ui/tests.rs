@@ -2533,6 +2533,171 @@ async fn seed_clients(profile: &Profile, clients: &[&Client]) {
     documents::commit(writes).await;
 }
 
+/// Копия в одно нажатие (задача 124, часть C; решение человека 2026-11-25):
+/// после копии с паролем «Сделать копию» — одна кнопка без поля пароля,
+/// а ключ пароля копий в базе устройства не извлекается. Через 30 дней без
+/// пароля — снова форма с паролем (та же мерка, что у автокопии), по «Забыли
+/// пароль?» — форма нового пароля, а сменённый пароль устройства делает
+/// запомненный ключ негодным — и он забыт.
+#[wasm_bindgen_test]
+async fn a_backup_takes_one_tap_after_the_password() {
+    documents::fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    let device = Device::new();
+    device.set_ui_lang(lang);
+    for name in ["backup_key", "password_entered", "last_backup", "last_size"] {
+        if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
+            let _ = storage.remove_item(&format!("kvartik.{name}"));
+        }
+    }
+    let _ = crate::store::autobackup::forget_copy().await;
+    let password = "Пароль копий в одно нажатие 124";
+    let mut wrong = Vec::new();
+    let password_field = |host: &HtmlElement| {
+        host.query_selector_all("#backup form.backup input[type=password]")
+            .ok()
+            .map(|found| {
+                (0..found.length())
+                    .filter_map(|at| found.item(at))
+                    .any(|node| node.unchecked_into::<HtmlElement>().offset_width() > 0)
+            })
+            .unwrap_or(false)
+    };
+    let ready = |host: &HtmlElement| {
+        let words = t(lang, Key::BackupReady).split("{}").next().unwrap_or_default().to_owned();
+        section_text(host, "backup").contains(&words) && host.query_selector("#backup a[download]").ok().flatten().is_some()
+    };
+    let wait = async |host: &HtmlElement, what: &dyn Fn(&HtmlElement) -> bool| {
+        for _ in 0..200 {
+            if what(host) {
+                return true;
+            }
+            sleep(50).await;
+        }
+        false
+    };
+
+    // Первая копия — новым паролем с повтором.
+    let (host, mounted) = mount_at("#/backup");
+    if !wait(&host, &|host: &HtmlElement| shown_button(host, t(lang, Key::BackupMake))).await {
+        wrong.push("нет «Сделать копию»".to_owned());
+    }
+    for label in [Key::BackupNewPassword, Key::BackupRepeatPassword] {
+        match field(&host, t(lang, label), 0) {
+            Some(input) => type_into(&input, password),
+            None => wrong.push(format!("нет поля {label:?}")),
+        }
+    }
+    if let Some(make) = button(&host, &[t(lang, Key::BackupMake)]) {
+        make.click();
+    }
+    if !wait(&host, &ready).await {
+        wrong.push(format!("первая копия не готова: «{}»", section_text(&host, "backup")));
+    }
+    // Вторая — одной кнопкой, без пароля.
+    match button(&host, &[t(lang, Key::BackupMakeAgain)]) {
+        Some(again) => again.click(),
+        None => wrong.push("нет «Сделать копию заново»".to_owned()),
+    }
+    if !wait_for(&host, t(lang, Key::BackupOneTap)).await {
+        wrong.push(format!("после копии с паролем — не одна кнопка: «{}»", section_text(&host, "backup")));
+    }
+    if password_field(&host) {
+        wrong.push("копия в одно нажатие — а поле пароля на экране".to_owned());
+    }
+    match button(&host, &[t(lang, Key::BackupMake)]) {
+        Some(make) if make.offset_width() > 0 => make.click(),
+        _ => wrong.push("нет видимой «Сделать копию» в одно нажатие".to_owned()),
+    }
+    if !wait(&host, &ready).await {
+        wrong.push(format!("копия в одно нажатие не готова: «{}»", section_text(&host, "backup")));
+    }
+    // Ключ в базе устройства — неизвлекаемый.
+    match crate::store::autobackup::load_copy().await {
+        Ok(Some(copy)) => {
+            let export = js_sys::Function::new_with_args(
+                "key",
+                "return crypto.subtle.exportKey('raw', key).then(() => 'выгружен', (error) => error.name);",
+            );
+            let answer = match export.call1(&wasm_bindgen::JsValue::NULL, &copy.key) {
+                Ok(promise) => js_sys::Promise::from(promise).await.ok().and_then(|value| value.as_string()),
+                Err(_) => None,
+            };
+            if answer.as_deref() != Some("InvalidAccessError") {
+                wrong.push(format!("ключ копии выгружается: {answer:?}"));
+            }
+            if Some(&copy.device) != device.backup_key().as_ref() {
+                wrong.push("ключ копии запомнен не под паролем устройства".to_owned());
+            }
+            if Some(copy.lock.salt()) == device.backup_key().as_ref().map(|key| key.salt()) {
+                wrong.push("у ключа копии — соль устройства, а не своя".to_owned());
+            }
+        }
+        other => wrong.push(format!("ключ копии не запомнен: {:?}", other.map(|copy| copy.is_some()))),
+    }
+    drop(mounted);
+    host.remove();
+
+    // Через 30 дней без пароля — форма с паролем.
+    let long_ago = kvartik_core::model::record::Timestamp::from_unix_millis(clock_now_millis() - 31 * 86_400_000);
+    device.set_password_entered(long_ago);
+    let (host, mounted) = mount_at("#/backup");
+    if !wait(&host, &password_field).await {
+        wrong.push(format!("через 30 дней пароль не спрошен: «{}»", section_text(&host, "backup")));
+    }
+    drop(mounted);
+    host.remove();
+
+    // Пароль ввели — снова одна кнопка, а «Забыли пароль?» даёт форму нового.
+    device.set_password_entered(crate::platform::clock::now());
+    let (host, mounted) = mount_at("#/backup");
+    if !wait_for(&host, t(lang, Key::BackupOneTap)).await {
+        wrong.push("с недавним паролем — не одна кнопка".to_owned());
+    }
+    match button(&host, &[t(lang, Key::BackupForgot)]) {
+        Some(forgot) if forgot.offset_width() > 0 => forgot.click(),
+        _ => wrong.push("у одной кнопки нет «Забыли пароль?»".to_owned()),
+    }
+    if !wait(&host, &|host: &HtmlElement| field(host, t(lang, Key::BackupNewPassword), 0).is_some()).await {
+        wrong.push("«Забыли пароль?» не дало формы нового пароля".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+
+    // Пароль устройства сменился — ключ не годится и забыт: форма.
+    let other = kvartik_core::format::backup::DeviceKey::new(
+        kvartik_core::format::backup::KDF_ITERATIONS,
+        vec![9; 16],
+        vec![9; 32],
+    )
+    .expect("пароль устройства");
+    device.set_backup_key(&other);
+    let (host, mounted) = mount_at("#/backup");
+    if !wait(&host, &password_field).await {
+        wrong.push("пароль сменён — а пароль копии не спрошен".to_owned());
+    }
+    if matches!(crate::store::autobackup::load_copy().await, Ok(Some(_))) {
+        wrong.push("пароль сменён — а ключ копии не забыт".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+
+    let _ = crate::store::autobackup::forget_copy().await;
+    for name in ["backup_key", "password_entered", "last_backup", "last_size"] {
+        if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
+            let _ = storage.remove_item(&format!("kvartik.{name}"));
+        }
+    }
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "копия в одно нажатие: {wrong:#?}");
+}
+
+/// «Сейчас» в миллисекундах — для дней в прошлом.
+fn clock_now_millis() -> i64 {
+    crate::platform::clock::now().unix_millis()
+}
+
 /// Восстановить из папки автокопий (задача 124, п. 20). Окна выбора папки
 /// в headless-браузере нет, поэтому выбор отдаёт личную файловую систему
 /// сайта (OPFS) — настоящую папку браузера. Папка без автокопий — словами;

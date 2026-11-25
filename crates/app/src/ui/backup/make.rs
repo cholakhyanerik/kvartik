@@ -267,6 +267,28 @@ pub(super) fn MakeBackup(
     let new_password = move || !backups.key_set.get() || resetting.get();
     let busy = move || matches!(making.get(), Making::Busy);
     let ready = move || matches!(making.get(), Making::Ready(_));
+    // Копия в одно нажатие (задача 124, часть C): ключ пароля копий —
+    // в базе устройства; `Some(true)` — есть и запомнен под нынешним паролем.
+    // Перечитывается, когда показан экран копии и когда копия собрана.
+    let remembered_key = RwSignal::new(None::<bool>);
+    let reload_key = move || {
+        leptos::task::spawn_local(async move {
+            let usable = copy_key_usable().await;
+            remembered_key.try_set(Some(usable));
+        });
+    };
+    Effect::new(move |_| {
+        if router.shows(Screen::Backup) {
+            reload_key();
+        }
+    });
+    // Пароль — раз в 30 дней, той же меркой, что у автокопии
+    // (`format::autobackup::check_due`, одна проверка на устройство): иначе
+    // одна кнопка, а пароль, который давно не вводили, забылся бы.
+    let check_due = move || {
+        clock::today().is_none_or(|today| autobackup::check_due(Device::new().password_entered().and_then(clock::local_date), today))
+    };
+    let one_tap = move || remembered_key.get() == Some(true) && backups.key_set.get() && !resetting.get() && !check_due();
     forms.hold_while(move || {
         let typed = password.with(|text| !text.is_empty()) || repeat.with(|text| !text.is_empty());
         typed
@@ -294,6 +316,9 @@ pub(super) fn MakeBackup(
     // Собрать копию — паролем из формы или ключом, который передал код
     // передачи (задача 124, п. 18).
     let start = move |job: Job| {
+        // Копия в одно нажатие пароль не вводила: просьба ввести его не
+        // сдвигается.
+        let typed = !matches!(job, Job::Remembered);
         making.set(Making::Busy);
         saved.set(None);
         share_failed.set(false);
@@ -310,9 +335,14 @@ pub(super) fn MakeBackup(
                 password.set(String::new());
                 repeat.set(String::new());
                 resetting.set(false);
-                backups.password_entered();
+                if typed {
+                    backups.password_entered();
+                }
                 handed_parts.set(vec![false; ready.downloads.len()]);
             }
+            // Ключ копии в одно нажатие запомнен, забыт или пропал — снова
+            // прочитать, что помнит устройство.
+            reload_key();
             making.set(match outcome {
                 Ok(ready) => Making::Ready(Rc::new(ready)),
                 Err(problem) => Making::Failed(problem),
@@ -374,7 +404,31 @@ pub(super) fn MakeBackup(
         // Готовая копия — на экране вместо формы (задача 124): у неё одна
         // главная кнопка — сохранить файл, — а менеджер паролей предлагает
         // сохранить пароль, только когда форма пропала (`ui/password.rs`).
-        <form class="backup" hidden=move || quiet.get() || ready() on:submit=submit>
+        // Копия в одно нажатие (задача 124, часть C): пароль копий это
+        // устройство помнит ключом и спрашивает раз в 30 дней — одна кнопка.
+        // В разметке — только в этом режиме: вторая спрятанная «Сделать
+        // копию» рядом с формой пароля путала бы и чтеца экрана.
+        {move || (one_tap() && !quiet.get() && !ready()).then(|| view! {
+            <form
+                class="backup"
+                on:submit=move |event: SubmitEvent| {
+                    event.prevent_default();
+                    if !busy() {
+                        start(Job::Remembered);
+                    }
+                }
+            >
+                <p class="hint">{tr(lang, Key::BackupOneTap)}</p>
+                <button type="submit" class="wide" disabled=busy>
+                    {icon(Icon::Download)}
+                    <span class="label">{tr(lang, Key::BackupMake)}</span>
+                </button>
+                <button type="button" class="link" disabled=busy on:click=move |_| resetting.set(true)>
+                    <span class="label">{tr(lang, Key::BackupForgot)}</span>
+                </button>
+            </form>
+        })}
+        <form class="backup" hidden=move || quiet.get() || ready() || one_tap() on:submit=submit>
             <PasswordLogin />
             {move || if new_password() {
                 view! {
@@ -526,7 +580,66 @@ pub(super) async fn make(backups: Backups, typed: &str, repeat: Option<&str>) ->
         Device::new().set_backup_key(&device_key);
         backups.key_set.set(true);
     }
+    // Дальше — в одно нажатие (задача 124, часть C): ключ этого пароля —
+    // в базе устройства. Не запомнился — дальше снова форма, а копия готова.
+    remember_copy(typed, &device_key).await;
     Ok(ready)
+}
+
+/// Запомнить ключ ручной копии (задача 124, часть C; решение человека
+/// 2026-11-25): неизвлекаемым `CryptoKey` в базе устройства, со своей солью —
+/// как ключ автокопии (`store::autobackup`): байты такого ключа Chromium
+/// держит на диске открыто, и своя соль не даёт им открыть копии, сделанные
+/// паролем. Записанный читается обратно: браузер, не сохранивший ключ
+/// (WebKit отдавал `null` вместо неизвлекаемого ключа некоторых видов, bug
+/// 312279), оставляет форму с паролем, как раньше. `true` — запомнен.
+async fn remember_copy(typed: &str, device: &DeviceKey) -> bool {
+    let Ok(salt) = crypto::random(SALT_BYTES) else {
+        return false;
+    };
+    let Ok(key) = crypto::derive(&crypto::normalize(typed), &salt, KDF_ITERATIONS).await else {
+        return false;
+    };
+    let Some(lock) = DeviceKey::new(KDF_ITERATIONS, salt, key.check().to_vec()) else {
+        return false;
+    };
+    let copy = CopyKey {
+        key: key.aes().clone(),
+        lock,
+        device: device.clone(),
+    };
+    remembered::save_copy(&copy).await.is_ok() && matches!(remembered::load_copy().await, Ok(Some(_)))
+}
+
+/// Годится ли ключ ручной копии, который помнит устройство: он есть и запомнен
+/// под нынешним паролем копий. Пароль сменили — ключ забыт (задача 124,
+/// часть C).
+pub(super) async fn copy_key_usable() -> bool {
+    let current = Device::new().backup_key();
+    match remembered::load_copy().await {
+        Ok(Some(copy)) if current.as_ref() == Some(&copy.device) => true,
+        Ok(Some(_)) => {
+            let _ = remembered::forget_copy().await;
+            false
+        }
+        _ => false,
+    }
+}
+
+/// Ручная копия в одно нажатие (задача 124, часть C): ключом, который помнит
+/// устройство, и его солью — пароль не спрашивается. Ключа нет или он не
+/// нынешнего пароля — слова и снова форма.
+pub(super) async fn make_remembered(backups: Backups) -> Result<Ready, Problem> {
+    let current = Device::new().backup_key();
+    let copy = match remembered::load_copy().await {
+        Ok(Some(copy)) if current.as_ref() == Some(&copy.device) => copy,
+        _ => {
+            let _ = remembered::forget_copy().await;
+            return Err(Problem::Say(Key::BackupOneTapLost));
+        }
+    };
+    let key = crypto::Key::stored(copy.key, copy.lock.check().to_vec());
+    sealed_copy(backups, &key, &copy.lock).await
 }
 
 /// Ручная копия ключом, который только что дал пароль копий для кода

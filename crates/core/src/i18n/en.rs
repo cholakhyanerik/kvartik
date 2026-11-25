@@ -160,7 +160,7 @@ macro_rules! en {
     (BackupPassword) => { "Backup password" };
     (BackupNewPassword) => { "Choose a backup password" };
     (BackupRepeatPassword) => { "Repeat the password" };
-    (BackupPasswordHint) => { "At least {} characters: a phrase of several words is safest. The app will ask for it with every backup so you don't forget it. The password isn't stored anywhere, and a forgotten one can't be recovered: without it the backup can't be opened." };
+    (BackupPasswordHint) => { "At least {} characters: a phrase of several words is safest. After that a backup takes one tap, and the app asks for the password once every 30 days so you don't forget it. The password isn't stored anywhere, and a forgotten one can't be recovered: without it the backup can't be opened." };
     (BackupMake) => { "Make a backup" };
     (BackupMaking) => { "Encrypting the backup…" };
     (BackupReady) => { "The backup is ready. Records in it: {}. Save the file and move it somewhere safe." };
@@ -1564,4 +1564,6 @@ macro_rules! en {
     (SyncPasteCtrl) => { "The cursor is in the code field: paste the code with Ctrl+V." };
     (SyncPasteCmd) => { "The cursor is in the code field: paste the code with Cmd+V." };
     (SyncPasteKeyboard) => { "The cursor is in the code field: the keyboard will offer what you copied\u{A0}— tap it above the keys." };
+    (BackupOneTap) => { "A backup takes one tap: this device keeps the key of the backup password and asks for the password itself once every 30 days, so you don't forget it." };
+    (BackupOneTapLost) => { "The backup password key is no longer on this device\u{A0}— enter the backup password." };
 }

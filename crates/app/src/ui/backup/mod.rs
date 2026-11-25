@@ -72,7 +72,7 @@ use crate::platform::file::{self, Download, FileError};
 use crate::platform::pause::breathe;
 use crate::platform::share::{self, ShareError};
 use crate::store::{Store, StoreError};
-use crate::store::autobackup::{self as remembered, Saved};
+use crate::store::autobackup::{self as remembered, CopyKey, Saved};
 use crate::store::backup::{self as stored, Failure, Merged, OtherIe, Restored, Sealing};
 use crate::store::device::Device;
 use crate::store::office::list as office_list;
@@ -986,6 +986,9 @@ enum Job {
     /// Ручная копия ключом, который передал код передачи (задача 124,
     /// п. 18, [`Backups::hand_off`]).
     Prepared(Rc<crypto::Key>),
+    /// Ручная копия в одно нажатие — ключом, который помнит устройство
+    /// (задача 124, часть C).
+    Remembered,
     /// Копия открытого ИП для клиента — своим новым паролем с повтором
     /// (задача 38).
     Client { typed: String, repeat: String },
@@ -1052,6 +1055,7 @@ split! {
             match job {
                 Job::Manual { typed, repeat } => make(backups, &typed, repeat.as_deref()).await.map(Made::File),
                 Job::Prepared(key) => make_prepared(backups, &key).await.map(Made::File),
+                Job::Remembered => make_remembered(backups).await.map(Made::File),
                 Job::Client { typed, repeat } => make_client(backups, &typed, &repeat).await.map(Made::File),
                 Job::Status => Ok(status().await),
                 Job::Enable { typed, repeat, folder, place } => {

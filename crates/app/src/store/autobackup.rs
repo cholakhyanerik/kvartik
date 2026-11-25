@@ -26,6 +26,12 @@
 //! версии, та закрыла бы соединение и попросила перезагрузиться, а база
 //! устройства нужна только там, где есть автокопия.
 //!
+//! Там же — ключ ручной копии в одно нажатие (задача 124, часть C, решение
+//! человека 2026-11-25; [`CopyKey`]): тоже неизвлекаемый и со своей солью —
+//! открывает он только копии, сделанные этим ключом, а копии, сделанные
+//! паролем с солью устройства, — нет. Запись — под своим ключом в том же
+//! хранилище объектов: версия базы устройства прежняя.
+//!
 //! Соединение — на одно действие: открыть, прочитать или записать, закрыть.
 //! Действия редкие — включить автокопию, начать её, — а соединение, которое
 //! держат, мешало бы новой версии этой базы
@@ -58,6 +64,9 @@ const THINGS: &str = "things";
 /// Ключ записи автокопии в нём.
 const AUTOBACKUP: &str = "autobackup";
 
+/// Ключ записи ключа ручной копии (задача 124, часть C).
+const COPY: &str = "copy";
+
 /// Версия вида записи автокопии: прочитав запись новее себя, старая вкладка
 /// не переписывает её, а говорит, что нужна новая версия (Правило 2).
 const SHAPE: u32 = 1;
@@ -80,6 +89,100 @@ pub struct Saved {
     /// Пароль копий устройства, под которым автокопию включили: сменили
     /// его — автокопия не пишет под прежним, пока пароль не введут.
     pub device: DeviceKey,
+}
+
+/// Ключ ручной копии в одно нажатие (задача 124, часть C): после копии
+/// с паролем «Сделать копию» — одна кнопка, а пароль спрашивается раз в 30
+/// дней, как у автокопии (`format::autobackup::check_due`).
+pub struct CopyKey {
+    /// Ключ шифра — неизвлекаемый, из пароля копий и своей соли.
+    pub key: CryptoKey,
+    /// Соль, итерации и проверочное значение этого ключа — в замок копии.
+    pub lock: DeviceKey,
+    /// Пароль копий устройства, под которым ключ запомнен: сменили его —
+    /// ключ не годится, и снова форма.
+    pub device: DeviceKey,
+}
+
+/// Ключ ручной копии; `None` — его нет: копий с паролем ещё не было, его
+/// забыли или браузер его не сохранил.
+pub async fn load_copy() -> Result<Option<CopyKey>, StoreError> {
+    let Some(value) = get(DEVICE_DB, COPY).await? else {
+        return Ok(None);
+    };
+    if newer(&value) {
+        return Err(StoreError::Newer);
+    }
+    let field = |name: &str| Reflect::get(&value, &name.into()).ok();
+    let password = |name: &str| {
+        field(name)
+            .and_then(|text| text.as_string())
+            .and_then(|text| DeviceKey::from_text(&text))
+    };
+    // Ключ, который браузер не вернул (null), — как его нет: тогда снова форма
+    // с паролем, а не сбой (WebKit отдаёт `null` вместо неизвлекаемого ключа
+    // некоторых видов, bug 312279).
+    let key = field("key").and_then(|key| key.dyn_into::<CryptoKey>().ok());
+    match (key, password("lock"), password("device")) {
+        (Some(key), Some(lock), Some(device)) => Ok(Some(CopyKey { key, lock, device })),
+        _ => {
+            log("copy key", &"не читается".into());
+            Ok(None)
+        }
+    }
+}
+
+/// Запомнить ключ ручной копии.
+pub async fn save_copy(copy: &CopyKey) -> Result<(), StoreError> {
+    let value = Object::new();
+    let set = |field: &str, part: &JsValue| {
+        Reflect::set(&value, &field.into(), part).map_err(|error| failure("put", Some(error)))
+    };
+    set("shape", &SHAPE.into())?;
+    set("key", &copy.key)?;
+    set("lock", &copy.lock.to_text().into())?;
+    set("device", &copy.device.to_text().into())?;
+    put(DEVICE_DB, COPY, &value).await
+}
+
+/// Забыть ключ ручной копии: сменили пароль или «Забыли пароль?».
+pub async fn forget_copy() -> Result<(), StoreError> {
+    let db = Open::new(DEVICE_DB).await?;
+    let tx = db.begin(IdbTransactionMode::Readwrite)?;
+    let done = Settle::new(tx.clone());
+    if let Err(error) = store(&tx)?.delete(&COPY.into()) {
+        let _ = tx.abort();
+        return Err(failure("delete", Some(error)));
+    }
+    finish(&tx, done).await
+}
+
+/// Значение под ключом `key` базы `name`; `None` — его нет.
+async fn get(name: &str, key: &str) -> Result<Option<JsValue>, StoreError> {
+    let db = Open::new(name).await?;
+    let tx = db.begin(IdbTransactionMode::Readonly)?;
+    let request = store(&tx)?.get(&key.into()).map_err(|error| failure("get", Some(error)))?;
+    let value = wait(request).await?;
+    Ok((!value.is_undefined() && !value.is_null()).then_some(value))
+}
+
+/// Записать значение под ключом `key` базы `name`, если там не запись новее
+/// программы.
+async fn put(name: &str, key: &str, value: &JsValue) -> Result<(), StoreError> {
+    let db = Open::new(name).await?;
+    let tx = db.begin(IdbTransactionMode::Readwrite)?;
+    let done = Settle::new(tx.clone());
+    let request = store(&tx)?.get(&key.into()).map_err(|error| failure("get", Some(error)))?;
+    let current = wait(request).await?;
+    if newer(&current) {
+        let _ = tx.abort();
+        return Err(StoreError::Newer);
+    }
+    if let Err(error) = store(&tx)?.put_with_key(value, &key.into()) {
+        let _ = tx.abort();
+        return Err(failure("put", Some(error)));
+    }
+    finish(&tx, done).await
 }
 
 /// Что помнит устройство об автокопии; `None` — автокопия не включена.

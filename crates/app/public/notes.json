@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.195",
+      "date": "2026-11-25",
+      "hy": [
+        "Պահուստային պատճենը՝ մեկ սեղմումով. գաղտնաբառով առաջին պատճենից հետո «Ստեղծել պատճեն»-ը մեկ կոճակ է՝ առանց գաղտնաբառի դաշտի։ Գաղտնաբառը ծրագիրը կհարցնի 30 օրը մեկ, որպեսզի այն չմոռացվի։"
+      ],
+      "ru": [
+        "Резервная копия — в одно нажатие: после первой копии с паролем «Сделать копию» — одна кнопка без поля пароля. Пароль программа спросит раз в 30 дней, чтобы он не забылся."
+      ],
+      "en": [
+        "A backup now takes one tap: after the first backup with the password, “Make a backup” is a single button without the password field. The app asks for the password once every 30 days so you don’t forget it."
+      ]
+    },
+    {
       "version": "0.0.194",
       "date": "2026-11-25",
       "hy": [
@@ -272,19 +285,6 @@
       ],
       "en": [
         "Nothing changed in the app. kvartik.com now shows what it looks like: a short video of issuing an invoice and getting its PDF, and pictures of the home screen, an invoice, the ledger and the tax."
-      ]
-    },
-    {
-      "version": "0.0.175",
-      "date": "2026-11-22",
-      "hy": [
-        "Ծրագրում ոչինչ չի փոխվել. թարմացվել է այն գրադարաններից մեկը, որից հավաքված է ծրագիրը։"
-      ],
-      "ru": [
-        "В программе ничего не изменилось: обновлена одна из библиотек, из которых она собрана."
-      ],
-      "en": [
-        "Nothing changed in the app: one of the libraries it is built from has been updated."
       ]
     }
   ]
