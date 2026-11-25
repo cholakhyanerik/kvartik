@@ -79,6 +79,7 @@ use crate::platform::crypto::{self, CryptoError};
 use crate::platform::share::{self, ShareError};
 use crate::platform::awake as platform_awake;
 use crate::platform::clipboard::Paste;
+use crate::platform::shared::{self, Shared};
 use crate::platform::{clipboard, clock};
 use crate::store::backup::{self as stored, Merged, OtherIe, Restored};
 use crate::store::device::Device;
@@ -201,7 +202,10 @@ fn Ways(ctx: Ctx) -> impl IntoView {
     let Ctx { lang, backups, router, .. } = ctx;
     let empty = !untrack(|| backups.has_data());
     let carry = !empty && carrying();
-    let way = RwSignal::new(if empty {
+    // Код, поделённый из мессенджера (задача 124, часть D), — сразу «Принять
+    // сюда».
+    let shared = shared::marked() == Some(Shared::Text);
+    let way = RwSignal::new(if empty || shared {
         Some(Way::Receive)
     } else if carry {
         Some(Way::Send)
@@ -1832,6 +1836,16 @@ fn Receive(ctx: Ctx, seen: Signal<bool>) -> impl IntoView {
             take(found);
         }
     };
+    // «Поделиться → Kvartik» на Android (задача 124, часть D): код,
+    // поделённый из мессенджера, — сразу в поле и в сборку, как вставленный.
+    if shared::marked() == Some(Shared::Text) {
+        leptos::task::spawn_local(async move {
+            if let Some(text) = shared::take_text().await {
+                pasted.try_set(text.clone());
+                on_paste(text);
+            }
+        });
+    }
     // Код из буфера — в самом нажатии ([`paste_into`]): переслан себе
     // мессенджером, а вставлять жестом в поле на телефоне — три касания.
     let paste_now = move |_: MouseEvent| {

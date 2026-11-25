@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.196",
+      "date": "2026-11-25",
+      "hy": [
+        "Android-ում տեղադրված ծրագրում մեսենջերից կոդը կամ պատճենի ֆայլը կարելի է «Կիսվել» ընտրացանկով ուղարկել անմիջապես Kvartik. կոդը կհայտնվի «Այլ սարք» էկրանի դաշտում, իսկ պատճենը կվերականգնվի՝ ինչպես ընտրված ֆայլ։"
+      ],
+      "ru": [
+        "На Android в установленной программе код или файл копии из мессенджера можно отправить меню «Поделиться» прямо в Kvartik: код встанет в поле «Другого устройства», а копия ляжет, как выбранный файл."
+      ],
+      "en": [
+        "On Android, in the installed app, a code or a backup file from a messenger can go straight to Kvartik through the “Share” menu: the code lands in the field of “Another device”, and the backup is restored like a chosen file."
+      ]
+    },
+    {
       "version": "0.0.195",
       "date": "2026-11-25",
       "hy": [
@@ -272,19 +285,6 @@
       ],
       "en": [
         "On a computer, a button whose label wraps to three lines, like “Ակտ այս հաշվի համար” in the Armenian window, no longer shows a second copy of the label, and under the mouse the label flips without overlapping itself."
-      ]
-    },
-    {
-      "version": "0.0.176",
-      "date": "2026-11-23",
-      "hy": [
-        "Ծրագրում ոչինչ չի փոխվել։ kvartik.com-ում այժմ երևում է, թե ինչ տեսք ունի այն՝ տեսանյութ հաշիվ թողարկելու և PDF ստանալու մասին և գլխավոր էկրանի, հաշվի, մատյանի ու հարկի նկարներ։"
-      ],
-      "ru": [
-        "В программе ничего не изменилось. На kvartik.com теперь видно, как она выглядит: ролик о том, как выписать счёт и получить PDF, и снимки главной, счёта, книги и налога."
-      ],
-      "en": [
-        "Nothing changed in the app. kvartik.com now shows what it looks like: a short video of issuing an invoice and getting its PDF, and pictures of the home screen, an invoice, the ledger and the tax."
       ]
     }
   ]

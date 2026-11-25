@@ -19,6 +19,7 @@ pub mod motion;
 pub mod pause;
 pub mod pwa;
 pub mod share;
+pub mod shared;
 pub mod site;
 
 /// Перезагрузить страницу. Не вышло — делать нечего: кнопка браузера

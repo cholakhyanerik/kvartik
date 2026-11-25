@@ -2533,6 +2533,90 @@ async fn seed_clients(profile: &Profile, clients: &[&Client]) {
     documents::commit(writes).await;
 }
 
+/// Положить поделённое в кэш, как его кладёт `sw.js` (задача 124, часть D),
+/// и метку — в адрес: `entries` — адрес в кэше и текст.
+pub(super) async fn share_in(mark: &str, entries: &[(&str, &str)]) {
+    let put = js_sys::Function::new_with_args(
+        "name, entries",
+        "return caches.open(name).then((cache) => Promise.all(entries.map(([key, text]) => cache.put(key, new Response(text)))));",
+    );
+    let list = js_sys::Array::new();
+    for (key, text) in entries {
+        list.push(&js_sys::Array::of2(&(*key).into(), &(*text).into()));
+    }
+    let done = put.call2(&wasm_bindgen::JsValue::NULL, &crate::platform::shared::CACHE.into(), &list).expect("кэш");
+    let _ = js_sys::Promise::from(done).await;
+    if let Some(window) = web_sys::window() {
+        let path = window.location().pathname().unwrap_or_default();
+        let _ = window
+            .history()
+            .expect("история")
+            .replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&format!("{path}?share={mark}")));
+    }
+}
+
+/// Осталось ли что-то в кэше поделённого и метка в адресе.
+pub(super) async fn share_left() -> (bool, bool) {
+    let has = js_sys::Function::new_with_args("name", "return caches.has(name);");
+    let left = match has.call1(&wasm_bindgen::JsValue::NULL, &crate::platform::shared::CACHE.into()) {
+        Ok(promise) => js_sys::Promise::from(promise).await.ok().and_then(|value| value.as_bool()).unwrap_or(true),
+        Err(_) => true,
+    };
+    let marked = web_sys::window().and_then(|window| window.location().search().ok()).is_some_and(|search| search.contains("share="));
+    (left, marked)
+}
+
+/// «Поделиться → Kvartik» на Android (задача 124, часть D): файл копии,
+/// поделённый из мессенджера, `sw.js` кладёт в свой кэш и открывает экран
+/// копии с меткой в адресе; окно берёт файл в цепочку восстановления — спрошен
+/// пароль, копия легла, — а кэш и метку стирает.
+#[wasm_bindgen_test]
+async fn a_backup_shared_from_a_messenger_is_restored() {
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
+        let _ = storage.remove_item("kvartik.backup_key");
+    }
+    let mut wrong = Vec::new();
+    let sample = include_str!("../../../core/tests/backups/v2/kvartik-2026-10-12.json");
+    share_in(
+        "file",
+        &[(crate::platform::shared::FILE, sample), (crate::platform::shared::NAME, "kvartik-2026-10-12.json")],
+    )
+    .await;
+    let (host, mounted) = mount_at("#/backup");
+    if !wait_for(&host, t(lang, Key::BackupFilePassword)).await {
+        wrong.push(format!("поделённая копия не открыта: «{}»", section_text(&host, "backup")));
+    }
+    match field(&host, t(lang, Key::BackupFilePassword), 0) {
+        Some(password) => type_into(&password, "Պահուստ копия sample 0.0.12"),
+        None => wrong.push("нет поля пароля копии".to_owned()),
+    }
+    match button(&host, &[t(lang, Key::BackupRestore)]) {
+        Some(restore) => restore.click(),
+        None => wrong.push("нет «Восстановить»".to_owned()),
+    }
+    let done = t(lang, Key::BackupRestored).split("{}").next().unwrap_or_default();
+    if !wait_for(&host, done).await {
+        wrong.push(format!("поделённая копия не легла: «{}»", section_text(&host, "backup")));
+    }
+    let (left, marked) = share_left().await;
+    if left || marked {
+        wrong.push(format!("поделённое не стёрто: кэш {left}, метка {marked}"));
+    }
+    drop(mounted);
+    host.remove();
+    if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
+        for name in ["kvartik.lang", "kvartik.backup_key", "kvartik.last_backup", "kvartik.trial_data"] {
+            let _ = storage.remove_item(name);
+        }
+    }
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    crate::platform::set_hash("");
+    assert!(wrong.is_empty(), "поделённая копия: {wrong:#?}");
+}
+
 /// Копия в одно нажатие (задача 124, часть C; решение человека 2026-11-25):
 /// после копии с паролем «Сделать копию» — одна кнопка без поля пароля,
 /// а ключ пароля копий в базе устройства не извлекается. Через 30 дней без

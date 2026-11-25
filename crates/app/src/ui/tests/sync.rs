@@ -2120,6 +2120,53 @@ async fn the_back_code_keeps_the_scope_of_the_code() {
     assert!(wrong.is_empty(), "охват встречного кода: {wrong:#?}");
 }
 
+/// «Поделиться → Kvartik» на Android (задача 124, часть D): код, поделённый
+/// из мессенджера, `sw.js` кладёт в свой кэш и открывает «Другое устройство»
+/// с меткой в адресе; окно забирает его — путь «Принять сюда», код собран
+/// и спрошен пароль, — а кэш и метку стирает.
+#[wasm_bindgen_test]
+async fn a_code_shared_from_a_messenger_lands_in_the_field() {
+    let lang = Lang::Ru;
+    documents::fresh_base_with_client().await;
+    other_device();
+    Device::new().set_ui_lang(lang);
+    let mut wrong = Vec::new();
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база отправителя не открылась".to_owned());
+    }
+    let code = make(&host, lang, true, &mut wrong).await.unwrap_or_default();
+    drop(mounted);
+    host.remove();
+
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    other_device();
+    super::share_in("text", &[(crate::platform::shared::TEXT, &format!("Kvartik — мой код:\n{code}"))]).await;
+    crate::platform::set_hash(&Screen::Sync.href());
+    let (host, mounted) = mount_at("#/sync");
+    let mut asked = false;
+    for _ in 0..100 {
+        asked = password_field(&host, t(lang, Key::SyncPassword)).is_some();
+        if asked {
+            break;
+        }
+        sleep(50).await;
+    }
+    if !asked {
+        wrong.push(format!("поделённый код не собран: «{}»", section_text(&host, "sync")));
+    }
+    let (left, marked) = super::share_left().await;
+    if left || marked {
+        wrong.push(format!("поделённое не стёрто: кэш {left}, метка {marked}"));
+    }
+    drop(mounted);
+    host.remove();
+    other_device();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "поделённый код: {wrong:#?}");
+}
+
 /// Встречный код, в котором нести нечего, кроме эха (задача 124, п. 14): у
 /// получателя после того дня ничего своего — только то, что пришло, — и он
 /// говорит «передавать нечего», а не показывает код с тем же самым.

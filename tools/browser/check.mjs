@@ -1435,6 +1435,37 @@ async function restore(page) {
   return sample;
 }
 
+/// «Поделиться → Kvartik» на Android (задача 124, часть D): поделённое
+/// приходит запросом POST на адрес цели манифеста, и принимает его service
+/// worker — кладёт в свой кэш и отвечает переходом 303 на экран с меткой.
+/// Поделиться headless-браузер не умеет, поэтому запрос — свой, тем же телом,
+/// что шлёт Android (multipart), и с ответом без перехода (`manual`).
+async function shareTarget(page) {
+  const manifest = await page.eval(`return fetch("manifest.webmanifest").then((r) => r.json()).then((m) => m.share_target);`);
+  checks.check("поделиться: цель в манифесте — POST multipart на свой адрес, файлы — только .json",
+    manifest?.action === "share" && manifest?.method === "POST" && manifest?.enctype === "multipart/form-data"
+      && JSON.stringify(manifest?.params?.files?.[0]?.accept) === JSON.stringify([".json", "application/json"]),
+    JSON.stringify(manifest));
+  const file = await page.eval(`const form = new FormData();
+    form.append("backup", new File(["{\\"проба\\":1}"], "kvartik-проба.json", { type: "application/json" }));
+    const answer = await fetch("share", { method: "POST", body: form, redirect: "manual" });
+    const body = await caches.match("shared-file", { cacheName: "kvartik.share" });
+    const name = await caches.match("shared-name", { cacheName: "kvartik.share" });
+    return { type: answer.type, body: body ? await body.text() : null, name: name ? await name.text() : null };`);
+  checks.check("поделиться: файл копии лёг в кэш поделённого, ответ — переход",
+    file?.type === "opaqueredirect" && file?.body === '{"проба":1}' && file?.name === "kvartik-проба.json", JSON.stringify(file));
+  const text = await page.eval(`await caches.delete("kvartik.share");
+    const form = new FormData();
+    form.append("text", "Kvartik — мой код: KVARTIKпроба");
+    const answer = await fetch("share", { method: "POST", body: form, redirect: "manual" });
+    const body = await caches.match("shared-text", { cacheName: "kvartik.share" });
+    const file = await caches.match("shared-file", { cacheName: "kvartik.share" });
+    return { type: answer.type, body: body ? await body.text() : null, file: !!file };`);
+  checks.check("поделиться: текст кода лёг в кэш поделённого, ответ — переход",
+    text?.type === "opaqueredirect" && text?.body === "Kvartik — мой код: KVARTIKпроба" && text?.file === false, JSON.stringify(text));
+  await page.eval(`await caches.delete("kvartik.share"); return true;`);
+}
+
 /// Новая копия: пароль — во все видимые поля формы копии (новый пароль
 /// с повтором или пароль устройства).
 async function backup(page, password) {
@@ -1831,6 +1862,7 @@ async function main() {
     await firstSteps(page);
     const sample = await restore(page);
     checks.check("с сетью: страницей правит service worker", (await page.waitFor(CONTROLLER)) === `${ORIGIN}/app/sw.js`);
+    await shareTarget(page);
     await home(page);
     await rates(page);
     await go(page, "#/");

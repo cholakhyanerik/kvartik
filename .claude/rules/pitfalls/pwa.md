@@ -88,6 +88,19 @@ paths:
   только `standalone`: у программы Firefox на Windows он `minimal-ui`,
   а `fullscreen` у Chromium бывает и у обычной вкладки на весь экран
   (`platform::pwa::installed`).
+- **Цель «Поделиться» у манифеста одна, и только у Chrome на Android** (по
+  браузеру: MDN browser-compat-data, `manifests/webapp/share_target.json`,
+  и W3C Web Share Target, сверено 2026-11-25; задача 124). `share_target` —
+  объект, а не список: метод у него один, и файлы приходят только POST
+  `multipart/form-data`, поэтому и текст кода — тем же запросом, а не GET.
+  Есть он у Chrome на Android с 76 и Samsung Internet, у Chrome на
+  компьютере — только в ChromeOS; у Firefox на Android поле читается и не
+  действует, у Safari нет вовсе (WebKit bug 194593). Работает он только
+  у установленной программы и только через service worker: без него POST
+  ушёл бы на хостинг. Что именно шлёт Telegram у файла копии — тип
+  `application/json` или иной, — вживую не проверено: `accept` узкий
+  (`.json`, `application/json`), чтобы Kvartik не стоял в меню у любого
+  файла.
 - **`navigator.standalone` есть не только на iPhone**: с Safari 17 и на Mac
   (WebKit bug 257776; по исходникам WebKit, 2026-10-12), поэтому iPhone
   и iPad отличаются касанием (`maxTouchPoints`). Программа с экрана «Домой»

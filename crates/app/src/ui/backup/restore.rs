@@ -49,6 +49,7 @@ use web_sys::File;
 
 use super::*;
 use crate::platform::autobackup as folders;
+use crate::platform::shared::{self, Shared};
 
 /// Ключ прошлой части копии (задача 117): у частей одной копии один замок.
 /// Живёт, пока открыт экран копии и легли не все части: ключа не сохраняет
@@ -415,6 +416,15 @@ pub(super) fn RestoreBackup(
         next();
     };
     let take = move |files: Vec<File>| take_copies(files.into_iter().map(|file| (file, None)).collect(), Vec::new());
+    // «Поделиться → Kvartik» на Android (задача 124, часть D): файл копии из
+    // мессенджера — сразу в цепочку, как выбранный.
+    if shared::marked() == Some(Shared::File) {
+        leptos::task::spawn_local(async move {
+            if let Some(file) = shared::take_file().await {
+                take(vec![file]);
+            }
+        });
+    }
 
     // Из папки автокопий (задача 124, п. 20) — Chrome и Edge на компьютере:
     // самая свежая копия каждого устройства со всеми частями — той же

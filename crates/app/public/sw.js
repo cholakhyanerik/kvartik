@@ -121,12 +121,56 @@ self.addEventListener("message", (event) => {
   }
 });
 
+// «Поделиться → Kvartik» на Android (задача 124, часть D): Chrome шлёт
+// поделённое запросом POST на адрес цели из манифеста (share_target), и
+// принимает его этот файл — в сеть оно не уходит. Текст и файл ложатся в свой
+// кэш SHARED — его имя не начинается с PREFIX, и новая версия его не удаляет,
+// а стирает окно, забрав своё (crates/app/src/platform/shared.rs), — а ответ —
+// переход 303 на экран, где окно их заберёт, с меткой ?share= в адресе.
+// Решений здесь нет: только положить; код это или копия, решает окно.
+const SHARE_PATH = new URL("share", self.location).pathname;
+const SHARED = "kvartik.share";
+// Больше не кладётся: файл копии программа больше 128 МБ не открывает
+// (backup::MAX_FILE_BYTES), а код текстом — не больше мегабайта.
+const MAX_SHARED_FILE = 128 * 1024 * 1024;
+const MAX_SHARED_TEXT = 1024 * 1024;
+
+async function shared(request) {
+  let to = "./#/sync";
+  try {
+    const form = await request.formData();
+    const cache = await caches.open(SHARED);
+    const file = form.get("backup");
+    if (file instanceof File && file.size > 0 && file.size <= MAX_SHARED_FILE) {
+      await cache.put("shared-file", new Response(file));
+      await cache.put("shared-name", new Response(file.name));
+      to = "./?share=file#/backup";
+    } else {
+      const text = ["text", "title", "url"]
+        .map((name) => form.get(name))
+        .filter((part) => typeof part === "string" && part.length > 0)
+        .join("\n");
+      if (text.length > 0 && text.length <= MAX_SHARED_TEXT) {
+        await cache.put("shared-text", new Response(text));
+        to = "./?share=text#/sync";
+      }
+    }
+  } catch (error) {
+    // Не разобралось — программа открывается на «Другом устройстве», без метки.
+  }
+  return Response.redirect(new URL(to, self.location).href, 303);
+}
+
 // Сначала кэш, потом сеть. Чужие адреса и всё, кроме GET, не трогаем:
 // программа никуда, кроме своего сайта, не ходит, а данные человека живут
-// в IndexedDB, а не в запросах.
+// в IndexedDB, а не в запросах. Кроме поделённого: его POST — свой (выше).
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
+  if (request.method === "POST" && url.origin === self.location.origin && url.pathname === SHARE_PATH) {
+    event.respondWith(shared(request));
+    return;
+  }
   if (request.method !== "GET" || url.origin !== self.location.origin) {
     return;
   }
