@@ -21,7 +21,9 @@
 //! - у каждой записи есть источник: акт с номером (`ՀՕ-…-Ն`, у решений
 //!   правительства и приказов — `N …-Ն`), статья, ссылка на arlis.am или
 //!   src.am и дата сверки. Вторичный источник налоговое правило не
-//!   подтверждает (Правило 6);
+//!   подтверждает (Правило 6). Другой акт той же записи — своей ссылкой
+//!   в `also`, с тем же требованием, а адреса в статье нет (задача 126):
+//!   статья — текст ссылки на сайте;
 //! - у каждой есть день начала, а день конца — `until`, включительно, —
 //!   не раньше него; `null` — действует, конец не назначен. Ключ `until`
 //!   пишется всегда: serde прочёл бы пропавший как `null`, и запись, у
@@ -291,24 +293,57 @@ pub struct Source {
     pub article: String,
     /// Ссылка на текст: arlis.am или src.am.
     pub url: String,
-    /// Когда текст сверен.
+    /// Когда текст сверен — и тексты [`Source::also`] тоже.
     pub checked: Date,
+    /// Другие акты, на которых стоит та же запись, — каждый своей ссылкой
+    /// (задача 126): переходное положение закона о поправке, трудовой
+    /// кодекс с выходными днями. До 0.0.201 их адрес стоял в скобках внутри
+    /// `article` и попадал в текст ссылки на первый акт. Ключ можно не
+    /// писать: без него других актов нет, и правило от этого не меняется.
+    #[serde(default)]
+    pub also: Vec<Also>,
+}
+
+/// Ещё один акт записи правил ([`Source::also`]): номер и название, статья
+/// и ссылка — как у [`Source`], а сверен в тот же день, что и запись.
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Also {
+    pub law: String,
+    pub article: String,
+    pub url: String,
 }
 
 /// Где лежат тексты законов (arlis.am) и разъяснения ՊԵԿ (src.am). Другой
 /// адрес — вторичный источник, а он правило не подтверждает (Правило 6).
 const OFFICIAL_HOSTS: [&str; 4] = ["www.arlis.am", "arlis.am", "www.src.am", "src.am"];
 
+/// Годится ли акт `law`, статья `article` и ссылка `url` источником (шапка
+/// модуля). Номер нормативного акта в Армении кончается на `-Ն`:
+/// `ՀՕ-165-Ն`, `N 142-Ն`.
+fn sound(law: &str, article: &str, url: &str) -> bool {
+    let host = url
+        .strip_prefix("https://")
+        .and_then(|rest| rest.split('/').next())
+        .unwrap_or_default();
+    law.contains("-Ն") && !article.trim().is_empty() && OFFICIAL_HOSTS.contains(&host)
+}
+
+/// Акт без закона, который ввёл норму: `ՀՕ-165-Ն ՀՀ հարկային օրենսգիրք
+/// (12.06.24 ՀՕ-285-Ն)` — `ՀՕ-165-Ն ՀՀ հարկային օրենսգիրք`.
+fn act_of(law: &str) -> &str {
+    law.split_once(" (").map_or(law, |(act, _)| act).trim()
+}
+
 impl Source {
-    /// Годится ли источником (шапка модуля). Номер нормативного акта
-    /// в Армении кончается на `-Ն`: `ՀՕ-165-Ն`, `N 142-Ն`.
+    /// Годится ли источником (шапка модуля) — и каждый другой акт записи.
+    /// Адреса в статье нет: ссылка на другой акт — в [`Source::also`],
+    /// иначе она стала бы текстом ссылки на первый.
     fn is_sound(&self) -> bool {
-        let host = self
-            .url
-            .strip_prefix("https://")
-            .and_then(|rest| rest.split('/').next())
-            .unwrap_or_default();
-        self.law.contains("-Ն") && !self.article.trim().is_empty() && OFFICIAL_HOSTS.contains(&host)
+        let no_link = |article: &str| !article.contains("://");
+        sound(&self.law, &self.article, &self.url)
+            && no_link(&self.article)
+            && self.also.iter().all(|also| sound(&also.law, &also.article, &also.url) && no_link(&also.article))
     }
 
     /// Акт без закона, который ввёл норму: `ՀՕ-165-Ն ՀՀ հարկային օրենսգիրք
@@ -316,10 +351,14 @@ impl Source {
     /// акта с разными поправками — один акт в списке источников
     /// ([`Rules::acts`]).
     pub fn act(&self) -> &str {
-        self.law
-            .split_once(" (")
-            .map_or(self.law.as_str(), |(act, _)| act)
-            .trim()
+        act_of(&self.law)
+    }
+}
+
+impl Also {
+    /// Акт без закона, который ввёл норму, — как [`Source::act`].
+    pub fn act(&self) -> &str {
+        act_of(&self.law)
     }
 }
 
@@ -1576,14 +1615,17 @@ impl Rules {
     /// сверки (экран «О программе», задача 31).
     pub fn acts(&self) -> Vec<Act<'_>> {
         let mut acts: Vec<Act<'_>> = Vec::new();
-        for source in self.sources() {
-            let name = source.act();
+        // Другие акты записи (`Source::also`) — тоже акты правил, со днём
+        // сверки записи.
+        let named = self.sources().into_iter().flat_map(|source| {
+            std::iter::once(source.act())
+                .chain(source.also.iter().map(Also::act))
+                .map(move |name| (name, source.checked))
+        });
+        for (name, checked) in named {
             match acts.iter_mut().find(|act| act.name == name) {
-                Some(act) => act.checked = act.checked.max(source.checked),
-                None => acts.push(Act {
-                    name,
-                    checked: source.checked,
-                }),
+                Some(act) => act.checked = act.checked.max(checked),
+                None => acts.push(Act { name, checked }),
             }
         }
         acts

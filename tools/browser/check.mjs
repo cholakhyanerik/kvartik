@@ -938,23 +938,63 @@ async function landing(browser) {
         return e.scrollWidth <= e.clientWidth
           && document.querySelector("article.buy .faq")?.innerText.includes(${JSON.stringify(t("LicenseDevicesData", lang))}) ? true : null;`));
     }
-    // Страница о налоге (задача 118): своего языка, с оформлением окна,
-    // ставками всех строк налога, у каждой — источник на arlis.am, сроками,
-    // примером калькулятора с суммой; без прокрутки вбок на 360 — армянские
-    // источники длинные — и без отказов CSP; лендинг ведёт на неё.
+    // Страница о налоге (задачи 118 и 126): своего языка, с оформлением окна;
+    // сразу под заголовком — ответ с процентами и днём срока, под ним —
+    // оглавление по якорям разделов; ставки всех строк налога — строками
+    // таблицы, у каждой — источник на arlis.am; сроки — у каждого источник
+    // на arlis.am (сроков без записи правил нет: `deadlines::sources`);
+    // пример калькулятора с суммой; описание для поисковиков — один блок
+    // JSON-LD со страницей и днём изменения. На 360 строки таблицы —
+    // карточками, ничего не уходит вбок (армянские источники длинные), и
+    // отказов CSP нет; лендинг ведёт на неё.
     for (const lang of ["hy", "ru", "en"]) {
       const at = taxPath(lang);
       await page.go(`${ORIGIN}${at}`);
-      checks.check(`о налоге ${at}: свой язык, ставки с источниками, сроки и пример`, await page.waitFor(`return document.documentElement.lang
-        === ${JSON.stringify(lang)} && document.querySelector("article.tax h1")?.textContent === ${JSON.stringify(t("TaxPageTitle", lang))}
-        && document.querySelectorAll("article.tax ul.rates > li").length >= 10
-        && [...document.querySelectorAll("article.tax ul.rates > li")].every((li) => li.querySelector('a[href^="https://www.arlis.am/"][lang="hy"]'))
-        && document.querySelectorAll("article.tax ul.deadlines > li").length >= 4
-        && /\\d/.test(document.querySelector("article.tax .result .sum")?.textContent ?? "")
-        && getComputedStyle(document.querySelector("h1")).fontFamily.includes("Kvartik Serif")
-        && window.cspRefused.length === 0 ? true : null;`));
-      checks.check(`о налоге ${at}: без прокрутки вбок на 360`, await page.eval(`const d = document.documentElement;
-        return d.clientWidth === 360 && d.scrollWidth <= d.clientWidth ? true : null;`));
+      const arlis = 'a[href^="https://www.arlis.am/"][lang="hy"]';
+      // «Да» — только `true`: что не так, идёт третьим аргументом. Объект
+      // во втором `Checks` счёл бы успехом (`!!ok`), и шаг не краснел бы
+      // никогда (прогон на поломанной копии dist/, задача 126).
+      const verdict = (name, got, detail) => checks.check(name, got === true, got === true ? "" : JSON.stringify(detail ?? got));
+      const page_ok = await page.waitFor(`
+        const article = document.querySelector("article.tax");
+        const answer = article?.querySelector("h1 + p.answer");
+        const rows = [...(article?.querySelectorAll("table.rates > tbody > tr") ?? [])];
+        const terms = [...(article?.querySelectorAll("ul.deadlines > li") ?? [])];
+        const toc = [...(article?.querySelectorAll("p.answer + nav.contents a") ?? [])].map((a) => a.getAttribute("href"));
+        const ok = document.documentElement.lang === ${JSON.stringify(lang)}
+          && article.querySelector("h1")?.textContent === ${JSON.stringify(t("TaxPageTitle", lang))}
+          && /\\d+([.,]\\d+)?\\s?%/.test(answer?.textContent ?? "") && /\\d{4}/.test(answer?.textContent ?? "")
+          && toc.join() === "#rates,#deadlines,#example,#currency" && toc.every((id) => article.querySelector(id)?.tagName === "H2")
+          && rows.length >= 10 && rows.every((tr) => tr.querySelector('th[scope="row"]') && tr.querySelector(${JSON.stringify(`td.source ${arlis}`)}))
+          && terms.length >= 4 && terms.every((li) => li.querySelector(${JSON.stringify(`.source ${arlis}`)}))
+          && /\\d/.test(article.querySelector(".result .sum")?.textContent ?? "")
+          && getComputedStyle(document.querySelector("h1")).fontFamily.includes("Kvartik Serif")
+          && window.cspRefused.length === 0;
+        return ok ? true : null;`);
+      verdict(`о налоге ${at}: свой язык, ответ, ставки таблицей и сроки с источниками, пример`, page_ok,
+        page_ok === true ? null : await page.eval(`const a = document.querySelector("article.tax");
+        return { answer: a?.querySelector("h1 + p.answer")?.textContent?.slice(0, 80), rows: a?.querySelectorAll("table.rates > tbody > tr").length,
+          terms: a?.querySelectorAll("ul.deadlines > li").length,
+          unsourced: [...(a?.querySelectorAll("ul.deadlines > li") ?? [])].filter((li) => !li.querySelector(${JSON.stringify(`.source ${arlis}`)})).length,
+          refused: window.cspRefused };`));
+      verdict(`о налоге ${at}: описание для поисковиков — страница с днём изменения`, await page.eval(`
+        const blocks = document.querySelectorAll('script[type="application/ld+json"]');
+        const graph = blocks.length === 1 ? JSON.parse(blocks[0].textContent)["@graph"] : [];
+        return graph[0]?.["@type"] === "WebPage" && graph[0].url === "https://kvartik.com${at}"
+          && /^\\d{4}-\\d{2}-\\d{2}$/.test(graph[0].dateModified ?? "") && graph[1]?.["@type"] === "BreadcrumbList"
+          && document.querySelector('meta[property="og:url"]')?.content === "https://kvartik.com${at}"
+          ? true : { blocks: blocks.length, graph };`));
+      // На 360 строка таблицы — карточкой: ячейки одна под другой, с подписью
+      // столбца над значением, и ни таблица, ни страница не шире экрана.
+      verdict(`о налоге ${at}: на 360 ставки карточками, без прокрутки вбок`, await page.eval(`const d = document.documentElement;
+        const table = document.querySelector("article.tax table.rates");
+        const cell = table?.querySelector("tbody td");
+        const card = getComputedStyle(table.querySelector("tbody tr"));
+        return d.clientWidth === 360 && d.scrollWidth <= d.clientWidth && table.scrollWidth <= table.clientWidth
+          && getComputedStyle(cell).display === "block"
+          && !["none", "normal", ""].includes(getComputedStyle(cell, "::before").content)
+          && card.borderRadius !== "0px" ? true : { width: d.clientWidth, scroll: d.scrollWidth, table: table?.scrollWidth,
+          cell: cell && getComputedStyle(cell).display, label: cell && getComputedStyle(cell, "::before").content };`));
       await page.go(`${ORIGIN}${lang === "hy" ? "/" : `/${lang}/`}`);
       checks.check(`лендинг ${lang}: карточка ведёт на страницу о налоге`, await page.waitFor(`return document
         .querySelector('section.card a.button[href="${at}"]') && document.querySelector('footer a[href="${at}"]') ? true : null;`));

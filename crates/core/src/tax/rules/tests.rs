@@ -229,6 +229,65 @@ fn acts_come_once_with_their_latest_check() {
     assert_eq!(rules.checked(), Some(day(2026, 11, 1)));
 }
 
+/// Другой акт записи (`also`, задача 126) — своей ссылкой: он годен, только
+/// если годен и сам — номер `…-Ն`, статья, arlis.am или src.am, — а адреса
+/// в статье нет ни у записи, ни у него (до 0.0.201 он стоял там в скобках
+/// и попадал в текст ссылки на первый акт). Незнакомое поле в нём — ошибка
+/// разбора. В списке актов «О программе» он — свой акт со днём сверки
+/// записи; без `also` других актов нет.
+#[test]
+fn another_act_of_a_record_has_its_own_link() {
+    let also = |law: &str, article: &str, url: &str| {
+        let mut record = exclusion(&["69"], "2025-07-01", None);
+        record["source"]["also"] = json!([{ "law": law, "article": article, "url": url }]);
+        record
+    };
+    let sound = also("ՀՕ-124-Ն ՀՀ աշխատանքային օրենսգիրք", "հոդված 142, մաս 2", "https://www.arlis.am/hy/acts/227661");
+    let mut wrong = Vec::new();
+    let rules = Rules::parse(&file(std::slice::from_ref(&sound), &[])).expect("годный файл");
+    let source = &rules.turnover_exclusions()[0].source;
+    if source.also.len() != 1 || source.also[0].act() != "ՀՕ-124-Ն ՀՀ աշխատանքային օրենսգիրք" {
+        wrong.push(format!("другой акт не прочитан: {:?}", source.also));
+    }
+    let names: Vec<&str> = rules.acts().iter().map(|act| act.name).collect();
+    if names != ["ՀՕ-165-Ն ՀՀ հարկային օրենսգիրք", "ՀՕ-124-Ն ՀՀ աշխատանքային օրենսգիրք"]
+        || rules.acts().iter().any(|act| act.checked != day(2026, 10, 19))
+    {
+        wrong.push(format!("акты: {:?}", rules.acts()));
+    }
+    let unsourced = [
+        also("Աշխատանքային օրենսգիրք", "հոդված 142", "https://www.arlis.am/hy/acts/227661"),
+        also("ՀՕ-124-Ն", " ", "https://www.arlis.am/hy/acts/227661"),
+        also("ՀՕ-124-Ն", "հոդված 142", "https://example.com/labour"),
+        // Адрес ссылкой на сайте: ни скрипта, ни чужого хоста под видом arlis.
+        also("ՀՕ-124-Ն", "հոդված 142", "javascript:alert(1)//https://www.arlis.am/"),
+        also("ՀՕ-124-Ն", "հոդված 142", "https://www.arlis.am@evil.example/hy/acts/227661"),
+        also("ՀՕ-124-Ն", "հոդված 142", "https://www.arlis.am.evil.example/hy/acts/227661"),
+        also("ՀՕ-124-Ն", "հոդված 142 (https://www.arlis.am/hy/acts/227661)", "https://www.arlis.am/hy/acts/227661"),
+        with_source(
+            exclusion(&["69"], "2025-07-01", None),
+            "article",
+            "հոդված 16; ՀՕ-234-Ն՝ հոդված 2 (https://www.arlis.am/hy/acts/226008)",
+        ),
+    ];
+    for record in unsourced {
+        let got = Rules::parse(&file(std::slice::from_ref(&record), &[]));
+        if got != Err(RulesError::Unsourced(at(EXCLUSIONS, 0))) {
+            wrong.push(format!("{}: {got:?}", record["source"]));
+        }
+    }
+    let mut typo = sound.clone();
+    typo["source"]["also"][0]["checked"] = json!("2026-11-25");
+    if !matches!(Rules::parse(&file(&[typo], &[])), Err(RulesError::Malformed(_))) {
+        wrong.push("незнакомое поле другого акта прошло".to_owned());
+    }
+    let plain = Rules::parse(&file(&[exclusion(&["69"], "2025-07-01", None)], &[])).expect("годный файл");
+    if !plain.turnover_exclusions()[0].source.also.is_empty() || plain.acts().len() != 1 {
+        wrong.push(format!("без also: {:?}", plain.acts()));
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// Годный файл разбирается — без этого отказы ниже ничего бы не значили.
 #[test]
 fn a_sound_file_reads() {

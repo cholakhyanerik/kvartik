@@ -698,6 +698,148 @@ footer .links {
   font-weight: var(--weight-strong);
 }
 
+/* Страница о налоге (задача 126). Ответ сверху — крупнее текста страницы:
+   его читают первым, а цитируют целиком. Оглавление — ссылками в строку,
+   с переносом, каждая — не ниже пальца (--touch), как вопросы «Купить». */
+.tax .answer {
+  font-size: var(--font-size-lg);
+}
+
+.tax .contents ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-5);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.tax .contents li + li {
+  margin-top: 0;
+}
+
+.tax .contents a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--touch);
+}
+
+/* Ставки — таблицей (задача 126): строка налога, ставка, вычет и источник.
+   На телефоне в 360 точек четыре столбца не помещаются, поэтому строки
+   складываются в карточки — те же, что у лендинга (--surface-raised,
+   --radius-lg), — а подпись столбца стоит над значением из `data-label`
+   ячейки; разметка та же. Заголовок таблицы на телефоне не виден, но его
+   читает диктор: смысл таблицы при `display: block` браузеры с 2023 года
+   сохраняют все три (по браузеру: A. Roselli, «Tables, CSS Display
+   Properties, and ARIA», дополнение 2023-10; сверено 2026-11-25). Длинное
+   армянское название акта переносится, а не уводит страницу вбок. */
+.rates {
+  width: 100%;
+  margin-block: var(--space-4);
+  border-collapse: collapse;
+}
+
+.rates,
+.rates tbody,
+.rates tr,
+.rates th,
+.rates td {
+  display: block;
+}
+
+.rates thead {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.rates tbody {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.rates tr {
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+}
+
+.rates th,
+.rates td {
+  text-align: start;
+  overflow-wrap: break-word;
+}
+
+.rates tbody th {
+  font-weight: var(--weight-strong);
+}
+
+.rates td {
+  margin-top: var(--space-2);
+}
+
+.rates td::before {
+  content: attr(data-label);
+  display: block;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.rates .source {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+@media (min-width: 40rem) {
+  .rates {
+    display: table;
+  }
+
+  .rates thead {
+    display: table-header-group;
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    white-space: normal;
+  }
+
+  .rates tbody {
+    display: table-row-group;
+  }
+
+  .rates tr {
+    display: table-row;
+    padding: 0;
+    border-radius: 0;
+    background: none;
+  }
+
+  .rates th,
+  .rates td {
+    display: table-cell;
+    margin: 0;
+    padding: var(--space-3) var(--space-4) var(--space-3) 0;
+    border-top: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  .rates thead th {
+    border-top: 0;
+    color: var(--text-muted);
+    font-size: var(--font-size-sm);
+    font-weight: var(--weight-regular);
+  }
+
+  .rates td::before {
+    content: none;
+  }
+}
+
 @media (min-width: 40rem) {
   .cards,
   .fields {

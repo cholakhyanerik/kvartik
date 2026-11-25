@@ -33,10 +33,11 @@
 //! отправляет.
 //!
 //! И страница о налоге с оборота (задача 118), `tax/` там же (`tax_path`):
-//! ставки, порог, сроки на год, пример и курс ЦБ — из файла правил ядра,
-//! с актом, статьёй и днём сверки у каждого числа, сроки — те же, что
-//! в общем календаре, пример — расчётом калькулятора. Такие страницы
-//! цитируют поисковики и ИИ-ответы, а второго расчёта «для сайта» в ней нет.
+//! ответ сверху, ставки таблицей, порог, сроки на год, пример и курс ЦБ —
+//! из файла правил ядра, с актом, статьёй и днём сверки у каждого числа
+//! (у сроков — с задачи 126), сроки — те же, что в общем календаре,
+//! пример — расчётом калькулятора. Такие страницы цитируют поисковики
+//! и ИИ-ответы, а второго расчёта «для сайта» в ней нет.
 //!
 //! Рядом — оформление и скрипт, одним файлом каждый, с хэшем содержимого
 //! в имени (`kvartik-site-<хэш>.css` и `.js`): они кэшируются на год
@@ -51,7 +52,8 @@
 //! — файлом, а атрибутов `style` и `on…` в разметке нет, и это держит
 //! проверка ниже. Одно исключение (задача 118) — описание программы для
 //! поисковиков у страниц языков, `<script type="application/ld+json">`
-//! (`described`): это блок данных, браузер его не исполняет, и CSP его не
+//! (`described`), а с задачи 126 — и описание страницы о налоге
+//! (`described_tax`): это блок данных, браузер его не исполняет, и CSP его не
 //! касается — тип не JavaScript, и разбор элемента кончается раньше проверки
 //! CSP (HTML, «prepare the script element»). Что отказов CSP нет, сверяет
 //! проверка сайта в браузере (`tools/browser/check.mjs`, «лендинг»). Текст
@@ -374,7 +376,7 @@ pub fn write(staging: &Path, site: &Path, style: &Path, legal: &Path, app: &str,
         files.push((page_file(tax_path(lang)), tax_page(lang, &css_name, &js_name, app, checked)));
     }
     files.push(("robots.txt".to_owned(), robots()));
-    files.push(("sitemap.xml".to_owned(), sitemap()));
+    files.push(("sitemap.xml".to_owned(), sitemap(checked)));
     files.push((format!("{INDEXNOW_KEY}.txt"), INDEXNOW_KEY.to_owned()));
     files.push((css_name, css));
     files.push((js_name, js));
@@ -569,11 +571,6 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, media: &Media, 
     let calendar = format!("{SITE}/{}", calendar::path(lang));
     let webcal = calendar.replacen("https://", "webcal://", 1);
     let own = url(lang);
-    let locale = match lang {
-        Lang::Am => "hy_AM",
-        Lang::Ru => "ru_RU",
-        Lang::En => "en_US",
-    };
     let mut features = String::new();
     for (title, about) in FEATURES {
         features.push_str(&format!(
@@ -585,17 +582,9 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, media: &Media, 
     let title = text(Key::LandingTitle);
     let description = text(Key::LandingDescription);
     let meta = format!(
-        r#"    <meta name="description" content="{description}" />
-    <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="{name}" />
-    <meta property="og:title" content="{title}" />
-    <meta property="og:description" content="{description}" />
-    <meta property="og:url" content="{SITE}{own}" />
-    <meta property="og:image" content="{SITE}{app}icons/icon-512.png" />
-    <meta property="og:locale" content="{locale}" />
-{described}"#,
-        name = text(Key::AppName),
-        described = described(lang, app),
+        "    <meta name=\"description\" content=\"{description}\" />\n{}{}",
+        preview(lang, &title, &description, own, app),
+        described(lang, app),
     );
     format!(
         r#"{head}  <body>
@@ -756,8 +745,6 @@ fn described(lang: Lang, app: &str) -> String {
             "url": format!("{SITE}{}", buy_path(lang)),
         })
     };
-    let icon = format!("{SITE}{app}icons/icon-512.png");
-    let seller = format!("{SITE}/#seller");
     let data = serde_json::json!({
         "@context": "https://schema.org",
         "@graph": [
@@ -770,22 +757,122 @@ fn described(lang: Lang, app: &str) -> String {
                 "applicationCategory": "BusinessApplication",
                 "operatingSystem": "Web",
                 "inLanguage": Lang::ALL.map(Lang::code),
-                "image": icon,
+                "image": icon(app),
                 "featureList": FEATURES.map(|(title, _)| t(lang, title)),
                 "offers": [offer(Tariff::Standard), offer(Tariff::Pro)],
-                "publisher": { "@id": seller },
+                "publisher": { "@id": seller_id() },
             },
-            {
-                "@type": "Organization",
-                "@id": seller,
-                "name": t(lang, Key::AppName),
-                "url": format!("{SITE}/"),
-                "logo": icon,
-                "email": EMAIL,
-            },
+            seller(lang, app),
         ],
     });
     data_block(&data)
+}
+
+/// Продавец в данных для поисковиков (`Organization`) — один у страниц
+/// языков и страниц о налоге (задача 126): имя, сайт, значок, почта ядра.
+/// Адрес `@id` — один на сайте, и страница о налоге называет издателем того
+/// же продавца, что и программа.
+fn seller(lang: Lang, app: &str) -> serde_json::Value {
+    serde_json::json!({
+        "@type": "Organization",
+        "@id": seller_id(),
+        "name": t(lang, Key::AppName),
+        "url": format!("{SITE}/"),
+        "logo": icon(app),
+        "email": EMAIL,
+    })
+}
+
+/// `@id` продавца в данных для поисковиков: адрес навсегда, как сам сайт.
+fn seller_id() -> String {
+    format!("{SITE}/#seller")
+}
+
+/// День записью ISO 8601 — `2026-11-25`: так его ждут schema.org
+/// (`dateModified`) и карта сайта (`lastmod`).
+fn iso(day: Date) -> String {
+    format!("{:04}-{:02}-{:02}", day.year(), day.month(), day.day())
+}
+
+/// Значок программы для поисковиков и превью в чатах — пока единственная
+/// картинка сайта в полный размер.
+fn icon(app: &str) -> String {
+    format!("{SITE}{app}icons/icon-512.png")
+}
+
+/// Описание страницы о налоге для поисковиков (задача 126) — JSON-LD
+/// у страницы `lang`: сама страница (`WebPage`) — заголовок, описание,
+/// язык, день последней сверки правил (`dateModified`, `Rules::checked`:
+/// числа на ней меняются только с правилами) и издатель — продавец, тот же
+/// узел, что у страницы языка (`seller`), — и путь к ней хлебными крошками
+/// (`BreadcrumbList`): страница языка → о налоге. ИИ-ответы и поисковики
+/// цитируют такие страницы, и день сверки им виден без разбора текста.
+/// Нет дня сверки — нет и `dateModified`: страница не называет дня, которого
+/// у правил нет. Блок данных, а не скрипт (`data_block`, шапка файла).
+fn described_tax(lang: Lang, app: &str, checked: Option<Date>) -> String {
+    let page = format!("{SITE}{}", tax_path(lang));
+    let mut web_page = serde_json::json!({
+        "@type": "WebPage",
+        "@id": format!("{page}#page"),
+        "url": page,
+        "name": t(lang, Key::TaxPageTitle),
+        "description": t(lang, Key::TaxPageDescription),
+        "inLanguage": lang.code(),
+        "publisher": { "@id": seller_id() },
+        "breadcrumb": { "@id": format!("{page}#breadcrumb") },
+    });
+    if let Some(day) = checked {
+        web_page["dateModified"] = serde_json::Value::from(iso(day));
+    }
+    let crumb = |position: u8, name: &str, path: &str| {
+        serde_json::json!({
+            "@type": "ListItem",
+            "position": position,
+            "name": name,
+            "item": format!("{SITE}{path}"),
+        })
+    };
+    let data = serde_json::json!({
+        "@context": "https://schema.org",
+        "@graph": [
+            web_page,
+            {
+                "@type": "BreadcrumbList",
+                "@id": format!("{page}#breadcrumb"),
+                "itemListElement": [
+                    crumb(1, t(lang, Key::AppName), url(lang)),
+                    crumb(2, t(lang, Key::TaxPageLink), tax_path(lang)),
+                ],
+            },
+            seller(lang, app),
+        ],
+    });
+    data_block(&data)
+}
+
+/// Превью страницы в чатах и соцсетях (Open Graph): заголовок, описание,
+/// адрес `path`, картинка (пока значок программы) и язык. `title`
+/// и `description` уже экранированы. Одна функция у лендинга и страниц
+/// о налоге (задача 126) — а у «Купить», «Отзывов» и юридических текстов
+/// превью нет: их тесты держат, что `og:` там не появится.
+fn preview(lang: Lang, title: &str, description: &str, path: &str, app: &str) -> String {
+    let locale = match lang {
+        Lang::Am => "hy_AM",
+        Lang::Ru => "ru_RU",
+        Lang::En => "en_US",
+    };
+    format!(
+        r#"    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="{name}" />
+    <meta property="og:title" content="{title}" />
+    <meta property="og:description" content="{description}" />
+    <meta property="og:url" content="{SITE}{path}" />
+    <meta property="og:image" content="{image}" />
+    <meta property="og:locale" content="{locale}" />
+"#,
+        name = escape(t(lang, Key::AppName)),
+        image = icon(app),
+    )
 }
 
 /// Данные JSON блоком `<script type="application/ld+json">`: `<`, `>` и `&`
@@ -1036,20 +1123,51 @@ const TAX_EXAMPLE: (IncomeKind, i64, Residency, u16) = (IncomeKind::HighTech, 3_
 /// У каждого правила — акт, статья ссылкой на текст и день сверки
 /// (`rules::Source`), по-армянски, как в законе (`lang="hy"`). Правил дня
 /// нет — нет и раздела: страница не обещает того, чего нет в ядре.
+///
+/// Сразу под заголовком — ответ двумя предложениями (задача 126): ставки
+/// «от … до …», порог и ближайший срок квартала (`tax_answer`). Его цитируют
+/// поисковики и ИИ-ответы, и абзац должен отвечать сам, без остальной
+/// страницы. Под ним — оглавление разделов, которые есть на странице, по их
+/// якорям: адреса `#rates`, `#deadlines`, `#example`, `#currency` — навсегда,
+/// на них ведут поисковики. Превью в чатах — та же функция, что у лендинга
+/// (`preview`), описание для поисковиков — `described_tax`.
 fn tax_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -> String {
     let text = |key: Key| escape(t(lang, key));
     let all = rules::armenia();
-    let meta = format!("    <meta name=\"description\" content=\"{}\" />\n", text(Key::TaxPageDescription));
+    let title = text(Key::TaxPageTitle);
+    let description = text(Key::TaxPageDescription);
+    let meta = format!(
+        "    <meta name=\"description\" content=\"{description}\" />\n{}{}",
+        preview(lang, &title, &description, tax_path(lang), app),
+        described_tax(lang, app, checked),
+    );
     let mut body = String::new();
     if let Some(day) = checked {
+        let sections = [
+            ("rates", Key::TaxPageRates, tax_rates(lang, all, day)),
+            ("deadlines", Key::TaxPageDeadlines, tax_deadlines(lang, day)),
+            ("example", Key::TaxPageExample, tax_example(lang, day)),
+            ("currency", Key::TaxPageCurrency, tax_currency(lang, all, day)),
+        ];
+        let present: Vec<_> = sections.iter().filter(|(_, _, html)| !html.is_empty()).collect();
+        body.push_str(&tax_answer(lang, all, day));
+        if !present.is_empty() {
+            body.push_str(&format!(
+                "        <nav class=\"contents\" aria-label=\"{}\">\n          <ul>\n",
+                text(Key::TaxPageContents)
+            ));
+            for (id, heading, _) in &present {
+                body.push_str(&format!("            <li><a href=\"#{id}\">{}</a></li>\n", text(*heading)));
+            }
+            body.push_str("          </ul>\n        </nav>\n");
+        }
         body.push_str(&format!(
             "        <p>{}</p>\n",
             escape(&fill(t(lang, Key::TaxPageLead), &[&i18n::date(lang, day)]))
         ));
-        body.push_str(&tax_rates(lang, all, day));
-        body.push_str(&tax_deadlines(lang, day));
-        body.push_str(&tax_example(lang, day));
-        body.push_str(&tax_currency(lang, all, day));
+        for (id, heading, html) in present {
+            body.push_str(&format!("        <h2 id=\"{id}\">{}</h2>\n{html}", text(*heading)));
+        }
     }
     format!(
         r#"{head}  <body>
@@ -1063,10 +1181,9 @@ fn tax_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -
 {footer}  </body>
 </html>
 "#,
-        head = head(lang, &text(Key::TaxPageTitle), tax_path, &meta, css, js, app),
+        head = head(lang, &title, tax_path, &meta, css, js, app),
         top = top(lang, url(lang), tax_path),
         footer = footer(lang, app, checked),
-        title = text(Key::TaxPageTitle),
         link = app_link(app, lang),
         open = text(Key::LandingOpen),
         trial = trial(lang),
@@ -1074,47 +1191,137 @@ fn tax_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -
     )
 }
 
-/// Откуда правило — строкой под ним: акт и статья ссылкой на текст
-/// (arlis.am или src.am — других `rules` не примет) и день сверки.
+/// Строки налога, действующие в день `day`, — в порядке таблицы ст. 258,
+/// ч. 1, как в файле правил.
+fn rates_on(all: &rules::Rules, day: Date) -> impl Iterator<Item = &rules::Rate> {
+    all.turnover_rates().iter().filter(move |rate| rate.from <= day && rate.until.is_none_or(|until| day <= until))
+}
+
+/// Конец списка сроков страницы, начатого днём `day`, — 31 декабря
+/// следующего года, как у общего календаря. `None` — календарь кончился.
+fn deadlines_until(day: Date) -> Option<Date> {
+    day.year().checked_add(1).and_then(|year| Date::new(year, 12, 31))
+}
+
+/// Ответ сверху (задача 126): ставки строк налога, действующих в день
+/// `day`, «от … до …» — только сама ставка (`Rate::rate`), без нижнего
+/// предела после вычета: предел — не ставка строки, — порог оборота за год
+/// и срок расчёта и уплаты: число месяца после квартала и ближайший после
+/// дня `day` квартал с днём его срока по закону. Число месяца — общее
+/// правило, а не «ближайший срок»: страница собирается не каждый день,
+/// и через месяц «ближайший» стал бы прошлым, а «за IV квартал — до …»
+/// верно всегда. Числа — из того же ядра, что разделы ниже. Чего-то из
+/// этого в правилах дня нет — нет и абзаца: половина ответа читалась бы
+/// целым.
+fn tax_answer(lang: Lang, all: &rules::Rules, day: Date) -> String {
+    let percent = |value: rules::Percent| i18n::percent(lang, i64::from(value.hundredths()));
+    let lowest = rates_on(all, day).map(|rate| rate.rate).min();
+    let highest = rates_on(all, day).map(|rate| rate.rate).max();
+    let threshold = rules::on(all.turnover_threshold(), day);
+    // День — по закону (`by_law`), а не перенесённый: абзац цитируют без
+    // списка ниже, где у перенесённого стоит «заплатить надёжнее до него»
+    // (`deadlines::moved`), а перенос уплаты ՊԵԿ не подтверждал (шапка
+    // `tax::deadlines`, «Перенос»). Заплативший до дня по закону не опоздал
+    // ни при каком прочтении, и «до 20-го: … — до 22.01» не спорит с собой.
+    let next = deadlines_until(day).and_then(|until| {
+        deadlines::general(day, until).into_iter().find_map(|deadline| match deadline.kind {
+            deadlines::Kind::Turnover(quarter) => Some((deadline.by_law, quarter)),
+            _ => None,
+        })
+    });
+    // Число месяца — правило того квартала, чей срок назван.
+    let rule = next.and_then(|(_, quarter)| rules::on(all.turnover_due(), quarter.next()?.first_day()));
+    let (Some(lowest), Some(highest), Some(threshold), Some((due, quarter)), Some(rule)) =
+        (lowest, highest, threshold, next, rule)
+    else {
+        return String::new();
+    };
+    format!(
+        "        <p class=\"answer\">{}</p>\n",
+        escape(&fill(
+            t(lang, Key::TaxPageAnswer),
+            &[
+                &percent(lowest),
+                &percent(highest),
+                &i18n::money(lang, Money::new(threshold.amount, Currency::Amd)),
+                &rule.day.to_string(),
+                &i18n::quarter(lang, quarter),
+                &i18n::date(lang, due),
+            ],
+        ))
+    )
+}
+
+/// Ссылки на тексты записи правил: акт и статья ссылкой — у записи и у
+/// каждого другого её акта (`Source::also`, задача 126), через запятую.
+/// Акт — по-армянски, как в законе (`lang="hy"`); ссылка — arlis.am или
+/// src.am (других `rules` не примет).
+fn source_links(source: &rules::Source) -> String {
+    let link = |url: &str, law: &str, article: &str| {
+        format!("<a href=\"{}\" lang=\"hy\">{}, {}</a>", escape(url), escape(law), escape(article))
+    };
+    std::iter::once(link(&source.url, &source.law, &source.article))
+        .chain(source.also.iter().map(|also| link(&also.url, &also.law, &also.article)))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Откуда правило — строкой под ним: «Источник:», ссылки на тексты
+/// (`source_links`) и день сверки.
 fn tax_source(lang: Lang, source: &rules::Source) -> String {
     format!(
-        "          <span class=\"note source\">{} <a href=\"{}\" lang=\"hy\">{}, {}</a>; {}</span>\n",
+        "          <span class=\"note source\">{} {}; {}</span>\n",
         escape(t(lang, Key::TaxPageSource)),
-        escape(&source.url),
-        escape(&source.law),
-        escape(&source.article),
+        source_links(source),
         escape(&fill(t(lang, Key::TaxPageChecked), &[&i18n::date(lang, source.checked)]))
     )
 }
 
-/// Ставки строк налога, действующие в день `day`, — в порядке таблицы
-/// ст. 258, ч. 1, как в файле правил, — и порог оборота за год.
+/// Ставки строк налога, действующие в день `day`, — таблицей (задача 126):
+/// строка налога, ставка (и до какого дня действует), вычет расходов
+/// с нижним пределом и источник. Подписи столбцов — те же, что у окна
+/// (`ActivityKind`, `TaxLineRate`). На телефоне строки складываются
+/// в карточки (`site/landing.css`): разметка та же, а подпись столбца у
+/// ячейки — из `data-label`. Под таблицей — порог оборота за год. Ставок
+/// дня нет — нет и раздела.
 fn tax_rates(lang: Lang, all: &rules::Rules, day: Date) -> String {
+    if rates_on(all, day).next().is_none() {
+        return String::new();
+    }
+    let text = |key: Key| escape(t(lang, key));
     let percent = |value: rules::Percent| i18n::percent(lang, i64::from(value.hundredths()));
-    let mut out = format!(
-        "        <h2 id=\"rates\">{}</h2>\n        <p>{}</p>\n        <ul class=\"rates\">\n",
-        escape(t(lang, Key::TaxPageRates)),
-        escape(t(lang, Key::TaxPageRatesAbout))
+    let (kind, rate_label, deduction_label, source_label) = (
+        text(Key::ActivityKind),
+        text(Key::TaxLineRate),
+        text(Key::TaxPageRateDeduction),
+        text(Key::TaxPageSourceColumn),
     );
-    for rate in all.turnover_rates().iter().filter(|rate| rate.from <= day && rate.until.is_none_or(|until| day <= until)) {
-        let mut formula = match (rate.deduction, rate.floor) {
-            (Some(deduction), Some(floor)) => {
-                fill(t(lang, Key::TaxRateDeducted), &[&percent(rate.rate), &percent(deduction), &percent(floor)])
-            }
-            _ => fill(t(lang, Key::TaxRateFlat), &[&percent(rate.rate)]),
-        };
+    let mut out = format!(
+        "        <p>{}</p>\n        <table class=\"rates\">\n          <thead>\n            <tr><th scope=\"col\">{kind}</th><th scope=\"col\">{rate_label}</th><th scope=\"col\">{deduction_label}</th><th scope=\"col\">{source_label}</th></tr>\n          </thead>\n          <tbody>\n",
+        text(Key::TaxPageRatesAbout)
+    );
+    for rate in rates_on(all, day) {
+        let mut flat = fill(t(lang, Key::TaxRateFlat), &[&percent(rate.rate)]);
         if let Some(until) = rate.until {
-            formula.push_str("; ");
-            formula.push_str(&fill(t(lang, Key::TaxRateUntil), &[&i18n::date(lang, until)]));
+            flat.push_str("; ");
+            flat.push_str(&fill(t(lang, Key::TaxRateUntil), &[&i18n::date(lang, until)]));
         }
+        let deduction = match (rate.deduction, rate.floor) {
+            (Some(deduction), Some(floor)) => {
+                fill(t(lang, Key::TaxRateDeduction), &[&percent(deduction), &percent(floor)])
+            }
+            _ => t(lang, Key::TaxRateNoDeduction).to_owned(),
+        };
         out.push_str(&format!(
-            "          <li>\n          <strong>{}</strong>\u{a0}— {}<br />\n{}          </li>\n",
+            "            <tr>\n              <th scope=\"row\">{}</th>\n              <td data-label=\"{rate_label}\">{}</td>\n              <td data-label=\"{deduction_label}\">{}</td>\n              <td data-label=\"{source_label}\" class=\"source\">{}; {}</td>\n            </tr>\n",
             escape(t(lang, turnover::kind_key(rate.kind))),
-            escape(&formula),
-            tax_source(lang, &rate.source)
+            escape(&flat),
+            escape(&deduction),
+            source_links(&rate.source),
+            escape(&fill(t(lang, Key::TaxPageChecked), &[&i18n::date(lang, rate.source.checked)]))
         ));
     }
-    out.push_str("        </ul>\n");
+    out.push_str("          </tbody>\n        </table>\n");
     if let Some(threshold) = rules::on(all.turnover_threshold(), day) {
         let amount = i18n::money(lang, Money::new(threshold.amount, Currency::Amd));
         out.push_str(&format!(
@@ -1128,29 +1335,50 @@ fn tax_rates(lang: Lang, all: &rules::Rules, day: Date) -> String {
 
 /// Сроки всех ИП на налоге с оборота с дня `day` по конец следующего года —
 /// те же, что в общем календаре (`deadlines::general`), — с переносом
-/// с нерабочего дня словами экрана сроков (`deadlines::moved`), и ссылка на
-/// подписку.
+/// с нерабочего дня словами экрана сроков (`deadlines::moved`), у каждого —
+/// источники его дня по закону (`deadlines::sources`, задача 126), — и ссылка
+/// на подписку. Перенос — одной строкой под списком, с источниками каждого
+/// переноса списка по разу (`deadlines::moved_sources`): у дюжины строк одна
+/// и та же статья читалась бы шумом.
 fn tax_deadlines(lang: Lang, day: Date) -> String {
-    let Some(until) = day.year().checked_add(1).and_then(|year| Date::new(year, 12, 31)) else {
+    let Some(until) = deadlines_until(day) else {
         return String::new();
     };
     let mut out = format!(
-        "        <h2 id=\"deadlines\">{}</h2>\n        <p>{}</p>\n        <ul class=\"deadlines\">\n",
-        escape(t(lang, Key::TaxPageDeadlines)),
+        "        <p>{}</p>\n        <ul class=\"deadlines\">\n",
         escape(&fill(t(lang, Key::TaxPageDeadlinesAbout), &[&i18n::date(lang, day), &i18n::date(lang, until)]))
     );
+    let mut shifts: Vec<&rules::Source> = Vec::new();
     for deadline in deadlines::general(day, until) {
         let moved = deadlines::moved(lang, deadline.kind, deadline.by_law)
             .map(|words| format!("<br />\n          <span class=\"note\">{}</span>", escape(&words)))
             .unwrap_or_default();
+        let source: String = deadlines::sources(deadline.kind)
+            .into_iter()
+            .map(|source| format!("<br />\n{}", tax_source(lang, source).trim_end()))
+            .collect();
+        for shift in deadlines::moved_sources(deadline.by_law) {
+            if !shifts.iter().any(|known| std::ptr::eq(*known, shift)) {
+                shifts.push(shift);
+            }
+        }
         out.push_str(&format!(
-            "          <li><strong>{}</strong>\u{a0}— {}{moved}</li>\n",
+            "          <li><strong>{}</strong>\u{a0}— {}{moved}{source}</li>\n",
             escape(&i18n::date(lang, deadline.day)),
             escape(&deadlines::what(lang, deadline.kind))
         ));
     }
+    out.push_str("        </ul>\n");
+    if !shifts.is_empty() {
+        let sources: Vec<String> = shifts.iter().map(|source| tax_source(lang, source)).collect();
+        out.push_str(&format!(
+            "        <p>{}<br />\n{}        </p>\n",
+            escape(t(lang, Key::TaxPageShift)),
+            sources.join("          <br />\n")
+        ));
+    }
     out.push_str(&format!(
-        "        </ul>\n        <p class=\"actions\"><a class=\"button secondary\" href=\"{}#calendar\"><span class=\"label\">{}</span></a></p>\n",
+        "        <p class=\"actions\"><a class=\"button secondary\" href=\"{}#calendar\"><span class=\"label\">{}</span></a></p>\n",
         url(lang),
         escape(t(lang, Key::TaxPageCalendar))
     ));
@@ -1186,11 +1414,7 @@ fn tax_example(lang: Lang, day: Date) -> String {
             &born.to_string(),
         ],
     );
-    let mut out = format!(
-        "        <h2 id=\"example\">{}</h2>\n        <p>{}</p>\n        <div class=\"result\">\n",
-        escape(t(lang, Key::TaxPageExample)),
-        escape(&about)
-    );
+    let mut out = format!("        <p>{}</p>\n        <div class=\"result\">\n", escape(&about));
     for block in answer.blocks {
         let (tag, class) = match block.kind {
             example::BlockKind::Head => ("h3", "head"),
@@ -1205,7 +1429,8 @@ fn tax_example(lang: Lang, day: Date) -> String {
 }
 
 /// Курс ЦБ для дохода в валюте — по записи `rate_day` дня `day`: с какого
-/// дня и откуда. Записи нет — нет и раздела.
+/// дня и откуда — закон и переходное положение закона о поправке, каждый
+/// своей ссылкой (`Source::also`). Записи нет — нет и раздела.
 fn tax_currency(lang: Lang, all: &rules::Rules, day: Date) -> String {
     let Some(rule) = rules::on(all.rate_day(), day) else {
         return String::new();
@@ -1214,8 +1439,7 @@ fn tax_currency(lang: Lang, all: &rules::Rules, day: Date) -> String {
         rules::RateDayKind::PreviousWorkingDay => Key::TaxPageCurrencyAbout,
     };
     format!(
-        "        <h2 id=\"currency\">{}</h2>\n        <p>{}<br />\n{}        </p>\n",
-        escape(t(lang, Key::TaxPageCurrency)),
+        "        <p>{}<br />\n{}        </p>\n",
         escape(&fill(t(lang, kind), &[&i18n::date(lang, rule.from)])),
         tax_source(lang, &rule.source)
     )
@@ -1411,19 +1635,30 @@ fn robots() -> String {
 /// Карта сайта: страницы трёх языков, страницы о налоге (задача 118),
 /// «Купить» и «Отзывы и предложения» и юридические тексты к ним, у каждой — она же на всех
 /// трёх и «по умолчанию» армянская (как
-/// `hreflang` в самих страницах). Без `lastmod`: дня сборки в ней нет, иначе
-/// одна и та же сборка давала бы разные байты.
-fn sitemap() -> String {
+/// `hreflang` в самих страницах). Дня сборки в ней нет, иначе одна и та же
+/// сборка давала бы разные байты. А у страниц о налоге `lastmod` — день
+/// последней сверки правил `checked` (задача 126): их числа меняются только
+/// с правилами, и день берётся из данных, а не из часов, — те же байты на
+/// каждой сборке. Нет дня — нет и `lastmod`.
+fn sitemap(checked: Option<Date>) -> String {
     let mut out = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
          <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\" xmlns:xhtml=\"http://www.w3.org/1999/xhtml\">\n",
     );
     let terms = |lang: Lang| Legal::Terms.path(lang);
     let privacy = |lang: Lang| Legal::Privacy.path(lang);
-    let pages: [&dyn Fn(Lang) -> &'static str; 6] = [&url, &tax_path, &buy_path, &feedback_path, &terms, &privacy];
-    for path in pages {
+    let ruled = checked.map(|day| format!("    <lastmod>{}</lastmod>\n", iso(day))).unwrap_or_default();
+    let pages: [(&dyn Fn(Lang) -> &'static str, &str); 6] = [
+        (&url, ""),
+        (&tax_path, &ruled),
+        (&buy_path, ""),
+        (&feedback_path, ""),
+        (&terms, ""),
+        (&privacy, ""),
+    ];
+    for (path, lastmod) in pages {
         for lang in Lang::ALL {
-            out.push_str(&format!("  <url>\n    <loc>{SITE}{}</loc>\n", path(lang)));
+            out.push_str(&format!("  <url>\n    <loc>{SITE}{}</loc>\n{lastmod}", path(lang)));
             for other in Lang::ALL {
                 out.push_str(&format!(
                     "    <xhtml:link rel=\"alternate\" hreflang=\"{}\" href=\"{SITE}{}\" />\n",
@@ -1588,7 +1823,7 @@ mod tests {
                     if old.contains("class=\"editions\"") || current.contains("noindex") || current.contains("edition-note") {
                         wrong.push(format!("{doc:?} {lang:?}: прежняя и действующая перепутали свои слова"));
                     }
-                    if sitemap().contains(&at) {
+                    if sitemap(checked()).contains(&at) {
                         wrong.push(format!("{at}: прежняя редакция в карте сайта"));
                     }
                 }
@@ -1947,13 +2182,35 @@ mod tests {
         tax_page(lang, "kvartik-site-a.css", "kvartik-site-b.js", "/app/", checked())
     }
 
-    /// Страница о налоге (задача 118) — на своём языке, по адресу в папке
-    /// страницы языка, и всё на ней — из ядра: каждая ставка, действующая
-    /// в день сверки, — с процентом, вычетом и нижним пределом из файла
-    /// правил и ссылкой на свой источник, порог — суммой правил, сроки —
-    /// те же, что у общего календаря, пример — ответ калькулятора на тот же
-    /// ввод, курс ЦБ — со своим источником. Лендинг ведёт на неё карточкой.
-    /// Без дня сверки разделов нет: нет и правил, по которым их писать.
+    /// Кусок `html` от первого `start` до ближайшего после него `end`
+    /// включительно — строка таблицы или пункт списка, чтобы искать в нём,
+    /// а не во всей странице.
+    fn piece<'a>(html: &'a str, start: &str, end: &str) -> Option<&'a str> {
+        let at = html.find(start)?;
+        let to = html[at..].find(end)? + at + end.len();
+        Some(&html[at..to])
+    }
+
+    /// Ссылка страницы на текст акта записи правил — как её пишет
+    /// `source_links`, без него.
+    fn law_link(url: &str, law: &str, article: &str) -> String {
+        format!("<a href=\"{}\" lang=\"hy\">{}, {}</a>", escape(url), escape(law), escape(article))
+    }
+
+    /// Страница о налоге (задачи 118 и 126) — на своём языке, по адресу
+    /// в папке страницы языка, и всё на ней — из ядра. Сразу под заголовком —
+    /// ответ: самая низкая и самая высокая ставка строк дня сверки, порог
+    /// и ближайший срок квартала с кварталом; под ним — оглавление по якорям
+    /// разделов, которые есть на странице. Ставки — таблицей: у строки
+    /// налога — ставка, вычет с нижним пределом из файла правил и ссылка на
+    /// свой источник; порог — суммой правил; сроки — те же, что у общего
+    /// календаря, у каждого — ссылки на источники его записей
+    /// (`deadlines::sources`), а у перенесённых — строка о переносе с его
+    /// источниками; пример — ответ калькулятора на тот же ввод; курс ЦБ —
+    /// со ссылками на кодекс и на закон о поправке. Превью в чатах — её
+    /// заголовок и адрес. Лендинг ведёт на неё карточкой. Без дня сверки нет
+    /// ни ответа, ни оглавления, ни разделов: нет и правил, по которым их
+    /// писать.
     #[test]
     fn the_tax_page_takes_every_number_from_the_core() {
         let all = rules::armenia();
@@ -1963,48 +2220,148 @@ mod tests {
         for lang in Lang::ALL {
             let html = tax_sample(lang);
             let percent = |value: rules::Percent| i18n::percent(lang, i64::from(value.hundredths()));
+            let text = |key: Key| escape(t(lang, key));
             let mut need = vec![
                 format!("<html lang=\"{}\">", lang.code()),
                 format!("<link rel=\"canonical\" href=\"https://kvartik.com{}\" />", tax_path(lang)),
-                format!("<h1>{}</h1>", escape(t(lang, Key::TaxPageTitle))),
                 escape(&fill(t(lang, Key::TaxPageLead), &[&i18n::date(lang, day)])),
+                format!("<meta property=\"og:url\" content=\"https://kvartik.com{}\" />", tax_path(lang)),
+                format!("<meta property=\"og:title\" content=\"{}\" />", text(Key::TaxPageTitle)),
+                format!("<meta property=\"og:description\" content=\"{}\" />", text(Key::TaxPageDescription)),
+                "<meta property=\"og:image\" content=\"https://kvartik.com/app/icons/icon-512.png\" />".to_owned(),
             ];
-            let rates: Vec<_> =
+            let mut rates: Vec<_> =
                 all.turnover_rates().iter().filter(|r| r.from <= day && r.until.is_none_or(|u| day <= u)).collect();
             if rates.len() < 10 {
                 wrong.push(format!("{lang:?}: ставок дня сверки {} — меньше строк таблицы", rates.len()));
             }
-            for rate in rates {
-                need.push(format!("<strong>{}</strong>\u{a0}— ", escape(t(lang, turnover::kind_key(rate.kind)))));
-                need.push(match (rate.deduction, rate.floor) {
-                    (Some(deduction), Some(floor)) => escape(&fill(
-                        t(lang, Key::TaxRateDeducted),
-                        &[&percent(rate.rate), &percent(deduction), &percent(floor)],
-                    )),
-                    _ => escape(&fill(t(lang, Key::TaxRateFlat), &[&percent(rate.rate)])),
-                });
-                need.push(format!(
-                    "<a href=\"{}\" lang=\"hy\">{}, {}</a>",
-                    escape(&rate.source.url),
-                    escape(&rate.source.law),
-                    escape(&rate.source.article)
-                ));
-            }
-            let threshold = rules::on(all.turnover_threshold(), day).expect("порог");
-            need.push(escape(&fill(
-                t(lang, Key::TaxPageThreshold),
-                &[&i18n::money(lang, Money::new(threshold.amount, Currency::Amd))],
-            )));
+            // Ответ сверху — первым абзацем под заголовком, а под ним
+            // оглавление: «от» — самая низкая ставка строк, «до» — самая
+            // высокая, срок — первый срок квартала после дня сверки.
             let terms = deadlines::general(day, until);
+            let (due, quarter) = terms
+                .iter()
+                .find_map(|deadline| match deadline.kind {
+                    deadlines::Kind::Turnover(quarter) => Some((deadline.by_law, quarter)),
+                    _ => None,
+                })
+                .expect("срок квартала");
+            let mut by_rate = rates.clone();
+            by_rate.sort_by_key(|rate| rate.rate);
+            let threshold = rules::on(all.turnover_threshold(), day).expect("порог");
+            let amount = i18n::money(lang, Money::new(threshold.amount, Currency::Amd));
+            let month_day = rules::on(all.turnover_due(), quarter.next().expect("квартал").first_day()).expect("срок").day;
+            let answer = escape(&fill(
+                t(lang, Key::TaxPageAnswer),
+                &[
+                    &percent(by_rate[0].rate),
+                    &percent(by_rate[by_rate.len() - 1].rate),
+                    &amount,
+                    &month_day.to_string(),
+                    &i18n::quarter(lang, quarter),
+                    &i18n::date(lang, due),
+                ],
+            ));
+            need.push(format!(
+                "<h1>{}</h1>\n        <p class=\"answer\">{answer}</p>\n        <nav class=\"contents\" aria-label=\"{}\">",
+                text(Key::TaxPageTitle),
+                text(Key::TaxPageContents)
+            ));
+            for (id, heading) in [
+                ("rates", Key::TaxPageRates),
+                ("deadlines", Key::TaxPageDeadlines),
+                ("example", Key::TaxPageExample),
+                ("currency", Key::TaxPageCurrency),
+            ] {
+                need.push(format!("<li><a href=\"#{id}\">{}</a></li>", text(heading)));
+                need.push(format!("<h2 id=\"{id}\">{}</h2>", text(heading)));
+            }
+            need.push(format!(
+                "<tr><th scope=\"col\">{}</th><th scope=\"col\">{}</th><th scope=\"col\">{}</th><th scope=\"col\">{}</th></tr>",
+                text(Key::ActivityKind),
+                text(Key::TaxLineRate),
+                text(Key::TaxPageRateDeduction),
+                text(Key::TaxPageSourceColumn)
+            ));
+            // Строка таблицы — у каждой ставки дня, в порядке файла правил.
+            let mut after = 0;
+            for rate in rates.drain(..) {
+                let head = format!("<th scope=\"row\">{}</th>", escape(t(lang, turnover::kind_key(rate.kind))));
+                let Some(row) = piece(&html[after..], &head, "</tr>") else {
+                    wrong.push(format!("{lang:?}: нет строки {head} после прежней"));
+                    continue;
+                };
+                after += html[after..].find(&head).unwrap_or_default();
+                let mut flat = fill(t(lang, Key::TaxRateFlat), &[&percent(rate.rate)]);
+                if let Some(until) = rate.until {
+                    flat = format!("{flat}; {}", fill(t(lang, Key::TaxRateUntil), &[&i18n::date(lang, until)]));
+                }
+                let deduction = match (rate.deduction, rate.floor) {
+                    (Some(deduction), Some(floor)) => {
+                        fill(t(lang, Key::TaxRateDeduction), &[&percent(deduction), &percent(floor)])
+                    }
+                    _ => t(lang, Key::TaxRateNoDeduction).to_owned(),
+                };
+                let cells = [
+                    format!("<td data-label=\"{}\">{}</td>", text(Key::TaxLineRate), escape(&flat)),
+                    format!("<td data-label=\"{}\">{}</td>", text(Key::TaxPageRateDeduction), escape(&deduction)),
+                    format!(
+                        "<td data-label=\"{}\" class=\"source\">{}; {}</td>",
+                        text(Key::TaxPageSourceColumn),
+                        std::iter::once(law_link(&rate.source.url, &rate.source.law, &rate.source.article))
+                            .chain(rate.source.also.iter().map(|also| law_link(&also.url, &also.law, &also.article)))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        escape(&fill(t(lang, Key::TaxPageChecked), &[&i18n::date(lang, rate.source.checked)]))
+                    ),
+                ];
+                for cell in cells {
+                    if !row.contains(&cell) {
+                        wrong.push(format!("{lang:?}: в строке {head} нет {cell}"));
+                    }
+                }
+            }
+            need.push(escape(&fill(t(lang, Key::TaxPageThreshold), &[&amount])));
+            // Сроки — у каждого ссылка на источник его записи, а перенос —
+            // строкой под списком с источниками каждого переноса.
             if terms.len() < 4 {
                 wrong.push(format!("{lang:?}: сроков {} — меньше четырёх кварталов", terms.len()));
             }
-            for deadline in terms {
-                need.push(format!(
+            let mut shifts = Vec::new();
+            for deadline in &terms {
+                let head = format!(
                     "<li><strong>{}</strong>\u{a0}— {}",
                     escape(&i18n::date(lang, deadline.day)),
                     escape(&deadlines::what(lang, deadline.kind))
-                ));
+                );
+                let Some(item) = piece(&html, &head, "</li>") else {
+                    wrong.push(format!("{lang:?}: нет срока {head}"));
+                    continue;
+                };
+                let sources = deadlines::sources(deadline.kind);
+                if sources.is_empty() {
+                    wrong.push(format!("{lang:?}: у срока {:?} нет записи правил", deadline.kind));
+                }
+                if item.matches("<span class=\"note source\">").count() != sources.len() {
+                    wrong.push(format!("{lang:?}: у срока {head} источников не {}", sources.len()));
+                }
+                for source in sources {
+                    let link = law_link(&source.url, &source.law, &source.article);
+                    if !item.contains(&link) {
+                        wrong.push(format!("{lang:?}: у срока {head} нет источника {link}"));
+                    }
+                }
+                shifts.extend(deadlines::moved_sources(deadline.by_law));
+            }
+            if shifts.is_empty() {
+                wrong.push(format!("{lang:?}: ни один срок не перенесён — проверка переноса ничего не проверила"));
+            }
+            need.push(format!("<p>{}<br />", text(Key::TaxPageShift)));
+            for source in shifts {
+                need.push(law_link(&source.url, &source.law, &source.article));
+                for also in &source.also {
+                    need.push(law_link(&also.url, &also.law, &also.article));
+                }
             }
             let (kind, turnover, residency, born) = TAX_EXAMPLE;
             let raw = example::Raw {
@@ -2021,20 +2378,164 @@ mod tests {
             for block in answer.blocks {
                 need.push(format!(">{}</", escape(&block.text)));
             }
+            // Курс ЦБ — кодекс и закон о поправке, каждый своей ссылкой.
             let rate_day = rules::on(all.rate_day(), day).expect("курс ЦБ");
             need.push(escape(&fill(t(lang, Key::TaxPageCurrencyAbout), &[&i18n::date(lang, rate_day.from)])));
-            need.push(format!("<a href=\"{}\" lang=\"hy\">", escape(&rate_day.source.url)));
+            let source = &rate_day.source;
+            if source.also.is_empty() {
+                wrong.push("у курса ЦБ нет закона о поправке отдельной ссылкой".to_owned());
+            }
+            let mut links = vec![law_link(&source.url, &source.law, &source.article)];
+            links.extend(source.also.iter().map(|also| law_link(&also.url, &also.law, &also.article)));
+            need.push(links.join(", "));
             for piece in need {
                 if !html.contains(&piece) {
                     wrong.push(format!("{lang:?}: нет {piece}"));
                 }
+            }
+            // Ни одна ссылка на закон не несёт адреса в своём тексте.
+            if html.contains(", https://") || html.contains("(https://") {
+                wrong.push(format!("{lang:?}: адрес в тексте ссылки на закон"));
             }
             if !sample(lang).contains(&format!("<a class=\"button secondary\" href=\"{}\">", tax_path(lang))) {
                 wrong.push(format!("{lang:?}: лендинг не ведёт на страницу о налоге"));
             }
         }
         let bare = tax_page(Lang::Ru, "a.css", "b.js", "/app/", None);
-        assert!(!bare.contains("id=\"rates\"") && !bare.contains("id=\"example\""), "без сверки — без разделов");
+        for absent in ["id=\"rates\"", "id=\"example\"", "class=\"answer\"", "class=\"contents\"", "dateModified"] {
+            if bare.contains(absent) {
+                wrong.push(format!("без сверки на странице {absent}"));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// Ответ сверху (задача 126) — числами, написанными рукой по файлу правил
+    /// версии 2026.12 и календарю, а не теми же вызовами, что у страницы:
+    /// ставки строк от 1 % (высокие технологии) до 20 % (прочие доходы при
+    /// заявлении об общепите), порог 115 000 000 ֏, 20-е число. И день —
+    /// по закону, а не перенесённый: срок за I квартал 2025 года — 20 апреля,
+    /// воскресенье, перенос — на понедельник, 21-е (НК 261(1), 262(1);
+    /// ՀՕ-180-Ն 32(4)), а абзац, который цитируют без оговорки об уплате,
+    /// называет 20-е.
+    #[test]
+    fn the_answer_names_the_day_by_law() {
+        let all = rules::armenia();
+        let answer = |day| tax_answer(Lang::Ru, all, Date::new(2025, 3, day).expect("день"));
+        let march = answer(1);
+        for piece in [
+            "<p class=\"answer\">Налог с оборота ИП в Армении\u{a0}— от 1\u{a0}% до 20\u{a0}% дохода квартала",
+            "пока оборот за год не больше 115\u{a0}000\u{a0}000\u{a0}֏.",
+            "до 20-го числа месяца после квартала: за I\u{a0}квартал 2025\u{a0}— до 20.04.2025.</p>",
+        ] {
+            assert!(march.contains(piece), "нет «{piece}» в {march}");
+        }
+        assert!(!march.contains("21.04.2025"), "перенесённый день в ответе: {march}");
+        let november = tax_answer(Lang::Ru, all, Date::new(2026, 11, 25).expect("день"));
+        assert!(november.contains("за IV\u{a0}квартал 2026\u{a0}— до 20.01.2027."), "{november}");
+        // Правил ставок на этот день нет — нет и абзаца, а не его половины.
+        assert_eq!(tax_answer(Lang::Ru, all, Date::new(2024, 6, 1).expect("день")), "");
+    }
+
+    /// Ссылки на законы (задача 126) — только текстом: адрес, акт и статья
+    /// записи правил экранированы и в `href`, и в тексте, у записи и у её
+    /// другого акта (`also`). Сегодня в файле правил таких знаков нет, и без
+    /// этой проверки `escape`, убранный из `source_links`, прошёл бы молча.
+    #[test]
+    fn law_links_are_text() {
+        let source = rules::Source {
+            law: "ՀՕ-1-Ն \"A\" & <b>".to_owned(),
+            article: "հոդված 1 <i>".to_owned(),
+            url: "https://www.arlis.am/hy/acts/1?a=1&b=\"2\"".to_owned(),
+            checked: Date::new(2026, 11, 25).expect("день"),
+            also: vec![rules::Also {
+                law: "ՀՕ-2-Ն 'x'".to_owned(),
+                article: "<script>".to_owned(),
+                url: "https://www.arlis.am/hy/acts/2?c=3&d=4".to_owned(),
+            }],
+        };
+        let html = source_links(&source);
+        assert_eq!(
+            html,
+            "<a href=\"https://www.arlis.am/hy/acts/1?a=1&amp;b=&quot;2&quot;\" lang=\"hy\">ՀՕ-1-Ն &quot;A&quot; &amp; &lt;b&gt;, \
+             հոդված 1 &lt;i&gt;</a>, <a href=\"https://www.arlis.am/hy/acts/2?c=3&amp;d=4\" lang=\"hy\">ՀՕ-2-Ն &#39;x&#39;, \
+             &lt;script&gt;</a>"
+        );
+        let line = tax_source(Lang::Ru, &source);
+        assert!(line.contains(&html) && !line.contains("<script>") && !line.contains("<b>"), "{line}");
+    }
+
+    /// Описание страницы о налоге для поисковиков (задача 126) — один блок
+    /// JSON-LD, и он разбирается как JSON: сама страница (`WebPage`) с её
+    /// адресом, заголовком, описанием, языком, днём последней сверки правил
+    /// (`dateModified`) и издателем — тем же продавцом, что у страницы языка;
+    /// хлебные крошки ведут со страницы своего языка на неё. `<`, `>` и `&`
+    /// строк таблицы элемент не закроют. Без дня сверки дня изменения нет.
+    #[test]
+    fn the_tax_page_describes_itself_for_search_engines() {
+        let day = checked().expect("правила сверены");
+        let mut wrong = Vec::new();
+        for lang in Lang::ALL {
+            let html = tax_sample(lang);
+            if html.matches("<script type=\"application/ld+json\">").count() != 1 {
+                wrong.push(format!("{lang:?}: блоков JSON-LD не один"));
+                continue;
+            }
+            let Some(json) = json_ld(&html) else {
+                wrong.push(format!("{lang:?}: нет JSON-LD"));
+                continue;
+            };
+            if json.contains('<') || json.contains('>') || json.contains('&') {
+                wrong.push(format!("{lang:?}: <, > или & в блоке как есть"));
+            }
+            let data: serde_json::Value = match serde_json::from_str(&json) {
+                Ok(data) => data,
+                Err(error) => {
+                    wrong.push(format!("{lang:?}: не JSON — {error}"));
+                    continue;
+                }
+            };
+            let site = |path: &str| serde_json::Value::from(format!("https://kvartik.com{path}"));
+            let page = &data["@graph"][0];
+            let crumbs = &data["@graph"][1];
+            let seller = &data["@graph"][2];
+            let date = format!("{:04}-{:02}-{:02}", day.year(), day.month(), day.day());
+            let items = &crumbs["itemListElement"];
+            let checks = [
+                (data["@context"] == "https://schema.org", "словарь schema.org"),
+                (page["@type"] == "WebPage" && page["url"] == site(tax_path(lang)), "страница со своим адресом"),
+                (page["name"] == t(lang, Key::TaxPageTitle), "заголовок — как у страницы"),
+                (page["description"] == t(lang, Key::TaxPageDescription), "описание — как у страницы"),
+                (page["inLanguage"] == lang.code(), "язык страницы"),
+                (page["dateModified"] == date.as_str(), "день изменения — день сверки правил"),
+                (page["publisher"]["@id"] == seller["@id"], "издатель — продавец"),
+                (seller["@type"] == "Organization" && seller["email"] == EMAIL, "продавец с почтой"),
+                (seller["@id"] == "https://kvartik.com/#seller", "тот же продавец, что у страницы языка"),
+                (page["breadcrumb"]["@id"] == crumbs["@id"] && crumbs["@type"] == "BreadcrumbList", "хлебные крошки"),
+                (items.as_array().map(Vec::len) == Some(2), "две ступени"),
+                (items[0]["position"] == 1 && items[0]["item"] == site(url(lang)), "первая — страница своего языка"),
+                (items[0]["name"] == t(lang, Key::AppName), "имя страницы языка"),
+                (items[1]["position"] == 2 && items[1]["item"] == site(tax_path(lang)), "вторая — о налоге"),
+                (items[1]["name"] == t(lang, Key::TaxPageLink), "имя страницы о налоге"),
+            ];
+            for (ok, what) in checks {
+                if !ok {
+                    wrong.push(format!("{lang:?}: {what}"));
+                }
+            }
+        }
+        // Продавец страницы о налоге — тот же узел, что у страницы языка.
+        let landing: serde_json::Value =
+            serde_json::from_str(&json_ld(&sample(Lang::Ru)).expect("блок")).expect("JSON");
+        let tax: serde_json::Value = serde_json::from_str(&json_ld(&tax_sample(Lang::Ru)).expect("блок")).expect("JSON");
+        if landing["@graph"][1] != tax["@graph"][2] {
+            wrong.push("продавец у страницы о налоге другой".to_owned());
+        }
+        let bare = tax_page(Lang::Ru, "a.css", "b.js", "/app/", None);
+        let data: serde_json::Value = serde_json::from_str(&json_ld(&bare).expect("блок")).expect("JSON");
+        if !data["@graph"][0]["dateModified"].is_null() {
+            wrong.push("без сверки — день изменения".to_owned());
+        }
         assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
@@ -2174,8 +2675,9 @@ mod tests {
 
     /// Ни встроенного скрипта, ни стиля, ни атрибута `style` или
     /// обработчика `on…`: CSP их не пустил бы, и страница молча осталась бы
-    /// без них. Блок данных JSON-LD (задача 118) — не скрипт, и он один,
-    /// у страниц языков.
+    /// без них. Блок данных JSON-LD (задача 118) — не скрипт, и он не больше
+    /// одного на страницу: у страниц языков и, с задачи 126, у страниц
+    /// о налоге.
     #[test]
     fn nothing_inline_for_the_csp_to_block() {
         let mut wrong = Vec::new();
@@ -2201,19 +2703,23 @@ mod tests {
         assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
+    /// Текст первого блока JSON-LD страницы `html`.
+    fn json_ld(html: &str) -> Option<String> {
+        let open = "<script type=\"application/ld+json\">";
+        let at = html.find(open)? + open.len();
+        Some(html[at..at + html[at..].find("</script>")?].to_owned())
+    }
+
     /// Описание программы для поисковиков (задача 118) — у каждой страницы
     /// языка, одно, и разбирается как JSON: программа со страницей своего
     /// языка, описанием страницы и ключами с ценами ядра в драмах и страницей
     /// «Купить» своего языка, продавец — с почтой из ядра. `<`, `>` и `&`
-    /// строки таблицы элемент не закроют. У остальных страниц его нет: они
-    /// не о программе целиком.
+    /// строки таблицы элемент не закроют. У страниц о налоге — свой блок
+    /// без программы (задача 126), а у остальных страниц нет ни блока, ни
+    /// превью в чатах: они не о программе целиком.
     #[test]
     fn language_pages_describe_the_app_for_search_engines() {
-        let block = |html: &str| -> Option<String> {
-            let open = "<script type=\"application/ld+json\">";
-            let at = html.find(open)? + open.len();
-            Some(html[at..at + html[at..].find("</script>")?].to_owned())
-        };
+        let block = json_ld;
         let mut wrong = Vec::new();
         for lang in Lang::ALL {
             let html = sample(lang);
@@ -2259,10 +2765,21 @@ mod tests {
                 }
             }
         }
+        // Блок — у страниц языков и страниц о налоге (задача 126, у неё свой:
+        // `the_tax_page_describes_itself_for_search_engines`), а программа —
+        // только у страниц языков. У остальных — ни блока, ни превью.
         for (page, html) in every_page() {
             let language_page = Lang::ALL.into_iter().any(|lang| page == format!("{lang:?} {}", url(lang)));
-            if !language_page && block(&html).is_some() {
-                wrong.push(format!("{page}: JSON-LD не у страницы языка"));
+            let tax_page = Lang::ALL.into_iter().any(|lang| page == format!("{lang:?} {}", tax_path(lang)));
+            let found = block(&html);
+            if !language_page && !tax_page && (found.is_some() || html.contains("og:")) {
+                wrong.push(format!("{page}: JSON-LD или превью не у страницы языка и не о налоге"));
+            }
+            if (language_page || tax_page) && (found.is_none() || !html.contains("<meta property=\"og:url\"")) {
+                wrong.push(format!("{page}: нет JSON-LD или превью"));
+            }
+            if tax_page && found.is_some_and(|json| json.contains("SoftwareApplication")) {
+                wrong.push(format!("{page}: страница о налоге описывает программу"));
             }
         }
         assert!(wrong.is_empty(), "{wrong:#?}");
@@ -2307,10 +2824,21 @@ mod tests {
         assert!(stylesheet(TOKENS_CSS, "", LANDING_CSS, "/app/").is_err());
     }
 
-    /// Карта сайта называет все страницы, а `robots.txt` — карту.
+    /// Карта сайта называет все страницы, а `robots.txt` — карту. У страниц
+    /// о налоге (задача 126) — `lastmod`, день последней сверки правил,
+    /// у остальных — нет: дня их правки сборка не знает. Без дня сверки
+    /// `lastmod` нет ни у кого.
     #[test]
     fn robots_and_sitemap_point_at_every_page() {
-        let map = sitemap();
+        let day = checked().expect("правила сверены");
+        let lastmod = format!("<lastmod>{:04}-{:02}-{:02}</lastmod>", day.year(), day.month(), day.day());
+        let map = sitemap(checked());
+        for lang in Lang::ALL {
+            let entry = format!("<loc>https://kvartik.com{}</loc>\n    {lastmod}\n", tax_path(lang));
+            assert!(map.contains(&entry), "lastmod о налоге {lang:?}:\n{map}");
+        }
+        assert_eq!(map.matches("<lastmod>").count(), Lang::ALL.len(), "lastmod — только у страниц о налоге");
+        assert!(!sitemap(None).contains("<lastmod>"), "без сверки — без lastmod");
         for lang in Lang::ALL {
             assert!(map.contains(&format!("<loc>https://kvartik.com{}</loc>", url(lang))), "{lang:?}");
             assert!(map.contains(&format!("<loc>https://kvartik.com{}</loc>", buy_path(lang))), "«Купить» {lang:?}");

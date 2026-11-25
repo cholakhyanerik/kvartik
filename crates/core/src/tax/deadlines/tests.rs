@@ -177,6 +177,114 @@ fn the_built_in_calendar_shifts_by_the_law() {
     assert!(wrong.is_empty(), "встроенный календарь: {wrong:#?}");
 }
 
+/// Источники дня срока (задача 126) — те записи файла правил, из которых
+/// день берут: квартал — `turnover_due` месяца после него, заявления —
+/// своей записью года, гербовый сбор микропредприятия — шкалой года,
+/// медстраховка и декларация — записью года, а годовые платежи — три
+/// записи: налог на прибыль, соцплатёж и гербовый сбор года. Нет правила —
+/// нет ни дня, ни источника.
+#[test]
+fn every_deadline_names_the_records_it_comes_from() {
+    let all = rules::armenia();
+    let one = |source: Option<&'static Source>| source.into_iter().collect::<Vec<_>>();
+    let cases: [(Kind, Vec<&Source>); 13] = [
+        (Kind::Turnover(quarter(2026, 4)), one(rules::on(all.turnover_due(), day(2027, 1, 1)).map(Rule::source))),
+        (Kind::Turnover(quarter(2024, 3)), Vec::new()),
+        (
+            Kind::Application(2027),
+            one(rules::on(all.turnover_application(), day(2027, 1, 1)).map(Rule::source)),
+        ),
+        (
+            Kind::MicroApplication(2027),
+            one(rules::on(all.micro_application(), day(2027, 1, 1)).map(Rule::source)),
+        ),
+        (Kind::MicroReport(2026), one(rules::for_year(all.micro_report(), 2026).map(Rule::source))),
+        (
+            Kind::Annual(2026),
+            [
+                rules::for_year(all.profit_tax(), 2026).map(Rule::source),
+                rules::for_year(all.social_payment(), 2026).map(Rule::source),
+                rules::for_year(all.stamp_duty(), 2026).map(Rule::source),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
+        ),
+        (Kind::MicroAnnual(2026), one(rules::for_year(all.stamp_duty(), 2026).map(Rule::source))),
+        (Kind::HealthYear(2026), one(rules::for_year(all.health_insurance(), 2026).map(Rule::source))),
+        (
+            Kind::HealthMonth { year: 2027, month: 3 },
+            one(rules::for_year(all.health_insurance(), 2027).map(Rule::source)),
+        ),
+        (Kind::Declaration(2025), one(rules::for_year(all.income_declaration(), 2025).map(Rule::source))),
+        (Kind::Declaration(2026), one(rules::for_year(all.income_declaration(), 2026).map(Rule::source))),
+        (Kind::Application(2024), Vec::new()),
+        (Kind::Annual(2024), Vec::new()),
+    ];
+    let mut wrong = Vec::new();
+    for (kind, expected) in cases {
+        let got = sources(kind);
+        let same = got.len() == expected.len() && got.iter().zip(&expected).all(|(a, b)| std::ptr::eq(*a, *b));
+        if !same {
+            let laws = |list: &[&Source]| list.iter().map(|source| source.law.clone()).collect::<Vec<_>>();
+            wrong.push(format!("{kind:?}: {:?} вместо {:?}", laws(&got), laws(&expected)));
+        }
+    }
+    // У годовых платежей источника три, и все разные: соцплатёж и гербовый
+    // сбор — не налог на прибыль, а у медстраховки 2026 и 2027 годов —
+    // разные записи: источник не «первый попавшийся».
+    let annual = sources(Kind::Annual(2026));
+    if annual.len() != 3 || std::ptr::eq(annual[0], annual[1]) || std::ptr::eq(annual[1], annual[2]) {
+        wrong.push(format!("годовые платежи: {} источника", annual.len()));
+    }
+    let health = |year| sources(Kind::HealthYear(year)).first().map(|source| *source as *const Source);
+    if health(2026) == health(2027) {
+        wrong.push("медстраховка 2026 и 2027 — один источник".to_owned());
+    }
+    // Каждый срок общего календаря — со своим источником.
+    for deadline in general(day(2025, 1, 1), day(2027, 12, 31)) {
+        if sources(deadline.kind).is_empty() {
+            wrong.push(format!("{:?}: срок без источника", deadline.kind));
+        }
+    }
+    assert!(wrong.is_empty(), "источники сроков: {wrong:#?}");
+}
+
+/// Откуда перенос (задача 126): запись переноса и выходных, а нерабочий
+/// праздник или день решения правительства — и их записи, по разу. Рабочий
+/// день — без источников.
+#[test]
+fn a_moved_day_names_why() {
+    let all = rules::armenia();
+    let shift = all.deadline_shift()[0].source();
+    let (old_holidays, holidays) = (all.holidays()[0].source(), all.holidays()[1].source());
+    let decision = all.days_off()[0].source();
+    let cases: [(Date, Vec<&Source>); 6] = [
+        // Суббота.
+        (day(2027, 2, 20), vec![shift]),
+        // Вторник.
+        (day(2027, 4, 20), vec![]),
+        // 31 декабря — 2 января — праздники записи 2025 года, 3–4 января — выходные.
+        (day(2025, 12, 31), vec![shift, old_holidays]),
+        // 27 и 28 января 2026 года — праздники записи с 21 января 2026 года.
+        (day(2026, 1, 27), vec![shift, holidays]),
+        // 4 мая 2026 года — нерабочий по решению 109-Ն.
+        (day(2026, 5, 4), vec![shift, decision]),
+        // 1 мая 2027 года — суббота и праздник, 2-е — воскресенье.
+        (day(2027, 5, 1), vec![shift, holidays]),
+    ];
+    let mut wrong = Vec::new();
+    for (by_law, expected) in cases {
+        let got = moved_sources(by_law);
+        let same = got.len() == expected.len() && got.iter().zip(&expected).all(|(a, b)| std::ptr::eq(*a, *b));
+        if !same {
+            let laws = |list: &[&Source]| list.iter().map(|source| source.law.clone()).collect::<Vec<_>>();
+            wrong.push(format!("{by_law:?}: {:?} вместо {:?}", laws(&got), laws(&expected)));
+        }
+    }
+    assert!(wrong.is_empty(), "источники переноса: {wrong:#?}");
+}
+
 /// Перенесённый срок подачи — без оговорки: так переносит и ՊԵԿ. Где к сроку
 /// платят — что заплатить надёжнее до дня по закону: перенос уплаты ՊԵԿ не
 /// подтверждал («Перенос»). У рабочего дня слов нет. 1 ноября 2026 года —

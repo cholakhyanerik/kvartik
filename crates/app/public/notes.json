@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.201",
+      "date": "2026-11-25",
+      "hy": [
+        "«Ծրագրի մասին» էկրանին աշխատանքային օրենսգիրքն ու ԿԲ փոխարժեքի մասին օրենքը (2026 թ. հուլիսի 1-ից) կանոնների ակտերի ցանկում այժմ առանձին տողերով են, իսկ ժամկետների աղբյուրներն օրենքի հետ նորից ստուգված են 25.11.2026-ին։",
+        "kvartik.com-ի շրջանառության հարկի էջը սկսվում է կարճ պատասխանով, դրույքաչափերն աղյուսակով են, իսկ յուրաքանչյուր ժամկետի մոտ՝ օրենքի հոդվածն ու ստուգման օրը։"
+      ],
+      "ru": [
+        "В «О программе» Трудовой кодекс и закон о курсе ЦБ (с 1 июля 2026 года) теперь отдельными строками в списке актов правил, а источники сроков заново сверены с законом 25.11.2026.",
+        "Страница о налоге с оборота на kvartik.com начинается с короткого ответа, ставки на ней — таблицей, а у каждого срока — статья закона и день сверки."
+      ],
+      "en": [
+        "In About, the Labour Code and the law on the CBA rate (from 1 July 2026) are now separate lines in the list of acts behind the rules, and the sources of deadlines were checked against the law again on Nov 25, 2026.",
+        "The turnover tax page on kvartik.com now opens with a short answer, shows the rates as a table, and gives each deadline its article of law and the day it was checked."
+      ]
+    },
+    {
       "version": "0.0.200",
       "date": "2026-11-25",
       "hy": [
@@ -269,22 +285,6 @@
       ],
       "en": [
         "Nothing changed in the app."
-      ]
-    },
-    {
-      "version": "0.0.181",
-      "date": "2026-11-23",
-      "hy": [
-        "Պահուստային պատճենը 128 ՄԲ-ից մեծ, օրինակ՝ տարվա կտրոնների լուսանկարներով, այժմ նույնպես արվում է. ծրագիրն այն բաժանում է մի քանի ֆայլի՝ մասերի։ Պահպանեք յուրաքանչյուրը, իսկ ավտոմատ պատճենը մասերը դնում է կողք կողքի իր թղթապանակում։",
-        "Մասերը վերականգնվում են մեկ առ մեկ, ցանկացած հերթականությամբ. ծրագիրն ասում է, թե որ մասերն են արդեն վերականգնվել, իսկ նույն պատճենի հաջորդ մասը, քանի դեռ էկրանը բաց է, վերականգնում է առանց գաղտնաբառի։"
-      ],
-      "ru": [
-        "Резервная копия больше 128 МБ — например, с фото чеков за год — теперь тоже делается: программа делит её на несколько файлов, частей. Сохраните каждый, а автокопия кладёт части рядом в свою папку.",
-        "Части восстанавливаются по одной, в любом порядке: программа говорит, какие уже легли, а следующую часть той же копии, пока экран открыт, кладёт без повторного пароля."
-      ],
-      "en": [
-        "A backup over 128 MB — with a year of receipt photos, for example — can now be made too: the app splits it into several files, parts. Save each one; automatic backup puts the parts side by side in its folder.",
-        "Parts are restored one at a time, in any order: the app tells which ones are already in, and while the screen stays open, it restores the next part of the same backup without asking for the password again."
       ]
     }
   ]

@@ -47,7 +47,7 @@
 
 use super::annual::{self, Health, Status, Total};
 use super::closing::Closing;
-use super::rules::{self, HealthBy, Rule, Rules};
+use super::rules::{self, HealthBy, Rule, Rules, Source};
 use super::turnover::{Books, Leaving};
 use crate::i18n::{self, Key, Lang, fill, t};
 use crate::model::date::{Date, Quarter};
@@ -143,6 +143,86 @@ pub fn what(lang: Lang, kind: Kind) -> String {
         ),
         Kind::Declaration(year) => fill(t(lang, Key::DeadlineDeclaration), &[&year.to_string()]),
     }
+}
+
+/// Откуда день срока `kind` по закону (задача 126): источники тех записей
+/// файла правил, из которых его берут функции ниже, — `turnover_due` по
+/// первому дню месяца после квартала, заявления — по 1 января года,
+/// медстраховка и декларация — по записи года. Годовые платежи — три
+/// платежа, и источника три: налог на прибыль (его день берёт [`general`]
+/// и `annual::Total`; НК, ст. 136, ч. 4, — только о нём), соцплатёж
+/// и гербовый сбор года — у каждого свой закон и свой срок. Гербовый сбор
+/// микропредприятия — его шкала года. Записи и дни сверки — данные, а не
+/// код: второго списка статей здесь нет, и он не разойдётся с файлом. Пусто —
+/// правила нет: у такого срока нет и дня.
+///
+/// Перенос с нерабочего дня — другой источник: [`moved_sources`].
+pub fn sources(kind: Kind) -> Vec<&'static Source> {
+    let all = rules::armenia();
+    let january = |year: u16| Date::new(year, 1, 1);
+    let found = match kind {
+        Kind::Turnover(quarter) => {
+            vec![quarter.next().and_then(|next| rules::on(all.turnover_due(), next.first_day())).map(Rule::source)]
+        }
+        Kind::Application(year) => {
+            vec![january(year).and_then(|day| rules::on(all.turnover_application(), day)).map(Rule::source)]
+        }
+        Kind::MicroApplication(year) => {
+            vec![january(year).and_then(|day| rules::on(all.micro_application(), day)).map(Rule::source)]
+        }
+        Kind::MicroReport(year) => vec![rules::for_year(all.micro_report(), year).map(Rule::source)],
+        // Без налога на прибыль года нет и дня срока: остальным двум
+        // источникам не к чему стоять.
+        Kind::Annual(year) => match rules::for_year(all.profit_tax(), year) {
+            Some(profit) => vec![
+                Some(profit.source()),
+                rules::for_year(all.social_payment(), year).map(Rule::source),
+                rules::for_year(all.stamp_duty(), year).map(Rule::source),
+            ],
+            None => Vec::new(),
+        },
+        Kind::MicroAnnual(year) => vec![rules::for_year(all.stamp_duty(), year).map(Rule::source)],
+        Kind::HealthYear(year) | Kind::HealthMonth { year, .. } => {
+            vec![rules::for_year(all.health_insurance(), year).map(Rule::source)]
+        }
+        Kind::Declaration(year) => vec![rules::for_year(all.income_declaration(), year).map(Rule::source)],
+    };
+    found.into_iter().flatten().collect()
+}
+
+/// Откуда перенос срока, который по закону кончается `by_law` (задача 126):
+/// запись переноса (`deadline_shift`: ՀՕ-180-Ն, ст. 32, ч. 4, и выходные
+/// дни недели), а если нерабочими были праздник или день решения
+/// правительства — и их записи, по разу, в этом порядке. Пусто — день
+/// рабочий, переноса нет. Дни те же, что у [`last_day`].
+pub fn moved_sources(by_law: Date) -> Vec<&'static Source> {
+    let all = rules::armenia();
+    let last = last_day(by_law);
+    let mut found: Vec<&'static Source> = Vec::new();
+    let mut add = |source: &'static Source| {
+        if !found.iter().any(|known| std::ptr::eq(*known, source)) {
+            found.push(source);
+        }
+    };
+    if last == by_law {
+        return found;
+    }
+    if let Some(shift) = rules::on(all.deadline_shift(), by_law) {
+        add(shift.source());
+    }
+    let mut day = Some(by_law);
+    while let Some(off) = day.filter(|day| *day < last) {
+        if let Some(holidays) = rules::on(all.holidays(), off).filter(|holidays| holidays.contains(off)) {
+            add(holidays.source());
+        }
+        for decision in all.days_off().iter().filter(|decision| decision.period().contains(off)) {
+            if decision.off.contains(&off) {
+                add(decision.source());
+            }
+        }
+        day = off.add_days(1);
+    }
+    found
 }
 
 /// Платят ли к сроку: перенос дня уплаты ՊԵԿ не подтверждал («Перенос»
