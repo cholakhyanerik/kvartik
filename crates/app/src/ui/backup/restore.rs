@@ -854,11 +854,11 @@ pub(super) async fn restore(backups: Backups, job: RestoreJob) -> Result<Recover
         RestoreJob::Open(sealed, typed) => {
             let password = crypto::normalize(&typed);
             let (entries, key) = stored::unlock(FILE_KINDS, &sealed, &password).await?;
-            opened(backups, &store, sealed, entries, Rc::new(key)).await
+            opened(backups, &store, sealed, entries, Rc::new(key), Some(password.as_str())).await
         }
         RestoreJob::Known(sealed, key) => {
             let entries = stored::unlock_with(FILE_KINDS, &sealed, &key).await?;
-            opened(backups, &store, sealed, entries, key).await
+            opened(backups, &store, sealed, entries, key, None).await
         }
         RestoreJob::Merge(asked) => {
             // Копия другого ИП: программа не пуста — в ней свой профиль.
@@ -870,7 +870,9 @@ pub(super) async fn restore(backups: Backups, job: RestoreJob) -> Result<Recover
                         (&asked.sealed, &asked.key),
                         restored,
                         Landed::single(&restored, &asked.entries, SameIe::No),
-                    ),
+                        None,
+                    )
+                    .await,
                     After {
                         fresh: false,
                         ahead,
@@ -887,17 +889,19 @@ pub(super) async fn restore(backups: Backups, job: RestoreJob) -> Result<Recover
 }
 
 /// Расшифрованную копию — слить с базой или остановиться на вопросе.
-/// Копия одного ИП ложится в открытую базу, копия всех — по ИП.
+/// Копия одного ИП ложится в открытую базу, копия всех — по ИП. `typed` —
+/// пароль, которым её открыли (`merge::restored_from`).
 async fn opened(
     backups: Backups,
     store: &Store,
     sealed: Rc<Sealed>,
     entries: Vec<Entry>,
     key: Rc<crypto::Key>,
+    typed: Option<&str>,
 ) -> Result<Recovered, Problem> {
     let ahead = backup::ahead(&entries, clock::now());
     if backup::is_full(&entries) {
-        return restore_full(backups, store, (&sealed, &key), entries, ahead).await;
+        return restore_full(backups, store, (&sealed, &key), entries, ahead, typed).await;
     }
     // ИП несколько, а копия — ИП из списка, не открытого: в открытую
     // базу её не класть, а отдельным ИП — тем более (ревью 2026-11-06).
@@ -919,7 +923,7 @@ async fn opened(
     let fresh = !several && empty(store).await?;
     Ok(match stored::restore(store, KINDS, &entries, OtherIe::Ask).await? {
         Merged::Done(restored) => Recovered::Done(
-            restored_from(backups, (&sealed, &key), restored, Landed::single(&restored, &entries, own)),
+            restored_from(backups, (&sealed, &key), restored, Landed::single(&restored, &entries, own), typed).await,
             After {
                 fresh,
                 ahead,

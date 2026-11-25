@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.192",
+      "date": "2026-11-25",
+      "hy": [
+        "Նոր սարքը, պատճենը վերականգնելով, նրա գաղտնաբառն իրեն է վերցնում սեփական աղով, ոչ թե ֆայլի. այլ համակարգչի ավտոմատ պատճենի բանալին այլևս չի բացի այս սարքի ձեռքով արված պատճենները։"
+      ],
+      "ru": [
+        "Новое устройство, восстановив копию, берёт её пароль себе со своей солью, а не с солью файла: ключ автокопии другого компьютера больше не откроет ручные копии этого устройства."
+      ],
+      "en": [
+        "A new device that restores a backup takes its password with its own salt, not the file’s: the automatic backup key of another computer no longer opens this device’s manual backups."
+      ]
+    },
+    {
       "version": "0.0.191",
       "date": "2026-11-25",
       "hy": [
@@ -272,19 +285,6 @@
       ],
       "en": [
         "If you keep several entrepreneurs, a code on the “Another device” screen now carries the changes of all of them at once, with their list and Pro keys, instead of one by one."
-      ]
-    },
-    {
-      "version": "0.0.172",
-      "date": "2026-11-22",
-      "hy": [
-        "Կոդն ընդունած սարքը պատասխանում ցույց է տալիս անդորրագիր. սկանավորեք այն կոդ ստեղծած սարքում — և կերևա, որ ամեն ինչ հասել է, իսկ եթե ոչ՝ որ օրվանից ստեղծել նոր կոդ։"
-      ],
-      "ru": [
-        "Устройство, принявшее код, показывает в ответ квитанцию: снимите её на устройстве, которое сделало код, — и будет видно, что всё дошло, а если нет — с какого дня сделать новый код."
-      ],
-      "en": [
-        "The device that received a code shows a receipt in return: scan it on the device that made the code to see that everything arrived or, if not, from which day to make a new code."
       ]
     }
   ]

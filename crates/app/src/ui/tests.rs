@@ -910,10 +910,16 @@ fn choose_file(input: &HtmlInputElement, name: &str, text: &str) {
 /// профиля обязан перечитать её: иначе на новом устройстве после
 /// восстановления окно просит «заполнить профиль», который уже в базе,
 /// и второй профиль появляется рядом с первым. Копия — образец версии 0.0.12
-/// с профилем и логотипом.
+/// с профилем и логотипом. Пароль копии устройство без своего берёт себе —
+/// со своей солью, а не солью файла (ревью задачи 124): файл бывает
+/// автокопией другого компьютера, и его соль — соль ключа, который тот
+/// держит на диске.
 #[wasm_bindgen_test]
 async fn restoring_a_backup_shows_its_profile() {
     crate::store::delete_database(crate::store::DB_NAME).await;
+    if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
+        let _ = storage.remove_item("kvartik.backup_key");
+    }
     let lang = Lang::Ru;
     let device = Device::new();
     device.set_ui_lang(lang);
@@ -962,6 +968,21 @@ async fn restoring_a_backup_shows_its_profile() {
     visit(&host, &[Screen::Profile]).await;
     if !wait_for(&host, "ИП Арам Петросян").await {
         wrong.push("после восстановления раздел профиля не показал профиль копии".to_owned());
+    }
+    let sample = include_str!("../../../core/tests/backups/v2/kvartik-2026-10-12.json");
+    let file_salt = kvartik_core::format::backup::open(sample).ok().map(|sealed| sealed.lock().salt().to_vec());
+    match Device::new().backup_key() {
+        Some(own) => {
+            if Some(own.salt().to_vec()) == file_salt {
+                wrong.push("пароль копий устройства — с солью файла копии".to_owned());
+            }
+            let typed = crate::platform::crypto::normalize("Պահուստ копия sample 0.0.12");
+            let key = crate::platform::crypto::derive(&typed, own.salt(), own.iterations()).await;
+            if !key.is_ok_and(|key| own.accepts(key.check())) {
+                wrong.push("пароль копий устройства — не пароль копии".to_owned());
+            }
+        }
+        None => wrong.push("пароль копии устройство себе не взяло".to_owned()),
     }
     drop(mounted);
     host.remove();

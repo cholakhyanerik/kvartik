@@ -104,6 +104,7 @@ pub(super) async fn restore_full(
     (sealed, key): (&Sealed, &Rc<crypto::Key>),
     entries: Vec<Entry>,
     ahead: bool,
+    typed: Option<&str>,
 ) -> Result<Recovered, Problem> {
     let office = backups.office().ok_or(Problem::Say(Key::BackupFailed))?;
     // Конторы не было — устройство чьё-то своё, и пароль его копии — его.
@@ -125,7 +126,7 @@ pub(super) async fn restore_full(
         same: if done.covers_all { SameIe::Yes } else { SameIe::No },
         adopt: !had_office,
     };
-    let restored = restored_from(backups, (sealed, key), done.restored, landed);
+    let restored = restored_from(backups, (sealed, key), done.restored, landed, typed).await;
     // Программа была пуста — ни списка ИП, ни записей открытого: так копию
     // всех ИП кладут на новое устройство.
     let fresh = spare.is_some();
@@ -169,7 +170,7 @@ pub(super) async fn restore_as_new(backups: Backups, store: &Store, asked: &Aske
         same: SameIe::No,
         adopt: false,
     };
-    restored_from(backups, (&asked.sealed, &asked.key), restored, landed);
+    restored_from(backups, (&asked.sealed, &asked.key), restored, landed, None).await;
     let _ = new;
     Ok(Recovered::AsNew)
 }
@@ -178,11 +179,14 @@ pub(super) async fn restore_as_new(backups: Backups, store: &Store, asked: &Aske
 /// пароль копий и день последней копии. День сдвигает только копия, в которой
 /// данные открытой базы (`backup::last_after_restore`: они лежат в этом
 /// файле); в копии другого ИП их нет, и напоминание о копии не пропадает.
-pub(super) fn restored_from(
+/// `typed` — пароль, которым открыли копию (уже приведённый,
+/// `crypto::normalize`); у части, открытой ключом прошлой, его нет.
+pub(super) async fn restored_from(
     backups: Backups,
     (sealed, key): (&Sealed, &crypto::Key),
     restored: Restored,
     landed: Landed,
+    typed: Option<&str>,
 ) -> Restored {
     if landed.touched {
         backups.base.replaced();
@@ -196,12 +200,22 @@ pub(super) fn restored_from(
     let opened_with = DeviceKey::new(lock.iterations(), lock.salt().to_vec(), key.check().to_vec());
     // Своего пароля у устройства нет — берётся пароль этой копии, если она
     // своя: человек только что показал, что знает его, и следующая копия
-    // будет под ним же.
+    // будет под ним же. Но со своей солью, а не солью файла (ревью задачи
+    // 124): файл бывает автокопией другого компьютера, и его соль — соль
+    // ключа автокопий, который тот держит на диске открыто; ручные копии
+    // этого устройства под ней открыл бы ключ из профиля того компьютера,
+    // а обещано обратное (`.claude/rules/security.md`, «Файл копии»). Ключ —
+    // заново из введённого пароля; пароля нет (часть открыта ключом прошлой) —
+    // устройство его не берёт, и следующая копия спросит новый.
     match (device.backup_key(), opened_with) {
-        (None, Some(opened_with)) if landed.adopt => {
-            device.set_backup_key(&opened_with);
-            backups.key_set.set(true);
-            backups.password_entered();
+        (None, Some(_)) if landed.adopt => {
+            if let Some(typed) = typed
+                && let Some(own) = own_key(typed).await
+                && device.set_backup_key(&own)
+            {
+                backups.key_set.set(true);
+                backups.password_entered();
+            }
         }
         // Копия этого же пароля — пароль, значит, помнится.
         (Some(current), Some(opened_with)) if current == opened_with => backups.password_entered(),
@@ -224,6 +238,14 @@ pub(super) fn restored_from(
         backups.has_data.set(true);
     }
     restored
+}
+
+/// Пароль копий устройства из пароля `typed` — со своей случайной солью
+/// и полным числом итераций; `None` — шифр отказал.
+async fn own_key(typed: &str) -> Option<DeviceKey> {
+    let salt = crypto::random(backup::SALT_BYTES).ok()?;
+    let key = crypto::derive(typed, &salt, backup::KDF_ITERATIONS).await.ok()?;
+    DeviceKey::new(backup::KDF_ITERATIONS, salt, key.check().to_vec())
 }
 
 /// В базу `base` легли записи, самая ранняя — с моментом `oldest`: код
