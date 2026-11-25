@@ -1249,8 +1249,9 @@ macro_rules! en {
     (TaxPageLink) => { "Turnover tax\u{A0}— rates and deadlines" };
     (TaxPageTitle) => { "Turnover tax for individual entrepreneurs in Armenia\u{A0}— rates, deadlines and an example" };
     (TaxPageDescription) => { "Turnover tax rates by type of activity, the turnover threshold, deadlines for returns and payments for the year, a worked example and the CBA rate for income in foreign currency\u{A0}— with articles of the Tax Code of Armenia." };
-    (TaxPageAnswer) => { "Turnover tax for individual entrepreneurs in Armenia is {} to {} of the quarter's income, depending on the activity (Art.\u{A0}258 of the Tax Code), while the year's turnover is no more than {}. The return and the tax are due by day {} of the month after the quarter: for {}, by {}." };
+    (TaxPageAnswer) => { "Turnover tax is a regime an individual entrepreneur in Armenia opts into by applying to the SRC, if turnover for both the previous and the current year is no more than {} and they carry out no activity the law excludes from it (Art.\u{A0}254 of the Tax Code; among others, since {}, codes {}). The rate is {} to {} of the quarter's income, depending on the activity (Art.\u{A0}258 of the Tax Code). The return and the tax are due by the {} of the month after the quarter: for {}, by {}." };
     (TaxPageContents) => { "Contents" };
+    (ListAnd) => { "{} and {}" };
     (TaxPageLead) => { "For individual entrepreneurs on turnover tax. The numbers here come from the same rules file Kvartik calculates with: each one has its article of law, and they were checked against the law on {}. This is not advice: check the numbers with an accountant before you file a return." };
     (TaxPageRates) => { "Rates" };
     (TaxPageRatesAbout) => { "The quarterly tax is a percentage of the quarter's income at the row of the table in Art.\u{A0}258 of the Tax Code that the activity falls under. For rows with a deduction, the quarter's expenses with a seller's document reduce the tax, but not below the floor." };

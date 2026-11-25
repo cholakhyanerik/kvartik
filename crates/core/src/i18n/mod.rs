@@ -35,7 +35,7 @@ mod locale;
 mod ru;
 
 pub use locale::{
-    ParseError, amount, date, day_long, decimal, integer, lumas, money, month_heading, parse_decimal,
+    ParseError, amount, date, day_long, decimal, integer, lumas, money, month_day, month_heading, parse_decimal,
     parse_money, parse_rate, percent, quarter, rate, rate_pair,
 };
 
@@ -2796,15 +2796,20 @@ strings! {
     TaxPageLink;
     TaxPageTitle;
     TaxPageDescription;
-    /// Шаблон: ответ сверху страницы о налоге (задача 126) — самая низкая
-    /// и самая высокая ставка строк налога дня сверки (`Rate::rate`, без
-    /// нижнего предела), порог оборота за год, число месяца после квартала
-    /// (`TurnoverDue::day`), ближайший квартал (`i18n::quarter`) и день его
-    /// срока. Его цитируют поисковики и ИИ-ответы: два предложения, отвечающие
-    /// без остальной страницы, и верные и после этого дня.
+    /// Шаблон: ответ сверху страницы о налоге (задача 126; правка человека
+    /// 2026-11-25) — порог оборота за год, день начала и коды записи
+    /// `turnover_exclusions` (`ListAnd`), самая низкая и самая высокая
+    /// ставка строк дня сверки (`Rate::rate`, без нижнего предела), число
+    /// месяца после квартала (`i18n::month_day`), ближайший квартал
+    /// (`i18n::quarter`) и день его срока по закону. Его цитируют
+    /// поисковики и ИИ-ответы: абзац отвечает без остальной страницы и верен
+    /// и после этого дня.
     TaxPageAnswer;
     /// Подпись оглавления страницы о налоге для диктора (`aria-label`).
     TaxPageContents;
+    /// Шаблон: перечень без последнего (через запятую) и последний —
+    /// «69, 70, 78.2 и 78.3» (`landing::and_list`, задача 126).
+    ListAnd;
     /// Шаблон: день последней сверки правил (`Rules::checked`).
     TaxPageLead;
     TaxPageRates;

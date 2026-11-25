@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.204",
+      "date": "2026-11-25",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось."
+      ],
+      "en": [
+        "Nothing changed in the app."
+      ]
+    },
+    {
       "version": "0.0.203",
       "date": "2026-11-25",
       "hy": [
@@ -263,25 +276,6 @@
         "When you move from a Safari tab to the installed app and the data doesn’t fit in a code, the app no longer suggests a later day; it points to a backup file, so everything moves, ledger files included. On the same iPhone the code is copied with one button, “Copy the whole code”.",
         "A password shown with “Show password” is hidden again when the form is sent, and restoring a client’s backup no longer offers the password manager to replace the backup password.",
         "“Last exchange” in the profile is set when the code is taken, not when it is just made."
-      ]
-    },
-    {
-      "version": "0.0.184",
-      "date": "2026-11-24",
-      "hy": [
-        "Պատճենի մասերը կարելի է ընտրել միանգամից կամ համակարգչում ֆայլերը քաշել պատճենի էկրանի վրա. դրանք վերականգնվում են հերթով, իսկ գաղտնաբառը հարցվում է մեկ անգամ։",
-        "«Այլ սարք» էկրանը սկսվում է ընտրությունից՝ «Փոխանցել այստեղից» կամ «Ընդունել այստեղ», և հետո էկրանին միայն ընտրված ճանապարհն է։ Կոդը տեքստով կարելի է ուղարկել «Ուղարկել» կոճակով, իսկ մյուս սարքում տեղադրել «Տեղադրել» կոճակով։",
-        "Գաղտնաբառի դաշտերն ունեն «Ցույց տալ գաղտնաբառը», իսկ բրաուզերի գաղտնաբառերի կառավարիչը կարող է պահպանել պատճենների գաղտնաբառը։ Նոր սարքը կարելի է սկսել առանց ֆայլի՝ առաջին գործարկումից և պատճենի դատարկ էկրանից։"
-      ],
-      "ru": [
-        "Части копии можно выбрать разом или перетащить файлы на экран копии на компьютере: они ложатся по очереди, а пароль спрашивается один раз.",
-        "«Другое устройство» начинается с выбора — «Передать отсюда» или «Принять сюда», — и дальше на экране только выбранный путь. Код текстом можно отправить кнопкой «Отправить», а на другом устройстве вставить кнопкой «Вставить».",
-        "У полей пароля — «Показать пароль», а менеджер паролей браузера может сохранить пароль копий. Новое устройство можно завести без файла — с первого запуска и с пустого экрана копии."
-      ],
-      "en": [
-        "You can pick all parts of a backup at once, or drop the files onto the backup screen on a computer: they are restored one by one, and the password is asked once.",
-        "“Another device” now starts with a choice, “Send from here” or “Receive here”, and then shows only the chosen path. You can send the code as text with “Send” and paste it on the other device with “Paste”.",
-        "Password fields have “Show password”, and the browser’s password manager can save the backup password. A new device can be set up without a file, from the first launch and from the empty backup screen."
       ]
     }
   ]

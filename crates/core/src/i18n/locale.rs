@@ -263,6 +263,29 @@ pub fn quarter(lang: Lang, quarter: Quarter) -> String {
     }
 }
 
+/// Число месяца, к которому срок, — словом в строке «до 20-го числа»
+/// (задача 126): по-армянски `20-ը` («ամսվա 20-ը», как пишет кодекс), по-русски
+/// `20-го`, по-английски порядковым — `20th`, `21st`, `22nd`, `23rd`, а 11–13
+/// — `th` (CLDR, порядковые формы `en`: one — 1, 21, 31…, two — 2, 22…,
+/// few — 3, 23…, other — остальные, и 11, 12, 13 тоже). Суффикс считает
+/// число: срок сменится на 21-е — и строка не скажет «21th».
+pub fn month_day(lang: Lang, day: u8) -> String {
+    match lang {
+        Lang::Am => format!("{day}-ը"),
+        Lang::Ru => format!("{day}-го"),
+        Lang::En => {
+            let suffix = match (day % 10, day % 100) {
+                (_, 11..=13) => "th",
+                (1, _) => "st",
+                (2, _) => "nd",
+                (3, _) => "rd",
+                _ => "th",
+            };
+            format!("{day}{suffix}")
+        }
+    }
+}
+
 /// Курс парой — «единица валюты = драмы» (задача 14): `1 $ = 388,00 ֏`,
 /// по-английски `$1 = AMD 388.00`. Знаки валют — те же, что у [`money`],
 /// а число курса — [`rate`]. Пробелы — неразрывные, и вокруг «=» тоже:
@@ -588,6 +611,34 @@ const fn comma_groups(lang: Lang) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Число месяца срока словом (задача 126): армянское и русское окончание
+    /// и английский порядковый суффикс, в том числе 11–13 и 21–23.
+    #[test]
+    fn a_month_day_is_written_by_the_language() {
+        let mut wrong = Vec::new();
+        let cases: [(Lang, u8, &str); 12] = [
+            (Lang::Am, 20, "20-ը"),
+            (Lang::Ru, 20, "20-го"),
+            (Lang::Ru, 1, "1-го"),
+            (Lang::En, 20, "20th"),
+            (Lang::En, 1, "1st"),
+            (Lang::En, 2, "2nd"),
+            (Lang::En, 3, "3rd"),
+            (Lang::En, 11, "11th"),
+            (Lang::En, 12, "12th"),
+            (Lang::En, 13, "13th"),
+            (Lang::En, 21, "21st"),
+            (Lang::En, 23, "23rd"),
+        ];
+        for (lang, day, expected) in cases {
+            let got = month_day(lang, day);
+            if got != expected {
+                wrong.push(format!("{lang:?} {day}: {got} вместо {expected}"));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
 
     fn amd(minor: i64) -> Money {
         Money::new(minor, Currency::Amd)
