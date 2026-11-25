@@ -32,6 +32,15 @@
 //! 124). Поздно прочитанный файл на iPhone может оказаться пустым (WebKit bug
 //! 197142, `platform::file::read`) — тогда он упадёт с именем, и его выбирают
 //! снова: все части разом в памяти телефона были бы хуже.
+//!
+//! Из папки автокопий (задача 124, п. 20; по устройствам — решение человека
+//! 2026-11-25) цепочка — самая свежая копия каждого устройства, чья метка есть
+//! в папке, со всеми частями (`autobackup::newest`). У копий разных устройств
+//! замки разные, и ключ прошлой части следующую не откроет; тогда цепочка
+//! сначала пробует пароль, уже введённый в ней ([`Chain::typed`]): пароль
+//! копий у устройств человека обычно один. Не подошёл — спрашивает, без слов
+//! «не тот»: человек его ещё не вводил. Итог называет, копии каких устройств
+//! легли.
 
 use std::collections::VecDeque;
 
@@ -89,15 +98,40 @@ fn parts_words(lang: Lang, laid: &Laid) -> String {
     }
 }
 
+/// Копия устройства из папки автокопий в цепочке (задача 124, п. 20).
+#[derive(Clone)]
+struct FolderCopy {
+    tag: DeviceTag,
+    /// День в имени файла.
+    day: Date,
+    /// Сколько её файлов легло.
+    landed: usize,
+    /// Сколько у неё частей и каких в папке нет: такую окно называет словами,
+    /// и до остальных частей здесь не выпускать.
+    of: u16,
+    missing: Vec<u16>,
+}
+
 /// Выбранные разом файлы копии (задача 124): ещё не тронутые — по порядку
 /// выбора, какой из скольких ложится сейчас и что легло прошлыми.
 #[derive(Default)]
 struct Chain {
-    left: VecDeque<File>,
+    /// Файлы и чья это копия из папки ([`Chain::copies`]); `None` — файл
+    /// выбрали сами.
+    left: VecDeque<(File, Option<usize>)>,
     total: usize,
     at: usize,
     /// Имя файла, который ложится сейчас: упал — окно его называет.
     name: String,
+    /// Чья копия из папки ложится сейчас.
+    copy: Option<usize>,
+    /// Копии устройств из папки автокопий: итог называет, какие легли.
+    copies: Vec<FolderCopy>,
+    /// Пароль, введённый в этой цепочке (задача 124): им сначала пробуется
+    /// следующий файл, который ключ прошлой части не открывает, — копия
+    /// другого устройства. Живёт, пока идёт цепочка: кончилась, отменили или
+    /// ушли с экрана копии — забыт, как ключ прошлой части ([`Known`]).
+    typed: Option<String>,
     /// Что легло файлами цепочки: итог суммой, слова о частях — последней
     /// части, о часах — любого файла. Окно показывает его, чем бы цепочка ни
     /// кончилась (ревью задачи 124).
@@ -231,12 +265,21 @@ pub(super) fn RestoreBackup(
     // ещё файл — он, а не итог. Следующий берёт `Effect` ниже: итог зовут из
     // чтения файла, и прямой вызов замкнул бы их друг на друга.
     let chain = StoredValue::new_local(Chain::default());
+    // Пароль цепочки — тоже только пока открыт экран копии.
+    Effect::new(move |_| {
+        if !router.shows(Screen::Backup) {
+            chain.update_value(|chain| chain.typed = None);
+        }
+    });
     let advance = RwSignal::new(false);
     let settle = move |state: Restoring| match state {
         Restoring::Done(restored, after, laid) => {
             let asks = after.fresh && (laid.is_some() || restored.added > 0);
             let more = chain
                 .try_update_value(|chain| {
+                    if let Some(copy) = chain.copy.and_then(|at| chain.copies.get_mut(at)) {
+                        copy.landed += 1;
+                    }
                     chain.landed = Some(match chain.landed.take() {
                         // Слова о частях — последней части, о часах — любого
                         // файла: спешащие часы в первой части не пропадают
@@ -252,7 +295,11 @@ pub(super) fn RestoreBackup(
                         None => (restored, after, laid.clone()),
                     });
                     chain.asks |= asks;
-                    !chain.left.is_empty()
+                    let more = !chain.left.is_empty();
+                    if !more {
+                        chain.typed = None;
+                    }
+                    more
                 })
                 .unwrap_or(false);
             if more {
@@ -263,14 +310,25 @@ pub(super) fn RestoreBackup(
                 restoring.set(Restoring::Done(total, after, laid));
             }
         }
+        // Цепочка встала на сбое — дальше она не пойдёт, и пароль её не нужен.
+        state @ Restoring::Failed(_) => {
+            chain.update_value(|chain| chain.typed = None);
+            restoring.set(state);
+        }
         state => restoring.set(state),
     };
-    // Остановить цепочку: следующие файлы не трогать.
-    let stop = move || chain.update_value(|chain| chain.left.clear());
+    // Остановить цепочку: следующие файлы не трогать, пароль её — забыть.
+    let stop = move || {
+        chain.update_value(|chain| {
+            chain.left.clear();
+            chain.typed = None;
+        });
+    };
 
     // Расшифровать и слить: паролем из поля или ключом прошлой части той же
-    // копии (задача 117).
-    let run = move |job: RestoreJob, sealed: Rc<Sealed>| {
+    // копии (задача 117). `guess` — пароль цепочки, который пробуют сами: не
+    // подошёл — спросить, без слов «не тот».
+    let run = move |job: RestoreJob, sealed: Rc<Sealed>, guess: bool| {
         restoring.set(Restoring::Busy);
         leptos::task::spawn_local(async move {
             let outcome = match restoring_task(backups, job).await {
@@ -283,6 +341,8 @@ pub(super) fn RestoreBackup(
             settle(match outcome {
                 Ok(Recovered::Other(asked)) => Restoring::Other(asked),
                 Ok(outcome) => landed(outcome, &sealed).unwrap_or(Restoring::Failed(Problem::Say(Key::BackupFailed))),
+                // Пароль цепочки, пробованный сам, не подошёл — спросить.
+                Err(Problem::Say(Key::BackupWrongFilePassword)) if guess => Restoring::Password(sealed, None),
                 // Пароль не подошёл — спросить снова, а не выбирать файл
                 // заново.
                 Err(problem @ Problem::Say(Key::BackupWrongFilePassword)) => {
@@ -299,9 +359,10 @@ pub(super) fn RestoreBackup(
     let next = move || {
         let file = chain
             .try_update_value(|chain| {
-                let file = chain.left.pop_front()?;
+                let (file, copy) = chain.left.pop_front()?;
                 chain.at += 1;
                 chain.name = file.name();
+                chain.copy = copy;
                 Some(file)
             })
             .flatten();
@@ -320,10 +381,14 @@ pub(super) fn RestoreBackup(
             match opened {
                 Ok(sealed) => {
                     let sealed = Rc::new(sealed);
-                    // Следующая часть той же копии — ключом прошлой.
+                    // Следующая часть той же копии — ключом прошлой; другая
+                    // копия — сначала паролем, уже введённым в цепочке.
                     match known.with_value(|known| known.as_ref().and_then(|known| known.key_for(&sealed))) {
-                        Some(key) => run(RestoreJob::Known(Rc::clone(&sealed), key), sealed),
-                        None => restoring.set(Restoring::Password(sealed, None)),
+                        Some(key) => run(RestoreJob::Known(Rc::clone(&sealed), key), sealed, false),
+                        None => match chain.with_value(|chain| chain.typed.clone()) {
+                            Some(typed) => run(RestoreJob::Open(Rc::clone(&sealed), typed), sealed, true),
+                            None => restoring.set(Restoring::Password(sealed, None)),
+                        },
                     }
                 }
                 Err(problem) => restoring.set(Restoring::Failed(problem)),
@@ -336,22 +401,25 @@ pub(super) fn RestoreBackup(
             next();
         }
     });
-    // Выбранные файлы — новой цепочкой.
-    let take = move |files: Vec<File>| {
+    // Выбранные файлы — новой цепочкой; из папки — с копиями устройств.
+    let take_copies = move |files: Vec<(File, Option<usize>)>, copies: Vec<FolderCopy>| {
         if files.is_empty() {
             return;
         }
         chain.set_value(Chain {
             total: files.len(),
             left: files.into(),
+            copies,
             ..Chain::default()
         });
         next();
     };
+    let take = move |files: Vec<File>| take_copies(files.into_iter().map(|file| (file, None)).collect(), Vec::new());
 
     // Из папки автокопий (задача 124, п. 20) — Chrome и Edge на компьютере:
-    // самая свежая копия со всеми частями — той же цепочкой, что выбранные
-    // разом файлы. Выбор папки — в самом нажатии, до первого `await`.
+    // самая свежая копия каждого устройства со всеми частями — той же
+    // цепочкой, что выбранные разом файлы. Выбор папки — в самом нажатии, до
+    // первого `await`.
     let from_folder = move |_: MouseEvent| {
         let picking = folders::pick_to_read();
         leptos::task::spawn_local(async move {
@@ -362,13 +430,21 @@ pub(super) fn RestoreBackup(
             };
             restoring.set(Restoring::Busy);
             let found = newest_in(&folder).await;
-            if !matches!(&found, Ok(files) if !files.is_empty()) {
+            if !matches!(&found, Ok(copies) if !copies.is_empty()) {
                 // Итог прошлой цепочки к этой папке не относится.
                 chain.set_value(Chain::default());
             }
             match found {
-                Ok(files) if files.is_empty() => restoring.set(Restoring::Failed(Problem::Say(Key::BackupFolderEmpty))),
-                Ok(files) => take(files),
+                Ok(copies) if copies.is_empty() => restoring.set(Restoring::Failed(Problem::Say(Key::BackupFolderEmpty))),
+                Ok(copies) => {
+                    let mut files = Vec::new();
+                    let mut found = Vec::new();
+                    for (at, (copy, names)) in copies.into_iter().enumerate() {
+                        files.extend(names.into_iter().map(|file| (file, Some(at))));
+                        found.push(copy);
+                    }
+                    take_copies(files, found);
+                }
                 Err(_) => restoring.set(Restoring::Failed(Problem::Say(Key::BackupFolderUnread))),
             }
         });
@@ -419,7 +495,9 @@ pub(super) fn RestoreBackup(
             return;
         };
         let typed = password.get_untracked();
-        run(RestoreJob::Open(Rc::clone(&sealed), typed), sealed);
+        // Им же цепочка попробует копию другого устройства (задача 124).
+        chain.update_value(|chain| chain.typed = Some(typed.clone()));
+        run(RestoreJob::Open(Rc::clone(&sealed), typed), sealed, false);
     };
 
     // Ответ на вопрос о копии другого ИП — «Всё равно слить» или «Добавить
@@ -456,6 +534,15 @@ pub(super) fn RestoreBackup(
         let ask = (after.fresh && (laid.is_some() || restored.added > 0) || chain.with_value(|chain| chain.asks))
             && !issued_elsewhere(backups);
         let whole = laid.as_ref().is_none_or(Laid::whole);
+        // Копии каких устройств легли из папки (задача 124, п. 20) и какие из
+        // них в папке не целые.
+        let copies = chain.with_value(|chain| {
+            let landed: Vec<FolderCopy> = chain.copies.iter().filter(|copy| copy.landed > 0).cloned().collect();
+            (!landed.is_empty()).then_some(landed)
+        });
+        let partial: Vec<FolderCopy> = chain.with_value(|chain| {
+            chain.copies.iter().filter(|copy| copy.landed > 0 && !copy.missing.is_empty()).cloned().collect()
+        });
         view! {
             // Что легло — по видам (задача 124, п. 21).
             <p role="status">
@@ -476,6 +563,8 @@ pub(super) fn RestoreBackup(
                 })}
             })}
             {after.ahead.then(|| view! { <p class="warning">{tr(lang, Key::BackupAhead)}</p> })}
+            {copies.map(|copies| view! { <p role="status">{move || copies_words(lang.get(), &copies)}</p> })}
+            {partial.into_iter().map(|copy| view! { <p class="warning">{move || partial_words(lang.get(), &copy)}</p> }).collect_view()}
             {ask.then(|| view! { <IssuerAsk lang /> })}
         }
         .into_any()
@@ -687,10 +776,46 @@ pub(super) fn RestoreBackup(
     }
 }
 
-/// Файлы самой свежей автокопии (`autobackup::newest`) в выбранной папке, а нет
-/// их там — в её «Kvartik»: выбирают и саму папку автокопии, и ту, где она
-/// лежит. По порядку частей.
-async fn newest_in(folder: &web_sys::FileSystemDirectoryHandle) -> Result<Vec<File>, folders::FolderError> {
+/// Слова о копиях устройств, легших из папки (задача 124, п. 20): сколько
+/// и чьи — этого устройства или другого, по метке в имени файла, — с днём
+/// в имени.
+fn copies_words(lang: Lang, copies: &[FolderCopy]) -> String {
+    let own = Device::new().auto_tag();
+    let list: Vec<String> = copies
+        .iter()
+        .map(|copy| {
+            let day = i18n::date(lang, copy.day);
+            if own == Some(copy.tag) {
+                fill(t(lang, Key::BackupFolderThis), &[&day])
+            } else {
+                fill(t(lang, Key::BackupFolderOther), &[copy.tag.as_str(), &day])
+            }
+        })
+        .collect();
+    fill(
+        t(lang, Key::BackupFolderCopies),
+        &[&i18n::integer(lang, copies.len() as i64), &list.join(", ")],
+    )
+}
+
+/// Слова о копии из папки, у которой там не все части (ревью задачи 124):
+/// каких нет и что до них здесь не выпускать — копия другого устройства
+/// бывает частями, а облако скачивает их по одной.
+fn partial_words(lang: Lang, copy: &FolderCopy) -> String {
+    let numbers: Vec<String> = copy.missing.iter().map(|&number| i18n::integer(lang, i64::from(number))).collect();
+    fill(
+        t(lang, Key::BackupFolderMissing),
+        &[copy.tag.as_str(), &numbers.join(", "), &i18n::integer(lang, i64::from(copy.of))],
+    )
+}
+
+/// Самая свежая автокопия каждого устройства (`autobackup::newest`) в выбранной
+/// папке, а нет их там — в её «Kvartik»: выбирают и саму папку автокопии, и ту,
+/// где она лежит. Копии — свежей первой, а не целые — после целых; файлы — по
+/// порядку частей.
+async fn newest_in(
+    folder: &web_sys::FileSystemDirectoryHandle,
+) -> Result<Vec<(FolderCopy, Vec<File>)>, folders::FolderError> {
     use kvartik_core::format::autobackup::{FOLDER, PREFIX, newest, own_folder};
     let mut found = folders::files(folder, PREFIX).await?;
     if found.is_empty()
@@ -701,9 +826,23 @@ async fn newest_in(folder: &web_sys::FileSystemDirectoryHandle) -> Result<Vec<Fi
     }
     // Момент изменения — миллисекунды, целым числом.
     let named: Vec<(String, i64)> = found.iter().map(|file| (file.name(), folders::modified(file))).collect();
-    Ok(newest(&named)
+    Ok(newest(&named, clock::now().unix_millis())
         .into_iter()
-        .filter_map(|name| found.iter().find(|file| file.name() == name).cloned())
+        .map(|copy| {
+            let files = copy
+                .names
+                .iter()
+                .filter_map(|&name| found.iter().find(|file| file.name() == name).cloned())
+                .collect();
+            let folder_copy = FolderCopy {
+                tag: copy.tag,
+                day: copy.day,
+                landed: 0,
+                of: copy.of,
+                missing: copy.missing,
+            };
+            (folder_copy, files)
+        })
         .collect())
 }
 

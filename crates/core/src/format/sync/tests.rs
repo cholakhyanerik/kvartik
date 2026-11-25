@@ -674,3 +674,100 @@ fn a_series_is_whole_or_refused() {
     let header = Header::new("0.0.174", at(9_000), RecordId::random(), None).for_files();
     assert!(matches!(pack(&header, picked.entries()), Err(TooLarge { bytes }) if bytes > MAX_SERIES_BYTES));
 }
+
+/// Встречный код (задача 124, п. 14) не возвращает отправителю его записей:
+/// запись, которая здесь та же, что пришла, — тот же момент и тот же текст, —
+/// выпадает, а профиль остаётся, но изменённым не считается. Запись, правленная
+/// здесь позже, идёт; и с моментом пришедшей, но другим текстом — тоже: так
+/// выходит у слияния по полям с правкой этого устройства в другом поле.
+#[test]
+fn the_back_code_leaves_the_echo_out() {
+    let ip = profile("ИП Арам", 8_000);
+    let echoed = client("Эхо", 8_000);
+    let edited = client("Правленный здесь", 8_000);
+    let mixed = client("Слитый", 8_000);
+    let mut came = Base(Vec::new());
+    for record in [&echoed, &edited, &mixed] {
+        came.put(record);
+    }
+    came.put(&ip);
+    let echo = Echo::of(pick(came.raw(), None).expect("собрано").entries());
+
+    // Здесь после слияния: эхо и профиль — те же; «Правленный здесь» правлен
+    // позже; «Слитый» — тот же момент, а текст другой; и свой новый клиент.
+    let mut here = Base(Vec::new());
+    here.put(&ip);
+    here.put(&echoed);
+    let later = edited
+        .edit(ClientData { name: line("Правленный здесь позже"), ..edited.data().clone() }, at(9_000))
+        .expect("годный")
+        .expect("правка");
+    here.put(&later);
+    let text = encode(&mixed).replace("Слитый", "Слитый по полям");
+    here.0.push((Client::KIND, mixed.id().to_string(), text));
+    let own = client("Свой", 9_500);
+    here.put(&own);
+
+    let since = Some(at(7_000));
+    let picked = pick(here.raw(), since).expect("собрано");
+    assert_eq!(picked.changed(since), 5, "без эха — всё изменённое");
+    let picked = picked.without_echo(&echo);
+    let ids: Vec<RecordId> = picked.entries().iter().map(|entry| entry.meta().id()).collect();
+    assert!(!ids.contains(&echoed.id()), "эхо не идёт обратно");
+    for (record, why) in [(later.id(), "правка здесь позже"), (mixed.id(), "слитая по полям"), (own.id(), "своя"), (ip.id(), "профиль")] {
+        assert!(ids.contains(&record), "нет записи: {why}");
+    }
+    assert_eq!(picked.changed(since), 3, "профиль-эхо — в коде, но не в счёт");
+    assert_eq!(picked.tally(since).clients, 3);
+    // Пустое эхо ничего не трогает.
+    let all = pick(here.raw(), since).expect("собрано").without_echo(&Echo::default());
+    assert_eq!(all.changed(since), 5);
+}
+
+/// Код всех ИП (задача 116): эхо узнаётся с меткой базы — запись ИП списка
+/// и профиль остаются, хоть и пришли теми же, а клиент той же базы — нет;
+/// тот же клиент в другой базе — не эхо.
+#[test]
+fn the_echo_knows_the_base() {
+    let (first, second) = (RecordId::random(), RecordId::random());
+    let ip = profile("ИП Арам", 8_000);
+    let echoed = client("Эхо", 8_000);
+    let mut came = Base(Vec::new());
+    came.put(&ip);
+    came.put(&echoed);
+    let echo = Echo::of(pick(came.raw(), None).expect("собрано").in_base(first).entries());
+    let mut back = pick(came.raw(), None).expect("собрано").in_base(first);
+    back.absorb(pick(came.raw(), None).expect("собрано").in_base(second));
+    let back = back.without_echo(&echo);
+    let left: Vec<(Option<RecordId>, &str)> = back.entries().iter().map(|entry| (entry.base(), entry.kind())).collect();
+    assert_eq!(
+        left,
+        [(Some(first), Profile::KIND), (Some(second), Profile::KIND), (Some(second), Client::KIND)]
+    );
+    assert_eq!(back.changed(None), 2, "профиль второй базы и её клиент; эхо первой — не в счёт");
+}
+
+/// Оценка кода файлов до него (задача 124): у несжимаемого файла — не меньше
+/// того, что выходит упаковкой, и близко к нему, а больше серии — «не
+/// поместится», хотя код ещё не собирали.
+#[test]
+fn the_files_estimate_is_close_and_not_below() {
+    for len in [40_000, 300_000, 900_000] {
+        let mut base = Base(Vec::new());
+        base.put(&profile("ИП Арам", 1_000));
+        base.put(&noisy_file(len, 6_000));
+        let changes = pick(base.raw(), None).expect("собрано");
+        let estimate = changes.skipped_bytes();
+        let files = pick_files(base.raw(), None).expect("собрано");
+        let header = Header::new("0.0.191", at(9_000), RecordId::random(), None).for_files();
+        let packed = pack(&header, files.entries()).expect("помещается").len();
+        assert!(estimate + 1_000 >= packed, "оценка {estimate} меньше кода {packed}");
+        assert!(estimate <= packed + packed / 10, "оценка {estimate} много больше кода {packed}");
+        assert!(files_fit(estimate), "{len} байтов помещаются");
+    }
+    let mut base = Base(Vec::new());
+    base.put(&noisy_file(MAX_SERIES_BYTES, 6_000));
+    let picked = pick(base.raw(), None).expect("собрано");
+    assert!(!files_fit(picked.skipped_bytes()), "файл больше серии");
+    assert_eq!(picked.skipped(), 1);
+}

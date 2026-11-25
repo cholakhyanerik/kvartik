@@ -169,31 +169,107 @@ pub fn named(name: &str) -> Option<Named> {
     })
 }
 
-/// Какие файлы папки восстановить (задача 124, п. 20): копию самого свежего
-/// файла автокопии — все её части по порядку номеров. Свежий — по моменту
-/// изменения файла, а не по дню в имени: дню верить нельзя ([`stale`]),
-/// а в общую папку облака пишут два компьютера, и у обоих сегодняшний день.
-/// Части той же копии — того же дня и устройства и с тем же числом частей:
-/// прежняя копия дня, которую не убрали, сюда не попадёт. `files` — имя
-/// и момент изменения файла в миллисекундах; чужие имена не берутся. Пусто —
-/// автокопий в папке нет.
-pub fn newest(files: &[(String, i64)]) -> Vec<&str> {
+/// Самая свежая автокопия одного устройства в папке ([`newest`]).
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Found<'a> {
+    /// Метка устройства, которое её писало.
+    pub tag: DeviceTag,
+    /// День в её имени — для слов, а не для выбора.
+    pub day: Date,
+    /// Её файлы — по порядку номеров частей.
+    pub names: Vec<&'a str>,
+    /// Сколько у неё частей (у копии одним файлом — одна).
+    pub of: u16,
+    /// Каких частей в папке нет: облако ещё не скачало их или их убрали.
+    pub missing: Vec<u16>,
+}
+
+/// Копия устройства старше самой свежей в папке больше чем на столько не
+/// берётся ([`newest`]): компьютер, на котором месяц не работали, скорее
+/// брошен, его записи давно пришли с ним, а его копия — лишний вопрос пароля
+/// и минута работы. Тридцать дней — как просьба ввести пароль копий
+/// ([`CHECK_AFTER_DAYS`]).
+pub const PEER_DAYS: i64 = 30;
+
+/// Миллисекунд в сутках.
+const DAY_MILLIS: i64 = 24 * 60 * 60 * 1000;
+
+/// Какие файлы папки восстановить (задача 124, п. 20; по устройствам —
+/// решение человека 2026-11-25): самую свежую копию каждого устройства —
+/// по метке в имени, — все её части по порядку номеров, а копии по
+/// свежести, самая свежая первой. В общую папку облака пишут два компьютера
+/// человека, и у каждого правки, которых нет у другого: одна самая свежая
+/// копия папки принесла бы только одного. Свежий — по моменту изменения
+/// файла, а не по дню в имени: дню верить нельзя ([`stale`]), и у обоих
+/// компьютеров сегодняшний день. Части той же копии — того же дня
+/// и устройства и с тем же числом частей: прежняя копия дня, которую не
+/// убрали, сюда не попадёт.
+///
+/// Копия устройства, записанная раньше самой свежей больше чем на
+/// [`PEER_DAYS`] дней, не берётся. Самая свежая для этого счёта — не позже
+/// суток после `now` (миллисекунды): момент файла ставят часы того
+/// компьютера, что его писал, и часы, убежавшие вперёд на месяц, иначе
+/// отсекли бы копии всех остальных (Правило 6; ревью задачи 124). Сама копия
+/// «из будущего» не отсекается — по ней одной ничего не решено.
+///
+/// Копия, у которой в папке не все части ([`Found::missing`]), идёт, но
+/// после целых: каждая часть — копия сама по себе, а слова о том, каких
+/// частей нет, окно говорит по последней части цепочки (`backup::Laid`
+/// помнит одну копию частями) — целая копия после неполной их стёрла бы
+/// (ревью задачи 124). `files` — имя и момент изменения файла
+/// в миллисекундах; чужие имена не берутся. Пусто — автокопий в папке нет.
+pub fn newest(files: &[(String, i64)], now: i64) -> Vec<Found<'_>> {
     let ours: Vec<(Named, i64, &str)> = files
         .iter()
         .filter_map(|(name, at)| Some((named(name)?, *at, name.as_str())))
         .collect();
     // Равные моменты — имя побольше: выбор не зависит от порядка в папке.
-    let Some(&(last, _, _)) = ours.iter().max_by(|a, b| a.1.cmp(&b.1).then_with(|| a.2.cmp(b.2))) else {
+    let later = |a: &&(Named, i64, &str), b: &&(Named, i64, &str)| a.1.cmp(&b.1).then_with(|| a.2.cmp(b.2));
+    let trusted = now.saturating_add(DAY_MILLIS);
+    let freshest = ours
+        .iter()
+        .filter(|file| file.1 <= trusted)
+        .max_by(later)
+        .or_else(|| ours.iter().max_by(later));
+    let Some(&(_, freshest, _)) = freshest else {
         return Vec::new();
     };
+    let oldest = freshest.saturating_sub(PEER_DAYS * DAY_MILLIS);
+    let mut lasts: Vec<&(Named, i64, &str)> = Vec::new();
+    for file in &ours {
+        match lasts.iter_mut().find(|last| last.0.tag == file.0.tag) {
+            Some(last) if later(&file, last).is_gt() => *last = file,
+            Some(_) => {}
+            None => lasts.push(file),
+        }
+    }
+    lasts.retain(|last| last.1 >= oldest);
+    lasts.sort_unstable_by(|a, b| later(b, a));
     let of = |named: &Named| named.part.map(|(_, of)| of);
-    let mut copy: Vec<(u16, &str)> = ours
-        .iter()
-        .filter(|(named, _, _)| named.day == last.day && named.tag == last.tag && of(named) == of(&last))
-        .map(|(named, _, name)| (named.part.map_or(1, |(number, _)| number), *name))
+    let mut found: Vec<Found<'_>> = lasts
+        .into_iter()
+        .map(|&(last, _, _)| {
+            let mut copy: Vec<(u16, &str)> = ours
+                .iter()
+                .filter(|(named, _, _)| named.day == last.day && named.tag == last.tag && of(named) == of(&last))
+                .map(|(named, _, name)| (named.part.map_or(1, |(number, _)| number), *name))
+                .collect();
+            copy.sort_unstable();
+            copy.dedup_by_key(|(number, _)| *number);
+            let parts = of(&last).unwrap_or(1);
+            let missing = (1..=parts).filter(|number| !copy.iter().any(|(at, _)| at == number)).collect();
+            Found {
+                tag: last.tag,
+                day: last.day,
+                names: copy.into_iter().map(|(_, name)| name).collect(),
+                of: parts,
+                missing,
+            }
+        })
         .collect();
-    copy.sort_unstable();
-    copy.into_iter().map(|(_, name)| name).collect()
+    // Целые — первыми, порядок свежести внутри сохраняется.
+    found.sort_by_key(|copy| !copy.missing.is_empty());
+    found
 }
 
 /// Файлы этого устройства, которые пора убрать: все свои не позже дня

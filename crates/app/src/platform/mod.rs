@@ -7,6 +7,7 @@
 //! нет: что шифровать и что сохранять, решают ядро и хранилище.
 
 pub mod autobackup;
+pub mod awake;
 pub mod camera;
 pub mod clipboard;
 pub mod clock;

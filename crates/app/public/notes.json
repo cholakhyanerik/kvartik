@@ -1,6 +1,25 @@
 {
   "notes": [
     {
+      "version": "0.0.191",
+      "date": "2026-11-25",
+      "hy": [
+        "«Այլ սարք» էկրանում հակադարձ կոդն այլևս հետ չի ուղարկում առաջին սարքի այսօրվա փոփոխությունները՝ միայն այն, ինչ արվել է այստեղ։ Մինչ QR կոդերը շրջան են անում, հեռախոսի էկրանը չի մարում։",
+        "Ավտոմատ պատճենների թղթապանակից վերականգնվում է յուրաքանչյուր սարքի ամենաթարմ պատճենը՝ երկու համակարգիչների փոփոխությունները միասին, գաղտնաբառով մեկ անգամ։ Մի քանի ԱՁ ունեցող հաշվապահը մեկ ԱՁ-ի կոդին պատասխանում է միայն այդ ԱՁ-ի կոդով։",
+        "Եթե մատյանի ֆայլերն ավելի շատ են, քան փոխանցում են QR կոդերը, անդորրագրից հետո միանգամից մեկ գլխավոր կոճակ է՝ «Ուղարկել պատճենի ֆայլով», իսկ չափը՝ մեգաբայթերով։"
+      ],
+      "ru": [
+        "На экране «Другое устройство» встречный код больше не возвращает первому устройству его же сегодняшние правки — только то, что сделано здесь. Пока идут QR-коды, экран телефона не гаснет.",
+        "Из папки автокопий ложится самая свежая копия каждого устройства: правки двух компьютеров вместе, с паролем один раз. Бухгалтер с несколькими ИП отвечает на код одного ИП кодом только этого ИП.",
+        "Если файлов книги больше, чем передают QR-коды, после квитанции сразу одна главная кнопка — «Отправить копией файлом», а их вес — в мегабайтах."
+      ],
+      "en": [
+        "On the “Another device” screen, the code back no longer returns the first device’s own changes of today to it — only what was done here. While the QR codes circle, the phone screen stays on.",
+        "From the automatic backup folder, the newest backup of every device comes in: the changes of two computers together, with the password asked once. An accountant with several IEs answers a code of one IE with a code of that IE only.",
+        "If ledger files are more than QR codes carry, the receipt is followed by one main button — “Send as a backup file”, and their size is in megabytes."
+      ]
+    },
+    {
       "version": "0.0.190",
       "date": "2026-11-24",
       "hy": [
@@ -266,19 +285,6 @@
       ],
       "en": [
         "The device that received a code shows a receipt in return: scan it on the device that made the code to see that everything arrived or, if not, from which day to make a new code."
-      ]
-    },
-    {
-      "version": "0.0.171",
-      "date": "2026-11-22",
-      "hy": [
-        "Երկու սարքում մեկ գրառման երկու ուղղումն այլևս չեն ջնջում իրար. հեռախոսում նշված վճարումը և համակարգչում դրված ՊԵԿ նշումը կոդով կամ պատճենով փոխանցելուց հետո կան երկուսում էլ — յուրաքանչյուր դաշտ վերցվում է այն սարքից, որտեղ այն ավելի ուշ է փոխվել։"
-      ],
-      "ru": [
-        "Две правки одной записи на двух устройствах больше не стирают друг друга: оплата, отмеченная на телефоне, и отметка ՊԵԿ, поставленная на компьютере, после передачи кодом или копией есть на обоих — каждое поле берётся с того устройства, где его правили позже."
-      ],
-      "en": [
-        "Two edits of one record on two devices no longer erase each other: a payment marked on the phone and an SRC mark set on the computer are both kept after a transfer code or a backup — each field comes from the device where it was changed last."
       ]
     }
   ]

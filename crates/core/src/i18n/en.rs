@@ -1429,7 +1429,7 @@ macro_rules! en {
     (SyncMaking) => { "Assembling and encrypting the code…" };
     (SyncMadeSince) => { "The code is ready. Changes since {}: {}." };
     (SyncMadeAll) => { "The code is ready. All records: {}." };
-    (SyncSkipped) => { "Ledger files and logos don't go into this code; changed ones: {}. A file code (the button under the code) or a backup file will carry them." };
+    (SyncSkipped) => { "Ledger files and logos don't go into this code; changed ones: {}, {}\u{A0}MB. A file code (the button under the code) or a backup file will carry them." };
     (SyncUnreadable) => { "Records that can't be read and were left out of the code: {}." };
     (SyncNothing) => { "No records have changed since that day\u{A0}— there's nothing to send." };
     (SyncTooLarge) => { "There are more changes than a code holds: {}\u{A0}KB of {}. Pick a later day or move the changes with a backup file." };
@@ -1492,7 +1492,7 @@ macro_rules! en {
     (SyncFilesNext) => { "Next code" };
     (SyncFilesPrev) => { "Previous code" };
     (SyncFilesBack) => { "Back to the changes code" };
-    (SyncFilesTooLarge) => { "There are more files than a series of codes holds: {}\u{A0}KB of {}. Move them with a backup file." };
+    (SyncFilesTooLarge) => { "There are more files than a series of codes holds: {}\u{A0}MB of {}. Move them with a backup file." };
     (SyncFilesGot) => { "Files: {} of {} codes received." };
     (SyncFilesFirst) => { "This is a file code, and the other device's data isn't here yet. Receive the changes code first, then the files. Nothing was written." };
     (SyncReceiptFirst) => { "Receipt: the code was received, but this is the first code from here on that device, so it's unknown whether it has what was here before {}. If that device wasn't started from a backup or a code with all records, make a code with all records." };
@@ -1531,7 +1531,7 @@ macro_rules! en {
     (SyncCarryTooLarge) => { "There is more data than a code can hold: {}\u{A0}KB of {}. Move everything with a backup file: on the backup screen, “Make a backup” and “Send or save to Files”, then in the app “Restore from a backup…”. A code from a later day would move only what’s new, and Safari erases the rest if you don’t come back here for a while." };
     (SyncCopyAll) => { "Copy the whole code" };
     (InstallCarryHide) => { "Hide" };
-    (SyncFilesAfter) => { "The code was taken. It didn’t carry ledger files and logos\u{A0}— changed: {}. Send them next with a code of files." };
+    (SyncFilesAfter) => { "The code was taken. It didn’t carry ledger files and logos\u{A0}— changed: {}, {}\u{A0}MB. Send them next with a code of files." };
     (SyncFilesAsBackup) => { "Send as a backup file" };
     (BackupRestoredSame) => { "Already here, unchanged: {}." };
     (BackupRestoredNothing) => { "Done: all of it was already here, records: {}." };
@@ -1550,8 +1550,15 @@ macro_rules! en {
     (SyncBackHint) => { "On the other device, scan this code where you scanned the receipt, under its own QR codes. No password is needed again." };
     (SyncBackTook) => { "The other device’s code back was taken." };
     (SyncBackOther) => { "This code is not a reply to the code from here: receive it under “Receive here”." };
-    (SyncBackSkipped) => { "Ledger files and logos don't go into the code back; changed ones: {}. A file code from “Send from here” or a backup file will carry them." };
+    (SyncBackSkipped) => { "Ledger files and logos don't go into the code back; changed ones: {}, {}\u{A0}MB. A file code from “Send from here” or a backup file will carry them." };
     (BackupFromFolder) => { "From the automatic backup folder…" };
     (BackupFolderEmpty) => { "There are no Kvartik automatic backups in this folder. Choose the “Kvartik” folder they were saved to, or the folder it is in." };
     (BackupFolderUnread) => { "The browser didn't let the app read this folder. Choose it again or choose a backup file." };
+    (SyncSkippedLarge) => { "Ledger files and logos don't go into this code; changed ones: {}, {}\u{A0}MB. That is more than QR codes carry (about {}\u{A0}MB)\u{A0}— a backup file will move them: the button under the code." };
+    (SyncFilesBeyond) => { "The code was taken. It didn’t carry ledger files and logos\u{A0}— changed: {}, {}\u{A0}MB. That is more than QR codes carry (about {}\u{A0}MB)\u{A0}— move them with a backup file." };
+    (SyncBackTooLarge) => { "There are more changes from here than a code holds: {}\u{A0}KB of {}. Move them with a backup file." };
+    (BackupFolderCopies) => { "Automatic backups of devices came in from the folder, {} in all: {}." };
+    (BackupFolderThis) => { "this device\u{A0}— {}" };
+    (BackupFolderOther) => { "device “{}”\u{A0}— {}" };
+    (BackupFolderMissing) => { "The backup of device “{}” in the folder is not whole: parts {} of {} are missing. The cloud may not have downloaded them yet: restore from the folder again when they appear, and don't issue here until then." };
 }

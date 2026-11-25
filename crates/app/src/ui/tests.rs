@@ -1863,6 +1863,10 @@ async fn a_backup_over_the_limit_is_saved_in_parts() {
     }
     let lang = Lang::Ru;
     device.set_ui_lang(lang);
+    // Копия под другим паролем — для цепочки, где пароль её не подходит.
+    let other = sealed_sheets("другой пароль копии задачи 124", kvartik_core::format::backup::PART_PLAIN_BYTES)
+        .await
+        .concat();
     // Каждая запись, кроме профиля, — своей частью: три клиента — три файла.
     PART_LIMIT.with(|limit| limit.set(1));
     let (host, mounted) = mount_at("#/backup");
@@ -2104,10 +2108,10 @@ async fn a_backup_over_the_limit_is_saved_in_parts() {
 
     // Все части разом (задача 124): одним выбором и не по порядку — пароль
     // спрошен один раз на три части, остальные легли ключом первой. Четвёртый
-    // файл — та же часть 1 ещё раз: копия уже целая, ключ забыт, и пароль
-    // спрошен снова, со словами, какой это из выбранных файлов. Где
-    // выпускать — спрошено в итоге, хотя целой копию сделал третий файл,
-    // а не последний.
+    // файл — та же часть 1 ещё раз: копия уже целая, ключ прошлой части
+    // забыт, а пароль, введённый в цепочке, подходит — второй раз его не
+    // спрашивают (задача 124, A2). Где выпускать — спрошено в итоге, хотя
+    // целой копию сделал третий файл, а не последний.
     // Спрошен ли пароль файла — есть ли его поле: слова «Файл 4 из 4.» видно
     // и на шаге «Восстанавливаем…», до формы (CLAUDE.md, «браузерный тест
     // ждёт состояния»).
@@ -2148,28 +2152,29 @@ async fn a_backup_over_the_limit_is_saved_in_parts() {
                 wrong.push("у выбранных разом не спросили пароль первой".to_owned());
             }
             enter(&host, &mut wrong);
-            let fourth = fill(t(lang, Key::BackupChainAt), &[&n(4), &n(4)]);
-            if !wait_for(&host, &fourth).await || !password_asked(&host).await {
-                wrong.push(format!("пароль четвёртого файла — без «{fourth}»: «{}»", section_text(&host, "backup")));
-            }
-            enter(&host, &mut wrong);
             said(&host, &all, true, "все части разом", &mut wrong).await;
+            if field(&host, t(lang, Key::BackupFilePassword), 0).is_some() {
+                wrong.push("пароль цепочки не подошёл четвёртому файлу — спрошен снова".to_owned());
+            }
         }
         None => wrong.push("нет поля выбора копии".to_owned()),
     }
     drop(mounted);
     host.remove();
 
-    // Те же четыре, но пароль четвёртого — «Отмена» (ревью задачи 124): что
-    // легло до неё, и вопрос, где выпускать, остаются на экране — повтор
-    // у целой копии его уже не задал бы.
+    // Те же три и четвёртый файл под другим паролем: пароль цепочки к нему
+    // не подошёл, и его спрошено — со словами, какой это из выбранных
+    // файлов, без «не тот пароль»; «Отмена» (ревью задачи 124): что легло до
+    // неё, и вопрос, где выпускать, остаются на экране — повтор у целой копии
+    // его уже не задал бы.
     crate::store::delete_database(crate::store::DB_NAME).await;
     forget(&["parts_laid"]);
     let (host, mounted) = mount_at("#/backup");
     match backup_file(&host).await {
         Some(input) => {
-            let chosen = files(&[1, 2, 0, 0]);
-            let chosen: Vec<(&str, &str)> = chosen.iter().map(|(name, text)| (name.as_str(), text.as_str())).collect();
+            let chosen = files(&[1, 2, 0]);
+            let mut chosen: Vec<(&str, &str)> = chosen.iter().map(|(name, text)| (name.as_str(), text.as_str())).collect();
+            chosen.push(("kvartik-other.json", other.as_str()));
             choose_files(&input, &chosen);
             if wait_for(&host, &asked(2)).await {
                 enter(&host, &mut wrong);
@@ -2177,6 +2182,9 @@ async fn a_backup_over_the_limit_is_saved_in_parts() {
             let fourth = fill(t(lang, Key::BackupChainAt), &[&n(4), &n(4)]);
             if !wait_for(&host, &fourth).await || !password_asked(&host).await {
                 wrong.push("отмена: нет пароля четвёртого файла".to_owned());
+            }
+            if section_text(&host, "backup").contains(t(lang, Key::BackupWrongFilePassword)) {
+                wrong.push("пароль цепочки, пробованный сам, назван «не тем»".to_owned());
             }
             match button(&host, &[t(lang, Key::Cancel)]) {
                 Some(cancel) => cancel.click(),
@@ -2507,9 +2515,11 @@ async fn seed_clients(profile: &Profile, clients: &[&Client]) {
 /// Восстановить из папки автокопий (задача 124, п. 20). Окна выбора папки
 /// в headless-браузере нет, поэтому выбор отдаёт личную файловую систему
 /// сайта (OPFS) — настоящую папку браузера. Папка без автокопий — словами;
-/// из «Kvartik» внутри выбранной ложится самая свежая копия по моменту файла,
-/// а не по дню в имени, всеми частями одной цепочкой с паролем один раз,
-/// а прежняя копия другого компьютера не ложится.
+/// из «Kvartik» внутри выбранной ложится самая свежая копия каждого
+/// устройства (решение человека 2026-11-25) — свежая по моменту файла, а не
+/// по дню в имени, — всеми частями одной цепочкой, с паролем один раз: копию
+/// другого компьютера открывает пароль, уже введённый в цепочке. Итог
+/// называет копии обоих устройств.
 #[wasm_bindgen_test]
 async fn the_newest_auto_backup_lands_from_its_folder() {
     use crate::platform::autobackup as folders;
@@ -2533,8 +2543,8 @@ async fn the_newest_auto_backup_lands_from_its_folder() {
     js_sys::Reflect::set(&window, &"showDirectoryPicker".into(), &picker).expect("выбор папки подменён");
     let mut wrong = Vec::new();
 
-    // Прежняя копия другого компьютера — с клиентом, которого в свежей нет;
-    // свежая — частями, по клиенту на часть.
+    // Копия второго компьютера, записанная раньше, — с клиентом, которого
+    // в свежей нет; свежая — частями, по клиенту на часть.
     let now = crate::platform::clock::now();
     let profile = Profile::save(None, documents::profile(), now).expect("годный профиль").expect("новый");
     let named = |name: &str| {
@@ -2545,12 +2555,17 @@ async fn the_newest_auto_backup_lands_from_its_folder() {
         Client::create(data, now).expect("годный клиент")
     };
     let (old_client, first, second) = (named("Old Client Ltd"), named("Beispiel GmbH"), named("Example LLC"));
+    let third_clients = (named("Third Device Ltd"), named("Fourth Device Ltd"));
     seed_clients(&profile, &[&old_client]).await;
     let old = sealed_sheets(password, kvartik_core::format::backup::PART_PLAIN_BYTES).await;
     seed_clients(&profile, &[&first, &second]).await;
     let fresh = sealed_sheets(password, 1).await;
-    if old.len() != 1 || fresh.len() < 2 {
-        wrong.push(format!("копии не те: {} и {} файлов", old.len(), fresh.len()));
+    // Третье устройство: в папке — только часть 1 его копии (облако не
+    // скачало остальные, ревью задачи 124).
+    seed_clients(&profile, &[&third_clients.0, &third_clients.1]).await;
+    let third = sealed_sheets(password, 1).await;
+    if old.len() != 1 || fresh.len() < 2 || third.len() < 2 {
+        wrong.push(format!("копии не те: {}, {} и {} файлов", old.len(), fresh.len(), third.len()));
     }
     crate::store::delete_database(crate::store::DB_NAME).await;
     let device = Device::new();
@@ -2573,7 +2588,7 @@ async fn the_newest_auto_backup_lands_from_its_folder() {
         wrong.push(format!("о папке без автокопий — молча: «{}»", section_text(&host, "backup")));
     }
 
-    // Прежняя копия записана раньше, хотя день в её имени позже.
+    // Копия второго компьютера записана раньше, хотя день в её имени позже.
     match folders::subfolder(&root, "Kvartik").await {
         Ok(kvartik) => {
             let mut written = folders::write(&kvartik, "kvartik-auto-2026-11-03-1a2b.json", old.concat().as_bytes()).await.is_ok();
@@ -2581,6 +2596,10 @@ async fn the_newest_auto_backup_lands_from_its_folder() {
             for (at, text) in fresh.iter().enumerate().rev() {
                 let name = format!("kvartik-auto-2026-11-02-00ff-{}of{}.json", at + 1, fresh.len());
                 written &= folders::write(&kvartik, &name, text.as_bytes()).await.is_ok();
+            }
+            if let Some(part) = third.first() {
+                let name = format!("kvartik-auto-2026-11-01-c0de-1of{}.json", third.len());
+                written &= folders::write(&kvartik, &name, part.as_bytes()).await.is_ok();
             }
             if !written {
                 wrong.push("файлы автокопий не записались".to_owned());
@@ -2609,10 +2628,30 @@ async fn the_newest_auto_backup_lands_from_its_folder() {
         }
         None => wrong.push(format!("пароль копии не спрошен: «{}»", section_text(&host, "backup"))),
     }
-    let of = fresh.len().to_string();
-    let all = fill(t(lang, Key::BackupPartsAll), &[&of, &of]);
-    if !wait_for(&host, &all).await {
-        wrong.push(format!("легли не все части: «{}»", section_text(&host, "backup")));
+    let day = |iso: &str| kvartik_core::i18n::date(lang, kvartik_core::model::date::Date::from_iso(iso).expect("день"));
+    // Целые копии — свежей первой, неполная — после них.
+    let copies = fill(
+        t(lang, Key::BackupFolderCopies),
+        &[
+            "3",
+            &[
+                fill(t(lang, Key::BackupFolderOther), &["00ff", &day("2026-11-02")]),
+                fill(t(lang, Key::BackupFolderOther), &["1a2b", &day("2026-11-03")]),
+                fill(t(lang, Key::BackupFolderOther), &["c0de", &day("2026-11-01")]),
+            ]
+            .join(", "),
+        ],
+    );
+    if !wait_for(&host, &copies).await {
+        wrong.push(format!("нет слов о копиях трёх устройств «{copies}»: «{}»", section_text(&host, "backup")));
+    }
+    if field(&host, t(lang, Key::BackupFilePassword), 0).is_some() {
+        wrong.push("копия другого компьютера спросила пароль снова".to_owned());
+    }
+    let missing: Vec<String> = (2..=third.len()).map(|number| number.to_string()).collect();
+    let partial = fill(t(lang, Key::BackupFolderMissing), &["c0de", &missing.join(", "), &third.len().to_string()]);
+    if !section_text(&host, "backup").contains(&partial) {
+        wrong.push(format!("о неполной копии молчит «{partial}»: «{}»", section_text(&host, "backup")));
     }
     match stored_clients().await {
         Ok(clients) => {
@@ -2620,8 +2659,11 @@ async fn the_newest_auto_backup_lands_from_its_folder() {
             if !has(&first) || !has(&second) {
                 wrong.push("свежая копия легла не вся".to_owned());
             }
-            if has(&old_client) {
-                wrong.push("легла прежняя копия другого компьютера".to_owned());
+            if !has(&old_client) {
+                wrong.push("не легла копия второго компьютера".to_owned());
+            }
+            if !has(&third_clients.0) && !has(&third_clients.1) {
+                wrong.push("не легла часть копии третьего устройства".to_owned());
             }
         }
         Err(error) => wrong.push(format!("клиенты не читаются: {error:?}")),

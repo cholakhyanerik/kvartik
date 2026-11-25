@@ -91,6 +91,11 @@ fn sync_button(host: &HtmlElement, label: &str) -> Option<HtmlElement> {
 /// Новый пароль копий с повтором, «Сделать код» — и текст кода. В базе —
 /// профиль и клиент, изменённые сегодня. `None` — не вышло.
 async fn make(host: &HtmlElement, lang: Lang, all: bool, wrong: &mut Vec<String>) -> Option<String> {
+    make_with(host, lang, all, &kinds(lang, 1, 0, 1), wrong).await
+}
+
+/// [`make`] с базой, где в коде — записи `words` по видам.
+async fn make_with(host: &HtmlElement, lang: Lang, all: bool, words: &str, wrong: &mut Vec<String>) -> Option<String> {
     crate::platform::set_hash(&Screen::Sync.href());
     if find(host, "input[type=radio][name=sync-what]").await.is_none() {
         wrong.push("нет выбора, что передать".to_owned());
@@ -120,12 +125,11 @@ async fn make(host: &HtmlElement, lang: Lang, all: bool, wrong: &mut Vec<String>
         None => wrong.push("нет «Сделать код»".to_owned()),
     }
     let today = clock::today().expect("часы с датой");
-    // Профиль и клиент — словами по видам (задача 124, п. 21).
-    let words = kinds(lang, 1, 0, 1);
+    // Записи — словами по видам (задача 124, п. 21).
     let ready = if all {
-        fill(t(lang, Key::SyncMadeAll), &[&words])
+        fill(t(lang, Key::SyncMadeAll), &[words])
     } else {
-        fill(t(lang, Key::SyncMadeSince), &[&kvartik_core::i18n::date(lang, today), &words])
+        fill(t(lang, Key::SyncMadeSince), &[&kvartik_core::i18n::date(lang, today), words])
     };
     if !wait_for(host, &ready).await {
         wrong.push(format!("код не готов: «{}»", section_text(host, "sync")));
@@ -180,6 +184,54 @@ fn landed_words(lang: Lang, kinds: &str, unchanged: usize) -> String {
         words.push_str(&fill(t(lang, Key::BackupRestoredSame), &[&unchanged.to_string()]));
     }
     words
+}
+
+/// Начало шаблона `key`, заполненного `args`, — до следующего «{}»: слова
+/// с числом, которого тест не считает (мегабайты оценкой), сверяются по
+/// началу.
+fn words_until(lang: Lang, key: Key, args: &[&str]) -> String {
+    fill(t(lang, key), args).split("{}").next().unwrap_or_default().to_owned()
+}
+
+/// Подписи видимых главных кнопок экрана — без `secondary` и `link`.
+fn main_buttons(host: &HtmlElement) -> Vec<String> {
+    let Ok(found) = host.query_selector_all("#sync button") else {
+        return Vec::new();
+    };
+    (0..found.length())
+        .filter_map(|at| found.item(at))
+        .map(|node| node.unchecked_into::<HtmlElement>())
+        .filter(|button| {
+            let classes = button.class_list();
+            button.offset_width() > 0 && !classes.contains("secondary") && !classes.contains("link")
+        })
+        .map(|button| button.text_content().unwrap_or_default().trim().to_owned())
+        .collect()
+}
+
+/// Записи кода из его текста — вид, идентификатор, текст записи и метка
+/// базы (у кода всех ИП), — как их прочтёт принявшее устройство паролем
+/// [`PASSWORD`].
+async fn code_records(code: &str) -> Option<Vec<(&'static str, RecordId, String, Option<RecordId>)>> {
+    use kvartik_core::format::sync;
+    let mut collector = sync::Collector::default();
+    for frame in sync::frames_in_text(code) {
+        collector.take(frame.ok()?);
+    }
+    let sealed = sync::open(&collector.whole()?).ok()?;
+    let lock = sealed.lock();
+    let key = crate::platform::crypto::derive(&crate::platform::crypto::normalize(PASSWORD), lock.salt(), lock.iterations())
+        .await
+        .ok()?;
+    let plain = crate::platform::crypto::decrypt(&key, lock.iv(), sealed.ciphertext()).await.ok()?;
+    Some(
+        sync::read(&sealed, &plain)
+            .ok()?
+            .entries()
+            .iter()
+            .map(|entry| (entry.kind(), entry.meta().id(), entry.stored(), entry.base()))
+            .collect(),
+    )
 }
 
 /// Ввести пароль и нажать «Принять».
@@ -795,9 +847,12 @@ async fn files_follow_as_a_series_of_codes() {
         Some((header, key)) => {
             let whole = kvartik_core::format::sync::Receipt::new(&header, RecordId::random(), kvartik_core::format::sync::Continuity::Whole);
             paste_reply(&host, &receipt_text(&key, &whole).await, &mut wrong).await;
-            let after = fill(t(lang, Key::SyncFilesAfter), &["1"]);
+            let after = words_until(lang, Key::SyncFilesAfter, &["1"]);
             if !wait_for(&host, &after).await {
                 wrong.push(format!("после квитанции нет «{after}»"));
+            }
+            if main_buttons(&host) != [t(lang, Key::SyncFilesMake)] {
+                wrong.push(format!("после квитанции главные кнопки — не одна серия: {:?}", main_buttons(&host)));
             }
             match sync_button(&host, t(lang, Key::SyncFilesMake)) {
                 Some(files) if !files.class_list().contains("secondary") => {}
@@ -1235,9 +1290,60 @@ async fn carrying_from_a_tab_moves_everything() {
 /// копией, без второго ввода пароля: его только что ввели для кода.
 #[wasm_bindgen_test]
 async fn files_beyond_a_series_go_as_a_backup_file() {
+    let mut wrong = Vec::new();
+    let lang = Lang::Ru;
+    let (host, mounted, failed) = big_file_code(lang).await;
+    wrong.extend(failed);
+    let code = make(&host, lang, true, &mut wrong).await.unwrap_or_default();
+    // Оценка (задача 124): файл больше серии — кнопки серии нет, а копия
+    // файлом есть сразу; до квитанции она второстепенная.
+    if sync_button(&host, t(lang, Key::SyncFilesMake)).is_some() {
+        wrong.push("файл больше серии, а кнопка серии есть".to_owned());
+    }
+    let large = words_until(lang, Key::SyncSkippedLarge, &["1"]);
+    if !section_text(&host, "sync").contains(&large) {
+        wrong.push(format!("нет «{large}»: «{}»", section_text(&host, "sync")));
+    }
+    match sync_button(&host, t(lang, Key::SyncFilesAsBackup)) {
+        Some(button) if button.class_list().contains("secondary") => {}
+        Some(_) => wrong.push("до квитанции копия файлом — главная".to_owned()),
+        None => wrong.push("нет «Отправить копией файлом» до квитанции".to_owned()),
+    }
+    // Квитанция «принято»: слова о файлах больше серии и одна главная
+    // кнопка — копия файлом.
+    match opened_code(&code).await {
+        Some((header, key)) => {
+            let whole = kvartik_core::format::sync::Receipt::new(&header, RecordId::random(), kvartik_core::format::sync::Continuity::Whole);
+            paste_reply(&host, &receipt_text(&key, &whole).await, &mut wrong).await;
+            let beyond = words_until(lang, Key::SyncFilesBeyond, &["1"]);
+            if !wait_for(&host, &beyond).await {
+                wrong.push(format!("после квитанции нет «{beyond}»: «{}»", section_text(&host, "sync")));
+            }
+            if main_buttons(&host) != [t(lang, Key::SyncFilesAsBackup)] {
+                wrong.push(format!("после квитанции главные кнопки: {:?}", main_buttons(&host)));
+            }
+        }
+        None => wrong.push("код не открылся".to_owned()),
+    }
+    match sync_button(&host, t(lang, Key::SyncFilesAsBackup)) {
+        Some(button) => button.click(),
+        None => wrong.push("нет «Отправить копией файлом»".to_owned()),
+    }
+    ready_backup(&host, &mut wrong).await;
+    drop(mounted);
+    host.remove();
+    other_device();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "файлы копией: {wrong:#?}");
+}
+
+/// База с файлом книги больше серии кодов (1,2 МБ, не сжимается), окно —
+/// на русском; день и размер последней копии забыты. Не открылась база — это
+/// третьим в ответе.
+async fn big_file_code(lang: Lang) -> (HtmlElement, impl Sized, Option<String>) {
     use kvartik_core::model::attachment::{Attachment, FileBytes};
     documents::fresh_base_with_client().await;
-    let lang = Lang::Ru;
     other_device();
     for name in ["last_backup", "last_size"] {
         if let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten()) {
@@ -1245,7 +1351,6 @@ async fn files_beyond_a_series_go_as_a_backup_file() {
         }
     }
     Device::new().set_ui_lang(lang);
-    // Файл, который не сжимается и больше серии: 1,2 МБ.
     let mut seed = 23u64;
     let mut bytes = b"%PDF-1.4 ".to_vec();
     bytes.extend((0..1_200_000).map(|_| {
@@ -1256,50 +1361,100 @@ async fn files_beyond_a_series_go_as_a_backup_file() {
     let mut writes = Writes::default();
     writes.insert(&file);
     documents::commit(writes).await;
-    let mut wrong = Vec::new();
     let (host, mounted) = mount();
-    if !opened(&host, lang).await {
-        wrong.push("база не открылась".to_owned());
-    }
-    make(&host, lang, true, &mut wrong).await;
-    match sync_button(&host, t(lang, Key::SyncFilesMake)) {
-        Some(button) => button.click(),
-        None => wrong.push("нет «Передать файлы серией кодов»".to_owned()),
-    }
-    let large = t(lang, Key::SyncFilesTooLarge).split("{}").next().unwrap_or_default().to_owned();
-    if !wait_for(&host, &large).await {
-        wrong.push(format!("нет «{large}»: «{}»", section_text(&host, "sync")));
-    }
-    match sync_button(&host, t(lang, Key::SyncFilesAsBackup)) {
-        Some(button) => button.click(),
-        None => wrong.push("нет «Отправить копией файлом»".to_owned()),
-    }
-    let ready = t(lang, Key::BackupReady).split("{}").next().unwrap_or_default().to_owned();
+    let failed = (!opened(&host, lang).await).then(|| "база не открылась".to_owned());
+    (host, mounted, failed)
+}
+
+/// Экран копии открылся с готовой копией.
+async fn ready_backup(host: &HtmlElement, wrong: &mut Vec<String>) {
+    let ready = t(Lang::Ru, Key::BackupReady).split("{}").next().unwrap_or_default().to_owned();
     let mut done = false;
     for _ in 0..300 {
-        done = section_text(&host, "backup").contains(&ready) && host.query_selector("#backup a[download]").ok().flatten().is_some();
+        done = section_text(host, "backup").contains(&ready) && host.query_selector("#backup a[download]").ok().flatten().is_some();
         if done {
             break;
         }
         sleep(50).await;
     }
     if !done {
-        wrong.push(format!("экран копии без готовой копии: «{}»", section_text(&host, "backup")));
+        wrong.push(format!("экран копии без готовой копии: «{}»", section_text(host, "backup")));
     }
     if crate::platform::hash() != Screen::Backup.href() {
         wrong.push(format!("открыт не экран копии: {}", crate::platform::hash()));
     }
+}
+
+/// Серия отказала, хотя оценка обещала (размер разошёлся; оценку тест
+/// подменяет): кнопки серии больше нет, слова — спокойные, не тревога, без
+/// «передайте следом» и после квитанции, а главная кнопка одна — копия
+/// файлом (задача 124).
+#[wasm_bindgen_test]
+async fn a_refused_series_leaves_one_way() {
+    let mut wrong = Vec::new();
+    let lang = Lang::Ru;
+    crate::ui::sync::FITS.with(|fits| fits.set(Some(true)));
+    let (host, mounted, failed) = big_file_code(lang).await;
+    wrong.extend(failed);
+    let code = make(&host, lang, true, &mut wrong).await.unwrap_or_default();
+    match sync_button(&host, t(lang, Key::SyncFilesMake)) {
+        Some(button) => button.click(),
+        None => wrong.push("нет «Передать файлы серией кодов»".to_owned()),
+    }
+    let large = words_until(lang, Key::SyncFilesTooLarge, &[]);
+    if !wait_for(&host, &large).await {
+        wrong.push(format!("нет «{large}»: «{}»", section_text(&host, "sync")));
+    }
+    let said = host
+        .query_selector_all("#sync p[role=alert]")
+        .ok()
+        .map(|found| (0..found.length()).filter_map(|at| found.item(at)).filter_map(|node| node.text_content()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    if said.iter().any(|text| text.contains(&large)) {
+        wrong.push("отказ серии — тревогой, а не спокойными словами".to_owned());
+    }
+    if sync_button(&host, t(lang, Key::SyncFilesMake)).is_some() {
+        wrong.push("после отказа кнопка серии осталась".to_owned());
+    }
+    if main_buttons(&host) != [t(lang, Key::SyncFilesAsBackup)] {
+        wrong.push(format!("после отказа главные кнопки: {:?}", main_buttons(&host)));
+    }
+    match opened_code(&code).await {
+        Some((header, key)) => {
+            let whole = kvartik_core::format::sync::Receipt::new(&header, RecordId::random(), kvartik_core::format::sync::Continuity::Whole);
+            paste_reply(&host, &receipt_text(&key, &whole).await, &mut wrong).await;
+            if !wait_for(&host, t(lang, Key::SyncReceiptWhole)).await {
+                wrong.push("квитанция не принята".to_owned());
+            }
+            let after = words_until(lang, Key::SyncFilesAfter, &["1"]);
+            if section_text(&host, "sync").contains(&after) {
+                wrong.push("после отказа серии — «передайте следом»".to_owned());
+            }
+            if main_buttons(&host) != [t(lang, Key::SyncFilesAsBackup)] {
+                wrong.push(format!("после квитанции главные кнопки: {:?}", main_buttons(&host)));
+            }
+        }
+        None => wrong.push("код не открылся".to_owned()),
+    }
+    match sync_button(&host, t(lang, Key::SyncFilesAsBackup)) {
+        Some(button) => button.click(),
+        None => wrong.push("нет «Отправить копией файлом»".to_owned()),
+    }
+    ready_backup(&host, &mut wrong).await;
+    crate::ui::sync::FITS.with(|fits| fits.set(None));
     drop(mounted);
     host.remove();
     other_device();
     crate::platform::set_hash("");
     documents::forget_device();
-    assert!(wrong.is_empty(), "файлы копией: {wrong:#?}");
+    assert!(wrong.is_empty(), "отказ серии: {wrong:#?}");
 }
 
 /// QR-коды на весь экран (задача 124, п. 17): кнопка под кодом открывает окно
 /// с тем же кодом, словами о яркости и подписью круга; Escape и «Свернуть»
-/// его закрывают, а фокус в окне — на кнопке.
+/// его закрывают, а фокус в окне — на кнопке. Tab из окна не уходит,
+/// закрытое возвращает фокус на кнопку под кодом, а квитанция «принято»
+/// закрывает его само (A4).
 #[wasm_bindgen_test]
 async fn the_qr_code_opens_full_screen() {
     documents::fresh_base_with_client().await;
@@ -1311,7 +1466,7 @@ async fn the_qr_code_opens_full_screen() {
     if !opened(&host, lang).await {
         wrong.push("база не открылась".to_owned());
     }
-    make(&host, lang, true, &mut wrong).await;
+    let code = make(&host, lang, true, &mut wrong).await.unwrap_or_default();
     let open = |host: &HtmlElement, wrong: &mut Vec<String>| match sync_button(host, t(lang, Key::SyncQrFull)) {
         Some(button) => button.click(),
         None => wrong.push("нет «QR-код на весь экран»".to_owned()),
@@ -1353,6 +1508,18 @@ async fn the_qr_code_opens_full_screen() {
     if find(&host, ".sync-full").await.is_none() {
         wrong.push("окно QR-кода не открылось второй раз".to_owned());
     }
+    // Tab не уводит фокус из окна (задача 124, A4): кнопка в нём одна.
+    if let Some(full) = host.query_selector("#sync .sync-full").ok().flatten() {
+        let init = web_sys::KeyboardEventInit::new();
+        init.set_key("Tab");
+        init.set_bubbles(true);
+        init.set_cancelable(true);
+        let tab = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).expect("создаётся");
+        full.dispatch_event(&tab).expect("отправлено");
+        if !tab.default_prevented() {
+            wrong.push("Tab в окне QR-кода не остановлен".to_owned());
+        }
+    }
     match sync_button(&host, t(lang, Key::SyncQrFullClose)) {
         Some(close) => close.click(),
         None => wrong.push("в окне нет «Свернуть»".to_owned()),
@@ -1361,12 +1528,168 @@ async fn the_qr_code_opens_full_screen() {
     if host.query_selector("#sync .sync-full").ok().flatten().is_some() {
         wrong.push("«Свернуть» не закрыло окно QR-кода".to_owned());
     }
+    let focused = || {
+        web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.active_element())
+            .and_then(|element| element.text_content())
+    };
+    let mut back = false;
+    for _ in 0..40 {
+        back = focused().as_deref().map(str::trim) == Some(t(lang, Key::SyncQrFull));
+        if back {
+            break;
+        }
+        sleep(25).await;
+    }
+    if !back {
+        wrong.push(format!("закрытое окно не вернуло фокус на свою кнопку: {:?}", focused()));
+    }
+    // Квитанция «принято» закрывает открытое окно само.
+    open(&host, &mut wrong);
+    if find(&host, ".sync-full").await.is_none() {
+        wrong.push("окно QR-кода не открылось третий раз".to_owned());
+    }
+    match opened_code(&code).await {
+        Some((header, key)) => {
+            let whole = kvartik_core::format::sync::Receipt::new(&header, RecordId::random(), kvartik_core::format::sync::Continuity::Whole);
+            paste_reply(&host, &receipt_text(&key, &whole).await, &mut wrong).await;
+            if !wait_for(&host, t(lang, Key::SyncReceiptWhole)).await {
+                wrong.push("квитанция не принята".to_owned());
+            }
+            sleep(50).await;
+            if host.query_selector("#sync .sync-full").ok().flatten().is_some() {
+                wrong.push("квитанция «принято» не закрыла окно QR-кода".to_owned());
+            }
+        }
+        None => wrong.push("код не открылся".to_owned()),
+    }
     drop(mounted);
     host.remove();
     other_device();
     crate::platform::set_hash("");
     documents::forget_device();
     assert!(wrong.is_empty(), "QR на весь экран: {wrong:#?}");
+}
+
+/// Сколько блокировок экрана сейчас держит подменённый `navigator.wakeLock`.
+fn wake_held() -> f64 {
+    web_sys::window()
+        .and_then(|window| Reflect::get(&window, &"kvartikWake".into()).ok())
+        .and_then(|log| Reflect::get(&log, &"held".into()).ok())
+        .and_then(|held| held.as_f64())
+        .unwrap_or(-1.0)
+}
+
+/// Дождаться, пока блокировок станет `held`.
+async fn wake_becomes(held: f64) -> bool {
+    for _ in 0..40 {
+        if wake_held() == held {
+            return true;
+        }
+        sleep(50).await;
+    }
+    false
+}
+
+/// Экран не гаснет, пока идёт круг QR-кодов (задача 124, A3): блокировка
+/// экрана берётся, когда код на экране и путь на виду, отпускается, когда
+/// выбрано «Принять сюда», берётся снова на «Передать отсюда», отпускается
+/// по пределу без квитанции и берётся снова на возвращённом пути,
+/// а квитанция «принято» отпускает её насовсем. Настоящей блокировки headless-браузер не даёт —
+/// `navigator.wakeLock` подменён счётчиком.
+#[wasm_bindgen_test]
+async fn the_screen_stays_on_while_codes_circle() {
+    documents::fresh_base_with_client().await;
+    let lang = Lang::Ru;
+    other_device();
+    Device::new().set_ui_lang(lang);
+    let stub = js_sys::Function::new_no_args(
+        "const log = { held: 0 };
+         Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: { request(type) {
+             if (type !== 'screen') return Promise.reject(new TypeError('type'));
+             log.held++;
+             const sentinel = { released: false, release() {
+                 if (!this.released) { this.released = true; log.held--; }
+                 return Promise.resolve();
+             } };
+             return Promise.resolve(sentinel);
+         } } });
+         window.kvartikWake = log;",
+    );
+    stub.call0(&wasm_bindgen::JsValue::NULL).expect("подмена");
+    let mut wrong = Vec::new();
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база не открылась".to_owned());
+    }
+    let code = make(&host, lang, true, &mut wrong).await.unwrap_or_default();
+    if !wake_becomes(1.0).await {
+        wrong.push(format!("код на экране, а экран не держится: {}", wake_held()));
+    }
+    choose_way(&host, false);
+    if !wake_becomes(0.0).await {
+        wrong.push(format!("выбрано «Принять сюда», а экран держится: {}", wake_held()));
+    }
+    choose_way(&host, true);
+    if !wake_becomes(1.0).await {
+        wrong.push(format!("снова «Передать отсюда», а экран не держится: {}", wake_held()));
+    }
+    // Без квитанции — не дольше предела (ревью задачи 124): оставленный
+    // телефон гаснет и запирается сам; вернулись на путь — снова держится.
+    // Путь сменился — дождаться, пока экран отпущен: два переключения подряд
+    // окно видит одним.
+    let away_and_back = || async {
+        choose_way(&host, false);
+        let mut away = false;
+        for _ in 0..40 {
+            away = visible(&host, ".sync-paste:not(.sync-reply) textarea") && wake_held() == 0.0;
+            if away {
+                break;
+            }
+            sleep(50).await;
+        }
+        choose_way(&host, true);
+        away
+    };
+    crate::ui::sync::AWAKE_LIMIT.with(|limit| limit.set(Some(std::time::Duration::from_millis(300))));
+    if !away_and_back().await || !wake_becomes(1.0).await {
+        wrong.push(format!("с коротким пределом экран не взят: {}", wake_held()));
+    }
+    if !wake_becomes(0.0).await {
+        wrong.push(format!("предел вышел, а экран держится: {}", wake_held()));
+    }
+    if !away_and_back().await || !wake_becomes(1.0).await {
+        wrong.push(format!("вернулись на путь, а экран не держится: {}", wake_held()));
+    }
+    crate::ui::sync::AWAKE_LIMIT.with(|limit| limit.set(None));
+    if !away_and_back().await || !wake_becomes(1.0).await {
+        wrong.push(format!("без короткого предела экран не взят: {}", wake_held()));
+    }
+    match opened_code(&code).await {
+        Some((header, key)) => {
+            let whole = kvartik_core::format::sync::Receipt::new(&header, RecordId::random(), kvartik_core::format::sync::Continuity::Whole);
+            paste_reply(&host, &receipt_text(&key, &whole).await, &mut wrong).await;
+            if !wait_for(&host, t(lang, Key::SyncReceiptWhole)).await {
+                wrong.push("квитанция не принята".to_owned());
+            }
+            if !wake_becomes(0.0).await {
+                wrong.push(format!("код принят, а экран держится: {}", wake_held()));
+            }
+        }
+        None => wrong.push("код не открылся".to_owned()),
+    }
+    drop(mounted);
+    host.remove();
+    crate::ui::sync::AWAKE_LIMIT.with(|limit| limit.set(None));
+    if let Some(window) = web_sys::window() {
+        let _ = Reflect::delete_property(&window.navigator(), &"wakeLock".into());
+        let _ = Reflect::delete_property(&window, &"kvartikWake".into());
+    }
+    other_device();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "экран при круге QR-кодов: {wrong:#?}");
 }
 
 /// Записи этой программы на устройстве (`kvartik.*`) — чтобы «вернуться» на
@@ -1413,30 +1736,49 @@ async fn seed_pair(profile: &Profile, client: &Client) {
 /// возвращается) и не сдвигая своего ряда изменений. Отправитель вставляет
 /// его там же, где квитанцию: код ложится, квитанции на него нет, «Готово»
 /// становится главной кнопкой, а код под чужим замком назван словами. В
-/// пустой программе встречного кода нет — это держит тест квитанции.
+/// пустой программе встречного кода нет — это держит тест квитанции. Правки
+/// отправителя после того дня — сегодняшние — встречный код ему не
+/// возвращает, а запись, которую получатель правил после них, — несёт
+/// (решение человека 2026-11-25).
 #[wasm_bindgen_test]
 async fn changes_go_both_ways_in_one_session() {
     use kvartik_core::format::sync;
+    use kvartik_core::model::client::ClientData;
     use kvartik_core::model::record::Timestamp;
+    use kvartik_core::model::text::Line;
     const DAY: i64 = 86_400_000;
     let lang = Lang::Ru;
     let now = clock::now();
     let profile = Profile::save(None, documents::profile(), now).expect("годный профиль").expect("новый");
+    let named = |name: &str, at: Timestamp| {
+        Client::create(ClientData { name: Line::new(name).expect("имя"), ..documents::acme() }, at).expect("годный клиент")
+    };
     // Клиент отправителя правлен десять дней назад: встречный код с дня до
-    // принятого кода его обратно не несёт.
-    let theirs = Client::create(documents::acme(), Timestamp::from_unix_millis(now.unix_millis() - 10 * DAY)).expect("годный клиент");
-    let ours = Client::create(documents::acme(), now).expect("годный клиент");
+    // принятого кода его обратно не несёт. Два — сегодня: один придёт
+    // обратно эхом, если встречный код его не выкинет, другой получатель
+    // правит позже.
+    let theirs = named("Acme Ltd", Timestamp::from_unix_millis(now.unix_millis() - 10 * DAY));
+    let echoed = named("Эхо сегодня", now);
+    let edited = named("Правят там", now);
+    let ours = named("Свой клиент", now);
+    let seed_sender = || async {
+        seed_pair(&profile, &theirs).await;
+        let mut writes = Writes::default();
+        writes.insert(&echoed);
+        writes.insert(&edited);
+        documents::commit(writes).await;
+    };
     let mut wrong = Vec::new();
 
     // Отправитель: код всех записей.
-    seed_pair(&profile, &theirs).await;
+    seed_sender().await;
     other_device();
     Device::new().set_ui_lang(lang);
     let (host, mounted) = mount();
     if !opened(&host, lang).await {
         wrong.push("база отправителя не открылась".to_owned());
     }
-    let code = make(&host, lang, true, &mut wrong).await.unwrap_or_default();
+    let code = make_with(&host, lang, true, &kinds(lang, 3, 0, 1), &mut wrong).await.unwrap_or_default();
     let sender = device_records();
     drop(mounted);
     host.remove();
@@ -1462,22 +1804,32 @@ async fn changes_go_both_ways_in_one_session() {
         wrong.push("база получателя не открылась".to_owned());
     }
     let mut back = String::new();
+    let later = edited
+        .edit(ClientData { name: Line::new("Правят здесь позже").expect("имя"), ..edited.data().clone() }, clock::now())
+        .expect("годный")
+        .expect("правка");
     if let Some(input) = paste(&host, lang, &code, &mut wrong).await {
         accept(&host, lang, &input, PASSWORD);
-        if !wait_for(&host, &landed_words(lang, &kinds(lang, 1, 0, 0), 1)).await {
+        if !wait_for(&host, &landed_words(lang, &kinds(lang, 3, 0, 0), 1)).await {
             wrong.push(format!("код не лёг: «{}»", section_text(&host, "sync")));
         }
+        // Получатель правит запись того устройства — позже, чем она пришла.
+        let mut writes = Writes::default();
+        writes.update(&edited, &later);
+        documents::commit(writes).await;
         match sync_button(&host, t(lang, Key::SyncBackMake)) {
             Some(button) => button.click(),
             None => wrong.push(format!("под квитанцией нет встречного кода: «{}»", section_text(&host, "sync"))),
         }
         let day = clock::local_date(made).expect("день");
-        let ready = fill(t(lang, Key::SyncMadeSince), &[&kvartik_core::i18n::date(lang, day), &kinds(lang, 1, 0, 1)]);
+        // Свой клиент и правленный здесь; профиль и «Эхо» пришли теми же —
+        // их нет в счёте.
+        let ready = fill(t(lang, Key::SyncMadeSince), &[&kvartik_core::i18n::date(lang, day), &kinds(lang, 2, 0, 0)]);
         if !wait_for(&host, &ready).await {
-            wrong.push(format!("встречный код не с того дня: «{}»", section_text(&host, "sync")));
+            wrong.push(format!("встречный код не тот: «{}»", section_text(&host, "sync")));
         }
         // Кнопки кода файлов под встречным кодом нет — и слова о файлах свои.
-        if !section_text(&host, "sync").contains(&fill(t(lang, Key::SyncBackSkipped), &["1"])) {
+        if !section_text(&host, "sync").contains(&words_until(lang, Key::SyncBackSkipped, &["1"])) {
             wrong.push(format!("о файлах встречного кода — не те слова: «{}»", section_text(&host, "sync")));
         }
         back = find(&host, ".sync-text:not(.sync-receipt) textarea")
@@ -1496,6 +1848,27 @@ async fn changes_go_both_ways_in_one_session() {
             }
             None => wrong.push(format!("встречный код не открылся паролем того кода: {}", back.chars().take(20).collect::<String>())),
         }
+        match code_records(&back).await {
+            Some(records) => {
+                let has = |id: RecordId| records.iter().any(|(_, found, _, _)| *found == id);
+                if has(echoed.id()) {
+                    wrong.push("встречный код вернул отправителю его сегодняшнюю правку".to_owned());
+                }
+                if has(theirs.id()) {
+                    wrong.push("встречный код вернул запись старше своего дня".to_owned());
+                }
+                if !has(ours.id()) {
+                    wrong.push("во встречном коде нет своего клиента".to_owned());
+                }
+                if !records.iter().any(|(_, id, text, _)| *id == later.id() && text.contains("Правят здесь позже")) {
+                    wrong.push("во встречном коде нет записи, правленной здесь позже".to_owned());
+                }
+                if !has(profile.id()) {
+                    wrong.push("во встречном коде нет профиля — того устройства ИП не узнает".to_owned());
+                }
+            }
+            None => wrong.push("записи встречного кода не читаются".to_owned()),
+        }
         if Device::new().sync_made(crate::store::DB_NAME) != Some(made) {
             wrong.push("встречный код сдвинул ряд изменений получателя".to_owned());
         }
@@ -1505,7 +1878,7 @@ async fn changes_go_both_ways_in_one_session() {
 
     // Снова отправитель: код тем же паролем копий — замок тот же, — и под ним
     // встречный код получателя.
-    seed_pair(&profile, &theirs).await;
+    seed_sender().await;
     restore_device(&sender);
     let (host, mounted) = mount();
     if !opened(&host, lang).await {
@@ -1539,6 +1912,7 @@ async fn changes_go_both_ways_in_one_session() {
         key: &foreign_key,
         salt: &salt,
         iterations: 1,
+        echo: None,
     };
     let foreign = match crate::store::sync::make(&store, &sealing).await {
         Ok(made) => sync::text_parts(&made.code, 1).join("\n"),
@@ -1556,7 +1930,7 @@ async fn changes_go_both_ways_in_one_session() {
     if !wait_for(&host, t(lang, Key::SyncBackTook)).await {
         wrong.push(format!("встречный код не принят: «{}»", section_text(&host, "sync")));
     }
-    if !wait_for(&host, &landed_words(lang, &kinds(lang, 1, 0, 0), 1)).await {
+    if !wait_for(&host, &landed_words(lang, &kinds(lang, 2, 0, 0), 1)).await {
         wrong.push(format!("встречный код не лёг: «{}»", section_text(&host, "sync")));
     }
     if section_text(&host, "sync").contains(t(lang, Key::SyncReceiptTitle)) {
@@ -1568,8 +1942,15 @@ async fn changes_go_both_ways_in_one_session() {
         None => wrong.push("нет «Готово, убрать код»".to_owned()),
     }
     match stored_clients().await {
-        Ok(clients) if clients.iter().any(|known| known.id() == ours.id()) => {}
-        other => wrong.push(format!("клиента получателя нет у отправителя: {other:?}")),
+        Ok(clients) => {
+            if !clients.iter().any(|known| known.id() == ours.id()) {
+                wrong.push("клиента получателя нет у отправителя".to_owned());
+            }
+            if !clients.iter().any(|known| known.id() == later.id() && known.data().name.as_str() == "Правят здесь позже") {
+                wrong.push("правка получателя не легла у отправителя".to_owned());
+            }
+        }
+        Err(error) => wrong.push(format!("клиенты не читаются: {error:?}")),
     }
     if Device::new().sync_received(crate::store::DB_NAME).until(receiver).is_none() {
         wrong.push("отправитель не запомнил, что принял от получателя".to_owned());
@@ -1580,4 +1961,164 @@ async fn changes_go_both_ways_in_one_session() {
     crate::platform::set_hash("");
     documents::forget_device();
     assert!(wrong.is_empty(), "обмен в обе стороны: {wrong:#?}");
+}
+
+/// Встречный код — того же охвата, что принятый (ревью задачи 124): контора
+/// двух ИП, принявшая код одного ИП, отвечает кодом только этого ИП — без
+/// записей ИП списка, без меток баз и без второго ИП. Кодом всех ИП тому, у
+/// кого ИП один, легли бы все ИП конторы.
+#[wasm_bindgen_test]
+async fn the_back_code_keeps_the_scope_of_the_code() {
+    use super::office::{forget_office, named, seed, seed_office};
+    use crate::store::office::OFFICE_DB;
+    use kvartik_core::model::office::Ip;
+    let lang = Lang::Ru;
+    let aram = named("ИП Арам Петросян");
+    let anna = named("ИП Анна Акопян");
+    let client = Client::create(documents::acme(), clock::now()).expect("годный клиент");
+    let annas = Client::create(documents::acme(), clock::now()).expect("годный клиент");
+    let fresh = || async {
+        crate::store::delete_database(crate::store::DB_NAME).await;
+        crate::store::delete_database(OFFICE_DB).await;
+        forget_office();
+        other_device();
+        Device::new().set_ui_lang(lang);
+    };
+    let mut wrong = Vec::new();
+
+    // Отправитель: один ИП, код всех записей.
+    fresh().await;
+    seed_pair(&aram, &client).await;
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база отправителя не открылась".to_owned());
+    }
+    let code = make(&host, lang, true, &mut wrong).await.unwrap_or_default();
+    drop(mounted);
+    host.remove();
+
+    // Получатель: контора — тот же ИП открыт и ещё второй ИП со своим клиентом.
+    fresh().await;
+    let today = clock::today().expect("сегодня");
+    let first = {
+        let mut ip = Ip::first(Some(&aram), today, clock::now());
+        ip.copy_profile(&aram, clock::now());
+        ip
+    };
+    let mut second = Ip::new(today, clock::now());
+    second.copy_profile(&anna, clock::now());
+    crate::store::delete_database(second.base()).await;
+    seed(crate::store::DB_NAME, &aram).await;
+    seed(second.base(), &anna).await;
+    {
+        let store = crate::store::Store::open_base(second.base(), |_| {}).await.expect("база открыта");
+        let mut writes = Writes::default();
+        writes.insert(&annas);
+        store.write().expect("транзакция").commit(writes).await.expect("записано");
+    }
+    seed_office(&[&first, &second]).await;
+    Device::new().set_office();
+    crate::store::office::set_tab_base(crate::store::DB_NAME);
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база конторы не открылась".to_owned());
+    }
+    if let Some(input) = paste(&host, lang, &code, &mut wrong).await {
+        accept(&host, lang, &input, PASSWORD);
+        if !wait_for(&host, t(lang, Key::SyncReceiptTitle)).await {
+            wrong.push(format!("код одного ИП не лёг в контору: «{}»", section_text(&host, "sync")));
+        }
+        match sync_button(&host, t(lang, Key::SyncBackMake)) {
+            Some(button) => button.click(),
+            None => wrong.push(format!("нет встречного кода: «{}»", section_text(&host, "sync"))),
+        }
+        let back = match find(&host, ".sync-text:not(.sync-receipt) textarea").await {
+            Some(area) => Reflect::get(&area, &"value".into()).ok().and_then(|value| value.as_string()).unwrap_or_default(),
+            None => String::new(),
+        };
+        if back.is_empty() && !section_text(&host, "sync").contains(t(lang, Key::SyncNothing)) {
+            wrong.push(format!("встречный код не готов: «{}»", section_text(&host, "sync")));
+        }
+        if !back.is_empty() {
+            match code_records(&back).await {
+                Some(records) => {
+                    if records.iter().any(|(_, _, _, base)| base.is_some()) {
+                        wrong.push("встречный код на код одного ИП — с метками баз, кодом всех ИП".to_owned());
+                    }
+                    if records.iter().any(|(kind, ..)| *kind == Ip::KIND) {
+                        wrong.push("во встречном коде — записи ИП списка".to_owned());
+                    }
+                    if records.iter().any(|(_, id, ..)| *id == annas.id() || *id == anna.id()) {
+                        wrong.push("во встречном коде — второй ИП конторы".to_owned());
+                    }
+                }
+                None => wrong.push("встречный код не читается".to_owned()),
+            }
+        }
+    }
+    drop(mounted);
+    host.remove();
+    crate::store::delete_database(second.base()).await;
+    fresh().await;
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "охват встречного кода: {wrong:#?}");
+}
+
+/// Встречный код, в котором нести нечего, кроме эха (задача 124, п. 14): у
+/// получателя после того дня ничего своего — только то, что пришло, — и он
+/// говорит «передавать нечего», а не показывает код с тем же самым.
+#[wasm_bindgen_test]
+async fn the_echo_alone_is_nothing_to_send_back() {
+    use kvartik_core::model::record::Timestamp;
+    const DAY: i64 = 86_400_000;
+    let lang = Lang::Ru;
+    let now = clock::now();
+    let profile = Profile::save(None, documents::profile(), now).expect("годный профиль").expect("новый");
+    let theirs = Client::create(documents::acme(), now).expect("годный клиент");
+    let mut wrong = Vec::new();
+    seed_pair(&profile, &theirs).await;
+    other_device();
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база отправителя не открылась".to_owned());
+    }
+    let code = make(&host, lang, true, &mut wrong).await.unwrap_or_default();
+    drop(mounted);
+    host.remove();
+
+    // Получатель: тот же профиль, своего ничего, прошлый код — два дня назад.
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let mut writes = Writes::default();
+    writes.insert(&profile);
+    documents::commit(writes).await;
+    other_device();
+    Device::new().set_sync_made(crate::store::DB_NAME, Timestamp::from_unix_millis(now.unix_millis() - 2 * DAY));
+    let (host, mounted) = mount();
+    if !opened(&host, lang).await {
+        wrong.push("база получателя не открылась".to_owned());
+    }
+    if let Some(input) = paste(&host, lang, &code, &mut wrong).await {
+        accept(&host, lang, &input, PASSWORD);
+        if !wait_for(&host, &landed_words(lang, &kinds(lang, 1, 0, 0), 1)).await {
+            wrong.push(format!("код не лёг: «{}»", section_text(&host, "sync")));
+        }
+        match sync_button(&host, t(lang, Key::SyncBackMake)) {
+            Some(button) => button.click(),
+            None => wrong.push(format!("под квитанцией нет встречного кода: «{}»", section_text(&host, "sync"))),
+        }
+        if !wait_for(&host, t(lang, Key::SyncNothing)).await {
+            wrong.push(format!("эхо вместо «передавать нечего»: «{}»", section_text(&host, "sync")));
+        }
+        if host.query_selector("#sync .sync-text:not(.sync-receipt) textarea").ok().flatten().is_some() {
+            wrong.push("встречный код из одного эха показан".to_owned());
+        }
+    }
+    drop(mounted);
+    host.remove();
+    other_device();
+    crate::platform::set_hash("");
+    documents::forget_device();
+    assert!(wrong.is_empty(), "встречный код из эха: {wrong:#?}");
 }

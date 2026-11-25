@@ -55,7 +55,7 @@ use kvartik_core::format::backup::{self, DeviceKey, IV_BYTES, KDF_ITERATIONS, KI
 use kvartik_core::format::office as office_route;
 use kvartik_core::format::qr::{self, Gray};
 use kvartik_core::format::sync::{
-    self, Acked, CodeError, Collector, Continuity, FrameError, MAX_CODE_BYTES, MAX_SERIES_BYTES, Payload, Receipt,
+    self, Acked, CodeError, Collector, Continuity, Echo, FrameError, MAX_CODE_BYTES, MAX_SERIES_BYTES, Payload, Receipt,
     Sealed, Series, Took,
 };
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
@@ -77,6 +77,7 @@ use super::{Base, tr};
 use crate::platform::camera::{Camera, CameraError};
 use crate::platform::crypto::{self, CryptoError};
 use crate::platform::share::{self, ShareError};
+use crate::platform::awake as platform_awake;
 use crate::platform::{clipboard, clock};
 use crate::store::backup::{self as stored, Merged, OtherIe, Restored};
 use crate::store::device::Device;
@@ -293,10 +294,7 @@ impl Say {
             ),
             Self::FilesTooLarge(bytes) => fill(
                 t(lang, Key::SyncFilesTooLarge),
-                &[
-                    &i18n::integer(lang, bytes.div_ceil(1024) as i64),
-                    &i18n::integer(lang, (MAX_SERIES_BYTES / 1024) as i64),
-                ],
+                &[&megabytes(lang, *bytes), &megabytes(lang, MAX_SERIES_BYTES)],
             ),
             Self::EmptyDelta(day) => fill(
                 t(lang, Key::SyncEmptyDelta),
@@ -326,6 +324,15 @@ impl From<Problem> for Say {
     }
 }
 
+/// Мегабайты с десятыми (задача 124): «130 161 КБ из 1 023» о файлах книги
+/// человек не читал — «127,1 МБ из 1» читает. Мегабайт — 2²⁰ байтов, как
+/// у копии (`backup::megabytes`); десятые — вверх, чтобы файл в 30 КБ не был
+/// «0 МБ».
+fn megabytes(lang: Lang, bytes: usize) -> String {
+    let tenths = (bytes as u64 * 10).div_ceil(1 << 20);
+    i18n::decimal(lang, i64::try_from(tenths).unwrap_or(i64::MAX), 1)
+}
+
 /// Готовый код на экране.
 struct Shown {
     /// Контуры тёмных модулей каждого QR-кода — для `<path d>`.
@@ -339,6 +346,9 @@ struct Shown {
     /// Изменённые записи кода — по видам (задача 124, п. 21).
     tally: Tally,
     skipped: usize,
+    /// Сколько байтов вышло бы у кода этих файлов — оценкой (задача 124):
+    /// не поместятся в серию — кнопка копии файлом, а не серии.
+    skipped_bytes: usize,
     unreadable: usize,
     /// Ключ кода — им зашифрована квитанция в ответ (задача 116).
     key: Rc<crypto::Key>,
@@ -353,6 +363,24 @@ struct Shown {
     everyone: bool,
     salt: Vec<u8>,
     iterations: u32,
+}
+
+/// Поместятся ли файлы в серию кодов (`sync::files_fit`).
+#[cfg(not(test))]
+fn files_fit(bytes: usize) -> bool {
+    sync::files_fit(bytes)
+}
+
+// Браузерный тест отказа серии (размер разошёлся с оценкой) ставит «поместятся»
+// сам: файлов, у которых код вышел бы больше оценки, тест не соберёт.
+#[cfg(test)]
+thread_local! {
+    pub(super) static FITS: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+fn files_fit(bytes: usize) -> bool {
+    FITS.with(std::cell::Cell::get).unwrap_or_else(|| sync::files_fit(bytes))
 }
 
 /// Где передача.
@@ -637,7 +665,7 @@ async fn make(ctx: Ctx, typed: &str, repeat: Option<&str>, since: Option<Date>, 
         salt: device_key.salt().to_vec(),
         iterations: device_key.iterations(),
     };
-    let (shown, changed) = seal_code(ctx, &lock, since, everyone).await?;
+    let (shown, changed) = seal_code(ctx, &lock, since, everyone, None).await?;
     // Новый пароль запоминается, когда код под ним уже собран, — как у копии.
     if fresh {
         ctx.backups.password_set(&device_key);
@@ -677,26 +705,37 @@ struct Unsent {
 /// принятого кода, без пароля, с дня по умолчанию этого устройства до того
 /// кода (`unsent`). Ряд изменений отсюда он не сдвигает: квитанции на
 /// встречный код нет, и день следующего кода, сдвинутый кодом, который не
-/// сняли, спрятал бы дыру (риск в записи задачи) — как у кода файлов. У кого
-/// ИП несколько, код — всех ИП, как у «Передать отсюда» по умолчанию.
-async fn make_back(ctx: Ctx, lock: &CodeLock, unsent: Unsent) -> Result<Shown, Say> {
-    let everyone = Device::new().office();
+/// сняли, спрятал бы дыру (риск в записи задачи) — как у кода файлов. Охват —
+/// тот же, что у принятого кода (`everyone` — он был кодом всех ИП): на код
+/// одного ИП бухгалтер с конторой отвечал кодом всех своих ИП, и тому, у кого
+/// ИП один, без вопроса легли бы все ИП конторы (ревью задачи 124). Записей,
+/// которые здесь те же, что пришли принятым кодом (`echo`), в нём нет: день
+/// берёт и правки того устройства после него, а они у него уже есть
+/// (решение человека 2026-11-25). Остались одни они — «передавать нечего».
+async fn make_back(ctx: Ctx, lock: &CodeLock, unsent: Unsent, echo: &Echo, everyone: bool) -> Result<Shown, Say> {
     let (base, arrived) = if everyone {
         (OFFICE_DB.to_owned(), unsent.office)
     } else {
         (ctx.office.open_name(), unsent.open)
     };
-    let (shown, changed) = seal_code(ctx, lock, day_after(&base, arrived), everyone).await?;
+    let (shown, changed) = seal_code(ctx, lock, day_after(&base, arrived), everyone, Some(echo)).await?;
     if changed == 0 && shown.skipped == 0 {
         return Err(Say::Key(Key::SyncNothing));
     }
     Ok(shown)
 }
 
-/// Код ключом `lock`: записи с дня `since` (`everyone` — всех ИП) — в QR-коды
-/// и куски текста; вместе с кодом — сколько в нём изменённых записей. Ряда
-/// изменений не трогает: это решает тот, кто зовёт.
-async fn seal_code(ctx: Ctx, lock: &CodeLock, since: Option<Date>, everyone: bool) -> Result<(Shown, usize), Say> {
+/// Код ключом `lock`: записи с дня `since` (`everyone` — всех ИП), кроме эха
+/// принятого кода (`echo`, у встречного кода), — в QR-коды и куски текста;
+/// вместе с кодом — сколько в нём изменённых записей. Ряда изменений не
+/// трогает: это решает тот, кто зовёт.
+async fn seal_code(
+    ctx: Ctx,
+    lock: &CodeLock,
+    since: Option<Date>,
+    everyone: bool,
+    echo: Option<&Echo>,
+) -> Result<(Shown, usize), Say> {
     let store = ctx.base.get().ok_or(Say::Key(Key::BackupFailed))?;
     // Контору не открыть — отказ, а не код одного открытого ИП молча: человек
     // считал бы, что в нём все.
@@ -714,6 +753,7 @@ async fn seal_code(ctx: Ctx, lock: &CodeLock, since: Option<Date>, everyone: boo
         key: &lock.key,
         salt: &lock.salt,
         iterations: lock.iterations,
+        echo,
     };
     let made = match &office {
         Some((office_store, open_name)) => stored_sync::make_all(&store, open_name, office_store, &sealing).await,
@@ -733,6 +773,7 @@ async fn seal_code(ctx: Ctx, lock: &CodeLock, since: Option<Date>, everyone: boo
         since,
         tally: made.tally,
         skipped: made.skipped,
+        skipped_bytes: made.skipped_bytes,
         unreadable: made.unreadable,
         key: Rc::clone(&lock.key),
         created: now,
@@ -743,6 +784,23 @@ async fn seal_code(ctx: Ctx, lock: &CodeLock, since: Option<Date>, everyone: boo
         iterations: lock.iterations,
     };
     Ok((shown, made.changed))
+}
+
+/// Дольше этого экран при коде не держится (ревью задачи 124): три круга
+/// кода из `count` QR-кодов, но не меньше двух минут — камере хватает
+/// и одного круга, а оставленный телефон гаснет и запирается сам.
+fn awake_limit(count: usize) -> Duration {
+    #[cfg(test)]
+    if let Some(limit) = AWAKE_LIMIT.with(std::cell::Cell::get) {
+        return limit;
+    }
+    (QR_STEP * u32::try_from(count.saturating_mul(3)).unwrap_or(u32::MAX)).max(Duration::from_secs(120))
+}
+
+// Браузерный тест предела ждёт не две минуты, а долю секунды.
+#[cfg(test)]
+thread_local! {
+    pub(super) static AWAKE_LIMIT: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
 }
 
 /// Следующий QR-код круга — через [`QR_STEP`], и снова, пока круг идёт.
@@ -794,8 +852,38 @@ fn CodeShown(
     // дальше незачем (найдено человеком 2026-11-24).
     let running = StoredValue::new(false);
     let timer = StoredValue::new(None::<TimeoutHandle>);
+    // Экран не гаснет, пока код на виду и не принят (задача 124, A3): камера
+    // того устройства снимает круг до минуты, а телефон без касания гасит
+    // экран через полминуты. «Принято», «Готово» и уход с пути отпускают его,
+    // а дольше [`awake_limit`] он не держится и без них: у встречного кода
+    // и кода файлов квитанции нет, и оставленный с кодом телефон иначе не гас
+    // бы и не запирался сам (ревью задачи 124). Вернулись на путь — снова.
+    let awake = StoredValue::new(false);
+    let tired = RwSignal::new(false);
+    let tired_timer = StoredValue::new(None::<TimeoutHandle>);
+    let wake = move |on: bool| {
+        if awake.try_get_value() != Some(!on) {
+            return;
+        }
+        awake.try_set_value(on);
+        if let Some(Some(handle)) = tired_timer.try_get_value() {
+            handle.clear();
+        }
+        if on {
+            platform_awake::hold();
+            let handle = set_timeout_with_handle(move || { tired.try_set(true); }, awake_limit(count));
+            tired_timer.try_set_value(handle.ok());
+        } else {
+            tired_timer.try_set_value(None);
+            platform_awake::let_go();
+        }
+    };
     Effect::new(move |_| {
         let go = seen.get() && !accepted.get();
+        if !go && tired.get_untracked() {
+            tired.set(false);
+        }
+        wake(go && !tired.get());
         if go && count > 1 && !running.get_value() {
             running.set_value(true);
             cycle(index, count, running, timer);
@@ -803,7 +891,10 @@ fn CodeShown(
             halt(running, timer);
         }
     });
-    on_cleanup(move || halt(running, timer));
+    on_cleanup(move || {
+        halt(running, timer);
+        wake(false);
+    });
     let frames = StoredValue::new(qr);
     let path = move || frames.with_value(|qr| qr.get(index.get()).cloned()).unwrap_or_default();
     let caption = move || {
@@ -821,14 +912,34 @@ fn CodeShown(
     // читает крупный код с метра, а в строке экрана телефона он мелкий. Круг
     // идёт и там — тот же индекс.
     let full = RwSignal::new(false);
+    let open_full = NodeRef::<leptos::html::Button>::new();
     let close_full = NodeRef::<leptos::html::Button>::new();
+    // Фокус — в окне, пока оно открыто, и на кнопке, что его открыла, когда
+    // закрыто (задача 124, A4): окно `aria-modal`, а Tab уводил фокус под него,
+    // на кнопки программы, которых не видно.
+    let focus = move |button: NodeRef<leptos::html::Button>| {
+        request_animation_frame(move || {
+            if let Some(button) = button.get_untracked() {
+                let _ = button.focus();
+            }
+        });
+    };
+    let shut = move || {
+        if full.get_untracked() {
+            full.set(false);
+            focus(open_full);
+        }
+    };
     Effect::new(move |_| {
         if full.get() {
-            request_animation_frame(move || {
-                if let Some(button) = close_full.get_untracked() {
-                    let _ = button.focus();
-                }
-            });
+            focus(close_full);
+        }
+    });
+    // Квитанция «принято» пришла — окно закрывается само: код сняли, и он
+    // больше не нужен на весь экран.
+    Effect::new(move |_| {
+        if accepted.get() {
+            shut();
         }
     });
     view! {
@@ -840,22 +951,26 @@ fn CodeShown(
             {(count > 1).then(|| view! { <figcaption>{caption}</figcaption> })}
         </figure>
         <div class="actions">
-            <button type="button" class="secondary" on:click=move |_| full.set(true)>
+            <button type="button" class="secondary" node_ref=open_full on:click=move |_| full.set(true)>
                 <span class="label">{tr(lang, Key::SyncQrFull)}</span>
             </button>
         </div>
         // Окно поверх программы, как «Что нового»: Escape и «Свернуть»
-        // возвращают код на место, фокус — на кнопке.
+        // возвращают код на место, фокус — на кнопке. Кнопка в окне одна,
+        // и Tab остаётся на ней.
         {move || full.get().then(|| view! {
             <div
                 class="sync-full"
                 role="dialog"
                 aria-modal="true"
                 aria-label=move || t(lang.get(), Key::SyncQrLabel)
-                on:keydown=move |event: KeyboardEvent| {
-                    if event.key() == "Escape" {
-                        full.set(false);
+                on:keydown=move |event: KeyboardEvent| match event.key().as_str() {
+                    "Escape" => shut(),
+                    "Tab" => {
+                        event.prevent_default();
+                        focus(close_full);
                     }
+                    _ => {}
                 }
             >
                 <svg viewBox=format!("0 0 {side} {side}") role="img" aria-label=move || t(lang.get(), Key::SyncQrLabel)>
@@ -864,7 +979,7 @@ fn CodeShown(
                 </svg>
                 {(count > 1).then(|| view! { <p class="sync-full-count">{caption}</p> })}
                 <p>{tr(lang, Key::SyncQrBright)}</p>
-                <button type="button" class="wide" node_ref=close_full on:click=move |_| full.set(false)>
+                <button type="button" class="wide" node_ref=close_full on:click=move |_| shut()>
                     <span class="label">{tr(lang, Key::SyncQrFullClose)}</span>
                 </button>
             </div>
@@ -984,6 +1099,7 @@ async fn make_files(ctx: Ctx, shown: Rc<Shown>) -> Result<FilesShown, Say> {
         key: &shown.key,
         salt: &shown.salt,
         iterations: shown.iterations,
+        echo: None,
     };
     let made = if shown.everyone {
         let (office_store, open_name) = ctx
@@ -1018,7 +1134,8 @@ async fn make_files(ctx: Ctx, shown: Rc<Shown>) -> Result<FilesShown, Say> {
 /// Что в готовом коде — по видам (задача 124, п. 21), сколько QR-кодов
 /// и сколько идёт круг, что не вошло: у кода изменений и у встречного кода.
 /// `skipped` — слова о файлах, которых в коде нет: у встречного кода под ним
-/// нет кнопки кода файлов.
+/// нет кнопки кода файлов, а файлы больше серии кодов везёт копия файлом.
+/// Шаблон берёт число файлов, их МБ и сколько МБ вмещает серия.
 #[component]
 fn MadeWords(lang: ReadSignal<Lang>, shown: Rc<Shown>, skipped: Key) -> impl IntoView {
     let (since, tally) = (shown.since, shown.tally);
@@ -1044,8 +1161,17 @@ fn MadeWords(lang: ReadSignal<Lang>, shown: Rc<Shown>, skipped: Key) -> impl Int
     view! {
         <p role="status">{summary}</p>
         {(codes > 1).then(|| view! { <p class="hint">{round}</p> })}
-        {(shown.skipped > 0).then(|| view! {
-            <p class="hint">{counted(lang, skipped, shown.skipped as i64)}</p>
+        {(shown.skipped > 0).then(|| {
+            let (count, bytes) = (shown.skipped, shown.skipped_bytes);
+            view! {
+                <p class="hint">{move || {
+                    let lang = lang.get();
+                    fill(
+                        t(lang, skipped),
+                        &[&i18n::integer(lang, count as i64), &megabytes(lang, bytes), &megabytes(lang, MAX_SERIES_BYTES)],
+                    )
+                }}</p>
+            }
         })}
         {(shown.unreadable > 0).then(|| view! { <p role="alert">{counted(lang, Key::SyncUnreadable, shown.unreadable as i64)}</p> })}
     }
@@ -1087,9 +1213,14 @@ fn ShownCode(
     // Квитанция этого кода пришла (задача 123): круг стоит, а «Готово,
     // убрать код» — главной кнопкой.
     let accepted = RwSignal::new(false);
-    let skipped = shown.skipped;
-    // Файлов больше серии кодов (задача 124, п. 18): ручная копия тем же
-    // паролем — экран копии соберёт её ключом этого кода и откроется с ней
+    let (skipped, skipped_bytes) = (shown.skipped, shown.skipped_bytes);
+    // Поместятся ли файлы в серию кодов — оценкой, до неё (задача 124): 50
+    // файлов в 127 МБ вели к кнопке серии, а она отказывала словами «130 161
+    // КБ из 1 023» рядом со второй главной кнопкой (найдено вживую
+    // 2026-11-25). Не поместятся — слова и копия файлом сразу, а серии нет.
+    let fits = files_fit(skipped_bytes);
+    // Файлов больше серии кодов (задача 124, пп. 18 и A5): ручная копия тем
+    // же паролем — экран копии соберёт её ключом этого кода и откроется с ней
     // готовой.
     let as_backup = move |_: MouseEvent| {
         if let Some(key) = source.try_with_value(|shown| Rc::clone(&shown.key)) {
@@ -1098,7 +1229,7 @@ fn ShownCode(
         }
     };
     view! {
-        <MadeWords lang shown=Rc::clone(&shown) skipped=Key::SyncSkipped />
+        <MadeWords lang shown=Rc::clone(&shown) skipped=if fits { Key::SyncSkipped } else { Key::SyncSkippedLarge } />
         {move || match files.get() {
             FilesState::On(made, at) => {
                 let total = made.parts.len();
@@ -1134,44 +1265,70 @@ fn ShownCode(
             }
             state => {
                 let (qr, side, parts) = main.get_value();
+                // Серия всё же отказала — размер разошёлся с оценкой: кнопки
+                // серии больше нет, а слова спокойные — путь есть, кнопка над
+                // ними (задача 124).
+                let refused = match &state {
+                    FilesState::Failed(say @ Say::FilesTooLarge(_)) => Some(say.clone()),
+                    _ => None,
+                };
+                let series = fits && refused.is_none();
+                let gave_up = refused.is_some();
                 view! {
                     <CodeShown lang seen qr side parts accepted=accepted.into() hint=Key::SyncQrHint carry />
                     // Файлы — без отдельного шага (задача 124, п. 18): пришла
-                    // квитанция «принято» — код файлов следующей главной
-                    // кнопкой и словами, сколько их.
+                    // квитанция «принято» — следующей главной кнопкой и словами,
+                    // сколько их: код файлов, а не помещаются они в серию —
+                    // копия файлом тем же паролем.
                     {(skipped > 0).then(|| view! {
-                        {move || accepted.get().then(|| view! {
-                            <p role="status">{counted(lang, Key::SyncFilesAfter, skipped as i64)}</p>
+                        {move || (accepted.get() && !gave_up).then(|| {
+                            let key = if series { Key::SyncFilesAfter } else { Key::SyncFilesBeyond };
+                            view! {
+                                <p role="status">{move || {
+                                    let lang = lang.get();
+                                    fill(
+                                        t(lang, key),
+                                        &[
+                                            &i18n::integer(lang, skipped as i64),
+                                            &megabytes(lang, skipped_bytes),
+                                            &megabytes(lang, MAX_SERIES_BYTES),
+                                        ],
+                                    )
+                                }}</p>
+                            }
                         })}
+                        {refused.clone().map(|say| view! { <p role="status">{move || say.text(lang.get())}</p> })}
                         <div class="actions">
-                            <button
-                                type="button"
-                                class=move || (!accepted.get()).then_some("secondary")
-                                disabled=matches!(state, FilesState::Busy)
-                                on:click=build
-                            >
-                                <span class="label">{tr(lang, Key::SyncFilesMake)}</span>
-                            </button>
+                            {if series {
+                                view! {
+                                    <button
+                                        type="button"
+                                        class=move || (!accepted.get()).then_some("secondary")
+                                        disabled=matches!(state, FilesState::Busy)
+                                        on:click=build
+                                    >
+                                        <span class="label">{tr(lang, Key::SyncFilesMake)}</span>
+                                    </button>
+                                }
+                                .into_any()
+                            } else {
+                                view! {
+                                    <button
+                                        type="button"
+                                        class=move || (!accepted.get() && !gave_up).then_some("secondary")
+                                        on:click=as_backup
+                                    >
+                                        <span class="label">{tr(lang, Key::SyncFilesAsBackup)}</span>
+                                    </button>
+                                }
+                                .into_any()
+                            }}
                         </div>
                     })}
                     {match state {
                         FilesState::Busy => Some(view! { <p role="status">{tr(lang, Key::SyncFilesMaking)}</p> }.into_any()),
-                        // Файлов больше серии — копией файлом, тем же паролем,
-                        // одной кнопкой (задача 124, п. 18).
-                        FilesState::Failed(say) => {
-                            let large = matches!(say, Say::FilesTooLarge(_));
-                            Some(view! {
-                                <p role="alert">{move || say.text(lang.get())}</p>
-                                {large.then(|| view! {
-                                    <div class="actions">
-                                        <button type="button" on:click=as_backup>
-                                            <span class="label">{tr(lang, Key::SyncFilesAsBackup)}</span>
-                                        </button>
-                                    </div>
-                                })}
-                            }.into_any())
-                        }
-                        FilesState::Off | FilesState::On(..) => None,
+                        FilesState::Failed(Say::FilesTooLarge(_)) | FilesState::Off | FilesState::On(..) => None,
+                        FilesState::Failed(say) => Some(view! { <p role="alert">{move || say.text(lang.get())}</p> }.into_any()),
                     }}
                     <Reply ctx seen shown=source.get_value() gap accepted />
                 }
@@ -1471,6 +1628,12 @@ struct Accepted {
     was_empty: bool,
     /// Что ждало кода отсюда до этого кода — день встречного кода.
     unsent: Unsent,
+    /// Записи кода, какими они пришли (задача 124, п. 14): встречный код
+    /// их обратно не несёт, пока они здесь те же.
+    echo: Rc<Echo>,
+    /// Код был кодом всех ИП: встречный — тоже, а на код одного ИП — кодом
+    /// одного ИП.
+    everyone: bool,
 }
 
 /// Чем открыть код: паролем, который вписал человек, или ключом прошлого
@@ -1741,9 +1904,11 @@ fn Receive(ctx: Ctx, seen: Signal<bool>) -> impl IntoView {
                     Receiving::Done(accepted) => {
                         let lock = (accepted.receipt.is_some() && !accepted.was_empty).then(|| known.get_value()).flatten();
                         let unsent = accepted.unsent;
+                        let echo = Rc::clone(&accepted.echo);
+                        let everyone = accepted.everyone;
                         Some(view! {
                             <AcceptedWords lang accepted />
-                            {lock.map(|lock| view! { <BackCode ctx seen lock unsent /> })}
+                            {lock.map(|lock| view! { <BackCode ctx seen lock unsent echo everyone /> })}
                         }.into_any())
                     }
                     Receiving::Failed(say) => Some(view! { <p role="alert">{move || say.text(lang.get())}</p> }.into_any()),
@@ -1825,24 +1990,34 @@ fn ReceiptShown(lang: ReadSignal<Lang>, receipt: ShownReceipt) -> impl IntoView 
 }
 
 /// Встречный код (задача 124, п. 14): под квитанцией — изменения отсюда тому
-/// устройству тем же ключом, без пароля, по нажатию. Снимает его тот, кто
-/// показал код, — там же, где квитанцию (`Reply`). Квитанции на него нет:
-/// круг идёт, пока путь на виду.
+/// устройству тем же ключом, без пароля, по нажатию, без записей, что пришли
+/// от него (`echo`). Снимает его тот, кто показал код, — там же, где
+/// квитанцию (`Reply`). Квитанции на него нет: круг идёт, пока путь на виду.
+/// Больше предела — копией файлом: дня у встречного кода не выбрать.
 #[component]
-fn BackCode(ctx: Ctx, seen: Signal<bool>, lock: CodeLock, unsent: Unsent) -> impl IntoView {
+fn BackCode(ctx: Ctx, seen: Signal<bool>, lock: CodeLock, unsent: Unsent, echo: Rc<Echo>, everyone: bool) -> impl IntoView {
     let lang = ctx.lang;
     let back = RwSignal::new_local(Sending::Idle);
     let lock = StoredValue::new_local(lock);
+    let echo = StoredValue::new_local(echo);
+    // Копией файлом — тем же паролем, если он здесь тот же (`Backups::hand_off`):
+    // экран копии соберёт её сам.
+    let as_backup = move |_: MouseEvent| {
+        if let Some(key) = lock.try_with_value(|lock| Rc::clone(&lock.key)) {
+            ctx.backups.hand_off(key);
+        }
+        ctx.router.go(Screen::Backup);
+    };
     let start = move |_: MouseEvent| {
         if matches!(back.get_untracked(), Sending::Busy) {
             return;
         }
         back.set(Sending::Busy);
         leptos::task::spawn_local(async move {
-            let Some(lock) = lock.try_get_value() else {
+            let (Some(lock), Some(echo)) = (lock.try_get_value(), echo.try_get_value()) else {
                 return;
             };
-            back.set(match make_back(ctx, &lock, unsent).await {
+            back.set(match make_back(ctx, &lock, unsent, &echo, everyone).await {
                 Ok(shown) => Sending::Ready(Rc::new(shown)),
                 Err(say) => Sending::Failed(say),
             });
@@ -1860,17 +2035,41 @@ fn BackCode(ctx: Ctx, seen: Signal<bool>, lock: CodeLock, unsent: Unsent) -> imp
                 .into_any()
             }
             state => view! {
-                <div class="actions">
-                    <button type="button" disabled=matches!(state, Sending::Busy) on:click=start>
-                        <span class="label">{tr(lang, Key::SyncBackMake)}</span>
-                    </button>
-                </div>
+                // Не уместился — снова тот же код не уместится: главная кнопка
+                // одна, копия файлом.
+                {(!matches!(state, Sending::Failed(Say::TooLarge(_)))).then(|| view! {
+                    <div class="actions">
+                        <button type="button" disabled=matches!(state, Sending::Busy) on:click=start>
+                            <span class="label">{tr(lang, Key::SyncBackMake)}</span>
+                        </button>
+                    </div>
+                })}
                 {match state {
                     Sending::Busy => Some(view! { <p role="status">{tr(lang, Key::SyncMaking)}</p> }.into_any()),
                     // «Передавать нечего» — ответ, а не беда, как у «Передать отсюда».
                     Sending::Failed(say @ Say::Key(Key::SyncNothing)) => {
                         Some(view! { <p role="status">{move || say.text(lang.get())}</p> }.into_any())
                     }
+                    // Больше предела (задача 124): «выберите день позже» здесь
+                    // не годится — дня у встречного кода нет, — путь один,
+                    // копия файлом.
+                    Sending::Failed(Say::TooLarge(bytes)) => Some(view! {
+                        <p role="alert">{move || {
+                            let lang = lang.get();
+                            fill(
+                                t(lang, Key::SyncBackTooLarge),
+                                &[
+                                    &i18n::integer(lang, bytes.div_ceil(1024) as i64),
+                                    &i18n::integer(lang, (MAX_CODE_BYTES / 1024) as i64),
+                                ],
+                            )
+                        }}</p>
+                        <div class="actions">
+                            <button type="button" on:click=as_backup>
+                                <span class="label">{tr(lang, Key::SyncFilesAsBackup)}</span>
+                            </button>
+                        </div>
+                    }.into_any()),
                     Sending::Failed(say) => Some(view! { <p role="alert">{move || say.text(lang.get())}</p> }.into_any()),
                     Sending::Idle | Sending::Ready(_) => None,
                 }}
@@ -1922,12 +2121,15 @@ async fn accept(ctx: Ctx, sealed: &Sealed, secret: Secret, answer: bool) -> Resu
     let ahead = backup::ahead(code.entries(), now)
         || header.created().unix_millis() > now.unix_millis().saturating_add(backup::CLOCK_SLACK_MILLIS);
     let had_office = device.office();
+    // Какими записи пришли — до слияния: встречный код их не вернёт.
+    let echo = Rc::new(Echo::of(code.entries()));
+    let everyone = backup::is_full(code.entries());
     // До слияния: что здесь ждало кода отсюда (`Unsent`).
     let unsent = Unsent {
         open: device.sync_arrived(&ctx.office.open_name()),
         office: device.sync_arrived(OFFICE_DB),
     };
-    let (landed, fresh, base) = if backup::is_full(code.entries()) {
+    let (landed, fresh, base) = if everyone {
         land_all(ctx, &store, code.into_entries(), header.since(), header.files()).await?
     } else {
         land_one(ctx, &store, code.into_entries(), header.since(), since, header.files()).await?
@@ -1979,6 +2181,8 @@ async fn accept(ctx: Ctx, sealed: &Sealed, secret: Secret, answer: bool) -> Resu
             receipt,
             was_empty: fresh,
             unsent,
+            echo,
+            everyone,
         },
         key,
     ))

@@ -359,6 +359,16 @@ fn any_device_names_are_read() {
     }
 }
 
+/// Имена файлов каждой найденной копии — для сравнения.
+fn names<'a>(found: &[Found<'a>]) -> Vec<Vec<&'a str>> {
+    found.iter().map(|copy| copy.names.clone()).collect()
+}
+
+const DAY_MILLIS: i64 = 24 * 60 * 60 * 1000;
+
+/// «Сейчас» проб — позже всех моментов файлов, кроме нарочно «будущих».
+const NOW: i64 = 200 * DAY_MILLIS;
+
 #[test]
 fn the_newest_copy_comes_whole_and_in_order() {
     // Части — не по порядку папки, а по номерам.
@@ -369,36 +379,48 @@ fn the_newest_copy_comes_whole_and_in_order() {
         ("kvartik-auto-2026-11-03-1a2b-2of3.json", 32),
         ("notes.txt", 99),
     ]);
+    let found = newest(&folder, NOW);
     assert_eq!(
-        newest(&folder),
-        [
+        names(&found),
+        [[
             "kvartik-auto-2026-11-03-1a2b-1of3.json",
             "kvartik-auto-2026-11-03-1a2b-2of3.json",
             "kvartik-auto-2026-11-03-1a2b-3of3.json",
-        ]
+        ]]
     );
+    assert_eq!((found[0].tag, found[0].day), (tag("1a2b"), day(2026, 11, 3)));
     // Одним файлом.
     let folder = files(&[("kvartik-auto-2026-11-02-1a2b.json", 10), ("kvartik-auto-2026-11-01-1a2b.json", 5)]);
-    assert_eq!(newest(&folder), ["kvartik-auto-2026-11-02-1a2b.json"]);
-    assert!(newest(&files(&[("kvartik-2026-11-03.json", 1)])).is_empty());
-    assert!(newest(&[]).is_empty());
+    assert_eq!(names(&newest(&folder, NOW)), [["kvartik-auto-2026-11-02-1a2b.json"]]);
+    assert!(newest(&files(&[("kvartik-2026-11-03.json", 1)]), NOW).is_empty());
+    assert!(newest(&[], NOW).is_empty());
 }
 
 #[test]
-fn the_newest_is_by_the_file_not_by_the_day_in_its_name() {
-    // Два компьютера в одной папке облака, у второго день в имени раньше —
-    // часы ушли назад, — но записан он позже.
+fn every_device_brings_its_newest_copy() {
+    // Два компьютера в одной папке облака (решение человека 2026-11-25): у
+    // каждого — своя самая свежая копия, а свежей первой идёт та, что
+    // записана позже, хотя день в её имени раньше — часы ушли назад.
     let folder = files(&[
+        ("kvartik-auto-2026-11-01-1a2b.json", 50),
         ("kvartik-auto-2026-11-03-1a2b.json", 100),
         ("kvartik-auto-2026-11-02-00ff.json", 200),
+        ("kvartik-auto-2026-11-01-00ff.json", 150),
     ]);
-    assert_eq!(newest(&folder), ["kvartik-auto-2026-11-02-00ff.json"]);
+    let found = newest(&folder, NOW);
+    assert_eq!(
+        names(&found),
+        [["kvartik-auto-2026-11-02-00ff.json"], ["kvartik-auto-2026-11-03-1a2b.json"]]
+    );
+    assert_eq!(found.iter().map(|copy| copy.tag).collect::<Vec<_>>(), [tag("00ff"), tag("1a2b")]);
 }
 
 #[test]
 fn an_older_copy_of_the_same_day_stays_out() {
     // Утром копия была из трёх частей, к вечеру — из двух, а утренние
-    // не убраны: берётся вечерняя, и только её части.
+    // не убраны: берётся вечерняя, и только её части. У второго устройства
+    // в папке пока одна часть из двух — она и идёт: каждая часть — копия
+    // сама по себе, а какой нет, окно скажет.
     let folder = files(&[
         ("kvartik-auto-2026-11-03-1a2b-1of3.json", 10),
         ("kvartik-auto-2026-11-03-1a2b-2of3.json", 11),
@@ -407,8 +429,80 @@ fn an_older_copy_of_the_same_day_stays_out() {
         ("kvartik-auto-2026-11-03-1a2b-2of2.json", 51),
         ("kvartik-auto-2026-11-03-00ff-1of2.json", 20),
     ]);
+    let found = newest(&folder, NOW);
     assert_eq!(
-        newest(&folder),
-        ["kvartik-auto-2026-11-03-1a2b-1of2.json", "kvartik-auto-2026-11-03-1a2b-2of2.json"]
+        names(&found),
+        [
+            vec!["kvartik-auto-2026-11-03-1a2b-1of2.json", "kvartik-auto-2026-11-03-1a2b-2of2.json"],
+            vec!["kvartik-auto-2026-11-03-00ff-1of2.json"],
+        ]
     );
+    assert_eq!((found[0].of, found[0].missing.clone()), (2, vec![]));
+    assert_eq!((found[1].of, found[1].missing.clone()), (2, vec![2]));
+}
+
+#[test]
+fn an_incomplete_copy_goes_after_the_whole_ones() {
+    // Копия 00ff свежее, но облако скачало только её часть 2 из 3: она идёт
+    // после целой копии 1a2b — слова о недостающих частях говорит последняя
+    // часть цепочки (ревью задачи 124).
+    let folder = files(&[
+        ("kvartik-auto-2026-11-03-00ff-2of3.json", 90),
+        ("kvartik-auto-2026-11-02-1a2b.json", 40),
+    ]);
+    let found = newest(&folder, NOW);
+    assert_eq!(
+        names(&found),
+        [vec!["kvartik-auto-2026-11-02-1a2b.json"], vec!["kvartik-auto-2026-11-03-00ff-2of3.json"]]
+    );
+    assert_eq!((found[0].of, found[0].missing.clone()), (1, vec![]));
+    assert_eq!((found[1].of, found[1].missing.clone()), (3, vec![1, 3]));
+}
+
+#[test]
+fn clocks_from_the_future_do_not_cut_the_others() {
+    // Часы одного компьютера ушли на сорок дней вперёд (Правило 6): его копия
+    // идёт, но отсчёт тридцати дней — от самой свежей копии не позже суток
+    // после «сейчас», и копии остальных на месте.
+    let folder = files(&[
+        ("kvartik-auto-2026-12-30-00ff.json", NOW + 40 * DAY_MILLIS),
+        ("kvartik-auto-2026-11-20-1a2b.json", NOW - DAY_MILLIS),
+        ("kvartik-auto-2026-11-11-c0de.json", NOW - 10 * DAY_MILLIS),
+    ]);
+    assert_eq!(
+        names(&newest(&folder, NOW)),
+        [
+            ["kvartik-auto-2026-12-30-00ff.json"],
+            ["kvartik-auto-2026-11-20-1a2b.json"],
+            ["kvartik-auto-2026-11-11-c0de.json"],
+        ]
+    );
+    // Все «из будущего» — отсчёт от самой свежей из них, как прежде.
+    let folder = files(&[
+        ("kvartik-auto-2026-12-30-00ff.json", NOW + 40 * DAY_MILLIS),
+        ("kvartik-auto-2026-12-01-1a2b.json", NOW + 2 * DAY_MILLIS),
+    ]);
+    assert_eq!(names(&newest(&folder, NOW)).len(), 1);
+}
+
+#[test]
+fn a_device_silent_for_a_month_stays_out() {
+    // Копия, записанная на тридцать дней раньше самой свежей, ещё берётся,
+    // а на день старше — нет: компьютер, скорее, брошен.
+    let fresh = 100 * DAY_MILLIS;
+    let folder = files(&[
+        ("kvartik-auto-2026-11-25-1a2b.json", fresh),
+        ("kvartik-auto-2026-10-26-00ff.json", fresh - 30 * DAY_MILLIS),
+        ("kvartik-auto-2026-10-25-c0de.json", fresh - 30 * DAY_MILLIS - 1),
+    ]);
+    assert_eq!(
+        names(&newest(&folder, NOW)),
+        [["kvartik-auto-2026-11-25-1a2b.json"], ["kvartik-auto-2026-10-26-00ff.json"]]
+    );
+    // Своя прежняя копия того же устройства — не повод брать его старую.
+    let folder = files(&[
+        ("kvartik-auto-2026-11-25-1a2b.json", fresh),
+        ("kvartik-auto-2026-09-01-1a2b.json", fresh - 80 * DAY_MILLIS),
+    ]);
+    assert_eq!(names(&newest(&folder, NOW)), [["kvartik-auto-2026-11-25-1a2b.json"]]);
 }

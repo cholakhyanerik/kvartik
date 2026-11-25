@@ -242,10 +242,32 @@ pub fn default_day(last_code: Option<Date>, arrived: Option<Date>, today: Date) 
 pub struct Picked {
     entries: Vec<Entry>,
     skipped: usize,
+    /// Длина текста изменённых файлов, которые в код не вошли, — для оценки
+    /// кода файлов ([`Picked::skipped_bytes`]).
+    skipped_text: usize,
     unreadable: usize,
+    /// Записи, которые идут в код всегда ([`ALWAYS`]), а пришли сюда тем же
+    /// кодом, что открыл встречный ([`Picked::without_echo`]): в коде они
+    /// есть, но изменёнными не считаются.
+    quiet: Vec<EchoKey>,
 }
 
+/// Записи, которые идут в код всегда: живой профиль — по нему принимающее
+/// сверяет ИП, — и записи ИП списка у кода всех ИП (шапка модуля).
+const ALWAYS: [&str; 2] = [Profile::KIND, Ip::KIND];
+
 impl Picked {
+    /// Ничего ещё не выбрано.
+    const fn empty() -> Self {
+        Self {
+            entries: Vec::new(),
+            skipped: 0,
+            skipped_text: 0,
+            unreadable: 0,
+            quiet: Vec::new(),
+        }
+    }
+
     /// Записи кода.
     pub fn entries(&self) -> &[Entry] {
         &self.entries
@@ -263,12 +285,50 @@ impl Picked {
     pub fn absorb(&mut self, other: Self) {
         self.entries.extend(other.entries);
         self.skipped += other.skipped;
+        self.skipped_text += other.skipped_text;
         self.unreadable += other.unreadable;
+        self.quiet.extend(other.quiet);
+    }
+
+    /// Без записей, которые здесь те же, что пришли принятым кодом `echo`
+    /// (задача 124, п. 14): встречный код вернул бы их тому, кто их прислал.
+    /// Записи [`ALWAYS`] остаются — без них принимающее не узнает ИП, — но
+    /// изменёнными не считаются. Зовётся, когда метки баз уже стоят.
+    #[must_use]
+    pub fn without_echo(mut self, echo: &Echo) -> Self {
+        if echo.records.is_empty() {
+            return self;
+        }
+        let mut quiet = Vec::new();
+        self.entries.retain(|entry| {
+            if !echo.has(entry) {
+                return true;
+            }
+            let always = ALWAYS.contains(&entry.kind());
+            if always {
+                quiet.push(EchoKey::of(entry));
+            }
+            always
+        });
+        self.quiet.extend(quiet);
+        self
     }
 
     /// Сколько изменённых файлов книги и логотипов в код не вошло.
     pub const fn skipped(&self) -> usize {
         self.skipped
+    }
+
+    /// Сколько байтов вышло бы у кода этих файлов — оценкой, до него
+    /// (задача 124): файл лежит в записи base64-ом, на треть длиннее своих
+    /// байтов, а сжатие уровнем 1 ([`FILES_LEVEL`]) оставляет от base64 уже
+    /// сжатых картинок и PDF 0,755 длины (тест
+    /// `the_files_estimate_is_close_and_not_below`) — оценка берёт 0,8,
+    /// с запасом. Файлы, которые сжимаются ещё, дадут код меньше оценки —
+    /// тогда окно предложит копию файлом зря, но не пообещает серию кодов,
+    /// которой не выйдет.
+    pub const fn skipped_bytes(&self) -> usize {
+        self.skipped_text / 5 * 4
     }
 
     /// Сколько записей не читается и в код не вошло.
@@ -283,12 +343,74 @@ impl Picked {
 
     /// Те же записи по видам — для слов «код готов» (задача 124, п. 21).
     pub fn tally(&self, since: Option<Timestamp>) -> Tally {
-        Tally::of(
-            self.entries
-                .iter()
-                .filter(|entry| since.is_none_or(|since| entry.meta().modified() >= since)),
-        )
+        Tally::of(self.entries.iter().filter(|entry| {
+            since.is_none_or(|since| entry.meta().modified() >= since) && !self.quiet.contains(&EchoKey::of(entry))
+        }))
     }
+}
+
+/// Поместится ли код файлов в `bytes` байтов (оценка [`Picked::skipped_bytes`])
+/// в серию кодов ([`MAX_SERIES_BYTES`]): нет — окно сразу ведёт к копии
+/// файлом, а не к серии, которая откажет (задача 124).
+pub const fn files_fit(bytes: usize) -> bool {
+    bytes.saturating_add(ENVELOPE_BYTES) <= MAX_SERIES_BYTES
+}
+
+/// Какая запись: база (у кода всех ИП), вид и идентификатор.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+struct EchoKey {
+    base: Option<RecordId>,
+    kind: &'static str,
+    id: RecordId,
+}
+
+impl EchoKey {
+    fn of(entry: &Entry) -> Self {
+        Self {
+            base: entry.base(),
+            kind: entry.kind(),
+            id: entry.meta().id(),
+        }
+    }
+}
+
+/// Записи принятого кода (задача 124, п. 14) — какими они пришли: момент
+/// изменения и отпечаток текста. Встречный код берёт записи с дня, а не по
+/// тому, что пришло, и правки отправителя после того дня вернул бы ему же
+/// ([`Picked::without_echo`]). Эхо — запись, которая здесь и сейчас та же, что
+/// пришла: тот же момент и тот же текст. Одного момента мало: слияние по
+/// полям (`format::fields`) берёт поздний момент двух сторон, и запись с
+/// правкой этого устройства в другом поле момент пришедшей сохраняет, а
+/// текст — нет; такая идёт обратно. Отпечаток — 64 бита FNV-1a: совпасть
+/// у двух разных текстов одной записи с одним моментом ему почти негде.
+#[derive(Clone, Default, Debug)]
+pub struct Echo {
+    records: std::collections::BTreeMap<EchoKey, (Timestamp, u64)>,
+}
+
+impl Echo {
+    /// Записи кода `entries`, какими они пришли.
+    pub fn of(entries: &[Entry]) -> Self {
+        Self {
+            records: entries
+                .iter()
+                .map(|entry| (EchoKey::of(entry), (entry.meta().modified(), print(entry.record()))))
+                .collect(),
+        }
+    }
+
+    /// Та же ли это запись, что пришла.
+    fn has(&self, entry: &Entry) -> bool {
+        self.records
+            .get(&EchoKey::of(entry))
+            .is_some_and(|&(modified, text)| modified == entry.meta().modified() && text == print(entry.record()))
+    }
+}
+
+/// Отпечаток текста записи — FNV-1a, 64 бита.
+fn print(text: &str) -> u64 {
+    text.bytes()
+        .fold(0xcbf2_9ce4_8422_2325, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3))
 }
 
 /// Только общие поля — без разбора остального: файл книги — сотни
@@ -324,11 +446,7 @@ where
 {
     let changed = |meta: &RecordMeta| since.is_none_or(|since| meta.modified() >= since);
     let mut meter = Meter::new(pause);
-    let mut picked = Picked {
-        entries: Vec::new(),
-        skipped: 0,
-        unreadable: 0,
-    };
+    let mut picked = Picked::empty();
     let mut profiles = Vec::new();
     for item in raw {
         meter.add(item.text.map_or(0, str::len).max(backup::RECORD_WEIGHT)).await;
@@ -341,6 +459,7 @@ where
             // Файл, у которого и общие поля не читаются, — тоже не вошёл.
             if peeked.as_ref().is_none_or(changed) {
                 picked.skipped += 1;
+                picked.skipped_text += item.text.map_or(0, str::len);
             }
             continue;
         }
@@ -397,11 +516,7 @@ where
 {
     let changed = |meta: &RecordMeta| since.is_none_or(|since| meta.modified() >= since);
     let mut meter = Meter::new(pause);
-    let mut picked = Picked {
-        entries: Vec::new(),
-        skipped: 0,
-        unreadable: 0,
-    };
+    let mut picked = Picked::empty();
     let mut profiles = Vec::new();
     for item in raw {
         let file = SKIPPED.contains(&item.kind);
@@ -443,11 +558,7 @@ where
 /// раньше `since` (`None` — все). Запись ИП, которая не читается, — отказ:
 /// база этого ИП молча выпала бы из кода, как из копии всех ИП.
 pub fn pick_office<'a>(raw: impl IntoIterator<Item = Raw<'a>>, since: Option<Timestamp>) -> Result<Picked, FormatError> {
-    let mut picked = Picked {
-        entries: Vec::new(),
-        skipped: 0,
-        unreadable: 0,
-    };
+    let mut picked = Picked::empty();
     for item in raw {
         match backup::read_stored(OFFICE_KINDS, item) {
             Ok(entry) => {

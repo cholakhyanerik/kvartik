@@ -9,7 +9,7 @@
 use kvartik_core::format::backup::{IV_BYTES, Lock};
 use kvartik_core::format::office as route;
 use kvartik_core::format::backup::Tally;
-use kvartik_core::format::sync::{self, Code, CodeError, Header, Picked, Sealed, TooLarge};
+use kvartik_core::format::sync::{self, Code, CodeError, Echo, Header, Picked, Sealed, TooLarge};
 
 use super::backup::{Failure, newer};
 use super::{Dumped, Store};
@@ -26,6 +26,10 @@ pub struct Made {
     pub tally: Tally,
     /// Изменённых файлов книги и логотипов, которые в код не идут.
     pub skipped: usize,
+    /// Сколько байтов вышло бы у их кода — оценкой (`Picked::skipped_bytes`,
+    /// задача 124): по ней окно знает до кода файлов, поместятся ли они
+    /// в серию.
+    pub skipped_bytes: usize,
     /// Нечитаемых записей, которые в код не вошли.
     pub unreadable: usize,
 }
@@ -58,6 +62,9 @@ pub struct Sealing<'a> {
     pub key: &'a Key,
     pub salt: &'a [u8],
     pub iterations: u32,
+    /// Записи принятого кода, какими они легли, — у встречного кода (задача
+    /// 124, п. 14): их тому устройству не возвращать (`Picked::without_echo`).
+    pub echo: Option<&'a Echo>,
 }
 
 /// Собрать код из базы: изменённые с `header.since` записи — одной
@@ -107,6 +114,10 @@ pub async fn make_all(open: &Store, open_name: &str, office_store: &Store, seali
 
 /// Сжать, зашифровать и запечатать записи кода.
 async fn seal(picked: Picked, sealing: &Sealing<'_>) -> Result<Made, Unmade> {
+    let picked = match sealing.echo {
+        Some(echo) => picked.without_echo(echo),
+        None => picked,
+    };
     let packed = sync::pack_sliced(sealing.header, picked.entries(), &mut breathe)
         .await
         .map_err(Unmade::TooLarge)?;
@@ -118,6 +129,7 @@ async fn seal(picked: Picked, sealing: &Sealing<'_>) -> Result<Made, Unmade> {
         changed: picked.changed(sealing.header.since()),
         tally: picked.tally(sealing.header.since()),
         skipped: picked.skipped(),
+        skipped_bytes: picked.skipped_bytes(),
         unreadable: picked.unreadable(),
     })
 }
