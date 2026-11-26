@@ -304,12 +304,18 @@ fn the_public_calendar_is_sound() {
 #[test]
 fn the_first_monthly_premium_has_its_safe_day() {
     let mut wrong = Vec::new();
+    // Строки под взносом (с 0.0.210): заплатившему в январе второй раз не
+    // платить, заплатившему годовую ставку за 2026 год — уточнить.
+    let paid = "Если вы заплатили взнос за январь в январе, второй раз платить не нужно";
+    let annual = "Если вы заплатили годовую ставку за 2026 год, уточните у бухгалтера, нужен ли вам взнос за январь (ст.\u{a0}46, ч.\u{a0}12)";
     let (_, events) = parse(&public(Lang::Ru));
     let find = |uid: &str| events.iter().find(|event| event.one("UID") == uid);
     match find("health-2027-01@kvartik.com") {
         Some(event)
             if event.one("DTSTART;VALUE=DATE") == "20270220"
-                && event.text("DESCRIPTION").contains("Надёжнее заплатить в январе, до 20.01.2027") => {}
+                && event
+                    .text("DESCRIPTION")
+                    .contains(&format!("Надёжнее заплатить в январе, до 20.01.2027\n{paid}\n{annual}")) => {}
         other => wrong.push(format!(
             "срок взноса за январь: {:?}",
             other.map(|event| (event.one("DTSTART;VALUE=DATE").to_owned(), event.text("DESCRIPTION")))
@@ -321,7 +327,7 @@ fn the_first_monthly_premium_has_its_safe_day() {
         Some(event)
             if event.one("DTSTART;VALUE=DATE") == "20270120"
                 && event.text("SUMMARY") == "Взнос медстраховки за январь 2027\u{a0}г.\u{a0}— надёжнее заплатить до этого дня"
-                && event.text("DESCRIPTION").starts_with(about)
+                && event.text("DESCRIPTION").starts_with(&format!("{about}\n{annual}"))
                 && event.text("DESCRIPTION").contains(APP_URL) => {}
         other => wrong.push(format!(
             "январь, день с безопасной стороны: {:?}",

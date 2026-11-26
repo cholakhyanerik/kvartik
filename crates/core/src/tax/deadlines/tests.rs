@@ -674,6 +674,55 @@ fn the_first_monthly_premium_is_safe_in_january() {
     assert!(wrong.is_empty(), "первый взнос: {wrong:#?}");
 }
 
+/// Строки под взносом за январь 2027 года (решения человека 2026-11-26,
+/// ревью 0.0.209): до 20.01.2027 включительно — «надёжнее заплатить
+/// в январе»; после — что заплатившему в январе второй раз платить не
+/// нужно; у календаря и сайта, которым дня не знать, — обе; и всегда —
+/// заплатившему годовую ставку за 2026 год уточнить у бухгалтера (ст. 46,
+/// ч. 12). Под списком — что его день указан без переноса. У взноса за
+/// февраль — только перенос, как раньше.
+#[test]
+fn the_first_monthly_premium_says_what_to_do_by_the_day() {
+    let mut wrong = Vec::new();
+    let january = Kind::HealthMonth { year: 2027, month: 1 };
+    let by_law = day(2027, 2, 20);
+    let safe = "Надёжнее заплатить в январе, до 20.01.2027";
+    let paid = "Если вы заплатили взнос за январь в январе, второй раз платить не нужно";
+    let annual = "Если вы заплатили годовую ставку за 2026 год, уточните у бухгалтера, нужен ли вам взнос за январь (ст.\u{a0}46, ч.\u{a0}12)";
+    for (today, expected) in [
+        (Some(day(2027, 1, 10)), vec![safe, annual]),
+        (Some(day(2027, 1, 20)), vec![safe, annual]),
+        (Some(day(2027, 1, 21)), vec![paid, annual]),
+        (None, vec![safe, paid, annual]),
+    ] {
+        let got = notes(Lang::Ru, january, by_law, today);
+        if got != expected {
+            wrong.push(format!("{today:?}: {got:#?}"));
+        }
+    }
+    let english = notes(Lang::En, january, by_law, Some(day(2027, 1, 21)));
+    if english
+        != [
+            "If you paid the January premium in January, you don't need to pay it again",
+            "If you paid the annual rate for 2026, check with your accountant whether you need the January premium (Art.\u{a0}46(12))",
+        ]
+    {
+        wrong.push(format!("En: {english:#?}"));
+    }
+    let february = notes(Lang::Ru, Kind::HealthMonth { year: 2027, month: 2 }, day(2027, 3, 20), Some(day(2027, 1, 21)));
+    if february != ["Перенесено с 20.03.2027\u{a0}— нерабочего дня; заплатить надёжнее до него"] {
+        wrong.push(format!("февраль: {february:#?}"));
+    }
+    match no_shift(Lang::Ru, january) {
+        Some(line) if line == "У взноса медстраховки за январь 2027 года день срока указан без переноса с нерабочего дня: заплатить раньше безопаснее." => {}
+        other => wrong.push(format!("под списком: {other:?}")),
+    }
+    if no_shift(Lang::Ru, Kind::HealthMonth { year: 2027, month: 2 }).is_some() {
+        wrong.push("под списком — и у взноса за февраль".to_owned());
+    }
+    assert!(wrong.is_empty(), "строки под взносом за январь: {wrong:#?}");
+}
+
 /// Напоминание о взносе за январь 2027 года — к 20.01.2027, дню
 /// с безопасной стороны: с 13 января, «через 7 дней», — о 20 января; после
 /// него — к самому сроку, 20.02.2027, за неделю, как у всех; между ними —

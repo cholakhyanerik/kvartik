@@ -380,11 +380,23 @@ fn monthly_health(all: &rules::Rules, year: u16) -> Option<(&rules::HealthInsura
 /// до …» и где об этом сказано (`answer`, уже разметкой: на странице
 /// медстраховки — словами, в таблице сроков — ссылкой на неё), в согласии
 /// с ответом сверху; у остальных — слова переноса ядра (`deadlines::moved`).
-fn row_note(lang: Lang, deadline: &deadlines::Deadline, answer: &str) -> Option<String> {
-    match deadlines::safe(deadline.kind) {
-        Some(safe) => Some(fill(&escape(t(lang, Key::GuideHealthFirstSafe)), &[&escape(&i18n::date(lang, safe)), answer])),
-        None => deadlines::moved(lang, deadline.kind, deadline.by_law).map(|words| escape(&words)),
+/// `full` — и остальные строки ядра под первым взносом (с 0.0.210): что
+/// заплатившему в январе второй раз платить не нужно и о годовой ставке
+/// прошлого года. Они — в списке взносов страницы медстраховки, во всю
+/// ширину, а в таблице сроков узкий столбец дня вытянули бы в столб текста:
+/// там — одна строка со ссылкой на ответ той страницы (решение агента
+/// 2026-11-26, Правило 14).
+fn row_note(lang: Lang, deadline: &deadlines::Deadline, answer: &str, full: bool) -> Option<String> {
+    let Some(safe) = deadlines::safe(deadline.kind) else {
+        return deadlines::moved(lang, deadline.kind, deadline.by_law).map(|words| escape(&words));
+    };
+    let mut lines = vec![fill(&escape(t(lang, Key::GuideHealthFirstSafe)), &[&escape(&i18n::date(lang, safe)), answer])];
+    if full {
+        // Дня у страницы нет — строки ядра все (`deadlines::notes` с `None`),
+        // а первая — своя, со ссылкой на ответ.
+        lines.extend(deadlines::notes(lang, deadline.kind, deadline.by_law, None).iter().skip(1).map(|line| escape(line)));
     }
+    Some(lines.join("<br />"))
 }
 
 /// Имя руководства — заголовок, имя ссылки (подвал, хлебные крошки)
@@ -1746,15 +1758,21 @@ fn shift_note(lang: Lang, terms: &[deadlines::Deadline]) -> String {
             }
         }
     }
-    if shifts.is_empty() {
-        return String::new();
+    let mut out = String::new();
+    if !shifts.is_empty() {
+        let sources: Vec<String> = shifts.iter().map(|source| tax_source(lang, source)).collect();
+        out.push_str(&format!(
+            "        <p>{}<br />\n{}        </p>\n",
+            escape(t(lang, Key::TaxPageShift)),
+            sources.join("          <br />\n")
+        ));
     }
-    let sources: Vec<String> = shifts.iter().map(|source| tax_source(lang, source)).collect();
-    format!(
-        "        <p>{}<br />\n{}        </p>\n",
-        escape(t(lang, Key::TaxPageShift)),
-        sources.join("          <br />\n")
-    )
+    // А у первого взноса медстраховки день указан без переноса — строкой под
+    // словами о переносе, как под списком программы (`deadlines::no_shift`).
+    if let Some(line) = terms.iter().find_map(|deadline| deadlines::no_shift(lang, deadline.kind)) {
+        out.push_str(&format!("        <p>{}</p>\n", escape(&line)));
+    }
+    out
 }
 
 /// Подписка на общий календарь сроков языка `lang` (задача 22): кнопка
@@ -1875,7 +1893,7 @@ fn deadlines_guide(lang: Lang, all: &rules::Rules, year: u16, checked: Date) -> 
             escape(&capitalized(&i18n::month_heading(lang, year, month, year)))
         ));
         for deadline in rows {
-            let moved = row_note(lang, deadline, &answer)
+            let moved = row_note(lang, deadline, &answer, false)
                 .map(|note| format!("<br />\n                <span class=\"note\">{note}</span>"))
                 .unwrap_or_default();
             out.push_str(&format!(
@@ -2142,7 +2160,7 @@ fn health_months(
     // Январский взнос — в согласии с ответом сверху (`row_note`).
     let answer = escape(t(lang, Key::GuideHealthAnswerHere));
     for deadline in months {
-        let moved = row_note(lang, deadline, &answer)
+        let moved = row_note(lang, deadline, &answer, true)
             .map(|note| format!("<br />\n          <span class=\"note\">{note}</span>"))
             .unwrap_or_default();
         out.push_str(&format!(
@@ -3441,7 +3459,7 @@ mod tests {
                     wrong.push(format!("{lang:?}: у срока {:?} ссылка на руководство медстраховки не та", deadline.kind));
                 }
                 let mut cells = vec![head, format!("<td data-label=\"{}\">{}</td>", text(Key::GuideColumnWho), deadline_who(lang, all, deadline.kind))];
-                if let Some(note) = row_note(lang, deadline, &answer) {
+                if let Some(note) = row_note(lang, deadline, &answer, false) {
                     cells.push(note);
                 }
                 let sources = deadlines::sources(deadline.kind);
@@ -3671,7 +3689,7 @@ mod tests {
                 need.push(format!("<h2 id=\"{id}\">{heading}</h2>"));
             }
             for deadline in &months {
-                let note = row_note(lang, deadline, &text(Key::GuideHealthAnswerHere));
+                let note = row_note(lang, deadline, &text(Key::GuideHealthAnswerHere), true);
                 need.push(format!(
                     "<li><strong>{}</strong>\u{a0}— {}{}",
                     escape(&i18n::date(lang, deadline.day)),
@@ -3780,15 +3798,23 @@ mod tests {
     /// «надёжнее заплатить в январе, до 20.01.2027» и куда смотреть — ответ
     /// сверху; в таблице сроков — ссылкой на ответ руководства медстраховки,
     /// и строка встаёт раньше заявления, перенесённого с субботы 20.02.2027
-    /// на 22.02.2027. Остальные месяцы — как были: взнос за февраль —
-    /// 22.03.2027, перенесён с субботы 20.03.2027.
+    /// на 22.02.2027. Под «надёжнее» (с 0.0.210, решения человека
+    /// 2026-11-26) — что заплатившему в январе второй раз платить не нужно
+    /// и что заплатившему годовую ставку за 2026 год — уточнить у бухгалтера
+    /// (ст. 46, ч. 12); под словами о переносе — что у этого взноса переноса
+    /// нет. Остальные месяцы — как были: взнос за февраль — 22.03.2027,
+    /// перенесён с субботы 20.03.2027.
     #[test]
     fn the_first_premium_row_agrees_with_the_answer() {
         let mut wrong = Vec::new();
         let russian = guide_sample(Lang::Ru, Guide::Health);
+        let more = "<br />Если вы заплатили взнос за январь в январе, второй раз платить не нужно<br />Если вы заплатили годовую ставку \
+                    за 2026 год, уточните у бухгалтера, нужен ли вам взнос за январь (ст.\u{a0}46, ч.\u{a0}12)</span>";
+        let no_shift = "<p>У взноса медстраховки за январь 2027 года день срока указан без переноса с нерабочего дня: заплатить раньше безопаснее.</p>";
         for want in [
             "<li><strong>20.02.2027</strong>\u{a0}— ",
-            "<span class=\"note\">Надёжнее заплатить в январе, до 20.01.2027\u{a0}— см. ответ сверху</span></li>",
+            &format!("<span class=\"note\">Надёжнее заплатить в январе, до 20.01.2027\u{a0}— см. ответ сверху{more}</li>"),
+            no_shift,
             "<li><strong>22.03.2027</strong>\u{a0}— ",
             "Перенесено с 20.03.2027\u{a0}— нерабочего дня; заплатить надёжнее до него",
         ] {
@@ -3812,7 +3838,15 @@ mod tests {
         let table = guide_sample(Lang::Ru, Guide::Deadlines);
         let first = "<th scope=\"row\">20.02.2027<br />\n                <span class=\"note\">Надёжнее заплатить в январе, до 20.01.2027\u{a0}— \
                      см. <a href=\"/ru/health-insurance/\">ответ сверху на странице о медстраховке</a></span></th>";
+        // Остальные строки — в списке страницы медстраховки, во всю ширину,
+        // а не в узком столбце дня таблицы сроков.
+        if table.contains("второй раз платить не нужно") {
+            wrong.push("в узком столбце таблицы сроков — все строки под взносом".to_owned());
+        }
         let application = "<th scope=\"row\">22.02.2027<br />";
+        if !table.contains(no_shift) {
+            wrong.push("под таблицей сроков нет строки о том, что у взноса за январь переноса нет".to_owned());
+        }
         match (table.find(first), table.find(application)) {
             (Some(first), Some(application)) if first < application => {}
             other => wrong.push(format!("январский взнос и заявление в таблице сроков: {other:?}")),

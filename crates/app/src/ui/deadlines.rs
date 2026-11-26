@@ -106,7 +106,12 @@ pub fn DeadlineReminder(ctx: tax::Ctx) -> impl IntoView {
                             <a href=place(deadline.kind).href()>
                                 <span class="reminder">{move || when(lang.get(), soon, day)}</span>
                                 <span>{move || what(lang.get(), deadline.kind)}</span>
-                                {move || deadlines::moved(lang.get(), deadline.kind, by_law).map(|note| view! { <span>{note}</span> })}
+                                {move || {
+                                    deadlines::notes(lang.get(), deadline.kind, by_law, ctx.today)
+                                        .into_iter()
+                                        .map(|note| view! { <span>{note}</span> })
+                                        .collect_view()
+                                }}
                                 {overdue.then(|| view! { <span>{tr(lang, Key::TaxCloseReminder)}</span> })}
                             </a>
                         </li>
@@ -261,7 +266,7 @@ pub fn DeadlinesEntry(ctx: tax::Ctx) -> impl IntoView {
 /// строкой под днём, а не справа: на телефоне колонка справа сжала бы
 /// слова срока в узкий столбец (глазной прогон задачи 21).
 #[component]
-fn Row(lang: ReadSignal<Lang>, deadline: Deadline, soon: Option<(When, Date)>) -> impl IntoView {
+fn Row(lang: ReadSignal<Lang>, deadline: Deadline, soon: Option<(When, Date)>, today: Option<Date>) -> impl IntoView {
     let soon = soon.filter(|_| !deadline.done);
     view! {
         <li class="deadline">
@@ -286,7 +291,12 @@ fn Row(lang: ReadSignal<Lang>, deadline: Deadline, soon: Option<(When, Date)>) -
                     })}
                     <span class="entry-meta">
                         <span>{move || what(lang.get(), deadline.kind)}</span>
-                        {move || deadlines::moved(lang.get(), deadline.kind, deadline.by_law).map(|note| view! { <span>{note}</span> })}
+                        {move || {
+                            deadlines::notes(lang.get(), deadline.kind, deadline.by_law, today)
+                                .into_iter()
+                                .map(|note| view! { <span>{note}</span> })
+                                .collect_view()
+                        }}
                     </span>
                 </span>
                 {icon(Icon::Forward)}
@@ -358,17 +368,24 @@ pub fn DeadlinesPage(ctx: tax::Ctx) -> impl IntoView {
             let micro = ahead.iter().any(|(deadline, _)| {
                 matches!(deadline.kind, Kind::MicroApplication(_) | Kind::MicroReport(_) | Kind::MicroAnnual(_))
             });
+            // Первый взнос медстраховки — день без переноса, а слова ниже
+            // говорят о переносе: строкой под списком (`deadlines::no_shift`).
+            let no_shift = ahead
+                .iter()
+                .map(|(deadline, _)| deadline.kind)
+                .find(|kind| deadlines::safe(*kind).is_some());
             view! {
                 <ul class="list deadlines">
-                    {overdue.map(|deadline| view! { <Row lang deadline soon=Some((When::Overdue, deadline.day)) /> })}
+                    {overdue.map(|deadline| view! { <Row lang deadline soon=Some((When::Overdue, deadline.day)) today=ctx.today /> })}
                     {ahead
                         .into_iter()
-                        .map(|(deadline, soon)| view! { <Row lang deadline soon /> })
+                        .map(|(deadline, soon)| view! { <Row lang deadline soon today=ctx.today /> })
                         .collect_view()}
                 </ul>
                 {empty.then(|| view! { <p class="hint">{tr(lang, Key::DeadlinesNone)}</p> })}
                 {declaration.then(|| view! { <p class="hint">{tr(lang, Key::DeadlinesDeclarationAbout)}</p> })}
                 {micro.then(|| view! { <p class="hint">{tr(lang, Key::DeadlinesMicroMonthly)}</p> })}
+                {no_shift.map(|kind| view! { <p class="hint">{move || deadlines::no_shift(lang.get(), kind)}</p> })}
                 <Gaps lang gaps />
             }
         })}

@@ -293,6 +293,60 @@ pub fn moved(lang: Lang, kind: Kind, by_law: Date) -> Option<String> {
     (last_day(by_law) != by_law).then(|| fill(t(lang, key), &[&i18n::date(lang, by_law)]))
 }
 
+/// Строки под днём срока `kind` (по закону — `by_law`) в день `today` —
+/// у экрана сроков, напоминания, календаря и сайта. У первого взноса
+/// помесячной медстраховки ([`safe`]): до дня с безопасной стороны —
+/// «надёжнее заплатить в январе, до …», после него — что заплатившему
+/// в январе второй раз платить не нужно (`today` — `None` у календаря
+/// и сайта: дня у них нет, и строки обе), и всегда — заплатившему годовую
+/// ставку прошлого года уточнить у бухгалтера, нужен ли ему взнос за январь
+/// ([`safe_annual`]). Решения человека 2026-11-26 (ревью 0.0.209). У
+/// остальных — слова переноса ([`moved`]).
+pub fn notes(lang: Lang, kind: Kind, by_law: Date, today: Option<Date>) -> Vec<String> {
+    let Some(safe) = safe(kind) else {
+        return moved(lang, kind, by_law).into_iter().collect();
+    };
+    let mut lines = Vec::new();
+    if today.is_none_or(|today| today <= safe) {
+        lines.push(fill(t(lang, Key::DeadlineSafe), &[&i18n::date(lang, safe)]));
+    }
+    if today.is_none_or(|today| today > safe) {
+        lines.push(t(lang, Key::DeadlineSafePaid).to_owned());
+    }
+    lines.extend(safe_annual(lang, kind));
+    lines
+}
+
+/// Строка под первым взносом помесячной медстраховки ([`safe`]) для того,
+/// кто заплатил годовую ставку прошлого года: застрахован он 12 месяцев
+/// с месяца после оплаты (ՀՕ-459-Ն, ст. 46, ч. 12), а нужен ли ему взнос
+/// за январь, закон прямо не говорит, — уточнить у бухгалтера. Знать,
+/// заплатил ли человек, программе не из чего, и строка — условием в самих
+/// словах, как оговорка экрана годовых платежей. `None` — не первый взнос
+/// или прошлый год не годовой ставкой.
+pub fn safe_annual(lang: Lang, kind: Kind) -> Option<String> {
+    let Kind::HealthMonth { year, .. } = kind else {
+        return None;
+    };
+    safe(kind)?;
+    let before = year.checked_sub(1)?;
+    let rule = rules::for_year(rules::armenia().health_insurance(), before)?;
+    matches!(rule.by, HealthBy::Year { .. }).then(|| fill(t(lang, Key::DeadlineSafeAnnual), &[&before.to_string()]))
+}
+
+/// Строка под списком сроков, в котором есть первый взнос помесячной
+/// медстраховки ([`safe`]): его день указан без переноса с нерабочего дня
+/// — решение программы, а не закона: ՀՕ-180-Ն, ст. 32, ч. 4 мог бы его
+/// перенести (правка человека 2026-11-26),
+/// а заплатить раньше безопаснее, — рядом со словами о переносе, которые
+/// говорят обратное (решение человека 2026-11-26). `None` — у остальных.
+pub fn no_shift(lang: Lang, kind: Kind) -> Option<String> {
+    let Kind::HealthMonth { year, .. } = kind else {
+        return None;
+    };
+    safe(kind).map(|_| fill(t(lang, Key::DeadlinesSafeNoShift), &[&year.to_string()]))
+}
+
 /// Насколько близок срок в день `today`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum When {

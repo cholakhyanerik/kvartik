@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.210",
+      "date": "2026-11-26",
+      "hy": [
+        "2027 թվականի հունվար ամսվա առողջության ապահովագրավճարի տակ հունվարի 20-ից հետո ծրագիրը գրում է, որ հունվարին վճարածը կրկին վճարել պետք չէ, իսկ 2026 թվականի տարեկան դրույքաչափը վճարածներին խորհուրդ է տալիս ճշտել հաշվապահի հետ՝ արդյոք այդ ապահովագրավճարն իրենց անհրաժեշտ է։"
+      ],
+      "ru": [
+        "Под взносом медстраховки за январь 2027 года после 20 января программа пишет, что заплатившему в январе второй раз платить не нужно, а заплатившим годовую ставку за 2026 год советует уточнить у бухгалтера, нужен ли им этот взнос."
+      ],
+      "en": [
+        "Under the health insurance premium for January 2027, after January 20 the app says that if you paid it in January you don't need to pay again, and if you paid the annual rate for 2026, it suggests checking with your accountant whether you need this premium."
+      ]
+    },
+    {
       "version": "0.0.209",
       "date": "2026-11-26",
       "hy": [
@@ -254,19 +267,6 @@
         "On the “Another device” screen, the code back no longer returns the first device’s own changes of today to it — only what was done here. While the QR codes circle, the phone screen stays on.",
         "From the automatic backup folder, the newest backup of every device comes in: the changes of two computers together, with the password asked once. An accountant with several IEs answers a code of one IE with a code of that IE only.",
         "If ledger files are more than QR codes carry, the receipt is followed by one main button — “Send as a backup file”, and their size is in megabytes."
-      ]
-    },
-    {
-      "version": "0.0.190",
-      "date": "2026-11-24",
-      "hy": [
-        "Պատճենը կարելի է վերականգնել ավտոմատ պատճենների թղթապանակից (Chrome և Edge համակարգչում). ընտրեք «Kvartik» թղթապանակը կամ այն թղթապանակը, որտեղ այն գտնվում է, և կվերականգնվի ամենաթարմ պատճենը՝ իր բոլոր մասերով։"
-      ],
-      "ru": [
-        "Копию можно восстановить прямо из папки автокопий (Chrome и Edge на компьютере): выберите папку «Kvartik» или ту, где она лежит, — и ляжет самая свежая копия со всеми частями."
-      ],
-      "en": [
-        "A backup can now be restored straight from the automatic backup folder (Chrome and Edge on a computer): choose the “Kvartik” folder or the folder it is in, and the newest backup lands with all its parts."
       ]
     }
   ]

@@ -959,7 +959,12 @@ fn Summary(lang: ReadSignal<Lang>, office: Office, base: Base, today: Option<Dat
             let mut found = Vec::with_capacity(alive.len());
             for (id, name) in alive {
                 let row = row_of(&name, &current, base, today).await;
-                if run.get_value() != mine {
+                // Окно могли снять, пока база читалась: тогда и счётчик,
+                // и строки освобождены, а `get_value` у освобождённого —
+                // паника, роняющая программу (найдено полным прогоном
+                // браузерных тестов 0.0.210). Снятое — то же, что новое
+                // чтение: бросить работу.
+                if run.try_get_value() != Some(mine) {
                     return;
                 }
                 found.push((id, row));

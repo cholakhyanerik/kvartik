@@ -1162,6 +1162,8 @@ macro_rules! en {
     (DeadlineShifted) => { "Moved from {}, a non-working day" };
     (DeadlineShiftedPay) => { "Moved from {}, a non-working day; it's safer to pay before it" };
     (DeadlineSafe) => { "Safer to pay in January, by {}" };
+    (DeadlineSafePaid) => { "If you paid the January premium in January, you don't need to pay it again" };
+    (DeadlineSafeAnnual) => { "If you paid the annual rate for {}, check with your accountant whether you need the January premium (Art.\u{A0}46(12))" };
     (DeadlineDone) => { "Quarter closed: return filed" };
     (DeadlineApplied) => { "Application filed" };
     (ApplyDue) => { "File the turnover tax application by {}: form 201 in the SRC system. Without it, you're a VAT payer from your registration day." };
@@ -1178,6 +1180,7 @@ macro_rules! en {
     (DeadlinesNext) => { "Next: {}" };
     (DeadlinesNone) => { "No deadlines for the year ahead." };
     (DeadlinesShiftRule) => { "If the last day of a deadline is a non-working day, the deadline ends on the next working day (Law ՀՕ-180-Ն on Normative Legal Acts, Art.\u{A0}32(4)), and the SRC moves deadlines this way too. It hasn't said so about payments, so it's safer to pay by the day the law names." };
+    (DeadlinesSafeNoShift) => { "The health insurance premium for January {} is shown without moving it off a non-working day: paying earlier is safer." };
     (DeadlinesNeedRegistered) => { "Your profile has no IE registration date: a new IE files the turnover tax application within 20\u{A0}days of registration, and that deadline isn't shown here." };
     (DeadlinesNeedResidency) => { "Your profile has no citizenship or residence status: without them, the health insurance premium and universal income declaration deadlines aren't shown here." };
     (DeadlinesHealthUnclear) => { "The health insurance premium isn't worked out for every month\u{A0}— see Annual payments" };

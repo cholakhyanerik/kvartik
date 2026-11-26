@@ -196,7 +196,9 @@ fn common_lines(lang: Lang, deadline: Deadline, lines: &mut Vec<String>) {
     if matches!(deadline.kind, Kind::Declaration(_)) {
         lines.push(t(lang, Key::DeadlinesDeclarationAbout).to_owned());
     }
-    lines.extend(deadlines::moved(lang, deadline.kind, deadline.by_law));
+    // Дня у календаря нет: событие живёт до срока и после дня с безопасной
+    // стороны, — строки под первым взносом медстраховки обе (`notes`).
+    lines.extend(deadlines::notes(lang, deadline.kind, deadline.by_law, None));
     if tax_payment(deadline.kind) {
         lines.push(t(lang, Key::DeadlinesPayEarly).to_owned());
     }
@@ -353,6 +355,7 @@ fn safe_event(lang: Lang, deadline: Deadline, from: Date, prefix: &str, link: im
         t(lang, Key::CalendarSafeAbout),
         &[&i18n::date(lang, deadline.by_law), &i18n::date(lang, safe)],
     )];
+    lines.extend(deadlines::safe_annual(lang, deadline.kind));
     link(&mut lines);
     Some(Event {
         uid: format!("{prefix}{}-safe@kvartik.com", uid(deadline.kind)),
