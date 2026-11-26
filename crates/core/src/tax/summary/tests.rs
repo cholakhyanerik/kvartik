@@ -102,7 +102,7 @@ fn an_open_quarter_is_to_pay() {
             other => wrong.push(format!("{today:?}: прошлый квартал {other:?}")),
         }
         match row.next {
-            Some(Next { deadline, when: got })
+            Some(Next { deadline, when: got, .. })
                 if deadline.kind == Kind::Turnover(quarter(2026, 3)) && got == when => {}
             other => wrong.push(format!("{today:?}: ближайший срок {other:?}")),
         }
@@ -132,9 +132,36 @@ fn a_closed_quarter_is_filed() {
         wrong.push(format!("прошлый квартал {:?}, а не поданный с налогом {}", row.previous, before.tax));
     }
     match row.next {
-        Some(Next { deadline, when: When::In(8) })
+        Some(Next { deadline, when: When::In(8), .. })
             if deadline.kind == Kind::Declaration(2025) && deadline.day == day(2026, 11, 2) => {}
         other => wrong.push(format!("ближайший срок {other:?}")),
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Взнос медстраховки за январь 2027 года — в сводке тем же расчётом, что
+/// напоминание главного экрана (`deadlines::remind_day`): 15.01.2027, IV
+/// квартал 2026 года закрыт — ближайший срок этот взнос (20.02.2027), а
+/// близость — к 20.01.2027, дню с безопасной стороны: «через 5 дней», а не
+/// «через 36» (ревью версии 0.0.209). После 20 января — к самому сроку.
+#[test]
+fn the_first_monthly_premium_is_near_as_on_the_home_screen() {
+    let profile = citizen();
+    let empty = books(&profile, &[], &[]);
+    let tax = turnover::quarter(empty, quarter(2026, 4));
+    let closing = Closing::close(&tax, day(2027, 1, 10), Timestamp::from_unix_millis(1_760_000_000_000))
+        .expect("пустой квартал закрывается");
+    let closed = books(&profile, &[], std::slice::from_ref(&closing));
+    let january = Kind::HealthMonth { year: 2027, month: 1 };
+    let mut wrong = Vec::new();
+    for (today, expected) in [
+        (day(2027, 1, 15), (When::In(5), day(2027, 1, 20))),
+        (day(2027, 1, 25), (When::In(26), day(2027, 2, 20))),
+    ] {
+        match row(closed, today).next {
+            Some(Next { deadline, when, day }) if deadline.kind == january && (when, day) == expected => {}
+            other => wrong.push(format!("{today:?}: ближайший срок {other:?}, а не взнос за январь {expected:?}")),
+        }
     }
     assert!(wrong.is_empty(), "{wrong:#?}");
 }

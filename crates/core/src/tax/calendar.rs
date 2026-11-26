@@ -33,6 +33,12 @@
 //! постоянный `UID`: обновлённая подписка меняет событие, а не добавляет
 //! второе.
 //!
+//! У первого взноса помесячной медстраховки (за январь 2027 года) событий
+//! два: срок по прочтению программы, без переноса, и день с безопасной
+//! стороны — 20 января (`deadlines::safe`, [`safe_event`]): сайт, программа
+//! и календарь говорят одно, и напоминание приходит до 20 января (решения
+//! человека 2026-11-26).
+//!
 //! Текст — из таблицы строк на языке календаря, и экранируется он по
 //! RFC 5545, 3.3.11 (CLAUDE.md, Правило 13): `\`, `;`, `,` и перевод строки
 //! — знаком `\`, прочие управляющие знаки отбрасываются. Строки длиннее
@@ -70,17 +76,21 @@ pub fn public(lang: Lang) -> String {
         let until = Date::new(checked.year().checked_add(1)?, 12, 31)?;
         Some((from, until))
     });
-    let events: Vec<Event> = span
-        .map(|(from, until)| deadlines::general(from, until))
-        .unwrap_or_default()
-        .into_iter()
-        .map(|deadline| Event {
-            uid: format!("{}@kvartik.com", uid(deadline.kind)),
-            deadline,
-            summary: deadlines::what(lang, deadline.kind),
-            lines: public_lines(lang, deadline),
-        })
-        .collect();
+    let mut events: Vec<Event> = Vec::new();
+    if let Some((from, until)) = span {
+        for deadline in deadlines::general(from, until) {
+            events.extend(safe_event(lang, deadline, from, "", |lines| {
+                lines.push(fill(t(lang, Key::CalendarYours), &[APP_URL]));
+            }));
+            events.push(Event {
+                uid: format!("{}@kvartik.com", uid(deadline.kind)),
+                day: deadline.day,
+                summary: deadlines::what(lang, deadline.kind),
+                lines: public_lines(lang, deadline),
+            });
+        }
+    }
+    events.sort_by_key(|event| event.day);
     let about = match checked {
         Some(checked) => fill(t(lang, Key::CalendarPublicAbout), &[&i18n::date(lang, checked)]),
         None => String::new(),
@@ -103,21 +113,22 @@ pub fn public(lang: Lang) -> String {
 pub fn personal(books: Books<'_>, today: Date, lang: Lang, app_url: &str) -> Option<String> {
     let until = today.add_days(AHEAD_DAYS)?;
     let mut years: Vec<Annual> = Vec::new();
-    let events: Vec<Event> = deadlines::between(books, today, until)
-        .into_iter()
-        .filter(|deadline| !deadline.done)
-        .map(|deadline| {
-            let amount = amount(books, today, deadline.kind, &mut years);
-            Event {
-                // Не те, что у общего календаря: событие своего файла
-                // не должно заменять событие подписки и наоборот.
-                uid: format!("mine-{}@kvartik.com", uid(deadline.kind)),
-                deadline,
-                summary: deadlines::what(lang, deadline.kind),
-                lines: personal_lines(lang, today, deadline, amount, app_url),
-            }
-        })
-        .collect();
+    let mut events: Vec<Event> = Vec::new();
+    for deadline in deadlines::between(books, today, until).into_iter().filter(|deadline| !deadline.done) {
+        events.extend(safe_event(lang, deadline, today, "mine-", |lines| {
+            lines.push(fill(t(lang, Key::CalendarOpen), &[app_url]));
+        }));
+        let amount = amount(books, today, deadline.kind, &mut years);
+        events.push(Event {
+            // Не те, что у общего календаря: событие своего файла
+            // не должно заменять событие подписки и наоборот.
+            uid: format!("mine-{}@kvartik.com", uid(deadline.kind)),
+            day: deadline.day,
+            summary: deadlines::what(lang, deadline.kind),
+            lines: personal_lines(lang, today, deadline, amount, app_url),
+        });
+    }
+    events.sort_by_key(|event| event.day);
     if events.is_empty() {
         return None;
     }
@@ -325,10 +336,36 @@ fn personal_lines(lang: Lang, today: Date, deadline: Deadline, amount: Option<Am
     lines
 }
 
-/// Событие: срок и слова о нём.
+/// Событие на день с безопасной стороны у первого взноса помесячной
+/// медстраховки (`deadlines::safe`; решение агента 2026-11-26 по поручению
+/// человека): своё событие на весь день, а не напоминание за месяц у события
+/// срока. Напоминания подписки календарь может снять молча — Apple, по всей
+/// видимости, снимает, Outlook берёт только первое (Правило 6, «Календарь
+/// принимает файл…»), — а событие на сам день видно в сетке и без них, и
+/// у него те же два напоминания, что у всех: за неделю и за день до него.
+/// `UID` — `UID` срока с `-safe`: постоянный, как у всех. Дня раньше `from`
+/// — начала общего календаря или «сегодня» личного — нет: прошедшее
+/// событие ни к чему. `prefix` — `mine-` у личного; `link` дописывает
+/// ссылку на программу, как у событий своего календаря.
+fn safe_event(lang: Lang, deadline: Deadline, from: Date, prefix: &str, link: impl FnOnce(&mut Vec<String>)) -> Option<Event> {
+    let safe = deadlines::safe(deadline.kind).filter(|safe| *safe >= from)?;
+    let mut lines = vec![fill(
+        t(lang, Key::CalendarSafeAbout),
+        &[&i18n::date(lang, deadline.by_law), &i18n::date(lang, safe)],
+    )];
+    link(&mut lines);
+    Some(Event {
+        uid: format!("{prefix}{}-safe@kvartik.com", uid(deadline.kind)),
+        day: safe,
+        summary: fill(t(lang, Key::CalendarSafeSummary), &[&deadlines::what(lang, deadline.kind)]),
+        lines,
+    })
+}
+
+/// Событие: день и слова о нём.
 struct Event {
     uid: String,
-    deadline: Deadline,
+    day: Date,
     summary: String,
     /// Абзацы описания.
     lines: Vec<String>,
@@ -370,7 +407,7 @@ fn write(head: &Head<'_>, stamp: Option<Date>, events: &[Event]) -> String {
     let stamp = stamp.map(|day| format!("{}T000000Z", ymd(day)));
     for event in events {
         let Some(stamp) = &stamp else { break };
-        let day = event.deadline.day;
+        let day = event.day;
         let summary = escape(&event.summary);
         line("BEGIN:VEVENT");
         line(&format!("UID:{}", event.uid));

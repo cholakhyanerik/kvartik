@@ -46,6 +46,10 @@ pub struct Next {
     /// (`deadlines::overdue`), иначе — сегодня, завтра или через столько
     /// дней, хоть бы и через полгода.
     pub when: When,
+    /// День, к которому считается `when`, — как у напоминания главного
+    /// экрана (`deadlines::remind_day`): у первого взноса помесячной
+    /// медстраховки до 20 января — этот день, иначе — сам срок.
+    pub day: Date,
 }
 
 /// Прошлый квартал.
@@ -80,18 +84,23 @@ pub fn row(books: Books<'_>, today: Date) -> Row {
         Some(deadline) => Some(Next {
             deadline,
             when: When::Overdue,
+            day: deadline.day,
         }),
         None => today.add_days(AHEAD_DAYS).and_then(|until| {
             deadlines::between(books, today, until)
                 .into_iter()
                 .find(|deadline| !deadline.done)
-                .map(|deadline| Next {
-                    deadline,
-                    when: match deadline.day.days_since(today) {
-                        0 => When::Today,
-                        1 => When::Tomorrow,
-                        days => When::In(days),
-                    },
+                .map(|deadline| {
+                    let day = deadlines::remind_day(&deadline, today);
+                    Next {
+                        deadline,
+                        when: match day.days_since(today) {
+                            0 => When::Today,
+                            1 => When::Tomorrow,
+                            days => When::In(days),
+                        },
+                        day,
+                    }
                 })
         }),
     };

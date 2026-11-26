@@ -1161,6 +1161,7 @@ macro_rules! en {
     (DeadlineHealthMonth) => { "Health insurance premium for {}" };
     (DeadlineShifted) => { "Moved from {}, a non-working day" };
     (DeadlineShiftedPay) => { "Moved from {}, a non-working day; it's safer to pay before it" };
+    (DeadlineSafe) => { "Safer to pay in January, by {}" };
     (DeadlineDone) => { "Quarter closed: return filed" };
     (DeadlineApplied) => { "Application filed" };
     (ApplyDue) => { "File the turnover tax application by {}: form 201 in the SRC system. Without it, you're a VAT payer from your registration day." };
@@ -1193,6 +1194,8 @@ macro_rules! en {
     (CalendarHealthOver) => { "Due from IEs whose turnover last year was over {}." };
     (CalendarYours) => { "Kvartik works out from your profile whether this deadline applies to you and how much to pay: {}" };
     (CalendarOpen) => { "Details in Kvartik: {}" };
+    (CalendarSafeSummary) => { "{}\u{A0}— safer to pay by this day" };
+    (CalendarSafeAbout) => { "In Kvartik's reading the premium is due by {}, but the law doesn't say which month each payment is for, so it's safer to pay in January, by {}." };
     (CalendarTitle) => { "Deadlines in your calendar" };
     (CalendarAbout) => { "Your phone or email calendar can remind you even then: add your deadlines to it as a file or subscribe to the shared deadline calendar. The events come with reminders a week and a day before each deadline; whether they go off is up to your calendar app." };
     (CalendarMine) => { "Download my deadlines" };

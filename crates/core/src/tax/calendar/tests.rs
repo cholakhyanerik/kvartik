@@ -293,6 +293,73 @@ fn the_public_calendar_is_sound() {
     assert!(wrong.is_empty(), "общий календарь: {wrong:#?}");
 }
 
+/// Взнос медстраховки за январь 2027 года (правки человека 2026-11-26:
+/// сайт, программа и календарь говорят одно): событие срока — на 20.02.2027
+/// по прочтению Kvartik, без переноса с субботы на 22.02.2027, со словами
+/// «Надёжнее заплатить в январе, до 20.01.2027», и своё событие на
+/// 20.01.2027 — день с безопасной стороны, с теми же двумя напоминаниями:
+/// напоминания подписки календарь может снять молча (шапка модуля), а
+/// событие на сам день видно и без них. В личном календаре — так же, со
+/// своими `UID`, а прошедшего 20 января события в нём нет.
+#[test]
+fn the_first_monthly_premium_has_its_safe_day() {
+    let mut wrong = Vec::new();
+    let (_, events) = parse(&public(Lang::Ru));
+    let find = |uid: &str| events.iter().find(|event| event.one("UID") == uid);
+    match find("health-2027-01@kvartik.com") {
+        Some(event)
+            if event.one("DTSTART;VALUE=DATE") == "20270220"
+                && event.text("DESCRIPTION").contains("Надёжнее заплатить в январе, до 20.01.2027") => {}
+        other => wrong.push(format!(
+            "срок взноса за январь: {:?}",
+            other.map(|event| (event.one("DTSTART;VALUE=DATE").to_owned(), event.text("DESCRIPTION")))
+        )),
+    }
+    let about = "По прочтению Kvartik срок взноса\u{a0}— 20.02.2027, но закон не говорит, за какой месяц каждый платёж, \
+                 и надёжнее заплатить в январе, до 20.01.2027.";
+    match find("health-2027-01-safe@kvartik.com") {
+        Some(event)
+            if event.one("DTSTART;VALUE=DATE") == "20270120"
+                && event.text("SUMMARY") == "Взнос медстраховки за январь 2027\u{a0}г.\u{a0}— надёжнее заплатить до этого дня"
+                && event.text("DESCRIPTION").starts_with(about)
+                && event.text("DESCRIPTION").contains(APP_URL) => {}
+        other => wrong.push(format!(
+            "январь, день с безопасной стороны: {:?}",
+            other.map(|event| (event.one("DTSTART;VALUE=DATE").to_owned(), event.text("SUMMARY"), event.text("DESCRIPTION")))
+        )),
+    }
+    let profile = programmer();
+    let documents: &[Document] = &[];
+    let books = Books {
+        documents,
+        operations: &[],
+        profile: Some(&profile),
+        closings: &[],
+        openings: &[],
+        unreadable: 0,
+    };
+    let starts = |today: Date| -> Vec<(String, String)> {
+        personal_events(books, today)
+            .into_iter()
+            .filter(|(uid, _, _)| uid.starts_with("mine-health-2027-01"))
+            .map(|(uid, start, _)| (uid, start))
+            .collect()
+    };
+    let before = starts(day(2026, 11, 26));
+    let expected = [
+        ("mine-health-2027-01-safe@kvartik.com".to_owned(), "20270120".to_owned()),
+        ("mine-health-2027-01@kvartik.com".to_owned(), "20270220".to_owned()),
+    ];
+    if before != expected {
+        wrong.push(format!("личный 26.11.2026: {before:?}"));
+    }
+    let after = starts(day(2027, 1, 25));
+    if after != expected[1..] {
+        wrong.push(format!("личный 25.01.2027: {after:?}"));
+    }
+    assert!(wrong.is_empty(), "взнос за январь в календаре: {wrong:#?}");
+}
+
 /// Гражданин 1990 года рождения, ИП с 2022 года, программист по списку
 /// 142-Ն (1 %).
 fn programmer() -> ProfileData {
@@ -391,7 +458,8 @@ fn the_personal_calendar_has_my_amounts() {
         ("mine-turnover-2026-q3@kvartik.com", "20261020", Some(sum("43 219"))),
         ("mine-turnover-2026-q4@kvartik.com", "20270120", None),
         ("mine-annual-2026@kvartik.com", "20270420", Some(sum("132 000"))),
-        ("mine-health-2027-01@kvartik.com", "20270222", Some(sum("10 800"))),
+        // Взнос за январь — по прочтению Kvartik, без переноса с субботы.
+        ("mine-health-2027-01@kvartik.com", "20270220", Some(sum("10 800"))),
         ("mine-application-2027@kvartik.com", "20270222", None),
     ] {
         match find(uid) {

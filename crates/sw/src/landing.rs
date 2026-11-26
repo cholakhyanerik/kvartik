@@ -374,31 +374,16 @@ fn monthly_health(all: &rules::Rules, year: u16) -> Option<(&rules::HealthInsura
     }
 }
 
-/// Первый взнос медстраховки года `year` — за январь — и день с безопасной
-/// стороны: то же число месяца самого взноса. Закон не говорит, за какой
-/// месяц платёж (ՀՕ-459-Ն, ст. 14, ч. 4), а перенос уплаты ՊԵԿ не
-/// подтверждал, поэтому ответ медстраховки и январская строка обеих таблиц
-/// называют его днём по прочтению программы без переноса и советуют
-/// заплатить в январе (правки человека 2026-11-26; вопрос 16 письма ՊԵԿ
-/// задачи 82). `None` — помесячной записи на этот год нет.
-fn first_premium(all: &rules::Rules, year: u16) -> Option<(Kind, Date)> {
-    let (_, due_day) = monthly_health(all, year)?;
-    Some((Kind::HealthMonth { year, month: 1 }, Date::new(year, 1, due_day)?))
-}
-
-/// День срока в таблицах руководств и пометка под ним — готовой разметкой.
-/// У первого взноса года (`first`) — день по прочтению программы, без
-/// переноса, и «надёжнее заплатить в январе, до …» с тем, где об этом
-/// сказано (`answer`, уже разметкой: на странице медстраховки — словами,
-/// в таблице сроков — ссылкой на неё), — в согласии с ответом сверху;
-/// у остальных — день с переносом и слова переноса ядра (`deadlines::moved`).
-fn shown_day(lang: Lang, deadline: &deadlines::Deadline, first: Option<(Kind, Date)>, answer: &str) -> (Date, Option<String>) {
-    match first {
-        Some((kind, safe)) if kind == deadline.kind => (
-            deadline.by_law,
-            Some(fill(&escape(t(lang, Key::GuideHealthFirstSafe)), &[&escape(&i18n::date(lang, safe)), answer])),
-        ),
-        _ => (deadline.day, deadlines::moved(lang, deadline.kind, deadline.by_law).map(|words| escape(&words))),
+/// Пометка под днём срока в таблицах руководств — готовой разметкой. У
+/// первого взноса помесячной медстраховки (`deadlines::safe`: день у него
+/// — по прочтению программы, без переноса) — «надёжнее заплатить в январе,
+/// до …» и где об этом сказано (`answer`, уже разметкой: на странице
+/// медстраховки — словами, в таблице сроков — ссылкой на неё), в согласии
+/// с ответом сверху; у остальных — слова переноса ядра (`deadlines::moved`).
+fn row_note(lang: Lang, deadline: &deadlines::Deadline, answer: &str) -> Option<String> {
+    match deadlines::safe(deadline.kind) {
+        Some(safe) => Some(fill(&escape(t(lang, Key::GuideHealthFirstSafe)), &[&escape(&i18n::date(lang, safe)), answer])),
+        None => deadlines::moved(lang, deadline.kind, deadline.by_law).map(|words| escape(&words)),
     }
 }
 
@@ -1752,7 +1737,9 @@ fn deadline_sources(lang: Lang, kind: Kind) -> String {
 /// и строки. Одна у страницы о налоге и руководств (задача 128).
 fn shift_note(lang: Lang, terms: &[deadlines::Deadline]) -> String {
     let mut shifts: Vec<&rules::Source> = Vec::new();
-    for deadline in terms {
+    // У первого взноса медстраховки переноса нет (`deadlines::safe`), хоть
+    // его день по закону и нерабочий.
+    for deadline in terms.iter().filter(|deadline| deadlines::safe(deadline.kind).is_none()) {
         for shift in deadlines::moved_sources(deadline.by_law) {
             if !shifts.iter().any(|known| std::ptr::eq(*known, shift)) {
                 shifts.push(shift);
@@ -1870,25 +1857,16 @@ fn deadlines_guide(lang: Lang, all: &rules::Rules, year: u16, checked: Date) -> 
         "        <p>{}</p>\n        <table class=\"rates terms\">\n          <thead>\n            <tr><th scope=\"col\">{date}</th><th scope=\"col\">{what}</th><th scope=\"col\">{who}</th><th scope=\"col\">{source}</th></tr>\n          </thead>\n",
         escape(&fill(t(lang, Key::GuideDeadlinesAbout), &[&year.to_string()]))
     ));
-    // Первый взнос медстраховки — днём по прочтению программы, со ссылкой на
-    // ответ её руководства (`shown_day`), и строки встают по показанному
-    // дню: январский взнос 20.02 — раньше заявления, перенесённого на 22.02.
+    // Первый взнос медстраховки — днём по прочтению программы (ядро,
+    // `deadlines::safe`: январский взнос 20.02 — раньше заявления,
+    // перенесённого на 22.02), со ссылкой на ответ её руководства (`row_note`).
     let answer = if health {
         format!("<a href=\"{}\">{}</a>", guide_path(lang, Guide::Health), text(Key::GuideHealthAnswerThere))
     } else {
         text(Key::GuideHealthAnswerThere)
     };
-    let first = first_premium(all, year);
-    let mut shown: Vec<(Date, Option<String>, &deadlines::Deadline)> = terms
-        .iter()
-        .map(|deadline| {
-            let (day, note) = shown_day(lang, deadline, first, &answer);
-            (day, note, deadline)
-        })
-        .collect();
-    shown.sort_by_key(|(day, ..)| *day);
     for month in 1..=12 {
-        let rows: Vec<&(Date, Option<String>, &deadlines::Deadline)> = shown.iter().filter(|(day, ..)| day.month() == month).collect();
+        let rows: Vec<&deadlines::Deadline> = terms.iter().filter(|deadline| deadline.day.month() == month).collect();
         if rows.is_empty() {
             continue;
         }
@@ -1896,14 +1874,13 @@ fn deadlines_guide(lang: Lang, all: &rules::Rules, year: u16, checked: Date) -> 
             "          <tbody>\n            <tr class=\"month\"><th scope=\"rowgroup\" colspan=\"4\">{}</th></tr>\n",
             escape(&capitalized(&i18n::month_heading(lang, year, month, year)))
         ));
-        for (day, note, deadline) in rows {
-            let moved = note
-                .as_ref()
+        for deadline in rows {
+            let moved = row_note(lang, deadline, &answer)
                 .map(|note| format!("<br />\n                <span class=\"note\">{note}</span>"))
                 .unwrap_or_default();
             out.push_str(&format!(
                 "            <tr>\n              <th scope=\"row\">{}{moved}</th>\n              <td data-label=\"{what}\">{}</td>\n              <td data-label=\"{who}\">{}</td>\n              <td data-label=\"{source}\" class=\"source\">{}</td>\n            </tr>\n",
-                escape(&i18n::date(lang, *day)),
+                escape(&i18n::date(lang, deadline.day)),
                 deadline_what(lang, deadline.kind, health),
                 deadline_who(lang, all, deadline.kind),
                 deadline_sources(lang, deadline.kind),
@@ -2020,12 +1997,12 @@ fn health_guide(lang: Lang, all: &rules::Rules, year: u16, checked: Date) -> Str
     // закон не говорит, за какой месяц платёж (ст. 14, ч. 4), поэтому день
     // по прочтению программы («за месяц — до числа следующего» — `by_law`
     // срока ядра) и день с безопасной стороны — то же число месяца самого
-    // взноса (`first_premium`). Перенесённый с нерабочего дня ответ сроком
+    // взноса (`deadlines::safe`). Перенесённый с нерабочего дня ответ сроком
     // не называет: перенос уплаты ՊԵԿ не подтверждал, а ответ цитируют без
     // слов под ним (решение человека 2026-11-26; вопрос 16 письма ՊԵԿ
-    // задачи 82). Январская строка взносов ниже — так же (`shown_day`).
-    let premium = first_premium(all, year);
-    let Some((_, safe)) = premium else {
+    // задачи 82). Январская строка взносов ниже, программа и календарь —
+    // так же: правило — в ядре.
+    let Some(safe) = deadlines::safe(first.kind) else {
         return String::new();
     };
     // Закон называет число каждого месяца после месяца, в котором ИП стал
@@ -2075,7 +2052,7 @@ fn health_guide(lang: Lang, all: &rules::Rules, year: u16, checked: Date) -> Str
         (
             "amount",
             text(Key::GuideHealthAmount),
-            health_months(lang, &months, &monthly, &yearly, due_day, year, Some(checked), &source, premium),
+            health_months(lang, &months, &monthly, &yearly, due_day, year, Some(checked), &source),
         ),
     ];
     if let Some((before, earlier, income_over, due)) = before {
@@ -2144,7 +2121,7 @@ fn health_guide(lang: Lang, all: &rules::Rules, year: u16, checked: Date) -> Str
 /// «Сколько и когда» руководства медстраховки: ставка за месяц и за год,
 /// число месяца — и взносы года `year` по месяцам (`months` — те же сроки,
 /// что в общем календаре, с переносом словами экрана сроков, а первый
-/// взнос года `first` — как в ответе сверху, `shown_day`), строка о
+/// взнос года — как в ответе сверху, `row_note`), строка о
 /// переносе с источниками, источник записи и ссылка на все сроки года
 /// (руководство сроков, когда оно есть на день сверки `checked`).
 #[allow(clippy::too_many_arguments)]
@@ -2157,20 +2134,20 @@ fn health_months(
     year: u16,
     checked: Option<Date>,
     source: &str,
-    first: Option<(Kind, Date)>,
 ) -> String {
     let mut out = format!(
         "        <p>{}</p>\n        <ul class=\"deadlines\">\n",
         escape(&fill(t(lang, Key::GuideHealthAmountText), &[monthly, yearly, &i18n::month_day(lang, due_day), &year.to_string()]))
     );
-    // Январский взнос — в согласии с ответом сверху (`shown_day`).
+    // Январский взнос — в согласии с ответом сверху (`row_note`).
     let answer = escape(t(lang, Key::GuideHealthAnswerHere));
     for deadline in months {
-        let (day, note) = shown_day(lang, deadline, first, &answer);
-        let moved = note.map(|note| format!("<br />\n          <span class=\"note\">{note}</span>")).unwrap_or_default();
+        let moved = row_note(lang, deadline, &answer)
+            .map(|note| format!("<br />\n          <span class=\"note\">{note}</span>"))
+            .unwrap_or_default();
         out.push_str(&format!(
             "          <li><strong>{}</strong>\u{a0}— {}{moved}</li>\n",
-            escape(&i18n::date(lang, day)),
+            escape(&i18n::date(lang, deadline.day)),
             deadline_what(lang, deadline.kind, false)
         ));
     }
@@ -3438,26 +3415,17 @@ mod tests {
                     &i18n::month_day(lang, due_day),
                 ],
             )));
-            // Строка таблицы — у каждого срока, по порядку показанных дней
-            // (первый взнос медстраховки — днём по прочтению, `shown_day`),
-            // а месяцы — заголовками групп.
+            // Строка таблицы — у каждого срока, по порядку дней ядра (у первого
+            // взноса медстраховки — по прочтению, `deadlines::safe`), а
+            // месяцы — заголовками групп.
             let answer = format!("<a href=\"{}\">{}</a>", guide_path(lang, Guide::Health), text(Key::GuideHealthAnswerThere));
-            let first = first_premium(all, year);
-            let mut shown: Vec<(Date, Option<String>, deadlines::Deadline)> = terms
-                .iter()
-                .map(|deadline| {
-                    let (day, note) = shown_day(lang, deadline, first, &answer);
-                    (day, note, *deadline)
-                })
-                .collect();
-            shown.sort_by_key(|(day, ..)| *day);
             let mut after = 0;
             let mut months = Vec::new();
-            for (day, note, deadline) in &shown {
-                if !months.contains(&day.month()) {
-                    months.push(day.month());
+            for deadline in &terms {
+                if !months.contains(&deadline.day.month()) {
+                    months.push(deadline.day.month());
                 }
-                let head = format!("<th scope=\"row\">{}", escape(&i18n::date(lang, *day)));
+                let head = format!("<th scope=\"row\">{}", escape(&i18n::date(lang, deadline.day)));
                 let what = format!("<td data-label=\"{}\">{}</td>", text(Key::GuideColumnWhat), deadline_what(lang, deadline.kind, true));
                 let Some(at) = html[after..].find(&what) else {
                     wrong.push(format!("{lang:?}: нет строки {what} после прежней"));
@@ -3473,8 +3441,8 @@ mod tests {
                     wrong.push(format!("{lang:?}: у срока {:?} ссылка на руководство медстраховки не та", deadline.kind));
                 }
                 let mut cells = vec![head, format!("<td data-label=\"{}\">{}</td>", text(Key::GuideColumnWho), deadline_who(lang, all, deadline.kind))];
-                if let Some(note) = note {
-                    cells.push(note.clone());
+                if let Some(note) = row_note(lang, deadline, &answer) {
+                    cells.push(note);
                 }
                 let sources = deadlines::sources(deadline.kind);
                 if sources.is_empty() {
@@ -3519,7 +3487,11 @@ mod tests {
                 &[&year.to_string(), &i18n::date(lang, december.day)],
             )));
             need.push(escape(&fill(t(lang, Key::GuideHealthReading), &[&i18n::month_day(lang, due_day), &i18n::month_day(lang, due_day)])));
-            let shifts: Vec<&rules::Source> = terms.iter().flat_map(|deadline| deadlines::moved_sources(deadline.by_law)).collect();
+            let shifts: Vec<&rules::Source> = terms
+                .iter()
+                .filter(|deadline| deadlines::safe(deadline.kind).is_none())
+                .flat_map(|deadline| deadlines::moved_sources(deadline.by_law))
+                .collect();
             if shifts.is_empty() {
                 wrong.push(format!("{lang:?}: ни один срок года не перенесён — перенос ничего не проверил"));
             }
@@ -3698,12 +3670,11 @@ mod tests {
                 need.push(format!("<li><a href=\"#{id}\">{heading}</a></li>"));
                 need.push(format!("<h2 id=\"{id}\">{heading}</h2>"));
             }
-            let first = first_premium(all, year);
             for deadline in &months {
-                let (day, note) = shown_day(lang, deadline, first, &text(Key::GuideHealthAnswerHere));
+                let note = row_note(lang, deadline, &text(Key::GuideHealthAnswerHere));
                 need.push(format!(
                     "<li><strong>{}</strong>\u{a0}— {}{}",
-                    escape(&i18n::date(lang, day)),
+                    escape(&i18n::date(lang, deadline.day)),
                     escape(&deadlines::what(lang, deadline.kind)),
                     note.map(|note| format!("<br />\n          <span class=\"note\">{note}</span>")).unwrap_or_default()
                 ));

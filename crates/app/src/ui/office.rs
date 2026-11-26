@@ -1053,13 +1053,13 @@ async fn row_of(name: &str, current: &str, base: Base, today: Date) -> Summed {
 /// — как напоминание о сроках, прошлый квартал — как карточка налога, годовые
 /// платежи — как их карточка. Чего нет, той строки нет.
 fn lines(lang: Lang, row: summary::Row) -> impl IntoView {
-    let next = row.next.map(|Next { deadline, when }| {
+    let next = row.next.map(|Next { deadline, when, day }| {
         // Срок прошёл — словами и цветом напоминания: цвет один ничего не
         // говорит (Правило 4).
         let overdue = when == When::Overdue;
         view! {
             <span class="entry-meta" class:due=overdue>
-                <span>{super::deadlines::when(lang, when, deadline.day)}</span>
+                <span>{super::deadlines::when(lang, when, day)}</span>
                 <span>{deadlines::what(lang, deadline.kind)}</span>
             </span>
         }

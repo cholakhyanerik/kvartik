@@ -57,6 +57,11 @@ use crate::model::profile::{Person, Residency};
 /// продукта — напоминание за 7 дней и за день.
 pub const REMIND_DAYS: i32 = 7;
 
+/// На сколько дней день с безопасной стороны ([`safe`]) раньше самого
+/// срока: 20 января против 20 февраля — 31 день. Напоминания берут сроки
+/// на столько дальше недели ([`reminders`]).
+const SAFE_AHEAD_DAYS: i32 = 31;
+
 /// На сколько дней вперёд показывать сроки — экран сроков и личный
 /// календарь (`tax::calendar`): год — все сроки года, включая годовые
 /// платежи и заявление.
@@ -103,7 +108,9 @@ pub struct Deadline {
     /// Последний день по закону.
     pub by_law: Date,
     /// Последний день с переносом: `by_law`, если он рабочий, иначе —
-    /// следующий рабочий.
+    /// следующий рабочий. У первого взноса помесячной медстраховки — сам
+    /// `by_law`, без переноса: у него есть день с безопасной стороны
+    /// ([`safe`]).
     pub day: Date,
     /// Сделано ли: квартал закрыт — расчёт подан (`tax::closing`); заявление
     /// нового ИП отмечено днём подачи (`Person::turnover_applied`). О других
@@ -116,9 +123,45 @@ impl Deadline {
         Self {
             kind,
             by_law,
-            day: last_day(by_law),
+            day: if safe(kind).is_some() { by_law } else { last_day(by_law) },
             done: false,
         }
+    }
+}
+
+/// День с безопасной стороны у первого взноса помесячной медстраховки —
+/// за январь года, с 1 января которого взнос помесячный (`health_insurance`
+/// с `HealthBy::Month`; с 2027 года — ՀՕ-459-Ն, ст. 45, ч. 1, п. 6): то же
+/// число самого января. Закон велит платить до числа каждого месяца после
+/// месяца, в котором ИП стал плательщиком (ст. 14, ч. 4), а за какой месяц
+/// каждый платёж, не говорит; ՊԵԿ об этом спрошен (вопрос 16 письма задачи
+/// 82). Поэтому срок такого взноса — день по прочтению программы («за
+/// месяц — до числа следующего»), без переноса: перенос уплаты ՊԵԿ не
+/// подтверждал, — а заплатить надёжнее в январе, до этого дня ([`moved`]),
+/// и напоминание до него приходит к нему ([`remind_day`], календарь —
+/// своим событием). Сайт, программа и календарь говорят одно (решения
+/// человека 2026-11-26). `None` — у остальных сроков: у всех платежей
+/// после первого прочтения сходятся.
+pub fn safe(kind: Kind) -> Option<Date> {
+    let Kind::HealthMonth { year, month: 1 } = kind else {
+        return None;
+    };
+    let rule = rules::for_year(rules::armenia().health_insurance(), year)?;
+    let HealthBy::Month { due_day } = rule.by else {
+        return None;
+    };
+    let january = Date::new(year, 1, due_day)?;
+    (rule.starts == Date::new(year, 1, 1)?).then_some(january)
+}
+
+/// День, к которому считается, насколько близок срок `deadline` в день
+/// `today`: до дня с безопасной стороны ([`safe`]) — он, потом — сам срок.
+/// Иначе напоминание о первом взносе пришло бы за неделю до 20 февраля,
+/// когда «надёжнее в январе» уже прошло.
+pub fn remind_day(deadline: &Deadline, today: Date) -> Date {
+    match safe(deadline.kind) {
+        Some(safe) if today <= safe => safe,
+        _ => deadline.day,
     }
 }
 
@@ -236,11 +279,16 @@ const fn pays(kind: Kind) -> bool {
     }
 }
 
-/// Слова под перенесённым днём срока `kind`, который по закону кончается
-/// `by_law`: с какого дня он перенесён, а если к сроку платят, — что
-/// заплатить надёжнее до этого дня. `None` — день рабочий, переноса нет.
-/// Слова одни у экрана сроков, напоминания, карточек и календаря.
+/// Слова под днём срока `kind`, который по закону кончается `by_law`:
+/// с какого дня он перенесён, а если к сроку платят, — что заплатить
+/// надёжнее до этого дня; у первого взноса помесячной медстраховки — что
+/// заплатить надёжнее в январе, до дня с безопасной стороны ([`safe`]).
+/// `None` — день рабочий, переноса нет. Слова одни у экрана сроков,
+/// напоминания, карточек и календаря.
 pub fn moved(lang: Lang, kind: Kind, by_law: Date) -> Option<String> {
+    if let Some(safe) = safe(kind) {
+        return Some(fill(t(lang, Key::DeadlineSafe), &[&i18n::date(lang, safe)]));
+    }
     let key = if pays(kind) { Key::DeadlineShiftedPay } else { Key::DeadlineShifted };
     (last_day(by_law) != by_law).then(|| fill(t(lang, key), &[&i18n::date(lang, by_law)]))
 }
@@ -262,6 +310,10 @@ pub enum When {
 pub struct Reminder {
     pub deadline: Deadline,
     pub when: When,
+    /// День, к которому считается `when` ([`remind_day`]): срок, а у
+    /// первого взноса помесячной медстраховки до дня с безопасной стороны —
+    /// этот день. У просроченного квартала — его срок.
+    pub day: Date,
 }
 
 /// Рабочий ли день `day` для срока по правилам `rules`: рабочий по решению
@@ -728,10 +780,17 @@ pub fn reminders(books: Books<'_>, today: Date) -> Vec<Reminder> {
         .map(|deadline| Reminder {
             deadline,
             when: When::Overdue,
+            day: deadline.day,
         })
         .into_iter()
         .collect();
     let Some(until) = today.add_days(REMIND_DAYS) else {
+        return found;
+    };
+    // День с безопасной стороны — за месяц до срока ([`safe`]): срок, чей
+    // день ещё за неделей, напоминает уже им, и сроки берутся на месяц
+    // дальше недели.
+    let Some(reach) = until.add_days(SAFE_AHEAD_DAYS) else {
         return found;
     };
     // Заявление нового ИП — своей карточкой ([`applying`]), когда год его
@@ -744,17 +803,20 @@ pub fn reminders(books: Books<'_>, today: Date) -> Vec<Reminder> {
         }
         _ => false,
     };
-    for deadline in between(books, today, until)
+    for deadline in between(books, today, reach)
         .into_iter()
         .filter(|deadline| !deadline.done && !own_card(deadline.kind))
     {
-        let days = deadline.day.days_since(today);
-        let when = match days {
+        let day = remind_day(&deadline, today);
+        if day > until {
+            continue;
+        }
+        let when = match day.days_since(today) {
             0 => When::Today,
             1 => When::Tomorrow,
             days => When::In(days),
         };
-        found.push(Reminder { deadline, when });
+        found.push(Reminder { deadline, when, day });
     }
     found
 }

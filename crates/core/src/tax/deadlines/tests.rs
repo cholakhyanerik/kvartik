@@ -390,8 +390,9 @@ fn listed(deadlines: &[Deadline]) -> Vec<(Date, Kind)> {
 /// за 2025 год 1 ноября (воскресенье — 2 ноября), заявление 20 февраля
 /// 2027 (суббота — 22-е), годовые платежи 20 апреля, медстраховка
 /// помесячно с 2027 года — 20-го следующего месяца, а выходной —
-/// понедельник; в один день — квартал, заявление, годовые, медстраховка,
-/// декларация.
+/// понедельник, кроме взноса за январь: он — 20.02.2027, по прочтению, без
+/// переноса (`safe`); в один день — квартал, заявление, годовые,
+/// медстраховка, декларация.
 #[test]
 fn a_year_of_deadlines() {
     let profile = citizen();
@@ -401,8 +402,9 @@ fn a_year_of_deadlines() {
         (day(2026, 10, 20), Kind::Turnover(quarter(2026, 3))),
         (day(2026, 11, 2), Kind::Declaration(2025)),
         (day(2027, 1, 20), Kind::Turnover(quarter(2026, 4))),
+        // Взнос за январь — по прочтению, без переноса (`safe`).
+        (day(2027, 2, 20), month(1)),
         (day(2027, 2, 22), Kind::Application(2027)),
-        (day(2027, 2, 22), month(1)),
         (day(2027, 3, 22), month(2)),
         (day(2027, 4, 20), Kind::Turnover(quarter(2027, 1))),
         (day(2027, 4, 20), Kind::Annual(2026)),
@@ -621,6 +623,95 @@ fn an_unclosed_quarter_is_overdue_after_its_day() {
     assert_eq!(reminders(closed, day(2026, 10, 19)), []);
 }
 
+/// Первый взнос помесячной медстраховки — за январь 2027 года (ՀՕ-459-Ն,
+/// ст. 45, ч. 1, п. 6): закон не говорит, за какой месяц каждый платёж
+/// (ст. 14, ч. 4), поэтому его срок — день по прочтению Kvartik, 20.02.2027,
+/// без переноса с субботы на 22.02.2027, а надёжнее заплатить в январе, до
+/// 20.01.2027 (правки человека 2026-11-26: сайт, программа и календарь
+/// говорят одно). В феврале он стоит раньше заявления, перенесённого
+/// на 22.02.2027. Взнос за февраль — как все: 20.03.2027 — суббота, срок
+/// 22.03.2027. За январь 2028 года и за 2026 год (годовая ставка) такого
+/// дня нет.
+#[test]
+fn the_first_monthly_premium_is_safe_in_january() {
+    let mut wrong = Vec::new();
+    let year = general(day(2027, 1, 1), day(2027, 12, 31));
+    let find = |kind: Kind| year.iter().position(|deadline| deadline.kind == kind);
+    let january = Kind::HealthMonth { year: 2027, month: 1 };
+    let february = Kind::HealthMonth { year: 2027, month: 2 };
+    match find(january).map(|at| year[at]) {
+        Some(deadline) if (deadline.by_law, deadline.day) == (day(2027, 2, 20), day(2027, 2, 20)) => {}
+        other => wrong.push(format!("взнос за январь: {other:?}")),
+    }
+    match find(february).map(|at| year[at]) {
+        Some(deadline) if (deadline.by_law, deadline.day) == (day(2027, 3, 20), day(2027, 3, 22)) => {}
+        other => wrong.push(format!("взнос за февраль: {other:?}")),
+    }
+    if !matches!((find(january), find(Kind::Application(2027))), (Some(premium), Some(application)) if premium < application) {
+        wrong.push("взнос за январь — не раньше заявления".to_owned());
+    }
+    for (kind, expected) in [
+        (january, Some(day(2027, 1, 20))),
+        (february, None),
+        (Kind::HealthMonth { year: 2028, month: 1 }, None),
+        (Kind::HealthYear(2026), None),
+    ] {
+        if safe(kind) != expected {
+            wrong.push(format!("{kind:?}: день с безопасной стороны {:?}, а не {expected:?}", safe(kind)));
+        }
+    }
+    for (lang, kind, by_law, expected) in [
+        (Lang::Ru, january, day(2027, 2, 20), "Надёжнее заплатить в январе, до 20.01.2027"),
+        (Lang::En, january, day(2027, 2, 20), "Safer to pay in January, by Jan 20, 2027"),
+        (Lang::Am, january, day(2027, 2, 20), "Ավելի ապահով է վճարել հունվարին՝ մինչև 20.01.2027"),
+        (Lang::Ru, february, day(2027, 3, 20), "Перенесено с 20.03.2027\u{a0}— нерабочего дня; заплатить надёжнее до него"),
+    ] {
+        let got = moved(lang, kind, by_law);
+        if got.as_deref() != Some(expected) {
+            wrong.push(format!("{lang:?} {kind:?}: {got:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "первый взнос: {wrong:#?}");
+}
+
+/// Напоминание о взносе за январь 2027 года — к 20.01.2027, дню
+/// с безопасной стороны: с 13 января, «через 7 дней», — о 20 января; после
+/// него — к самому сроку, 20.02.2027, за неделю, как у всех; между ними —
+/// нет. Взнос за февраль — к своему сроку с переносом.
+#[test]
+fn the_first_monthly_premium_is_reminded_in_january() {
+    let profile = citizen();
+    let mut wrong = Vec::new();
+    let january = Kind::HealthMonth { year: 2027, month: 1 };
+    for (today, expected) in [
+        (day(2027, 1, 12), None),
+        // Первый день недели: срок 20.02 — ровно на запас окна дальше её
+        // конца (`SAFE_AHEAD_DAYS`).
+        (day(2027, 1, 13), Some((When::In(7), day(2027, 1, 20)))),
+        (day(2027, 1, 14), Some((When::In(6), day(2027, 1, 20)))),
+        (day(2027, 1, 20), Some((When::Today, day(2027, 1, 20)))),
+        (day(2027, 1, 21), None),
+        (day(2027, 2, 15), Some((When::In(5), day(2027, 2, 20)))),
+        (day(2027, 2, 20), Some((When::Today, day(2027, 2, 20)))),
+    ] {
+        let got = reminders(books(Some(&profile), &[]), today)
+            .into_iter()
+            .find(|reminder| reminder.deadline.kind == january)
+            .map(|reminder| (reminder.when, reminder.day));
+        if got != expected {
+            wrong.push(format!("{today:?}: {got:?} вместо {expected:?}"));
+        }
+    }
+    let february = reminders(books(Some(&profile), &[]), day(2027, 3, 16))
+        .into_iter()
+        .find(|reminder| reminder.deadline.kind == Kind::HealthMonth { year: 2027, month: 2 })
+        .map(|reminder| (reminder.when, reminder.day));
+    if february != Some((When::In(6), day(2027, 3, 22))) {
+        wrong.push(format!("взнос за февраль 16.03.2027: {february:?}"));
+    }
+    assert!(wrong.is_empty(), "напоминание о взносе за январь: {wrong:#?}");
+}
+
 /// Напоминание — за 7 дней и ближе, и о просроченном квартале.
 #[test]
 fn reminders_come_a_week_ahead() {
@@ -785,8 +876,9 @@ fn a_micro_year_has_its_own_deadlines() {
         (day(2026, 10, 20), Kind::Turnover(quarter(2026, 3))),
         (day(2026, 11, 2), Kind::Declaration(2025)),
         (day(2027, 1, 20), Kind::Turnover(quarter(2026, 4))),
+        // Взнос за январь — по прочтению, без переноса (`safe`).
+        (day(2027, 2, 20), month(1)),
         (day(2027, 2, 22), Kind::MicroApplication(2027)),
-        (day(2027, 2, 22), month(1)),
         (day(2027, 3, 22), month(2)),
         (day(2027, 4, 20), Kind::Annual(2026)),
         (day(2027, 4, 20), month(3)),

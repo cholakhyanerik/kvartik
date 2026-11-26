@@ -98,13 +98,13 @@ pub fn DeadlineReminder(ctx: tax::Ctx) -> impl IntoView {
         found.get().map(|reminders| {
             let rows = reminders
                 .into_iter()
-                .map(|Reminder { deadline, when: soon }| {
+                .map(|Reminder { deadline, when: soon, day }| {
                     let overdue = soon == When::Overdue;
                     let by_law = deadline.by_law;
                     view! {
                         <li>
                             <a href=place(deadline.kind).href()>
-                                <span class="reminder">{move || when(lang.get(), soon, deadline.day)}</span>
+                                <span class="reminder">{move || when(lang.get(), soon, day)}</span>
                                 <span>{move || what(lang.get(), deadline.kind)}</span>
                                 {move || deadlines::moved(lang.get(), deadline.kind, by_law).map(|note| view! { <span>{note}</span> })}
                                 {overdue.then(|| view! { <span>{tr(lang, Key::TaxCloseReminder)}</span> })}
@@ -261,15 +261,15 @@ pub fn DeadlinesEntry(ctx: tax::Ctx) -> impl IntoView {
 /// строкой под днём, а не справа: на телефоне колонка справа сжала бы
 /// слова срока в узкий столбец (глазной прогон задачи 21).
 #[component]
-fn Row(lang: ReadSignal<Lang>, deadline: Deadline, soon: Option<When>) -> impl IntoView {
+fn Row(lang: ReadSignal<Lang>, deadline: Deadline, soon: Option<(When, Date)>) -> impl IntoView {
     let soon = soon.filter(|_| !deadline.done);
     view! {
         <li class="deadline">
             <a class="entry" href=place(deadline.kind).href()>
                 <span class="entry-main">
                     <span class="entry-title">{move || i18n::date(lang.get(), deadline.day)}</span>
-                    {soon.map(|soon| view! {
-                        <span class="deadline-soon">{move || when(lang.get(), soon, deadline.day)}</span>
+                    {soon.map(|(soon, day)| view! {
+                        <span class="deadline-soon">{move || when(lang.get(), soon, day)}</span>
                     })}
                     {deadline.done.then(|| {
                         let done = match deadline.kind {
@@ -331,17 +331,20 @@ pub fn DeadlinesPage(ctx: tax::Ctx) -> impl IntoView {
         ctx.sources.with_books(|books| {
             let gaps = deadlines::gaps(books, today, until);
             let overdue = deadlines::overdue(books, today);
-            let ahead: Vec<(Deadline, Option<When>)> = deadlines::between(books, today, until)
+            // Близость — к тому дню, к которому напоминает и главный экран
+            // (`deadlines::remind_day`): у первого взноса медстраховки — до
+            // 20 января, а не до самого срока.
+            let ahead: Vec<(Deadline, Option<(When, Date)>)> = deadlines::between(books, today, until)
                 .into_iter()
                 .map(|deadline| {
-                    let days = deadline.day.days_since(today);
-                    let soon = match days {
+                    let day = deadlines::remind_day(&deadline, today);
+                    let soon = match day.days_since(today) {
                         0 => Some(When::Today),
                         1 => Some(When::Tomorrow),
                         days if days <= deadlines::REMIND_DAYS => Some(When::In(days)),
                         _ => None,
                     };
-                    (deadline, soon)
+                    (deadline, soon.map(|soon| (soon, day)))
                 })
                 .collect();
             (gaps, overdue, ahead)
@@ -357,7 +360,7 @@ pub fn DeadlinesPage(ctx: tax::Ctx) -> impl IntoView {
             });
             view! {
                 <ul class="list deadlines">
-                    {overdue.map(|deadline| view! { <Row lang deadline soon=Some(When::Overdue) /> })}
+                    {overdue.map(|deadline| view! { <Row lang deadline soon=Some((When::Overdue, deadline.day)) /> })}
                     {ahead
                         .into_iter()
                         .map(|(deadline, soon)| view! { <Row lang deadline soon /> })
