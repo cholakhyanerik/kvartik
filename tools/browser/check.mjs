@@ -106,6 +106,9 @@ const buyPath = (lang) => (lang === "hy" ? "/buy/" : `/${lang}/buy/`);
 const feedbackPath = (lang) => (lang === "hy" ? "/feedback/" : `/${lang}/feedback/`);
 // Страница о налоге с оборота (задача 118) — `landing::tax_path`.
 const taxPath = (lang) => (lang === "hy" ? "/tax/" : `/${lang}/tax/`);
+// Руководства (задача 128) — `landing::guide_path`: папка руководства в папке
+// страницы языка.
+const guidePath = (lang, slug) => `${lang === "hy" ? "/" : `/${lang}/`}${slug}/`;
 const RELEASE = fs.readFileSync(path.join(REPO, "crates/core/src/release.rs"), "utf8");
 const ACCOUNT = RELEASE.match(/pub const ACCOUNT: &str = "(\d+)";/)?.[1];
 const PRICE = RELEASE.match(/pub const PRICE: Money = Money::new\(([\d_]+), Currency::Amd\);/)?.[1]?.replaceAll("_", "");
@@ -817,6 +820,15 @@ async function calendarScheme(browser) {
         return link && { seen: link.getClientRects().length > 0, address };`);
       checks.check(`календарь, ${system}: на лендинге кнопка webcal ${shown ? "есть" : "спрятана"}, адрес https на месте`,
         site && site.seen === shown && site.address.startsWith("https://"), JSON.stringify(site));
+      // Руководство сроков (задача 128) — та же подписка: на Windows кнопки
+      // нет и там, а адрес https под ней.
+      await page.go(`${ORIGIN}${guidePath("ru", "deadlines")}`);
+      const guide = await page.waitFor(`if (!(${SCRIPTED})) return null;
+        const links = [...document.querySelectorAll('article.guide a[href^="webcal:"]')];
+        const address = document.querySelector("article.guide .address")?.textContent ?? "";
+        return links.length === 1 && { seen: links[0].getClientRects().length > 0, address };`);
+      checks.check(`календарь, ${system}: в руководстве сроков кнопка webcal ${shown ? "есть" : "спрятана"}, адрес https на месте`,
+        guide && guide.seen === shown && guide.address.startsWith("https://"), JSON.stringify(guide));
       await page.go(`${ORIGIN}/app/`);
       await page.setLang(opt.lang);
       checks.check(`календарь, ${system}: рабочий экран`, await page.waitFor(WORKING));
@@ -1024,9 +1036,76 @@ async function landing(browser) {
           && !["none", "normal", ""].includes(getComputedStyle(cell, "::before").content)
           && card.borderRadius !== "0px" ? true : { width: d.clientWidth, scroll: d.scrollWidth, table: table?.scrollWidth,
           cell: cell && getComputedStyle(cell).display, label: cell && getComputedStyle(cell, "::before").content };`));
+      // Под сроками — все сроки года по месяцам (задача 128).
+      verdict(`о налоге ${at}: ведёт на сроки года и на медстраховку`, await page.eval(`
+        const all = document.querySelector('article.tax a.button[href="${guidePath(lang, "deadlines")}"]');
+        const health = document.querySelector('article.tax ul.deadlines a[href="${guidePath(lang, "health-insurance")}"]');
+        return all && health ? true : { all: !!all, health: !!health };`));
       await page.go(`${ORIGIN}${lang === "hy" ? "/" : `/${lang}/`}`);
       checks.check(`лендинг ${lang}: карточка ведёт на страницу о налоге`, await page.waitFor(`return document
         .querySelector('section.card a.button[href="${at}"]') && document.querySelector('footer a[href="${at}"]') ? true : null;`));
+      checks.check(`лендинг ${lang}: подвал ведёт на оба руководства`, await page.eval(`return document
+        .querySelector('footer a[href="${guidePath(lang, "deadlines")}"]')
+        && document.querySelector('footer a[href="${guidePath(lang, "health-insurance")}"]') ? true : null;`));
+    }
+    // Руководства (задача 128): своего языка, заголовок с годом по шаблону
+    // строки, ответ сверху с числами, у каждой строки таблицы сроков и у
+    // каждого раздела медстраховки с числами — источник на arlis.am; одно
+    // описание для поисковиков со страницей и днём изменения и превью; на
+    // 360 ничего не уходит вбок, а строки таблицы — карточками; отказов CSP
+    // нет. «Да» — только `true` (`verdict` выше).
+    const verdict = (name, got, detail) => checks.check(name, got === true, got === true ? "" : JSON.stringify(detail ?? got));
+    const titled = (template) => new RegExp(`^${template.replace(/[.*+?^$()|[\]\\/]/g, "\\$&").replace("{}", "\\d{4}")}$`);
+    for (const [slug, title] of [["deadlines", "GuideDeadlinesTitle"], ["health-insurance", "GuideHealthTitle"]]) {
+      for (const lang of ["hy", "ru", "en"]) {
+        const at = guidePath(lang, slug);
+        await page.go(`${ORIGIN}${at}`);
+        const arlis = 'a[href^="https://www.arlis.am/"][lang="hy"]';
+        const content = await page.waitFor(`
+          const article = document.querySelector("article.guide");
+          const h1 = article?.querySelector("h1")?.textContent ?? "";
+          const answer = article?.querySelector("h1 + p.answer")?.textContent ?? "";
+          const rows = [...(article?.querySelectorAll("table.terms > tbody > tr:not(.month)") ?? [])];
+          const sections = [...(article?.querySelectorAll("h2[id]") ?? [])];
+          const sourced = sections.filter((h2) => {
+            let node = h2.nextElementSibling;
+            while (node && node.tagName !== "H2") {
+              if (node.querySelector(${JSON.stringify(`.source ${arlis}`)})) return true;
+              node = node.nextElementSibling;
+            }
+            return false;
+          });
+          const ok = document.documentElement.lang === ${JSON.stringify(lang)}
+            && ${titled(t(title, lang))}.test(h1) && document.title === h1 && /\\d{4}/.test(answer)
+            && (${JSON.stringify(slug)} === "deadlines"
+              ? rows.length >= 12 && rows.every((tr) => tr.querySelector(${JSON.stringify(`td.source ${arlis}`)}))
+              : sections.length >= 4 && sourced.length >= 4)
+            && getComputedStyle(document.querySelector("h1")).fontFamily.includes("Kvartik Serif")
+            && window.cspRefused.length === 0;
+          return ok ? true : null;`);
+        verdict(`руководство ${at}: свой язык, заголовок с годом, ответ и источники на arlis.am`, content,
+          content === true ? null : await page.eval(`const a = document.querySelector("article.guide");
+          return { h1: a?.querySelector("h1")?.textContent, answer: a?.querySelector("h1 + p.answer")?.textContent?.slice(0, 80),
+            rows: a?.querySelectorAll("table.terms > tbody > tr:not(.month)").length,
+            unsourced: [...(a?.querySelectorAll("table.terms > tbody > tr:not(.month)") ?? [])]
+              .filter((tr) => !tr.querySelector(${JSON.stringify(`td.source ${arlis}`)})).length,
+            sections: a?.querySelectorAll("h2[id]").length, refused: window.cspRefused };`));
+        verdict(`руководство ${at}: описание для поисковиков — страница с днём изменения, превью`, await page.eval(`
+          const blocks = document.querySelectorAll('script[type="application/ld+json"]');
+          const graph = blocks.length === 1 ? JSON.parse(blocks[0].textContent)["@graph"] : [];
+          return graph[0]?.["@type"] === "WebPage" && graph[0].url === "https://kvartik.com${at}"
+            && graph[0].name === document.querySelector("h1")?.textContent
+            && /^\\d{4}-\\d{2}-\\d{2}$/.test(graph[0].dateModified ?? "") && graph[1]?.["@type"] === "BreadcrumbList"
+            && graph[1].itemListElement?.[1]?.item === "https://kvartik.com${at}"
+            && document.querySelector('meta[property="og:url"]')?.content === "https://kvartik.com${at}"
+            ? true : { blocks: blocks.length, graph };`));
+        verdict(`руководство ${at}: на 360 без прокрутки вбок`, await page.eval(`const d = document.documentElement;
+          const table = document.querySelector("article.guide table.terms");
+          const cell = table?.querySelector("tbody tr:not(.month) td");
+          const cards = !table || getComputedStyle(cell).display === "block";
+          return d.clientWidth === 360 && d.scrollWidth <= d.clientWidth && (!table || table.scrollWidth <= table.clientWidth) && cards
+            ? true : { width: d.clientWidth, scroll: d.scrollWidth, table: table?.scrollWidth, cell: cell && getComputedStyle(cell).display };`));
+      }
     }
     // «Отзывы и предложения» (задача 114): своего языка, с письмом продавцу,
     // в котором первая строка — версия программы и где её найти, и Telegram

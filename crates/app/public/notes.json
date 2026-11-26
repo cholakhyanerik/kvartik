@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.207",
+      "date": "2026-11-26",
+      "hy": [
+        "«Ծրագրի մասին» էկրանին տոների մասին օրենքն այժմ 11.11.2026-ի խմբագրությամբ է՝ ստուգված 26.11.2026-ին. ոչ աշխատանքային օրերը նույնն են։ Առողջության համընդհանուր ապահովագրության մասին օրենքը նույն օրը նորից է ստուգվել, գումարները նույնն են։"
+      ],
+      "ru": [
+        "В «О программе» закон о праздниках\u00a0— теперь в редакции от 11.11.2026, сверен 26.11.2026; нерабочие дни те же. Закон о медстраховке в тот же день сверен заново, суммы те же."
+      ],
+      "en": [
+        "On the About screen, the public holidays law is now its edition of Nov 11, 2026, checked Nov 26, 2026; the non-working days are the same. The health insurance law was rechecked the same day; the amounts are the same."
+      ]
+    },
+    {
       "version": "0.0.206",
       "date": "2026-11-26",
       "hy": [
@@ -254,19 +267,6 @@
       ],
       "en": [
         "QR codes on the “Another device” screen can open full screen, on white and as large as possible, so the other device’s camera reads them from a metre away. Turn the screen brightness up and the code is read faster."
-      ]
-    },
-    {
-      "version": "0.0.187",
-      "date": "2026-11-24",
-      "hy": [
-        "Պատճենը վերականգնելուց, կոդն ընդունելուց և կոդը պատրաստելուց հետո ծրագիրն ասում է, թե ինչ է եկել՝ ըստ տեսակների. հաշիվներ և ակտեր, հաճախորդներ, մատյանի գրառումներ, մատյանի ֆայլեր, իսկ առանձին՝ քանի գրառում արդեն այստեղ էր։"
-      ],
-      "ru": [
-        "После восстановления копии, приёма кода и готового кода программа говорит, что пришло, по видам: счета и акты, клиенты, записи книги, файлы книги, а отдельно — сколько записей уже было здесь."
-      ],
-      "en": [
-        "After restoring a backup, taking a code or making one, the app says what came in by kind: invoices and acts, clients, ledger entries, ledger files, and separately how many records were already here."
       ]
     }
   ]

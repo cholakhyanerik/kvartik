@@ -819,6 +819,41 @@ main > .plans {
   font-size: var(--font-size-sm);
 }
 
+/* Сроки года по месяцам (задача 128) — той же таблицей карточками, что
+   ставки (`table.rates terms`), а группа строк — месяц: на телефоне его
+   имя — заголовком над карточками без своей карточки, и между месяцами
+   воздуха больше, чем между сроками одного. Шире — строкой таблицы во всю
+   её ширину, жирнее ячеек. */
+.terms tbody + tbody {
+  margin-top: var(--space-6);
+}
+
+.terms tr.month {
+  padding: 0;
+  background: none;
+}
+
+.terms tr.month th {
+  font-family: var(--font-serif);
+  font-size: var(--font-size-lg);
+  font-weight: var(--weight-heading);
+}
+
+/* Слова о переносе под датой — обычным начертанием, а не жирным ячейки. */
+.terms tbody th .note {
+  font-weight: var(--weight-regular);
+}
+
+@media (min-width: 40rem) {
+  .terms tbody + tbody {
+    margin-top: 0;
+  }
+
+  .terms tr.month th {
+    padding-top: var(--space-6);
+  }
+}
+
 @media (min-width: 40rem) {
   .rates {
     display: table;

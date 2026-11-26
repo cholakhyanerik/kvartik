@@ -39,6 +39,12 @@
 //! пример — расчётом калькулятора. Такие страницы цитируют поисковики
 //! и ИИ-ответы, а второго расчёта «для сайта» в ней нет.
 //!
+//! И руководства (задача 128, `Guide`): «Сроки ИП на год» (`deadlines/`)
+//! и «Медстраховка ИП» (`health-insurance/`) там же (`guide_path`), устроенные,
+//! как страница о налоге, — ответ сверху, разделы из того же файла правил,
+//! источник у каждого числа, своё описание для поисковиков. Год — только
+//! в заголовке, из дня сверки правил (`guide_year`), а адрес — навсегда.
+//!
 //! Рядом — оформление и скрипт, одним файлом каждый, с хэшем содержимого
 //! в имени (`kvartik-site-<хэш>.css` и `.js`): они кэшируются на год
 //! (`_headers`), а новая сборка — новое имя. CSS — это `tokens.css`
@@ -80,6 +86,7 @@ use kvartik_core::release::{
     ACCOUNT, BANK, EMAIL, HOLDER, LICENSES, Legal, PRICE, PRO_PRICE, PRO_SEATS, SELLER_TIN, TELEGRAM, buy_path,
     feedback_path, mailto,
 };
+use kvartik_core::tax::deadlines::Kind;
 use kvartik_core::tax::{calendar, deadlines, example, rules, turnover};
 
 use super::{digest, legal};
@@ -310,6 +317,97 @@ pub fn tax_path(lang: Lang) -> &'static str {
     }
 }
 
+/// Руководство (задача 128) — страница на трёх языках в папке страницы
+/// языка, устроенная, как страница о налоге: ответ сверху, разделы из файла
+/// правил ядра, у каждого числа — акт, статья и день сверки, своё описание
+/// для поисковиков (`described_page`), превью в чатах (`preview`) и `lastmod`
+/// в карте сайта — день сверки правил. Адрес — навсегда и без года: на него
+/// ведут поисковики, ИИ-ответы и подвал, а год — только в заголовке.
+/// Новое руководство — вариант здесь, его страница в `guide_body` и строки.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Guide {
+    /// Сроки ИП на налоге с оборота на год (`guide_year`).
+    Deadlines,
+    /// Взнос медстраховки ИП с года, с которого его платят помесячно.
+    Health,
+}
+
+impl Guide {
+    pub const ALL: [Guide; 2] = [Guide::Deadlines, Guide::Health];
+
+    /// Папка руководства — часть адреса навсегда.
+    const fn slug(self) -> &'static str {
+        match self {
+            Guide::Deadlines => "deadlines",
+            Guide::Health => "health-insurance",
+        }
+    }
+}
+
+/// Адрес руководства `guide` на языке `lang` от корня сайта —
+/// `/deadlines/`, `/ru/deadlines/`, `/en/health-insurance/`: в папке страницы
+/// языка, как «Купить» и «о налоге».
+pub fn guide_path(lang: Lang, guide: Guide) -> String {
+    format!("{}{}/", url(lang), guide.slug())
+}
+
+/// Год страницы сроков (задача 128) по дню последней сверки правил
+/// `checked`: сверка в ноябре или декабре — следующий год, иначе — тот же.
+/// В ноябре ИП ищет уже сроки следующего года, а правила сверки их держат:
+/// общий календарь с того же дня идёт по конец следующего года
+/// (`tax::calendar`). День — из данных, а не из часов сборки: те же правила —
+/// те же байты. Предложение человека; лучшего правила не нашлось — «год,
+/// у которого впереди больше сроков» дал бы то же самое, только сложнее.
+fn guide_year(checked: Date) -> Option<u16> {
+    if checked.month() >= 11 { checked.year().checked_add(1) } else { Some(checked.year()) }
+}
+
+/// Запись медстраховки, о которой руководство «Медстраховка»: та, что
+/// действует весь год `year`, и только помесячная (`HealthBy::Month`) —
+/// с её числом месяца. Годовой ставки одной суммой страница не описывает:
+/// она о взносе, который платят каждый месяц. `None` — такой записи нет.
+fn monthly_health(all: &rules::Rules, year: u16) -> Option<(&rules::HealthInsurance, u8)> {
+    let rule = rules::for_year(all.health_insurance(), year)?;
+    match rule.by {
+        rules::HealthBy::Month { due_day } => Some((rule, due_day)),
+        rules::HealthBy::Year { .. } => None,
+    }
+}
+
+/// Имя руководства — заголовок, имя ссылки (подвал, хлебные крошки)
+/// и описание для поисковиков — на языке `lang`, ещё не экранированные.
+/// Год — из правил дня сверки `checked`: у сроков — `guide_year`, у
+/// медстраховки — год, с которого её запись действует для ИП (`starts`).
+/// `None` — дня сверки или записи нет: тогда нет и страницы, и ссылок на неё.
+struct GuideName {
+    title: String,
+    link: String,
+    description: String,
+}
+
+fn guide_name(lang: Lang, guide: Guide, checked: Option<Date>) -> Option<GuideName> {
+    let year = guide_year(checked?)?;
+    match guide {
+        Guide::Deadlines => Some(GuideName {
+            title: fill(t(lang, Key::GuideDeadlinesTitle), &[&year.to_string()]),
+            link: fill(t(lang, Key::GuideDeadlinesLink), &[&year.to_string()]),
+            description: fill(t(lang, Key::GuideDeadlinesDescription), &[&year.to_string()]),
+        }),
+        Guide::Health => {
+            let (rule, due_day) = monthly_health(rules::armenia(), year)?;
+            let start = rule.starts.year().to_string();
+            Some(GuideName {
+                title: fill(t(lang, Key::GuideHealthTitle), &[&start]),
+                link: fill(t(lang, Key::GuideHealthLink), &[&start]),
+                description: fill(
+                    t(lang, Key::GuideHealthDescription),
+                    &[&start, &i18n::money(lang, Money::new(rule.monthly, Currency::Amd)), &i18n::month_day(lang, due_day)],
+                ),
+            })
+        }
+    }
+}
+
 /// Файл страницы в сборке: её адрес от корня плюс `index.html`.
 fn page_file(path: &str) -> String {
     format!("{}index.html", path.trim_start_matches('/'))
@@ -339,6 +437,7 @@ pub fn write(staging: &Path, site: &Path, style: &Path, legal: &Path, app: &str,
         files.push((page_file(url(*lang)), page(*lang, &css_name, &js_name, app, calc, media, checked)));
     }
     let mut editions = 0;
+    let mut guides = 0;
     for doc in Legal::ALL {
         // Действующая редакция и прежние (задача 93; условия, п. 11) —
         // каждая на трёх языках, и переводы одной редакции держатся друг
@@ -374,6 +473,12 @@ pub fn write(staging: &Path, site: &Path, style: &Path, legal: &Path, app: &str,
         files.push((page_file(buy_path(lang)), buy_page(lang, &css_name, &js_name, app, checked)));
         files.push((page_file(feedback_path(lang)), feedback_page(lang, &css_name, &js_name, app, checked)));
         files.push((page_file(tax_path(lang)), tax_page(lang, &css_name, &js_name, app, checked)));
+        for guide in Guide::ALL {
+            if let Some(html) = guide_page(lang, guide, &css_name, &js_name, app, checked) {
+                files.push((page_file(&guide_path(lang, guide)), html));
+                guides += 1;
+            }
+        }
     }
     files.push(("robots.txt".to_owned(), robots()));
     files.push(("sitemap.xml".to_owned(), sitemap(checked)));
@@ -393,7 +498,7 @@ pub fn write(staging: &Path, site: &Path, style: &Path, legal: &Path, app: &str,
         fs::write(&target, bytes).map_err(|error| format!("{}: {error}", target.display()))?;
     }
     Ok(format!(
-        "лендинг: страниц {}, «Купить» {}, отзывов {}, о налоге {}, юридических текстов {}, снимков и роликов {}",
+        "лендинг: страниц {}, «Купить» {}, отзывов {}, о налоге {}, руководств {guides}, юридических текстов {}, снимков и роликов {}",
         Lang::ALL.len(),
         Lang::ALL.len(),
         Lang::ALL.len(),
@@ -568,8 +673,6 @@ fn app_link(app: &str, lang: Lang) -> String {
 fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, media: &Media, checked: Option<Date>) -> String {
     let text = |key: Key| escape(t(lang, key));
     let trial = trial(lang);
-    let calendar = format!("{SITE}/{}", calendar::path(lang));
-    let webcal = calendar.replacen("https://", "webcal://", 1);
     let own = url(lang);
     let mut features = String::new();
     for (title, about) in FEATURES {
@@ -608,10 +711,7 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, media: &Media, 
       <section class="card" aria-labelledby="calendar" data-tilt>
         <h2 id="calendar">{calendar_title}</h2>
         <p>{calendar_text}</p>
-        <p class="actions"><a class="button secondary" href="{webcal}"><span class="label">{subscribe}</span></a></p>
-        <p class="hint">{subscribe_hint}</p>
-        <p class="address">{calendar}</p>
-      </section>
+{subscription}      </section>
       <section class="card" aria-labelledby="fit" data-tilt>
         <h2 id="fit">{fit_title}</h2>
         <p>{fit_text}</p>
@@ -635,8 +735,7 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, media: &Media, 
         features_title = text(Key::LandingFeaturesTitle),
         calendar_title = text(Key::LandingCalendarTitle),
         calendar_text = text(Key::LandingCalendarText),
-        subscribe = text(Key::CalendarSubscribe),
-        subscribe_hint = text(Key::CalendarSubscribeHint),
+        subscription = subscription(lang),
         fit_title = text(Key::LandingFitTitle),
         fit_text = text(Key::LandingFitText),
         tax_title = text(Key::TaxPageLink),
@@ -801,13 +900,39 @@ fn icon(app: &str) -> String {
 /// Нет дня сверки — нет и `dateModified`: страница не называет дня, которого
 /// у правил нет. Блок данных, а не скрипт (`data_block`, шапка файла).
 fn described_tax(lang: Lang, app: &str, checked: Option<Date>) -> String {
-    let page = format!("{SITE}{}", tax_path(lang));
+    described_page(
+        lang,
+        app,
+        checked,
+        tax_path(lang),
+        t(lang, Key::TaxPageTitle),
+        t(lang, Key::TaxPageDescription),
+        t(lang, Key::TaxPageLink),
+    )
+}
+
+/// Описание страницы сайта `path` для поисковиков — JSON-LD у страницы о
+/// налоге (`described_tax`) и руководств (задача 128): `WebPage` с
+/// заголовком `name`, описанием `description`, языком, днём последней
+/// сверки правил и издателем-продавцом, и хлебные крошки «страница языка →
+/// `crumb`». Строки — ещё не экранированные: экранирует `data_block`.
+#[allow(clippy::too_many_arguments)]
+fn described_page(
+    lang: Lang,
+    app: &str,
+    checked: Option<Date>,
+    path: &str,
+    name: &str,
+    description: &str,
+    crumb: &str,
+) -> String {
+    let page = format!("{SITE}{path}");
     let mut web_page = serde_json::json!({
         "@type": "WebPage",
         "@id": format!("{page}#page"),
         "url": page,
-        "name": t(lang, Key::TaxPageTitle),
-        "description": t(lang, Key::TaxPageDescription),
+        "name": name,
+        "description": description,
         "inLanguage": lang.code(),
         "publisher": { "@id": seller_id() },
         "breadcrumb": { "@id": format!("{page}#breadcrumb") },
@@ -815,6 +940,7 @@ fn described_tax(lang: Lang, app: &str, checked: Option<Date>) -> String {
     if let Some(day) = checked {
         web_page["dateModified"] = serde_json::Value::from(iso(day));
     }
+    let crumb_name = crumb;
     let crumb = |position: u8, name: &str, path: &str| {
         serde_json::json!({
             "@type": "ListItem",
@@ -832,7 +958,7 @@ fn described_tax(lang: Lang, app: &str, checked: Option<Date>) -> String {
                 "@id": format!("{page}#breadcrumb"),
                 "itemListElement": [
                     crumb(1, t(lang, Key::AppName), url(lang)),
-                    crumb(2, t(lang, Key::TaxPageLink), tax_path(lang)),
+                    crumb(2, crumb_name, path),
                 ],
             },
             seller(lang, app),
@@ -1251,15 +1377,7 @@ fn tax_answer(lang: Lang, all: &rules::Rules, day: Date) -> String {
     // с января. День — по закону, без переноса с нерабочего: абзац цитируют
     // без списка ниже, где у перенесённого стоит «заплатить надёжнее до
     // него» (`deadlines::moved`), а перенос уплаты ՊԵԿ не подтверждал.
-    let due = rules::on(all.turnover_due(), day).map(|rule| {
-        let mut months: Vec<u8> = (1..=4)
-            .filter_map(|number| Quarter::new(day.year(), number)?.next())
-            .map(|next| next.first_day().month())
-            .collect();
-        months.sort_unstable();
-        let days: Vec<String> = months.into_iter().map(|month| i18n::deadline_day(lang, month, rule.day)).collect();
-        and_list(lang, &days.iter().map(String::as_str).collect::<Vec<_>>())
-    });
+    let due = turnover_days(lang, all, day);
     // Коды, закрывающие налог с оборота (НК 254(3)(3.1)), — последней по дню
     // начала записью, действующей в день `day`: «в том числе с … — коды …».
     let excluded = all
@@ -1395,8 +1513,9 @@ fn tax_deadlines(lang: Lang, day: Date) -> String {
         "        <p>{}</p>\n        <ul class=\"deadlines\">\n",
         escape(&fill(t(lang, Key::TaxPageDeadlinesAbout), &[&i18n::date(lang, day), &i18n::date(lang, until)]))
     );
-    let mut shifts: Vec<&rules::Source> = Vec::new();
-    for deadline in deadlines::general(day, until) {
+    let terms = deadlines::general(day, until);
+    let health = guide_name(lang, Guide::Health, Some(day)).is_some();
+    for deadline in &terms {
         let moved = deadlines::moved(lang, deadline.kind, deadline.by_law)
             .map(|words| format!("<br />\n          <span class=\"note\">{}</span>", escape(&words)))
             .unwrap_or_default();
@@ -1404,24 +1523,20 @@ fn tax_deadlines(lang: Lang, day: Date) -> String {
             .into_iter()
             .map(|source| format!("<br />\n{}", tax_source(lang, source).trim_end()))
             .collect();
-        for shift in deadlines::moved_sources(deadline.by_law) {
-            if !shifts.iter().any(|known| std::ptr::eq(*known, shift)) {
-                shifts.push(shift);
-            }
-        }
         out.push_str(&format!(
             "          <li><strong>{}</strong>\u{a0}— {}{moved}{source}</li>\n",
             escape(&i18n::date(lang, deadline.day)),
-            escape(&deadlines::what(lang, deadline.kind))
+            deadline_what(lang, deadline.kind, health)
         ));
     }
     out.push_str("        </ul>\n");
-    if !shifts.is_empty() {
-        let sources: Vec<String> = shifts.iter().map(|source| tax_source(lang, source)).collect();
+    out.push_str(&shift_note(lang, &terms));
+    // Все сроки года по месяцам — руководство сроков (задача 128).
+    if let Some(year) = guide_year(day) {
         out.push_str(&format!(
-            "        <p>{}<br />\n{}        </p>\n",
-            escape(t(lang, Key::TaxPageShift)),
-            sources.join("          <br />\n")
+            "        <p class=\"actions\"><a class=\"button secondary\" href=\"{}\"><span class=\"label\">{}</span></a></p>\n",
+            guide_path(lang, Guide::Deadlines),
+            escape(&fill(t(lang, Key::GuideDeadlinesAll), &[&year.to_string()]))
         ));
     }
     out.push_str(&format!(
@@ -1490,6 +1605,538 @@ fn tax_currency(lang: Lang, all: &rules::Rules, day: Date) -> String {
         escape(&fill(t(lang, kind), &[&i18n::date(lang, rule.from)])),
         tax_source(lang, &rule.source)
     )
+}
+
+/// Четыре дня срока расчёта и уплаты налога с оборота в году дня `day` —
+/// «20 января, 20 апреля, 20 июля и 20 октября»: число — запись
+/// `turnover_due` дня `day`, месяцы — первые месяцы кварталов, с января.
+/// День — по закону, без переноса (`tax_answer`). Одни слова у ответа
+/// страницы о налоге и ответа руководства сроков (задача 128). `None` —
+/// записи нет.
+fn turnover_days(lang: Lang, all: &rules::Rules, day: Date) -> Option<String> {
+    rules::on(all.turnover_due(), day).map(|rule| {
+        let mut months: Vec<u8> = (1..=4)
+            .filter_map(|number| Quarter::new(day.year(), number)?.next())
+            .map(|next| next.first_day().month())
+            .collect();
+        months.sort_unstable();
+        let days: Vec<String> = months.into_iter().map(|month| i18n::deadline_day(lang, month, rule.day)).collect();
+        and_list(lang, &days.iter().map(String::as_str).collect::<Vec<_>>())
+    })
+}
+
+/// Что сделать к сроку `kind` — разметкой списка и таблицы сроков: слова
+/// экрана сроков (`deadlines::what`), экранированные, а у взноса
+/// медстраховки — ссылкой на её руководство (задача 128), когда оно есть
+/// (`health`): так сроки медстраховки ведут к тому, кто её платит и сколько.
+fn deadline_what(lang: Lang, kind: Kind, health: bool) -> String {
+    let what = escape(&deadlines::what(lang, kind));
+    match kind {
+        Kind::HealthYear(_) | Kind::HealthMonth { .. } if health => {
+            format!("<a href=\"{}\">{what}</a>", guide_path(lang, Guide::Health))
+        }
+        Kind::Turnover(_)
+        | Kind::Application(_)
+        | Kind::MicroApplication(_)
+        | Kind::MicroReport(_)
+        | Kind::Annual(_)
+        | Kind::MicroAnnual(_)
+        | Kind::HealthYear(_)
+        | Kind::HealthMonth { .. }
+        | Kind::Declaration(_) => what,
+    }
+}
+
+/// Кого касается срок `kind` — столбец «Кто» руководства сроков (задача 128),
+/// экранированный: общий календарь — сроки всех ИП на налоге с оборота
+/// (`deadlines::general`), а кого из них касается срок, говорят эти слова;
+/// точно — программа по профилю. Числа в словах — из записей правил года
+/// срока: с какого дня рождения соцплатёж обязателен (`funded_pension`),
+/// с какого возраста взнос медстраховки платит государство
+/// (`health_insurance`), через сколько дней после учёта заявление нового
+/// ИП (`turnover_application`). Записи нет — нет и слов с её числом.
+fn deadline_who(lang: Lang, all: &rules::Rules, kind: Kind) -> String {
+    let text = |key: Key| escape(t(lang, key));
+    match kind {
+        Kind::Turnover(_) => text(Key::GuideWhoTurnover),
+        Kind::Application(year) => {
+            let mut out = escape(&fill(t(lang, Key::GuideWhoApplication), &[&year.to_string()]));
+            let rule = Date::new(year, 1, 1).and_then(|start| rules::on(all.turnover_application(), start));
+            if let Some(rule) = rule {
+                let days = u64::from(rule.after_days);
+                let count = fill(
+                    plural(lang, days, Key::DaysOne, Key::DaysFew, Key::DaysMany),
+                    &[&i18n::integer(lang, i64::from(rule.after_days))],
+                );
+                out.push_str(&format!(
+                    "<br />\n                <span class=\"note\">{}</span>",
+                    escape(&fill(t(lang, Key::CalendarApplicationNew), &[&count]))
+                ));
+            }
+            out
+        }
+        Kind::Annual(year) => match rules::for_year(all.funded_pension(), year) {
+            Some(pension) => {
+                escape(&fill(t(lang, Key::GuideWhoAnnual), &[&pension.mandatory_born_from.year().to_string()]))
+            }
+            None => String::new(),
+        },
+        Kind::HealthYear(year) | Kind::HealthMonth { year, .. } => {
+            match rules::for_year(all.health_insurance(), year) {
+                Some(rule) => escape(&fill(t(lang, Key::GuideWhoHealth), &[&rule.state_pays_from_age.to_string()])),
+                None => String::new(),
+            }
+        }
+        Kind::Declaration(_) => text(Key::GuideWhoDeclaration),
+        // Сроков микропредпринимательства в общем календаре нет
+        // (`deadlines::general`): этих слов страница не пишет.
+        Kind::MicroApplication(_) | Kind::MicroReport(_) | Kind::MicroAnnual(_) => String::new(),
+    }
+}
+
+/// Первая буква — заглавной: имя месяца заголовком группы таблицы сроков —
+/// «Январь», «Հունվար», — а CLDR пишет его со строчной, как в середине фразы
+/// (`i18n::month_heading`).
+fn capitalized(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or_default()
+}
+
+/// Источники срока `kind` — у каждой его записи правил ссылки на тексты
+/// и день сверки (`deadlines::sources`), строками одна под другой.
+fn deadline_sources(lang: Lang, kind: Kind) -> String {
+    deadlines::sources(kind)
+        .into_iter()
+        .map(|source| {
+            format!(
+                "{}; {}",
+                source_links(source),
+                escape(&fill(t(lang, Key::TaxPageChecked), &[&i18n::date(lang, source.checked)]))
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("<br />\n                ")
+}
+
+/// Строка о переносе с нерабочего дня под списком сроков `terms` — с
+/// источниками каждого их переноса по разу (`deadlines::moved_sources`): у
+/// дюжины строк одна и та же статья читалась бы шумом. Переноса нет — нет
+/// и строки. Одна у страницы о налоге и руководств (задача 128).
+fn shift_note(lang: Lang, terms: &[deadlines::Deadline]) -> String {
+    let mut shifts: Vec<&rules::Source> = Vec::new();
+    for deadline in terms {
+        for shift in deadlines::moved_sources(deadline.by_law) {
+            if !shifts.iter().any(|known| std::ptr::eq(*known, shift)) {
+                shifts.push(shift);
+            }
+        }
+    }
+    if shifts.is_empty() {
+        return String::new();
+    }
+    let sources: Vec<String> = shifts.iter().map(|source| tax_source(lang, source)).collect();
+    format!(
+        "        <p>{}<br />\n{}        </p>\n",
+        escape(t(lang, Key::TaxPageShift)),
+        sources.join("          <br />\n")
+    )
+}
+
+/// Подписка на общий календарь сроков языка `lang` (задача 22): кнопка
+/// `webcal:`, подсказка и адрес `https:`, который выделяется целиком, — на
+/// Windows скрипт снимает кнопку (`site/landing.js`, задача 75), и
+/// подписываются адресом. Одна разметка у карточки лендинга и руководства
+/// сроков (задача 128).
+fn subscription(lang: Lang) -> String {
+    let calendar = format!("{SITE}/{}", calendar::path(lang));
+    let webcal = calendar.replacen("https://", "webcal://", 1);
+    format!(
+        "        <p class=\"actions\"><a class=\"button secondary\" href=\"{webcal}\"><span class=\"label\">{}</span></a></p>\n        <p class=\"hint\">{}</p>\n        <p class=\"address\">{calendar}</p>\n",
+        escape(t(lang, Key::CalendarSubscribe)),
+        escape(t(lang, Key::CalendarSubscribeHint)),
+    )
+}
+
+/// Руководство `guide` на языке `lang` (задача 128) — рядом со страницей
+/// языка, с её шапкой, оформлением и подвалом, устроенное, как страница
+/// о налоге (`article.tax`): заголовок с годом, ответ сверху, разделы
+/// (`guide_body`), «Открыть Kvartik» и пробный ключ. Всё — по правилам дня
+/// последней сверки `checked`. Нет дня или записи, о которой руководство,
+/// — нет и страницы (`guide_name`).
+fn guide_page(lang: Lang, guide: Guide, css: &str, js: &str, app: &str, checked: Option<Date>) -> Option<String> {
+    let name = guide_name(lang, guide, checked)?;
+    let day = checked?;
+    let own = guide_path(lang, guide);
+    let (title, description) = (escape(&name.title), escape(&name.description));
+    let meta = format!(
+        "    <meta name=\"description\" content=\"{description}\" />\n{}{}",
+        preview(lang, &title, &description, &own, app),
+        described_page(lang, app, checked, &own, &name.title, &name.description, &name.link),
+    );
+    let path = |other: Lang| guide_path(other, guide);
+    Some(format!(
+        r#"{head}  <body>
+{top}    <main>
+      <article class="legal tax guide">
+        <h1>{title}</h1>
+{body}        <p class="actions"><a class="button" href="{link}" data-handoff><span class="label">{open}</span></a></p>
+        <p class="hint">{trial} {after_trial}</p>
+      </article>
+    </main>
+{footer}  </body>
+</html>
+"#,
+        head = head(lang, &title, path, &meta, css, js, app),
+        top = top(lang, url(lang), path),
+        body = guide_body(lang, guide, day),
+        footer = footer(lang, app, checked),
+        link = app_link(app, lang),
+        open = escape(t(lang, Key::LandingOpen)),
+        trial = trial(lang),
+        after_trial = escape(t(lang, Key::WelcomeWithoutKey)),
+    ))
+}
+
+/// Разделы руководства `guide` по правилам дня сверки `day`.
+fn guide_body(lang: Lang, guide: Guide, day: Date) -> String {
+    let all = rules::armenia();
+    let Some(year) = guide_year(day) else {
+        return String::new();
+    };
+    match guide {
+        Guide::Deadlines => deadlines_guide(lang, all, year, day),
+        Guide::Health => health_guide(lang, all, year, day),
+    }
+}
+
+/// Руководство «Сроки ИП на год» (задача 128) для года `year`: ответ —
+/// сколько сроков в году и главные из них; таблица по месяцам — те же сроки,
+/// что в общем календаре (`deadlines::general` с 1 января по 31 декабря),
+/// у каждого — последний день с переносом, что сделать, кого касается и
+/// источники его записей (`deadlines::sources`); под ней — взнос
+/// медстраховки за декабрь, который платят уже в следующем году, перенос
+/// с источниками и подписка на общий календарь. Сроков года нет — нет
+/// и разделов.
+fn deadlines_guide(lang: Lang, all: &rules::Rules, year: u16, checked: Date) -> String {
+    let (Some(from), Some(until)) = (Date::new(year, 1, 1), Date::new(year, 12, 31)) else {
+        return String::new();
+    };
+    let terms = deadlines::general(from, until);
+    if terms.is_empty() {
+        return String::new();
+    }
+    let text = |key: Key| escape(t(lang, key));
+    let health = guide_name(lang, Guide::Health, Some(checked)).is_some();
+    let mut out = deadlines_answer(lang, all, year, terms.len());
+    out.push_str(&format!(
+        "        <p>{}</p>\n",
+        escape(&fill(t(lang, Key::TaxPageLead), &[&i18n::date(lang, checked)]))
+    ));
+    let (date, what, who, source) = (
+        text(Key::GuideColumnDate),
+        text(Key::GuideColumnWhat),
+        text(Key::GuideColumnWho),
+        text(Key::TaxPageSourceColumn),
+    );
+    out.push_str(&format!(
+        "        <p>{}</p>\n        <table class=\"rates terms\">\n          <thead>\n            <tr><th scope=\"col\">{date}</th><th scope=\"col\">{what}</th><th scope=\"col\">{who}</th><th scope=\"col\">{source}</th></tr>\n          </thead>\n",
+        escape(&fill(t(lang, Key::GuideDeadlinesAbout), &[&year.to_string()]))
+    ));
+    for month in 1..=12 {
+        let rows: Vec<&deadlines::Deadline> = terms.iter().filter(|deadline| deadline.day.month() == month).collect();
+        if rows.is_empty() {
+            continue;
+        }
+        out.push_str(&format!(
+            "          <tbody>\n            <tr class=\"month\"><th scope=\"rowgroup\" colspan=\"4\">{}</th></tr>\n",
+            escape(&capitalized(&i18n::month_heading(lang, year, month, year)))
+        ));
+        for deadline in rows {
+            let moved = deadlines::moved(lang, deadline.kind, deadline.by_law)
+                .map(|words| format!("<br />\n                <span class=\"note\">{}</span>", escape(&words)))
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "            <tr>\n              <th scope=\"row\">{}{moved}</th>\n              <td data-label=\"{what}\">{}</td>\n              <td data-label=\"{who}\">{}</td>\n              <td data-label=\"{source}\" class=\"source\">{}</td>\n            </tr>\n",
+                escape(&i18n::date(lang, deadline.day)),
+                deadline_what(lang, deadline.kind, health),
+                deadline_who(lang, all, deadline.kind),
+                deadline_sources(lang, deadline.kind),
+            ));
+        }
+        out.push_str("          </tbody>\n");
+    }
+    out.push_str("        </table>\n");
+    // Взнос за декабрь платят уже в январе следующего года: в таблице года
+    // его нет, а без этой строки декабрь выглядел бы месяцем без взноса.
+    let december = year.checked_add(1).and_then(|next| Some((Date::new(next, 1, 1)?, Date::new(next, 1, 31)?)));
+    if let Some((first, last)) = december
+        && let Some(due) = deadlines::general(first, last)
+            .into_iter()
+            .find(|deadline| deadline.kind == Kind::HealthMonth { year, month: 12 })
+    {
+        let moved = deadlines::moved(lang, due.kind, due.by_law)
+            .map(|words| format!("<br />\n          <span class=\"note\">{}</span>", escape(&words)))
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "        <p>{}{moved}</p>\n",
+            escape(&fill(t(lang, Key::GuideDeadlinesDecember), &[&year.to_string(), &i18n::date(lang, due.day)]))
+        ));
+    }
+    if let Some((_, due_day)) = monthly_health(all, year) {
+        out.push_str(&format!(
+            "        <p>{}</p>\n",
+            escape(&fill(t(lang, Key::GuideHealthReading), &[&i18n::month_day(lang, due_day), &i18n::month_day(lang, due_day)]))
+        ));
+    }
+    out.push_str(&shift_note(lang, &terms));
+    out.push_str(&subscription(lang));
+    out
+}
+
+/// Ответ сверху руководства сроков (задача 128): сколько сроков в году
+/// `year` (`count` — у `deadlines::general` этого года) и главные из них —
+/// четыре дня квартала (`turnover_days`), день заявления (`turnover_application`),
+/// день годовых платежей за прошлый год (`profit_tax`, как у
+/// `deadlines::general`) и число месяца взноса медстраховки с года, с
+/// которого его платят помесячно (`monthly_health`). Дни — по закону, без
+/// переноса: абзац цитируют без таблицы ниже, где у перенесённого
+/// «заплатить надёжнее до него». Чего-то нет в правилах года — нет и абзаца:
+/// половина ответа читалась бы целым.
+fn deadlines_answer(lang: Lang, all: &rules::Rules, year: u16, count: usize) -> String {
+    let Some(start) = Date::new(year, 1, 1) else {
+        return String::new();
+    };
+    let quarters = turnover_days(lang, all, start);
+    let application = rules::on(all.turnover_application(), start).map(|rule| rule.due);
+    let annual = year.checked_sub(1).and_then(|before| rules::for_year(all.profit_tax(), before));
+    let (Some(quarters), Some(application), Some(annual), Some((health, due_day))) =
+        (quarters, application, annual, monthly_health(all, year))
+    else {
+        return String::new();
+    };
+    let count = u64::try_from(count).unwrap_or(u64::MAX);
+    let terms = fill(
+        plural(lang, count, Key::GuideTermsOne, Key::GuideTermsFew, Key::GuideTermsMany),
+        &[&i18n::integer(lang, i64::try_from(count).unwrap_or(i64::MAX))],
+    );
+    format!(
+        "        <p class=\"answer\">{}</p>\n",
+        escape(&fill(
+            t(lang, Key::GuideDeadlinesAnswer),
+            &[
+                &year.to_string(),
+                &terms,
+                &quarters,
+                &year.to_string(),
+                &i18n::deadline_day(lang, application.month, application.day),
+                &(year - 1).to_string(),
+                &i18n::deadline_day(lang, annual.due.month, annual.due.day),
+                &health.starts.year().to_string(),
+                &i18n::month_day(lang, due_day),
+            ],
+        ))
+    )
+}
+
+/// Руководство «Медстраховка ИП» (задача 128) по помесячной записи
+/// `health_insurance` года `year` (`monthly_health`): ответ сверху — с
+/// какого дня, сколько в месяц и за год, до какого числа, за кого платит
+/// государство и первый взнос года — днём по прочтению программы и днём
+/// с безопасной стороны, оба без переноса; под ним — оглавление
+/// и разделы: кто платит, сколько и когда (взносы года по месяцам — те же
+/// сроки, что в общем календаре), чем этот год отличается от года годовой
+/// ставки (запись года до `starts`), приостановка деятельности и — пока
+/// поправки к закону не приняты окончательно — что закон могут изменить
+/// (`Key::GuideHealthBillText`). Каждый раздел — с источником записи.
+/// Записи нет — нет и разделов.
+fn health_guide(lang: Lang, all: &rules::Rules, year: u16, checked: Date) -> String {
+    let Some((rule, due_day)) = monthly_health(all, year) else {
+        return String::new();
+    };
+    let (Some(from), Some(until)) = (Date::new(year, 1, 1), year.checked_add(1).and_then(|next| Date::new(next, 12, 31)))
+    else {
+        return String::new();
+    };
+    let months: Vec<deadlines::Deadline> = deadlines::general(from, until)
+        .into_iter()
+        .filter(|deadline| matches!(deadline.kind, Kind::HealthMonth { year: of, .. } if of == year))
+        .collect();
+    let Some(first) = months.first() else {
+        return String::new();
+    };
+    let text = |key: Key| escape(t(lang, key));
+    let money = |drams: i64| i18n::money(lang, Money::new(drams, Currency::Amd));
+    let monthly = money(rule.monthly);
+    let yearly = money(rule.monthly.saturating_mul(12));
+    let age = rule.state_pays_from_age.to_string();
+    let source = tax_source(lang, &rule.source);
+    // Первый взнос года — в ответе двумя днями по закону, без переноса:
+    // закон не говорит, за какой месяц платёж (ст. 14, ч. 4), поэтому день
+    // по прочтению программы («за месяц — до числа следующего» — `by_law`
+    // срока ядра) и день с безопасной стороны — то же число месяца самого
+    // взноса. Перенесённый с нерабочего дня ответ сроком не называет:
+    // перенос уплаты ՊԵԿ не подтверждал, а ответ цитируют без слов под ним
+    // (решение человека 2026-11-26; вопрос 16 письма ՊԵԿ задачи 82).
+    let Kind::HealthMonth { month, .. } = first.kind else {
+        return String::new();
+    };
+    let Some(safe) = Date::new(year, month, due_day) else {
+        return String::new();
+    };
+    // Закон называет число каждого месяца после месяца, в котором ИП стал
+    // плательщиком, а не «за месяц — до числа следующего»: сроки страницы —
+    // прочтение программы, и это сказано сразу под ответом (сверка закона
+    // задачи 128, 2026-11-26).
+    let reading = escape(&fill(t(lang, Key::GuideHealthReading), &[&i18n::month_day(lang, due_day), &i18n::month_day(lang, due_day)]));
+    let mut out = format!(
+        "        <p class=\"answer\">{}</p>\n        <p class=\"note\">{reading}</p>\n",
+        escape(&fill(
+            t(lang, Key::GuideHealthAnswer),
+            &[
+                &i18n::date(lang, rule.starts),
+                &monthly,
+                &yearly,
+                &i18n::month_day(lang, due_day),
+                &age,
+                &year.to_string(),
+                &i18n::date(lang, first.by_law),
+                &i18n::date(lang, safe),
+            ],
+        ))
+    );
+    // Год до помесячного взноса — годовой ставкой одной суммой с порогом
+    // дохода прошлого года (`HealthBy::Year`): раздел «чем отличается» есть,
+    // только когда такая запись есть.
+    let before = rule.starts.year().checked_sub(1).and_then(|before| {
+        let earlier = rules::for_year(all.health_insurance(), before)?;
+        match earlier.by {
+            rules::HealthBy::Year { income_over, due } => Some((before, earlier, income_over, due)),
+            rules::HealthBy::Month { .. } => None,
+        }
+    });
+    let mut sections = vec![
+        (
+            "who",
+            text(Key::GuideHealthWho),
+            format!(
+                "        <p>{}</p>\n        <p>{}</p>\n        <p>{}</p>\n        <p>{}</p>\n        <p>{}</p>\n",
+                text(Key::GuideHealthPayer),
+                escape(&fill(t(lang, Key::GuideHealthState), &[&age, &age])),
+                text(Key::AnnualHealthEmployed),
+                text(Key::AnnualHealthStateless),
+                source.trim_start(),
+            ),
+        ),
+        (
+            "amount",
+            text(Key::GuideHealthAmount),
+            health_months(lang, &months, &monthly, &yearly, due_day, year, Some(checked), &source),
+        ),
+    ];
+    if let Some((before, earlier, income_over, due)) = before {
+        sections.push((
+            "before",
+            escape(&fill(t(lang, Key::GuideHealthBefore), &[&rule.starts.year().to_string(), &before.to_string()])),
+            format!(
+                "        <p>{}<br />\n{}        </p>\n        <p>{}</p>\n        <p>{}</p>\n",
+                escape(&fill(
+                    t(lang, Key::GuideHealthBeforeText),
+                    &[
+                        &before.to_string(),
+                        &(before - 1).to_string(),
+                        &money(income_over),
+                        &money(earlier.monthly.saturating_mul(12)),
+                        &i18n::date(lang, due),
+                        &rule.starts.year().to_string(),
+                    ],
+                )),
+                tax_source(lang, &earlier.source),
+                escape(&fill(
+                    t(lang, Key::GuideHealthAfterYear),
+                    &[&before.to_string(), &rule.starts.year().to_string()]
+                )),
+                escape(&fill(
+                    t(lang, Key::GuideHealthNewIe),
+                    &[&before.to_string(), &(before - 1).to_string(), &before.to_string()]
+                )),
+            ),
+        ));
+    }
+    sections.push((
+        "stopped",
+        text(Key::GuideHealthStopped),
+        format!(
+            "        <p>{}<br />\n{source}        </p>\n",
+            escape(&fill(
+                t(lang, Key::GuideHealthStoppedText),
+                &[
+                    &i18n::date(lang, rule.starts),
+                    &i18n::date(lang, rule.starts),
+                    &rule.starts.year().saturating_sub(1).to_string(),
+                ],
+            ))
+        ),
+    ));
+    sections.push(("bill", text(Key::GuideHealthBill), format!("        <p>{}</p>\n", text(Key::GuideHealthBillText))));
+    out.push_str(&format!(
+        "        <nav class=\"contents\" aria-label=\"{}\">\n          <ul>\n",
+        text(Key::TaxPageContents)
+    ));
+    for (id, heading, _) in &sections {
+        out.push_str(&format!("            <li><a href=\"#{id}\">{heading}</a></li>\n"));
+    }
+    out.push_str("          </ul>\n        </nav>\n");
+    out.push_str(&format!(
+        "        <p>{}</p>\n",
+        escape(&fill(t(lang, Key::TaxPageLead), &[&i18n::date(lang, checked)]))
+    ));
+    for (id, heading, html) in sections {
+        out.push_str(&format!("        <h2 id=\"{id}\">{heading}</h2>\n{html}"));
+    }
+    out
+}
+
+/// «Сколько и когда» руководства медстраховки: ставка за месяц и за год,
+/// число месяца — и взносы года `year` по месяцам (`months` — те же сроки,
+/// что в общем календаре, с переносом словами экрана сроков), строка о
+/// переносе с источниками, источник записи и ссылка на все сроки года
+/// (руководство сроков, когда оно есть на день сверки `checked`).
+#[allow(clippy::too_many_arguments)]
+fn health_months(
+    lang: Lang,
+    months: &[deadlines::Deadline],
+    monthly: &str,
+    yearly: &str,
+    due_day: u8,
+    year: u16,
+    checked: Option<Date>,
+    source: &str,
+) -> String {
+    let mut out = format!(
+        "        <p>{}</p>\n        <ul class=\"deadlines\">\n",
+        escape(&fill(t(lang, Key::GuideHealthAmountText), &[monthly, yearly, &i18n::month_day(lang, due_day), &year.to_string()]))
+    );
+    for deadline in months {
+        let moved = deadlines::moved(lang, deadline.kind, deadline.by_law)
+            .map(|words| format!("<br />\n          <span class=\"note\">{}</span>", escape(&words)))
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "          <li><strong>{}</strong>\u{a0}— {}{moved}</li>\n",
+            escape(&i18n::date(lang, deadline.day)),
+            deadline_what(lang, deadline.kind, false)
+        ));
+    }
+    out.push_str("        </ul>\n");
+    out.push_str(&format!("        <p>{}</p>\n", source.trim()));
+    out.push_str(&shift_note(lang, months));
+    if let Some(name) = guide_name(lang, Guide::Deadlines, checked) {
+        out.push_str(&format!(
+            "        <p class=\"actions\"><a class=\"button secondary\" href=\"{}\"><span class=\"label\">{}</span></a></p>\n",
+            guide_path(lang, Guide::Deadlines),
+            escape(&name.link)
+        ));
+    }
+    out
 }
 
 /// «Вопросы» страницы «Купить» (задача 93): сколько устройств, как перенести
@@ -1642,6 +2289,14 @@ fn top<P: std::fmt::Display>(lang: Lang, home: &str, path: impl Fn(Lang) -> P) -
 /// и предложения» (задача 114).
 fn footer(lang: Lang, app: &str, checked: Option<Date>) -> String {
     let text = |key: Key| escape(t(lang, key));
+    // Руководства (задача 128) — сразу за страницей о налоге: о том же.
+    let guides: String = Guide::ALL
+        .into_iter()
+        .filter_map(|guide| {
+            let name = guide_name(lang, guide, checked)?;
+            Some(format!(" <a href=\"{}\">{}</a>", guide_path(lang, guide), escape(&name.link)))
+        })
+        .collect();
     let rules = checked
         .map(|day| {
             let line = fill(t(lang, Key::LandingRulesChecked), &[&i18n::date(lang, day)]);
@@ -1651,7 +2306,7 @@ fn footer(lang: Lang, app: &str, checked: Option<Date>) -> String {
     format!(
         r#"    <footer>
       <p>{disclaimer}</p>
-{rules}      <p class="links"><a href="{tax}">{tax_label}</a> <a href="{buy}">{buy_label}</a> <a href="{terms}">{terms_label}</a> <a href="{privacy}">{privacy_label}</a> <a href="{app}{LICENSES}">{licenses}</a></p>
+{rules}      <p class="links"><a href="{tax}">{tax_label}</a>{guides} <a href="{buy}">{buy_label}</a> <a href="{terms}">{terms_label}</a> <a href="{privacy}">{privacy_label}</a> <a href="{app}{LICENSES}">{licenses}</a></p>
       <p class="links"><span>{contact}</span> <a href="mailto:{EMAIL}">{EMAIL}</a> <a href="{TELEGRAM}">{telegram}</a> <a href="{feedback}">{feedback_label}</a></p>
     </footer>
 "#,
@@ -1695,14 +2350,17 @@ fn sitemap(checked: Option<Date>) -> String {
     let terms = |lang: Lang| Legal::Terms.path(lang);
     let privacy = |lang: Lang| Legal::Privacy.path(lang);
     let ruled = checked.map(|day| format!("    <lastmod>{}</lastmod>\n", iso(day))).unwrap_or_default();
-    let pages: [(&dyn Fn(Lang) -> &'static str, &str); 6] = [
-        (&url, ""),
-        (&tax_path, &ruled),
-        (&buy_path, ""),
-        (&feedback_path, ""),
-        (&terms, ""),
-        (&privacy, ""),
-    ];
+    type Path = Box<dyn Fn(Lang) -> String>;
+    let fixed = |path: fn(Lang) -> &'static str| -> Path { Box::new(move |lang: Lang| path(lang).to_owned()) };
+    let mut pages: Vec<(Path, &str)> = vec![(fixed(url), ""), (fixed(tax_path), &ruled)];
+    // Руководства (задача 128) — с тем же днём сверки: их числа тоже из
+    // правил. Нет страницы — нет и строки карты (`guide_name`).
+    for guide in Guide::ALL {
+        if guide_name(Lang::Am, guide, checked).is_some() {
+            pages.push((Box::new(move |lang: Lang| guide_path(lang, guide)), &ruled));
+        }
+    }
+    pages.extend([(fixed(buy_path), ""), (fixed(feedback_path), ""), (fixed(terms), ""), (fixed(privacy), "")]);
     for (path, lastmod) in pages {
         for lang in Lang::ALL {
             out.push_str(&format!("  <url>\n    <loc>{SITE}{}</loc>\n{lastmod}", path(lang)));
@@ -1806,7 +2464,8 @@ mod tests {
     }
 
     /// Все страницы сайта: три страницы языков, три «Купить», три страницы
-    /// отзывов, шесть юридических и прежние редакции.
+    /// отзывов, три о налоге, по три каждого руководства (задача 128), шесть
+    /// юридических и прежние редакции.
     fn every_page() -> Vec<(String, String)> {
         let mut out = Vec::new();
         for lang in Lang::ALL {
@@ -1814,6 +2473,9 @@ mod tests {
             out.push((format!("{lang:?} {}", buy_path(lang)), buy_sample(lang)));
             out.push((format!("{lang:?} {}", feedback_path(lang)), feedback_sample(lang)));
             out.push((format!("{lang:?} {}", tax_path(lang)), tax_sample(lang)));
+            for guide in Guide::ALL {
+                out.push((format!("{lang:?} {}", guide_path(lang, guide)), guide_sample(lang, guide)));
+            }
             for doc in Legal::ALL {
                 out.push((format!("{lang:?} {}", doc.path(lang)), legal_sample(doc, lang, None)));
                 for &day in doc.earlier() {
@@ -2195,7 +2857,10 @@ mod tests {
 
     /// Подвал каждой страницы ведёт на страницу «Купить» и оба юридических
     /// текста своего языка, на тексты лицензий и к продавцу — почтой,
-    /// в Telegram и страницей отзывов (задача 114).
+    /// в Telegram и страницей отзывов (задача 114), на страницу о налоге и оба
+    /// руководства (задача 128) — с годом правил версии 2026.12, написанным
+    /// рукой: сверка 25.11.2026 — сроки 2027 года, медстраховка помесячно
+    /// с 2027 года.
     #[test]
     fn every_footer_leads_to_the_terms_and_the_seller() {
         let mut wrong = Vec::new();
@@ -2214,6 +2879,16 @@ mod tests {
                 format!("<a href=\"{TELEGRAM}\">{}</a>", escape(t(lang, Key::ContactTelegram))),
                 format!("<a href=\"{}\">{}</a>", feedback_path(lang), escape(t(lang, Key::FeedbackTitle))),
                 format!("<a href=\"{}\">{}</a>", tax_path(lang), escape(t(lang, Key::TaxPageLink))),
+                format!(
+                    "<a href=\"{}\">{}</a>",
+                    guide_path(lang, Guide::Deadlines),
+                    escape(&fill(t(lang, Key::GuideDeadlinesLink), &["2027"]))
+                ),
+                format!(
+                    "<a href=\"{}\">{}</a>",
+                    guide_path(lang, Guide::Health),
+                    escape(&fill(t(lang, Key::GuideHealthLink), &["2027"]))
+                ),
                 escape(t(lang, Key::LandingDisclaimer)),
             ] {
                 if !footer.contains(&piece) {
@@ -2375,8 +3050,13 @@ mod tests {
                 let head = format!(
                     "<li><strong>{}</strong>\u{a0}— {}",
                     escape(&i18n::date(lang, deadline.day)),
-                    escape(&deadlines::what(lang, deadline.kind))
+                    deadline_what(lang, deadline.kind, true)
                 );
+                // У взноса медстраховки — ссылка на её руководство (задача 128).
+                let health = matches!(deadline.kind, deadlines::Kind::HealthMonth { .. } | deadlines::Kind::HealthYear(_));
+                if health != head.contains(&format!("<a href=\"{}\">", guide_path(lang, Guide::Health))) {
+                    wrong.push(format!("{lang:?}: у срока {head} ссылка на руководство медстраховки не та"));
+                }
                 let Some(item) = piece(&html, &head, "</li>") else {
                     wrong.push(format!("{lang:?}: нет срока {head}"));
                     continue;
@@ -2400,6 +3080,12 @@ mod tests {
                 wrong.push(format!("{lang:?}: ни один срок не перенесён — проверка переноса ничего не проверила"));
             }
             need.push(format!("<p>{}<br />", text(Key::TaxPageShift)));
+            // Под списком — все сроки года по месяцам (задача 128).
+            need.push(format!(
+                "<a class=\"button secondary\" href=\"{}\"><span class=\"label\">{}</span></a>",
+                guide_path(lang, Guide::Deadlines),
+                escape(&fill(t(lang, Key::GuideDeadlinesAll), &["2027"]))
+            ));
             for source in shifts {
                 need.push(law_link(&source.url, &source.law, &source.article));
                 for also in &source.also {
@@ -2615,6 +3301,496 @@ mod tests {
         let data: serde_json::Value = serde_json::from_str(&json_ld(&bare).expect("блок")).expect("JSON");
         if !data["@graph"][0]["dateModified"].is_null() {
             wrong.push("без сверки — день изменения".to_owned());
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// Руководство `guide` на языке `lang` (задача 128), как его пишет сборка.
+    fn guide_sample(lang: Lang, guide: Guide) -> String {
+        guide_page(lang, guide, "kvartik-site-a.css", "kvartik-site-b.js", "/app/", checked()).expect("руководство есть")
+    }
+
+    /// Год страницы сроков — по дню сверки: ноябрь и декабрь — следующий,
+    /// остальные месяцы — тот же; часов здесь нет.
+    #[test]
+    fn the_guide_year_follows_the_check_day() {
+        let year = |y, m, d| guide_year(Date::new(y, m, d).expect("день"));
+        assert_eq!(year(2026, 11, 25), Some(2027));
+        assert_eq!(year(2026, 11, 1), Some(2027));
+        assert_eq!(year(2026, 12, 31), Some(2027));
+        assert_eq!(year(2026, 10, 31), Some(2026));
+        assert_eq!(year(2027, 1, 1), Some(2027));
+        assert_eq!(guide_year(checked().expect("правила сверены")), Some(2027), "правила 2026.12 — сроки 2027 года");
+    }
+
+    /// Руководство сроков (задача 128) — на своём языке, по адресу без года,
+    /// и всё на нём — из ядра: ответ — число сроков года и главные из них
+    /// днями правил; таблица — те же сроки, что у общего календаря за год
+    /// (`deadlines::general`), по месяцам, у каждого — день с переносом, что
+    /// сделать (у медстраховки — ссылкой на её руководство), кто и ссылки на
+    /// источники его записей; под таблицей — взнос за декабрь, который платят
+    /// в следующем году, перенос с источниками и подписка на календарь.
+    /// Превью — его заголовок и адрес.
+    #[test]
+    fn the_deadlines_guide_takes_every_number_from_the_core() {
+        let all = rules::armenia();
+        let day = checked().expect("правила сверены");
+        let year = guide_year(day).expect("год");
+        let mut wrong = Vec::new();
+        for lang in Lang::ALL {
+            let html = guide_sample(lang, Guide::Deadlines);
+            let text = |key: Key| escape(t(lang, key));
+            let path = guide_path(lang, Guide::Deadlines);
+            let title = escape(&fill(t(lang, Key::GuideDeadlinesTitle), &[&year.to_string()]));
+            let terms = deadlines::general(Date::new(year, 1, 1).expect("день"), Date::new(year, 12, 31).expect("день"));
+            if terms.len() < 12 {
+                wrong.push(format!("{lang:?}: сроков года {} — меньше месяцев", terms.len()));
+            }
+            let mut need = vec![
+                format!("<html lang=\"{}\">", lang.code()),
+                format!("<title>{title}</title>"),
+                format!("<link rel=\"canonical\" href=\"https://kvartik.com{path}\" />"),
+                "<link rel=\"alternate\" hreflang=\"x-default\" href=\"https://kvartik.com/deadlines/\" />".to_owned(),
+                format!("<meta property=\"og:url\" content=\"https://kvartik.com{path}\" />"),
+                format!("<meta property=\"og:title\" content=\"{title}\" />"),
+                format!("<h1>{title}</h1>\n        <p class=\"answer\">"),
+                format!("href=\"webcal://kvartik.com/calendar/{}.ics\"", lang.code()),
+                format!("<p class=\"address\">https://kvartik.com/calendar/{}.ics</p>", lang.code()),
+                escape(&fill(t(lang, Key::TaxPageLead), &[&i18n::date(lang, day)])),
+                format!("<p>{}<br />", text(Key::TaxPageShift)),
+            ];
+            for other in Lang::ALL {
+                need.push(format!(
+                    "<link rel=\"alternate\" hreflang=\"{}\" href=\"https://kvartik.com{}\" />",
+                    other.code(),
+                    guide_path(other, Guide::Deadlines)
+                ));
+            }
+            // Ответ — из тех же записей, что сроки.
+            let count = u64::try_from(terms.len()).expect("число");
+            let count = fill(
+                plural(lang, count, Key::GuideTermsOne, Key::GuideTermsFew, Key::GuideTermsMany),
+                &[&i18n::integer(lang, i64::try_from(terms.len()).expect("число"))],
+            );
+            let start = Date::new(year, 1, 1).expect("день");
+            let application = rules::on(all.turnover_application(), start).expect("заявление").due;
+            let annual = rules::for_year(all.profit_tax(), year - 1).expect("налог на прибыль").due;
+            let (health, due_day) = monthly_health(all, year).expect("медстраховка помесячно");
+            need.push(escape(&fill(
+                t(lang, Key::GuideDeadlinesAnswer),
+                &[
+                    &year.to_string(),
+                    &count,
+                    &turnover_days(lang, all, start).expect("срок квартала"),
+                    &year.to_string(),
+                    &i18n::deadline_day(lang, application.month, application.day),
+                    &(year - 1).to_string(),
+                    &i18n::deadline_day(lang, annual.month, annual.day),
+                    &health.starts.year().to_string(),
+                    &i18n::month_day(lang, due_day),
+                ],
+            )));
+            // Строка таблицы — у каждого срока, по порядку дней, а месяцы —
+            // заголовками групп.
+            let mut after = 0;
+            let mut months = Vec::new();
+            for deadline in &terms {
+                if !months.contains(&deadline.day.month()) {
+                    months.push(deadline.day.month());
+                }
+                let head = format!("<th scope=\"row\">{}", escape(&i18n::date(lang, deadline.day)));
+                let what = format!("<td data-label=\"{}\">{}</td>", text(Key::GuideColumnWhat), deadline_what(lang, deadline.kind, true));
+                let Some(at) = html[after..].find(&what) else {
+                    wrong.push(format!("{lang:?}: нет строки {what} после прежней"));
+                    continue;
+                };
+                let start = html[..after + at].rfind("<tr>").unwrap_or(0);
+                let row = piece(&html[start..], "<tr>", "</tr>").unwrap_or_default();
+                after += at + what.len();
+                // У взноса медстраховки «что» — ссылкой на её руководство, у
+                // остальных — без ссылки.
+                let health = matches!(deadline.kind, deadlines::Kind::HealthMonth { .. } | deadlines::Kind::HealthYear(_));
+                if health != row.contains(&format!("<a href=\"{}\">", guide_path(lang, Guide::Health))) {
+                    wrong.push(format!("{lang:?}: у срока {:?} ссылка на руководство медстраховки не та", deadline.kind));
+                }
+                let mut cells = vec![head, format!("<td data-label=\"{}\">{}</td>", text(Key::GuideColumnWho), deadline_who(lang, all, deadline.kind))];
+                if let Some(moved) = deadlines::moved(lang, deadline.kind, deadline.by_law) {
+                    cells.push(escape(&moved));
+                }
+                let sources = deadlines::sources(deadline.kind);
+                if sources.is_empty() {
+                    wrong.push(format!("{lang:?}: у срока {:?} нет записи правил", deadline.kind));
+                }
+                // Источник — ссылки на акты записи и через «; » день сверки.
+                for source in sources {
+                    let links = std::iter::once(law_link(&source.url, &source.law, &source.article))
+                        .chain(source.also.iter().map(|also| law_link(&also.url, &also.law, &also.article)))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    cells.push(format!(
+                        "{links}; {}",
+                        escape(&fill(t(lang, Key::TaxPageChecked), &[&i18n::date(lang, source.checked)]))
+                    ));
+                }
+                for cell in cells {
+                    if !row.contains(&cell) {
+                        wrong.push(format!("{lang:?}: в строке {what} нет {cell}"));
+                    }
+                }
+                if deadline_who(lang, all, deadline.kind).is_empty() {
+                    wrong.push(format!("{lang:?}: у срока {:?} не сказано, кого касается", deadline.kind));
+                }
+            }
+            if html.matches("<tr class=\"month\">").count() != months.len() {
+                wrong.push(format!("{lang:?}: месяцев-заголовков не {}", months.len()));
+            }
+            for month in months {
+                need.push(format!(
+                    "<tr class=\"month\"><th scope=\"rowgroup\" colspan=\"4\">{}</th></tr>",
+                    escape(&capitalized(&i18n::month_heading(lang, year, month, year)))
+                ));
+            }
+            // Взнос за декабрь — в январе следующего года, из тех же правил.
+            let december = deadlines::general(Date::new(year + 1, 1, 1).expect("день"), Date::new(year + 1, 1, 31).expect("день"))
+                .into_iter()
+                .find(|deadline| deadline.kind == deadlines::Kind::HealthMonth { year, month: 12 })
+                .expect("взнос за декабрь");
+            need.push(escape(&fill(
+                t(lang, Key::GuideDeadlinesDecember),
+                &[&year.to_string(), &i18n::date(lang, december.day)],
+            )));
+            need.push(escape(&fill(t(lang, Key::GuideHealthReading), &[&i18n::month_day(lang, due_day), &i18n::month_day(lang, due_day)])));
+            let shifts: Vec<&rules::Source> = terms.iter().flat_map(|deadline| deadlines::moved_sources(deadline.by_law)).collect();
+            if shifts.is_empty() {
+                wrong.push(format!("{lang:?}: ни один срок года не перенесён — перенос ничего не проверил"));
+            }
+            for source in shifts {
+                need.push(law_link(&source.url, &source.law, &source.article));
+            }
+            for piece in need {
+                if !html.contains(&piece) {
+                    wrong.push(format!("{lang:?}: нет {piece}"));
+                }
+            }
+            if html.contains(", https://") || html.contains("{}") || html.contains("<form") {
+                wrong.push(format!("{lang:?}: адрес в тексте ссылки, незаполненный шаблон или форма"));
+            }
+        }
+        assert!(guide_page(Lang::Ru, Guide::Deadlines, "a.css", "b.js", "/app/", None).is_none(), "без сверки — страница");
+        assert!(!footer(Lang::Ru, "/app/", None).contains("/deadlines/"), "без сверки — ссылка в подвале");
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// Ответ руководства сроков (задача 128) — числами, написанными рукой по
+    /// файлу правил версии 2026.12, а не теми же вызовами, что у страницы:
+    /// 2027 год, 18 сроков в общем календаре (четыре квартала, заявление,
+    /// годовые платежи, декларация и одиннадцать взносов медстраховки — за
+    /// декабрь платят в 2028-м), квартал — 20 января, апреля, июля и октября
+    /// (НК 261(1), 262(1)), заявление — 20 февраля (254(1)(1)), годовые
+    /// платежи за 2026 год — 20 апреля (136(4)), медстраховка с 2027 года —
+    /// до 20-го числа следующего месяца (ՀՕ-459-Ն, ст. 14, ч. 4). Дни — по
+    /// закону: 20.02.2027 — суббота, но в ответе перенос не назван.
+    #[test]
+    fn the_deadlines_answer_names_the_year_by_hand() {
+        let russian = guide_sample(Lang::Ru, Guide::Deadlines);
+        for piece in [
+            "<p class=\"answer\">В 2027 году у ИП на налоге с оборота 18 сроков",
+            "не позднее 20 января, 20 апреля, 20 июля и 20 октября",
+            "на 2027 год не позднее 20 февраля",
+            "за 2026 год не позднее 20 апреля",
+            "с 2027 года",
+            "до 20-го числа каждого месяца после месяца, в котором стал плательщиком",
+            "<title>Сроки отчётности и платежей ИП в Армении на 2027 год</title>",
+            // 20.02.2027 — суббота: срок — в понедельник, 22.02.2027.
+            "<th scope=\"row\">22.02.2027<br />",
+            "<tr class=\"month\"><th scope=\"rowgroup\" colspan=\"4\">Февраль</th></tr>",
+            "Перенесено с 20.02.2027",
+            // Взнос за декабрь 2027 года — 20.01.2028, четверг.
+            "20.01.2028",
+        ] {
+            assert!(russian.contains(piece), "нет «{piece}» в руководстве сроков");
+        }
+        let english = guide_sample(Lang::En, Guide::Deadlines);
+        for piece in ["18 deadlines", "January 20, April 20, July 20 and October 20", "February 20", "<html lang=\"en\">"] {
+            assert!(english.contains(piece), "нет «{piece}» в английском руководстве сроков");
+        }
+        let armenian = guide_sample(Lang::Am, Guide::Deadlines);
+        let answer = piece(&armenian, "<p class=\"answer\">", "</p>").expect("ответ");
+        assert!(answer.contains("18 ժամկետ"), "{answer}");
+        assert!(!answer.contains(". "), "латинская точка в армянском ответе: {answer}");
+    }
+
+    /// Руководство медстраховки (задача 128) — на своём языке, по адресу без
+    /// года, и всё на нём — из ядра: ответ — с какого дня, сколько в месяц
+    /// и за год, до какого числа, с какого возраста платит государство
+    /// и первый взнос года — днём по прочтению и днём с безопасной стороны,
+    /// без переноса; оглавление по якорям разделов (кто
+    /// платит, сколько и когда, чем год отличается от прошлого, приостановка,
+    /// законопроект); взносы года по месяцам — те же, что у общего календаря;
+    /// прошлый год — годовая ставка с порогом своей записи; у каждого раздела
+    /// с числами — источник его записи. Ведёт на все сроки года.
+    #[test]
+    fn the_health_guide_takes_every_number_from_the_core() {
+        let all = rules::armenia();
+        let day = checked().expect("правила сверены");
+        let year = guide_year(day).expect("год");
+        let (rule, due_day) = monthly_health(all, year).expect("медстраховка помесячно");
+        let earlier = rules::for_year(all.health_insurance(), rule.starts.year() - 1).expect("год годовой ставки");
+        let rules::HealthBy::Year { income_over, due } = earlier.by else {
+            panic!("до помесячного взноса — годовая ставка");
+        };
+        let mut wrong = Vec::new();
+        for lang in Lang::ALL {
+            let html = guide_sample(lang, Guide::Health);
+            let text = |key: Key| escape(t(lang, key));
+            let money = |drams: i64| i18n::money(lang, Money::new(drams, Currency::Amd));
+            let path = guide_path(lang, Guide::Health);
+            let start = rule.starts.year().to_string();
+            let title = escape(&fill(t(lang, Key::GuideHealthTitle), &[&start]));
+            let months: Vec<deadlines::Deadline> =
+                deadlines::general(Date::new(year, 1, 1).expect("день"), Date::new(year + 1, 12, 31).expect("день"))
+                    .into_iter()
+                    .filter(|deadline| matches!(deadline.kind, deadlines::Kind::HealthMonth { year: of, .. } if of == year))
+                    .collect();
+            if months.len() != 12 {
+                wrong.push(format!("{lang:?}: взносов года {} — не двенадцать", months.len()));
+            }
+            let first = months[0];
+            let deadlines::Kind::HealthMonth { month, .. } = first.kind else {
+                panic!("взнос месяца");
+            };
+            let answer = escape(&fill(
+                t(lang, Key::GuideHealthAnswer),
+                &[
+                    &i18n::date(lang, rule.starts),
+                    &money(rule.monthly),
+                    &money(rule.monthly * 12),
+                    &i18n::month_day(lang, due_day),
+                    &rule.state_pays_from_age.to_string(),
+                    &year.to_string(),
+                    &i18n::date(lang, first.by_law),
+                    &i18n::date(lang, Date::new(year, month, due_day).expect("день")),
+                ],
+            ));
+            let reading = format!(
+                "        <p class=\"note\">{}</p>\n",
+                escape(&fill(t(lang, Key::GuideHealthReading), &[&i18n::month_day(lang, due_day), &i18n::month_day(lang, due_day)]))
+            );
+            let mut need = vec![
+                format!("<html lang=\"{}\">", lang.code()),
+                format!("<title>{title}</title>"),
+                format!("<link rel=\"canonical\" href=\"https://kvartik.com{path}\" />"),
+                "<link rel=\"alternate\" hreflang=\"x-default\" href=\"https://kvartik.com/health-insurance/\" />".to_owned(),
+                format!("<meta property=\"og:url\" content=\"https://kvartik.com{path}\" />"),
+                format!(
+                    "<h1>{title}</h1>\n        <p class=\"answer\">{answer}</p>\n{reading}        <nav class=\"contents\" aria-label=\"{}\">",
+                    text(Key::TaxPageContents)
+                ),
+                text(Key::GuideHealthPayer),
+                escape(&fill(
+                    t(lang, Key::GuideHealthState),
+                    &[&rule.state_pays_from_age.to_string(), &rule.state_pays_from_age.to_string()],
+                )),
+                text(Key::AnnualHealthEmployed),
+                text(Key::AnnualHealthStateless),
+                escape(&fill(
+                    t(lang, Key::GuideHealthAmountText),
+                    &[&money(rule.monthly), &money(rule.monthly * 12), &i18n::month_day(lang, due_day), &year.to_string()],
+                )),
+                escape(&fill(
+                    t(lang, Key::GuideHealthBeforeText),
+                    &[
+                        &(rule.starts.year() - 1).to_string(),
+                        &(rule.starts.year() - 2).to_string(),
+                        &money(income_over),
+                        &money(earlier.monthly * 12),
+                        &i18n::date(lang, due),
+                        &start,
+                    ],
+                )),
+                escape(&fill(
+                    t(lang, Key::GuideHealthStoppedText),
+                    &[&i18n::date(lang, rule.starts), &i18n::date(lang, rule.starts), &(rule.starts.year() - 1).to_string()],
+                )),
+                escape(&fill(t(lang, Key::GuideHealthAfterYear), &[&(rule.starts.year() - 1).to_string(), &start])),
+                escape(&fill(
+                    t(lang, Key::GuideHealthNewIe),
+                    &[&(rule.starts.year() - 1).to_string(), &(rule.starts.year() - 2).to_string(), &(rule.starts.year() - 1).to_string()],
+                )),
+                text(Key::GuideHealthBillText),
+                law_link(&rule.source.url, &rule.source.law, &rule.source.article),
+                law_link(&earlier.source.url, &earlier.source.law, &earlier.source.article),
+                format!(
+                    "<a class=\"button secondary\" href=\"{}\"><span class=\"label\">{}</span></a>",
+                    guide_path(lang, Guide::Deadlines),
+                    escape(&fill(t(lang, Key::GuideDeadlinesLink), &[&year.to_string()]))
+                ),
+            ];
+            for (id, heading) in [
+                ("who", text(Key::GuideHealthWho)),
+                ("amount", text(Key::GuideHealthAmount)),
+                (
+                    "before",
+                    escape(&fill(t(lang, Key::GuideHealthBefore), &[&start, &(rule.starts.year() - 1).to_string()])),
+                ),
+                ("stopped", text(Key::GuideHealthStopped)),
+                ("bill", text(Key::GuideHealthBill)),
+            ] {
+                need.push(format!("<li><a href=\"#{id}\">{heading}</a></li>"));
+                need.push(format!("<h2 id=\"{id}\">{heading}</h2>"));
+            }
+            for deadline in &months {
+                need.push(format!(
+                    "<li><strong>{}</strong>\u{a0}— {}",
+                    escape(&i18n::date(lang, deadline.day)),
+                    escape(&deadlines::what(lang, deadline.kind))
+                ));
+            }
+            for other in Lang::ALL {
+                need.push(format!(
+                    "<link rel=\"alternate\" hreflang=\"{}\" href=\"https://kvartik.com{}\" />",
+                    other.code(),
+                    guide_path(other, Guide::Health)
+                ));
+            }
+            for piece in need {
+                if !html.contains(&piece) {
+                    wrong.push(format!("{lang:?}: нет {piece}"));
+                }
+            }
+            // Ссылки на самого себя у взносов нет: страница и так о нём (в
+            // подвале она есть — он у всех страниц один).
+            let article = piece(&html, "<article", "</article>").unwrap_or_default();
+            if article.contains(&format!("<a href=\"{path}\">")) {
+                wrong.push(format!("{lang:?}: руководство ссылается само на себя"));
+            }
+            if html.contains("{}") || html.contains("<form") {
+                wrong.push(format!("{lang:?}: незаполненный шаблон или форма"));
+            }
+        }
+        assert!(guide_page(Lang::Ru, Guide::Health, "a.css", "b.js", "/app/", None).is_none(), "без сверки — страница");
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// Ответ руководства медстраховки (задача 128) — числами, написанными
+    /// рукой по файлу правил версии 2026.12: с 01.01.2027 — 10 800 ֏ в месяц,
+    /// 129 600 ֏ за год, до 20-го числа следующего месяца (ՀՕ-459-Ն, ст. 13,
+    /// ч. 1; ст. 14, ч. 4), за резидента от 65 лет платит государство
+    /// (ст. 11, ч. 2, п. 2). Взнос за январь 2027 года — по прочтению Kvartik
+    /// до 20.02.2027, а с безопасной стороны — до 20.01.2027: закон не
+    /// говорит, за какой месяц платёж, и 22.02.2027 (20-е — суббота) сроком
+    /// не назван — перенос уплаты ՊԵԿ не подтверждал (решение человека
+    /// 2026-11-26). За 2026 год — 129 600 ֏ одной суммой до 20.07.2026 при
+    /// обороте за 2025 год больше 2 400 000 ֏ (ст. 46, ч. 10, 12).
+    /// По-английски число — порядковым: «by the 20th».
+    #[test]
+    fn the_health_answer_names_the_numbers_by_hand() {
+        let mut wrong = Vec::new();
+        let russian = guide_sample(Lang::Ru, Guide::Health);
+        let answer = piece(&russian, "<p class=\"answer\">", "</p>").expect("ответ");
+        for want in [
+            "С 01.01.2027",
+            "10\u{a0}800\u{a0}֏ в месяц",
+            "129\u{a0}600\u{a0}֏ за год",
+            "до 20-го числа каждого месяца после месяца, в котором стал плательщиком",
+            "За гражданина Армении от 65 лет, если он резидент",
+            "Закон не уточняет, за какой месяц каждый платёж: по прочтению Kvartik взнос за январь 2027 года\u{a0}— до 20.02.2027, \
+             но надёжнее заплатить его в январе, до 20.01.2027; страница обновится, когда ответит КГД (ՊԵԿ).",
+        ] {
+            if !answer.contains(want) {
+                wrong.push(format!("нет «{want}» в ответе: {answer}"));
+            }
+        }
+        for lang in Lang::ALL {
+            let html = guide_sample(lang, Guide::Health);
+            let answer = piece(&html, "<p class=\"answer\">", "</p>").unwrap_or_default();
+            if answer.contains("22.02.2027") || answer.contains("Feb 22") {
+                wrong.push(format!("{lang:?}: перенесённый день сроком в ответе: {answer}"));
+            }
+            if !answer.contains("20.01.2027") && !answer.contains("Jan 20, 2027") {
+                wrong.push(format!("{lang:?}: нет дня с безопасной стороны: {answer}"));
+            }
+        }
+        for guide in Guide::ALL {
+            let english = guide_sample(Lang::En, guide);
+            if !english.contains("by the 20th of each month") {
+                wrong.push(format!("{guide:?}: нет «by the 20th of each month»"));
+            }
+            if english.contains("by day ") {
+                wrong.push(format!("{guide:?}: «by day» вместо порядкового числа"));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+        // Под ответом — что «за месяц — до 20-го следующего» лишь прочтение
+        // ст. 14, ч. 4 (сверка закона задачи 128), а законопроект — с номером
+        // и днём первого чтения.
+        assert!(russian.contains("Կ-50-30.10.2026-ԱռՀ-011/0") && russian.contains("в первом чтении 18.11.2026"), "законопроект без номера и дня");
+        // Без вида на жительство не подлежат — кроме ищущих убежища и беженцев
+        // (ст. 11, ч. 1, п. 2).
+        assert!(russian.contains("кроме ищущих убежища и беженцев"), "не сказано о беженцах");
+        assert!(russian.contains("Сроки здесь\u{a0}— прочтение Kvartik"), "не сказано, что срок за месяц — прочтение");
+        // Иностранец с видом на жительство после 65 лет платит сам (ст. 11,
+        // ч. 1, п. 2: группа 2(2) — только граждане).
+        assert!(russian.contains("и после 65 лет он платит сам"), "не сказано об иностранце 65+");
+        for want in ["2\u{a0}400\u{a0}000\u{a0}֏", "20.07.2026", "<title>Медстраховка ИП в Армении с 2027 года: сколько и когда платить</title>"] {
+            assert!(russian.contains(want), "нет «{want}» в руководстве медстраховки");
+        }
+        let armenian = guide_sample(Lang::Am, Guide::Health);
+        let answer = piece(&armenian, "<p class=\"answer\">", "</p>").expect("ответ");
+        assert!(!answer.contains(". "), "латинская точка в армянском ответе: {answer}");
+        assert!(guide_sample(Lang::En, Guide::Health).contains("AMD\u{a0}10,800"), "сумма в английской записи");
+    }
+
+    /// Описание руководств для поисковиков (задача 128) — как у страницы
+    /// о налоге: один блок JSON-LD, разбирается как JSON, `WebPage` со своим
+    /// адресом, заголовком и описанием страницы, языком и днём сверки правил,
+    /// издатель — тот же продавец; хлебные крошки — со страницы своего языка
+    /// на руководство его именем ссылки.
+    #[test]
+    fn guides_describe_themselves_for_search_engines() {
+        let day = checked().expect("правила сверены");
+        let date = format!("{:04}-{:02}-{:02}", day.year(), day.month(), day.day());
+        let mut wrong = Vec::new();
+        for guide in Guide::ALL {
+            for lang in Lang::ALL {
+                let html = guide_sample(lang, guide);
+                let name = guide_name(lang, guide, Some(day)).expect("имя");
+                if html.matches("<script type=\"application/ld+json\">").count() != 1 {
+                    wrong.push(format!("{guide:?} {lang:?}: блоков JSON-LD не один"));
+                    continue;
+                }
+                let json = json_ld(&html).unwrap_or_default();
+                if json.contains('<') || json.contains('>') || json.contains('&') {
+                    wrong.push(format!("{guide:?} {lang:?}: <, > или & в блоке как есть"));
+                }
+                let data: serde_json::Value = match serde_json::from_str(&json) {
+                    Ok(data) => data,
+                    Err(error) => {
+                        wrong.push(format!("{guide:?} {lang:?}: не JSON — {error}"));
+                        continue;
+                    }
+                };
+                let site = |path: &str| serde_json::Value::from(format!("https://kvartik.com{path}"));
+                let (page, crumbs, seller) = (&data["@graph"][0], &data["@graph"][1], &data["@graph"][2]);
+                let items = &crumbs["itemListElement"];
+                let path = guide_path(lang, guide);
+                for (ok, what) in [
+                    (page["@type"] == "WebPage" && page["url"] == site(&path), "страница со своим адресом"),
+                    (page["name"] == name.title.as_str(), "заголовок — как у страницы"),
+                    (page["description"] == name.description.as_str(), "описание — как у страницы"),
+                    (page["inLanguage"] == lang.code(), "язык страницы"),
+                    (page["dateModified"] == date.as_str(), "день изменения — день сверки правил"),
+                    (seller["@id"] == "https://kvartik.com/#seller" && page["publisher"]["@id"] == seller["@id"], "издатель — продавец"),
+                    (crumbs["@type"] == "BreadcrumbList" && items.as_array().map(Vec::len) == Some(2), "хлебные крошки"),
+                    (items[0]["item"] == site(url(lang)) && items[0]["name"] == t(lang, Key::AppName), "первая — страница языка"),
+                    (items[1]["item"] == site(&path) && items[1]["name"] == name.link.as_str(), "вторая — руководство"),
+                    (html.contains(&format!("<meta name=\"description\" content=\"{}\" />", escape(&name.description))), "описание"),
+                ] {
+                    if !ok {
+                        wrong.push(format!("{guide:?} {lang:?}: {what}"));
+                    }
+                }
+            }
         }
         assert!(wrong.is_empty(), "{wrong:#?}");
     }
@@ -2921,12 +4097,17 @@ mod tests {
                 }
             }
         }
-        // Блок — у страниц языков и страниц о налоге (задача 126, у неё свой:
-        // `the_tax_page_describes_itself_for_search_engines`), а программа —
-        // только у страниц языков. У остальных — ни блока, ни превью.
+        // Блок — у страниц языков, страниц о налоге (задача 126, у неё свой:
+        // `the_tax_page_describes_itself_for_search_engines`) и руководств
+        // (задача 128, `guides_describe_themselves_for_search_engines`), а
+        // программа — только у страниц языков. У остальных — ни блока, ни
+        // превью.
         for (page, html) in every_page() {
             let language_page = Lang::ALL.into_iter().any(|lang| page == format!("{lang:?} {}", url(lang)));
-            let tax_page = Lang::ALL.into_iter().any(|lang| page == format!("{lang:?} {}", tax_path(lang)));
+            let tax_page = Lang::ALL.into_iter().any(|lang| {
+                page == format!("{lang:?} {}", tax_path(lang))
+                    || Guide::ALL.into_iter().any(|guide| page == format!("{lang:?} {}", guide_path(lang, guide)))
+            });
             let found = block(&html);
             if !language_page && !tax_page && (found.is_some() || html.contains("og:")) {
                 wrong.push(format!("{page}: JSON-LD или превью не у страницы языка и не о налоге"));
@@ -2981,9 +4162,9 @@ mod tests {
     }
 
     /// Карта сайта называет все страницы, а `robots.txt` — карту. У страниц
-    /// о налоге (задача 126) — `lastmod`, день последней сверки правил,
-    /// у остальных — нет: дня их правки сборка не знает. Без дня сверки
-    /// `lastmod` нет ни у кого.
+    /// о налоге (задача 126) и руководств (задача 128) — `lastmod`, день
+    /// последней сверки правил, у остальных — нет: дня их правки сборка не
+    /// знает. Без дня сверки `lastmod` нет ни у кого, и руководств — тоже.
     #[test]
     fn robots_and_sitemap_point_at_every_page() {
         let day = checked().expect("правила сверены");
@@ -2992,9 +4173,18 @@ mod tests {
         for lang in Lang::ALL {
             let entry = format!("<loc>https://kvartik.com{}</loc>\n    {lastmod}\n", tax_path(lang));
             assert!(map.contains(&entry), "lastmod о налоге {lang:?}:\n{map}");
+            for guide in Guide::ALL {
+                let entry = format!("<loc>https://kvartik.com{}</loc>\n    {lastmod}\n", guide_path(lang, guide));
+                assert!(map.contains(&entry), "lastmod руководства {guide:?} {lang:?}:\n{map}");
+            }
         }
-        assert_eq!(map.matches("<lastmod>").count(), Lang::ALL.len(), "lastmod — только у страниц о налоге");
+        assert_eq!(
+            map.matches("<lastmod>").count(),
+            Lang::ALL.len() * (1 + Guide::ALL.len()),
+            "lastmod — только у страниц о налоге и руководств"
+        );
         assert!(!sitemap(None).contains("<lastmod>"), "без сверки — без lastmod");
+        assert!(!sitemap(None).contains("/deadlines/"), "без сверки — без руководств");
         for lang in Lang::ALL {
             assert!(map.contains(&format!("<loc>https://kvartik.com{}</loc>", url(lang))), "{lang:?}");
             assert!(map.contains(&format!("<loc>https://kvartik.com{}</loc>", buy_path(lang))), "«Купить» {lang:?}");
@@ -3004,7 +4194,7 @@ mod tests {
                 assert!(map.contains(&format!("<loc>https://kvartik.com{}</loc>", doc.path(lang))), "{doc:?} {lang:?}");
             }
         }
-        assert_eq!(map.matches("<url>").count(), Lang::ALL.len() * (4 + Legal::ALL.len()));
+        assert_eq!(map.matches("<url>").count(), Lang::ALL.len() * (4 + Guide::ALL.len() + Legal::ALL.len()));
         assert!(robots().contains("Sitemap: https://kvartik.com/sitemap.xml\n"));
     }
 
@@ -3184,6 +4374,9 @@ mod tests {
         pages.extend(Lang::ALL.into_iter().map(|lang| page_file(buy_path(lang))));
         pages.extend(Lang::ALL.into_iter().map(|lang| page_file(feedback_path(lang))));
         pages.extend(Lang::ALL.into_iter().map(|lang| page_file(tax_path(lang))));
+        for guide in Guide::ALL {
+            pages.extend(Lang::ALL.into_iter().map(|lang| page_file(&guide_path(lang, guide))));
+        }
         for doc in Legal::ALL {
             pages.extend(Lang::ALL.into_iter().map(|lang| page_file(doc.path(lang))));
             for &day in doc.earlier() {
