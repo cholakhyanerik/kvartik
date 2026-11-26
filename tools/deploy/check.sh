@@ -275,6 +275,10 @@ expected_type() {
     *.webp) echo image/webp ;;
     *.webm) echo video/webm ;;
     *.mp4) echo video/mp4 ;;
+    # Логотипы ArCa, Visa и Mastercard у оплаты картой на «Купить» (задача
+    # 90): SVG — тип по таблице `mime` wrangler (предпросмотр 0.0.211,
+    # 2026-11-26), PNG — тот же, что у значков.
+    *.svg) echo image/svg+xml ;;
     *) echo "?" ;;
   esac
 }
@@ -305,7 +309,7 @@ while IFS= read -r path; do
   done
   [ "$ok" = 1 ] || fail "$path: Content-Type «$type», а ждали $(expected_type "$path")"
   cache="$(header cache-control "$work/head")"
-  if [[ "$path" =~ -[0-9a-f]{16}(_bg)?\.(wasm|js|css|webp|webm|mp4)$ ]]; then
+  if [[ "$path" =~ -[0-9a-f]{16}(_bg)?\.(wasm|js|css|webp|webm|mp4|png|svg)$ ]]; then
     [[ "$cache" == *immutable* ]] || fail "$path: Cache-Control «$cache» — у файла с хэшем ждали immutable"
   else
     case "$cache" in
