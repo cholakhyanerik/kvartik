@@ -206,6 +206,9 @@ a:focus-visible {
   border-radius: var(--radius-round);
   background: var(--accent);
   color: var(--on-accent);
+  /* Шрифт страницы и у `<button>` (оплата картой, задача 90): кнопка его
+     не наследует, и подпись вышла системным Arial (глазной прогон). */
+  font-family: inherit;
   font-size: var(--font-size-lg);
   font-weight: var(--weight-strong);
   line-height: var(--leading-tight);
@@ -219,6 +222,15 @@ a:focus-visible {
   border: 2px solid var(--border-strong);
   background: none;
   color: var(--text);
+}
+
+/* Выключенная — как у окна (base.css): фон утоплен, текст приглушён
+   (--text-muted на --surface-sunken — 4.9:1), без отклика на мышь ниже.
+   Оплата картой на «Купить», пока банк её не включил (задача 90). */
+.button:disabled {
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  cursor: default;
 }
 
 /* Отклик на наведение — только там, где есть мышь: на телефоне оно
@@ -499,6 +511,12 @@ footer .links {
   gap: var(--space-1) var(--space-4);
 }
 
+/* Телефон продавца (задача 90) не рвётся по пробелам номера: на телефоне
+   строка подвала переносится между ссылками, а не посреди номера. */
+.phone {
+  white-space: nowrap;
+}
+
 /* Юридический текст (задача 32): читается, а не листается, — строка не
    длиннее ~70 знаков, название — ниже кругов украшения, как заголовок
    первого экрана (`.hero`), разделы — с воздухом над заголовком. */
@@ -598,6 +616,27 @@ main > .plans {
 
 .buy .steps > li + li {
   margin-top: var(--space-6);
+}
+
+/* Оплата картой (задача 90): логотипы ArCa, Visa и Mastercard — каждый на
+   белой плашке бумаги (--fill-paper, белая в обеих темах): цвета знаков —
+   для светлого фона, и синий Visa на тёмном не читался бы. Высота у всех
+   одна, ширина — по знаку: `width` и `height` в разметке держат место до
+   прихода файла. */
+.marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.marks img {
+  box-sizing: content-box;
+  width: auto;
+  height: 1.5rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--decor-paper-rule);
+  border-radius: var(--radius-sm);
+  background: var(--fill-paper);
 }
 
 /* Две кнопки шага — в строку, а где не помещаются, одна под другой. */
@@ -1121,6 +1160,22 @@ main > .plans {
 
   .button.secondary:hover .label {
     text-shadow: 0 var(--motion-flip) var(--on-fill-hover-soft);
+  }
+
+  /* Выключенная кнопка (оплата картой до включения банком, задача 90)
+     мышь не замечает: ни заливки, ни магнита, ни перелистывания подписи —
+     иначе она звала бы нажать то, что не нажимается. */
+  .button:disabled {
+    translate: none;
+  }
+
+  .button:disabled::before {
+    content: none;
+  }
+
+  .button:disabled:hover .label {
+    translate: none;
+    text-shadow: none;
   }
 
   /* Карточка под мышью чуть наклоняется вслед за курсором, по ней скользит

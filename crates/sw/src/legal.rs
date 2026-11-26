@@ -217,14 +217,33 @@ pub fn contains(doc: &Doc, words: &str) -> bool {
         })
 }
 
+/// Номер раздела по его заголовку: «6. Возврат денег» — 6. Заголовок без
+/// номера — `None`.
+pub fn section_number(title: &str) -> Option<u8> {
+    let (number, rest) = title.split_once(". ")?;
+    (!rest.is_empty()).then_some(())?;
+    number.parse().ok()
+}
+
+/// Есть ли в тексте раздел с номером `number` — его якорь `#p<номер>`
+/// (`html`): на него ведёт ссылка «Возврат» страницы «Купить» (задача 90).
+pub fn has_section(doc: &Doc, number: u8) -> bool {
+    doc.blocks.iter().any(|block| matches!(block, Block::Section(text) if section_number(text) == Some(number)))
+}
+
 /// Текст страницей: название, редакция, разделы — разметкой, текст
-/// экранирован `escape`.
+/// экранирован `escape`. У раздела с номером — якорь `p<номер>` (задача 90):
+/// «Купить» ведёт прямо к п. 6 о возврате, а что раздел с этим номером есть
+/// в условиях каждого языка, проверяет сборка (`landing::refunds`).
 pub fn html(doc: &Doc, escape: impl Fn(&str) -> String) -> String {
     let mut out = format!("        <h1>{}</h1>\n", escape(&doc.title));
     for block in &doc.blocks {
         match block {
             Block::Edition(text) => out.push_str(&format!("        <p class=\"edition\">{}</p>\n", escape(text))),
-            Block::Section(text) => out.push_str(&format!("        <h2>{}</h2>\n", escape(text))),
+            Block::Section(text) => match section_number(text) {
+                Some(number) => out.push_str(&format!("        <h2 id=\"p{number}\">{}</h2>\n", escape(text))),
+                None => out.push_str(&format!("        <h2>{}</h2>\n", escape(text))),
+            },
             Block::Paragraph(text) => out.push_str(&format!("        <p>{}</p>\n", escape(text))),
             Block::List(items) => {
                 out.push_str("        <ol>\n");
@@ -363,7 +382,13 @@ mod tests {
             ]
         );
         let page = html(&doc, |text| text.replace('<', "&lt;"));
-        assert!(page.contains("<h2>1. Раздел</h2>") && page.contains("<li>второй.</li>") && !page.contains("заметка"));
+        assert!(page.contains("<h2 id=\"p1\">1. Раздел</h2>") && page.contains("<li>второй.</li>") && !page.contains("заметка"));
+        // Якорь — у раздела с номером (задача 90), а заголовок без номера
+        // его не получает.
+        assert!(has_section(&doc, 1) && !has_section(&doc, 6));
+        for (title, number) in [("6. Возврат денег", Some(6)), ("12. Продавец", Some(12)), ("Раздел", None), ("6.", None)] {
+            assert_eq!(section_number(title), number, "{title:?}");
+        }
         // Слова ищутся так, как они на странице: через перенос строки
         // абзаца и пункта, но не в заметке для человека.
         for (words, found) in [

@@ -83,8 +83,8 @@ use kvartik_core::model::date::{Date, Quarter};
 use kvartik_core::model::money::{Currency, Money};
 use kvartik_core::model::profile::Residency;
 use kvartik_core::release::{
-    ACCOUNT, BANK, EMAIL, HOLDER, LICENSES, Legal, PRICE, PRO_PRICE, PRO_SEATS, SELLER_TIN, TELEGRAM, buy_path,
-    feedback_path, mailto,
+    ACCOUNT, BANK, EMAIL, HOLDER, LICENSES, Legal, PHONE, PHONE_LINK, PRICE, PRO_PRICE, PRO_SEATS, SELLER_TIN,
+    TELEGRAM, buy_path, feedback_path, mailto,
 };
 use kvartik_core::tax::deadlines::Kind;
 use kvartik_core::tax::{calendar, deadlines, example, rules, turnover};
@@ -139,6 +139,28 @@ const SHOTS: [(&str, Key, Key); 4] = [
     ("ledger", Key::NavLedger, Key::LandingShotLedgerAlt),
     ("tax", Key::TaxTitle, Key::LandingShotTaxAlt),
 ];
+
+/// Папка логотипов платёжных систем рядом с `landing.css` (задача 90):
+/// их сборка кладёт в корень сайта под именем с хэшем содержимого, как
+/// снимки (`MEDIA`).
+const PAY: &str = "pay";
+
+/// Логотипы у оплаты картой на «Купить» (задача 90), по порядку на странице:
+/// ArCa — карта Армении, потом Visa и Mastercard. Банк требует их на сайте
+/// магазина, принимающего карты (специалист IDBank, 2026-11-23), а своих
+/// файлов не даёт (2026-11-26): Visa и Mastercard — SVG из Wikimedia
+/// Commons (public domain), ArCa — PNG оттуда же, уменьшенный до 160×48
+/// (вдвое против показа). Что в SVG нет скрипта и ссылок, проверяет сборка
+/// (`marks`): файл лежит на нашем происхождении, и открытый адресом прямо
+/// он исполнял бы свой скрипт как наш.
+const MARKS: [&str; 3] = ["arca.png", "visa.svg", "mastercard.svg"];
+
+/// Раздел условий лицензии о возврате денег (п. 6): на него ведёт ссылка
+/// «Возврат» у оплаты картой на «Купить» — банк требует политику возврата
+/// там, где платят (задача 90). Есть ли такой раздел в условиях каждого
+/// языка, проверяет сборка (`refunds`): новая редакция с другой нумерацией
+/// не оставит ссылку вести не туда.
+const REFUND_SECTION: u8 = 6;
 
 /// Снимок или ролик в корне сайта: адрес и размер в пикселях — размер
 /// пишется в разметку, чтобы место под картинкой было до её прихода.
@@ -220,6 +242,60 @@ fn media(dir: &Path) -> Result<(Blobs, Vec<(Lang, Media)>), String> {
         pages.push((lang, Media { webm, mp4, poster, shots }));
     }
     Ok((files, pages))
+}
+
+/// Ширина и высота логотипа (`MARKS`) по его файлу: PNG — из заголовка
+/// IHDR, SVG — атрибутами `width` и `height` корня (их ставит тот, кто
+/// кладёт файл). `None` — ни то, ни другое.
+fn mark_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        if bytes.get(12..16)? != b"IHDR" {
+            return None;
+        }
+        let be = |at: usize| Some(u32::from_be_bytes(bytes.get(at..at + 4)?.try_into().ok()?));
+        return Some((be(16)?, be(20)?));
+    }
+    // Пробел перед корнем: атрибут ищется с пробелом впереди, и первый
+    // после `<svg` тоже.
+    let root = format!(" {}", std::str::from_utf8(bytes).ok()?.strip_prefix("<svg ")?.split('>').next()?);
+    let attr = |name: &str| root.split(&format!(" {name}=\"")).nth(1)?.split('"').next()?.parse().ok();
+    Some((attr("width")?, attr("height")?))
+}
+
+/// Есть ли в SVG то, что исполняется или ведёт наружу: скрипт, ссылка,
+/// обработчик события (`onload=`…). Логотипу нужно только рисовать.
+fn svg_acts(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    if ["<script", "href", "javascript:", "<foreignobject"].iter().any(|bad| lower.contains(bad)) {
+        return true;
+    }
+    lower.match_indices(" on").any(|(at, _)| {
+        let name = &lower[at + 3..];
+        let letters = name.bytes().take_while(u8::is_ascii_lowercase).count();
+        letters > 0 && name[letters..].trim_start().starts_with('=')
+    })
+}
+
+/// Логотипы платёжных систем (`MARKS`) из папки `dir`: что положить в корень
+/// (имя с хэшем и байты) и что вписать странице «Купить». Нет файла, не
+/// узнан размер или SVG что-то исполняет — ошибка сборки, а не дыра или
+/// чужой скрипт на странице.
+fn marks(dir: &Path) -> Result<(Blobs, Vec<Picture>), String> {
+    let mut files: Blobs = Vec::new();
+    let mut marks = Vec::new();
+    for name in MARKS {
+        let path = dir.join(name);
+        let bytes = fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+        if name.ends_with(".svg") && svg_acts(&String::from_utf8_lossy(&bytes)) {
+            return Err(format!("{}: в логотипе скрипт, ссылка или обработчик события", path.display()));
+        }
+        let (width, height) = mark_size(&bytes).ok_or_else(|| format!("{}: не PNG и не SVG с width и height", path.display()))?;
+        let ext = name.rsplit('.').next().unwrap_or_default();
+        let url = format!("kvartik-site-{}.{ext}", digest([(name, bytes.as_slice())]));
+        files.push((url.clone(), bytes));
+        marks.push(Picture { url, width, height });
+    }
+    Ok((files, marks))
 }
 
 /// Раздел «Как это выглядит» (задача 119): ролик «новый счёт → выпустить →
@@ -456,7 +532,10 @@ pub fn write(staging: &Path, site: &Path, style: &Path, legal: &Path, app: &str,
     let css_name = format!("kvartik-site-{}.css", digest([(STYLE, css.as_bytes())]));
     let js_name = format!("kvartik-site-{}.js", digest([(SCRIPT, js.as_bytes())]));
     let checked = rules::armenia().checked();
-    let (media_files, media) = media(&site.join(MEDIA))?;
+    let (mut media_files, media) = media(&site.join(MEDIA))?;
+    let (mark_files, marks) = marks(&site.join(PAY))?;
+    let pictures = media_files.len();
+    media_files.extend(mark_files);
     let mut files = Vec::new();
     for (lang, media) in &media {
         files.push((page_file(url(*lang)), page(*lang, &css_name, &js_name, app, calc, media, checked)));
@@ -482,6 +561,7 @@ pub fn write(staging: &Path, site: &Path, style: &Path, legal: &Path, app: &str,
             legal::same_shape(&legal::file_name(doc, Lang::Ru, day), &pairs)?;
             if doc == Legal::Terms && day.is_none() {
                 agreed(&texts)?;
+                refunds(&texts)?;
             }
             for (lang, text) in &texts {
                 let html = legal_page(*lang, doc, text, edition, &css_name, &js_name, app, checked);
@@ -495,7 +575,7 @@ pub fn write(staging: &Path, site: &Path, style: &Path, legal: &Path, app: &str,
         }
     }
     for lang in Lang::ALL {
-        files.push((page_file(buy_path(lang)), buy_page(lang, &css_name, &js_name, app, checked)));
+        files.push((page_file(buy_path(lang)), buy_page(lang, &css_name, &js_name, app, checked, &marks)));
         files.push((page_file(feedback_path(lang)), feedback_page(lang, &css_name, &js_name, app, checked)));
         files.push((page_file(tax_path(lang)), tax_page(lang, &css_name, &js_name, app, checked)));
         for guide in Guide::ALL {
@@ -523,13 +603,13 @@ pub fn write(staging: &Path, site: &Path, style: &Path, legal: &Path, app: &str,
         fs::write(&target, bytes).map_err(|error| format!("{}: {error}", target.display()))?;
     }
     Ok(format!(
-        "лендинг: страниц {}, «Купить» {}, отзывов {}, о налоге {}, руководств {guides}, юридических текстов {}, снимков и роликов {}",
+        "лендинг: страниц {}, «Купить» {}, отзывов {}, о налоге {}, руководств {guides}, юридических текстов {}, снимков и роликов {pictures}, логотипов {}",
         Lang::ALL.len(),
         Lang::ALL.len(),
         Lang::ALL.len(),
         Lang::ALL.len(),
         editions * Lang::ALL.len(),
-        media_files.len()
+        MARKS.len()
     ))
 }
 
@@ -557,6 +637,23 @@ fn agreed(terms: &[(Lang, legal::Doc)]) -> Result<(), String> {
             return Err(format!(
                 "{}.{}.md: нет слов согласия «{words}», которые просит написать страница «Купить» — \
                  новая редакция условий? Тогда и новые слова в Key::BuyAccept (crates/core/src/i18n/)",
+                Legal::Terms.name(),
+                lang.code()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Раздел о возврате денег (`REFUND_SECTION`) — в условиях каждого языка,
+/// иначе сборка останавливается: ссылка «Возврат» на «Купить» вела бы мимо
+/// него (задача 90). `terms` — разобранные условия трёх языков.
+fn refunds(terms: &[(Lang, legal::Doc)]) -> Result<(), String> {
+    for (lang, text) in terms {
+        if !legal::has_section(text, REFUND_SECTION) {
+            return Err(format!(
+                "{}.{}.md: нет раздела {REFUND_SECTION}, на который ведёт ссылка «Возврат» страницы «Купить» — \
+                 новая нумерация условий? Тогда и REFUND_SECTION (crates/sw/src/landing.rs)",
                 Legal::Terms.name(),
                 lang.code()
             ));
@@ -884,9 +981,10 @@ fn described(lang: Lang, app: &str) -> String {
 }
 
 /// Продавец в данных для поисковиков (`Organization`) — один у страниц
-/// языков и страниц о налоге (задача 126): имя, сайт, значок, почта ядра.
-/// Адрес `@id` — один на сайте, и страница о налоге называет издателем того
-/// же продавца, что и программа.
+/// языков и страниц о налоге (задача 126): имя, сайт, значок, почта ядра,
+/// а с задачи 90 — телефон и адрес, те же, что в подвале. Адрес `@id` —
+/// один на сайте, и страница о налоге называет издателем того же продавца,
+/// что и программа.
 fn seller(lang: Lang, app: &str) -> serde_json::Value {
     serde_json::json!({
         "@type": "Organization",
@@ -895,6 +993,13 @@ fn seller(lang: Lang, app: &str) -> serde_json::Value {
         "url": format!("{SITE}/"),
         "logo": icon(app),
         "email": EMAIL,
+        "telephone": PHONE,
+        "address": {
+            "@type": "PostalAddress",
+            "streetAddress": t(lang, Key::SellerStreet),
+            "addressLocality": t(lang, Key::SellerCity),
+            "addressCountry": "AM",
+        },
     })
 }
 
@@ -1135,8 +1240,20 @@ fn plans(lang: Lang) -> String {
 /// Реквизиты — как их выдал банк, а владелец счёта и банк — по-армянски
 /// (`lang="hy"`): их и вписывают в перевод, и выделяются они целиком одним
 /// касанием (`copy`).
-fn buy_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -> String {
+///
+/// Над шагами — оплата картой (задача 90): кнопка, логотипы `marks`
+/// (`MARKS`) и ссылка на возврат денег (`REFUND_SECTION`). Банк проверяет
+/// сайт с кнопкой на месте, а работу оплаты даёт после проверки (специалист
+/// IDBank, 2026-11-26): до того кнопка выключена, а слова под ней говорят
+/// почему и что пока купить можно переводом. Логотипы — без `alt`: системы
+/// названы словами рядом, и диктор не прочтёт их дважды.
+fn buy_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>, marks: &[Picture]) -> String {
     let text = |key: Key| escape(t(lang, key));
+    let logos: String = marks
+        .iter()
+        .map(|mark| format!("<img src=\"/{}\" width=\"{}\" height=\"{}\" alt=\"\" />", mark.url, mark.width, mark.height))
+        .collect::<Vec<_>>()
+        .join(" ");
     let (standard, pro) = (Tariff::Standard, Tariff::Pro);
     let meta = format!(
         "    <meta name=\"description\" content=\"{}\" />\n",
@@ -1168,6 +1285,13 @@ fn buy_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -
       <article class="legal buy">
         <h1>{title}</h1>
 {standard_card}{pro_card}        <p class="hint">{trial} {after_trial}</p>
+        <section class="pay" aria-labelledby="pay">
+          <h2 id="pay">{card_title}</h2>
+          <p class="marks">{logos}</p>
+          <p class="actions"><button class="button" type="button" disabled aria-describedby="pay-soon"><span class="label">{card}</span></button></p>
+          <p class="hint" id="pay-soon">{card_soon}</p>
+          <p><a href="{terms}#p{REFUND_SECTION}">{refund}</a></p>
+        </section>
         <h2>{how}</h2>
         <ol class="steps">
           <li>
@@ -1210,6 +1334,10 @@ fn buy_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -
         trial = trial(lang),
         after_trial = text(Key::WelcomeWithoutKey),
         faq = faq(lang),
+        card_title = text(Key::BuyCardTitle),
+        card = text(Key::BuyCard),
+        card_soon = text(Key::BuyCardSoon),
+        refund = text(Key::BuyRefund),
         how = text(Key::BuyHow),
         accept = text(Key::BuyAccept),
         mail = escape(&mail),
@@ -1260,6 +1388,7 @@ fn feedback_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Dat
         <p>{about}</p>
         <p class="actions"><a class="button" href="{mail}"><span class="label">{write}</span></a> <a class="button secondary" href="{TELEGRAM}"><span class="label">{telegram}</span></a></p>
         <p class="hint">{mail_hint}</p>
+        <p class="hint">{phone}</p>
         <h2>{what}</h2>
         <ul>
 {items}        </ul>
@@ -1279,6 +1408,7 @@ fn feedback_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Dat
         write = text(Key::BuyWrite),
         telegram = text(Key::FeedbackTelegram),
         mail_hint = linked(t(lang, Key::FeedbackMailHint), &format!("<a href=\"mailto:{EMAIL}\">{EMAIL}</a>")),
+        phone = linked(t(lang, Key::FeedbackPhone), &format!("<a class=\"phone\" href=\"{PHONE_LINK}\">{PHONE}</a>")),
         what = text(Key::FeedbackWhat),
         not = text(Key::FeedbackNot),
         not_text = text(Key::FeedbackNotText),
@@ -2350,9 +2480,11 @@ fn footer(lang: Lang, app: &str, checked: Option<Date>) -> String {
         r#"    <footer>
       <p>{disclaimer}</p>
 {rules}      <p class="links"><a href="{tax}">{tax_label}</a>{guides} <a href="{buy}">{buy_label}</a> <a href="{terms}">{terms_label}</a> <a href="{privacy}">{privacy_label}</a> <a href="{app}{LICENSES}">{licenses}</a></p>
-      <p class="links"><span>{contact}</span> <a href="mailto:{EMAIL}">{EMAIL}</a> <a href="{TELEGRAM}">{telegram}</a> <a href="{feedback}">{feedback_label}</a></p>
+      <p class="links"><span>{contact}</span> <a class="phone" href="{PHONE_LINK}">{PHONE}</a> <a href="mailto:{EMAIL}">{EMAIL}</a> <a href="{TELEGRAM}">{telegram}</a> <a href="{feedback}">{feedback_label}</a></p>
+      <p>{seller}</p>
     </footer>
 "#,
+        seller = escape(&fill(t(lang, Key::Seller), &[SELLER_TIN, t(lang, Key::SellerAddress)])),
         tax = tax_path(lang),
         tax_label = text(Key::TaxPageLink),
         buy = buy_path(lang),
@@ -2640,9 +2772,15 @@ mod tests {
         assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
+    /// Логотипы платёжных систем (задача 90), как их вписывает сборка, —
+    /// из настоящих файлов `site/pay/`.
+    fn marks_sample() -> Vec<Picture> {
+        marks(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../app/site").join(PAY)).expect("логотипы читаются").1
+    }
+
     /// Страница «Купить».
     fn buy_sample(lang: Lang) -> String {
-        buy_page(lang, "kvartik-site-a.css", "kvartik-site-b.js", "/app/", checked())
+        buy_page(lang, "kvartik-site-a.css", "kvartik-site-b.js", "/app/", checked(), &marks_sample())
     }
 
     /// Страница «Отзывы и предложения» (задача 114).
@@ -2677,6 +2815,10 @@ mod tests {
                     text(Key::FeedbackTelegram)
                 ),
                 linked(t(lang, Key::FeedbackMailHint), &format!("<a href=\"mailto:{EMAIL}\">{EMAIL}</a>")),
+                format!(
+                    "<p class=\"hint\">{}</p>",
+                    linked(t(lang, Key::FeedbackPhone), &format!("<a class=\"phone\" href=\"{PHONE_LINK}\">{PHONE}</a>"))
+                ),
                 format!("<h2>{}</h2>", text(Key::FeedbackWhat)),
                 format!("<li>{}</li>", escape(&fill(t(lang, Key::FeedbackVersion), &where_version))),
                 format!("<li>{}</li>", text(Key::FeedbackDevice)),
@@ -2921,6 +3063,10 @@ mod tests {
                 format!("<a href=\"mailto:{EMAIL}\">{EMAIL}</a>"),
                 format!("<a href=\"{TELEGRAM}\">{}</a>", escape(t(lang, Key::ContactTelegram))),
                 format!("<a href=\"{}\">{}</a>", feedback_path(lang), escape(t(lang, Key::FeedbackTitle))),
+                // Телефон и адрес продавца (задача 90): банк требует их на
+                // сайте магазина, принимающего карты.
+                format!("<a class=\"phone\" href=\"{PHONE_LINK}\">{PHONE}</a>"),
+                format!("<p>{}</p>", escape(&fill(t(lang, Key::Seller), &[SELLER_TIN, t(lang, Key::SellerAddress)]))),
                 format!("<a href=\"{}\">{}</a>", tax_path(lang), escape(t(lang, Key::TaxPageLink))),
                 format!(
                     "<a href=\"{}\">{}</a>",
@@ -4123,6 +4269,95 @@ mod tests {
         assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
+    /// Оплата картой на «Купить» (задача 90): кнопка на месте, но выключена,
+    /// пока банк не включил оплату, и слова под ней говорят почему; рядом —
+    /// логотипы ArCa, Visa и Mastercard с размером файла и ссылка на раздел
+    /// условий о возврате денег — того же языка, и раздел этот на странице
+    /// условий есть, с якорем, и он о возврате. Раздел оплаты — до шагов
+    /// перевода: им покупают, пока карта не работает.
+    #[test]
+    fn the_buy_page_offers_the_card_with_the_marks_and_refunds() {
+        let mut wrong = Vec::new();
+        let refund_words = [(Lang::Am, "վերադարձ"), (Lang::Ru, "Возврат"), (Lang::En, "Refund")];
+        for lang in Lang::ALL {
+            let html = buy_sample(lang);
+            let text = |key: Key| escape(t(lang, key));
+            let Some(start) = html.find("<section class=\"pay\"") else {
+                wrong.push(format!("{lang:?}: нет оплаты картой"));
+                continue;
+            };
+            let pay = &html[start..start + html[start..].find("</section>").expect("конец раздела")];
+            let mut need = vec![
+                format!("<h2 id=\"pay\">{}</h2>", text(Key::BuyCardTitle)),
+                format!(
+                    "<button class=\"button\" type=\"button\" disabled aria-describedby=\"pay-soon\"><span class=\"label\">{}</span></button>",
+                    text(Key::BuyCard)
+                ),
+                format!("<p class=\"hint\" id=\"pay-soon\">{}</p>", text(Key::BuyCardSoon)),
+                format!("<a href=\"{}#p{REFUND_SECTION}\">{}</a>", Legal::Terms.path(lang), text(Key::BuyRefund)),
+            ];
+            for mark in marks_sample() {
+                need.push(format!("<img src=\"/{}\" width=\"{}\" height=\"{}\" alt=\"\" />", mark.url, mark.width, mark.height));
+            }
+            for piece in need {
+                if !pay.contains(&piece) {
+                    wrong.push(format!("{lang:?}: в оплате картой нет {piece}"));
+                }
+            }
+            if html.find(&format!("<h2>{}</h2>", text(Key::BuyHow))).is_none_or(|how| how < start) {
+                wrong.push(format!("{lang:?}: оплата картой — не над шагами перевода"));
+            }
+            let terms = legal_sample(Legal::Terms, lang, None);
+            let words = refund_words.iter().find(|(l, _)| *l == lang).expect("слово языка").1;
+            let anchored = format!("<h2 id=\"p{REFUND_SECTION}\">{REFUND_SECTION}. ");
+            match terms.find(&anchored) {
+                Some(at) if terms[at..].split("</h2>").next().is_some_and(|title| title.contains(words)) => {}
+                Some(_) => wrong.push(format!("{lang:?}: раздел {REFUND_SECTION} условий не о возврате")),
+                None => wrong.push(format!("{lang:?}: у раздела {REFUND_SECTION} условий нет якоря")),
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// Адрес продавца для глаз (`SellerAddress`) — с теми же улицей
+    /// и городом, что адрес для поисковиков (`SellerStreet`, `SellerCity`):
+    /// в подвале и в данных JSON-LD продавец живёт по одному адресу.
+    #[test]
+    fn the_seller_address_is_one_in_words_and_in_data() {
+        for lang in Lang::ALL {
+            let full = t(lang, Key::SellerAddress);
+            for part in [Key::SellerStreet, Key::SellerCity] {
+                assert!(full.contains(t(lang, part)), "{lang:?}: в «{full}» нет «{}»", t(lang, part));
+            }
+        }
+    }
+
+    /// Логотипы — настоящие файлы с размером, который видит сборка, и без
+    /// того, что исполняется: SVG со скриптом, ссылкой или обработчиком
+    /// события сборку останавливает (задача 90).
+    #[test]
+    fn marks_are_pictures_and_nothing_else() {
+        let sizes: Vec<(u32, u32)> = marks_sample().iter().map(|mark| (mark.width, mark.height)).collect();
+        assert_eq!(sizes, [(160, 48), (1000, 325), (1000, 618)]);
+        for bad in [
+            "<svg width=\"1\" height=\"1\"><script>alert(1)</script></svg>",
+            "<svg width=\"1\" height=\"1\" onload=\"alert(1)\"></svg>",
+            "<svg width=\"1\" height=\"1\"><a href=\"https://example.com\"><path d=\"m0,0\"/></a></svg>",
+            "<svg width=\"1\" height=\"1\"><foreignObject></foreignObject></svg>",
+        ] {
+            assert!(svg_acts(bad), "{bad}");
+        }
+        assert!(!svg_acts("<svg width=\"1\" height=\"1\"><!-- знак one --><path d=\"m0,0\"/></svg>"));
+        assert_eq!(mark_size(b"<svg width=\"30\" height=\"20\"></svg>"), Some((30, 20)));
+        assert_eq!(mark_size(b"<svg viewBox=\"0 0 30 20\"></svg>"), None);
+        assert_eq!(mark_size(b"GIF89a"), None);
+        let temp = Temp::new("marks");
+        temp.put_bytes(&format!("{PAY}/arca.png"), b"\x89PNG\r\n\x1a\n");
+        temp.put_bytes(&format!("{PAY}/visa.svg"), b"<svg width=\"1\" height=\"1\"><script/></svg>");
+        temp.put_bytes(&format!("{PAY}/mastercard.svg"), b"<svg width=\"1\" height=\"1\"></svg>");
+        assert!(marks(&temp.0.join(PAY)).is_err(), "PNG без заголовка — ошибка");
+    }
+
     /// Адрес письма: незарезервированные знаки — как есть, остальное —
     /// байтами UTF-8, перенос строки — CRLF (RFC 6068).
     #[test]
@@ -4209,6 +4444,14 @@ mod tests {
                 (app["featureList"].as_array().map(Vec::len) == Some(FEATURES.len()), "что умеет"),
                 (app["publisher"]["@id"] == seller["@id"], "продаёт продавец"),
                 (seller["@type"] == "Organization" && seller["email"] == EMAIL, "продавец с почтой"),
+                (
+                    seller["telephone"] == PHONE
+                        && seller["address"]["@type"] == "PostalAddress"
+                        && seller["address"]["streetAddress"] == t(lang, Key::SellerStreet)
+                        && seller["address"]["addressLocality"] == t(lang, Key::SellerCity)
+                        && seller["address"]["addressCountry"] == "AM",
+                    "продавец с телефоном и адресом подвала (задача 90)",
+                ),
             ];
             for (ok, what) in checks {
                 if !ok {
@@ -4455,6 +4698,10 @@ mod tests {
                 temp.put_bytes(&format!("site/{MEDIA}/{name}-{code}-1280.webp"), &webp(1280, 800));
             }
         }
+        let real = Path::new(env!("CARGO_MANIFEST_DIR")).join("../app/site").join(PAY);
+        for name in MARKS {
+            temp.put_bytes(&format!("site/{PAY}/{name}"), &fs::read(real.join(name)).expect("логотип читается"));
+        }
     }
 
     fn build(temp: &Temp) -> Result<String, String> {
@@ -4515,7 +4762,7 @@ mod tests {
         for name in pages.iter().map(String::as_str).chain(["robots.txt", "sitemap.xml", key.as_str()]) {
             assert!(written.iter().any(|n| n == name), "нет {name}: {written:?}");
         }
-        assert_eq!(written.len(), pages.len() + 5 + MEDIA_PER_LANG * Lang::ALL.len(), "{written:?}");
+        assert_eq!(written.len(), pages.len() + 5 + MEDIA_PER_LANG * Lang::ALL.len() + MARKS.len(), "{written:?}");
         assert_eq!(fs::read_to_string(stage.join(&key)).ok().as_deref(), Some(INDEXNOW_KEY), "файл ключа — сам ключ");
         for page in &pages {
             let html = fs::read_to_string(stage.join(page)).expect("страница читается");

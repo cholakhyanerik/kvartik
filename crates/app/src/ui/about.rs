@@ -22,7 +22,7 @@
 
 use kvartik_core::format::FORMAT_VERSION;
 use kvartik_core::i18n::{self, Key, Lang, fill, t};
-use kvartik_core::release::{EMAIL, LICENSES, Legal, TELEGRAM, feedback_path};
+use kvartik_core::release::{EMAIL, LICENSES, Legal, PHONE, PHONE_LINK, SELLER_TIN, TELEGRAM, feedback_path};
 use kvartik_core::tax::rules;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -147,9 +147,14 @@ pub(super) fn AboutPage(ctx: tax::Ctx) -> impl IntoView {
         <p class="hint">{tr(lang, Key::AboutReport)}</p>
         <p class="hint contacts">
             <span>{tr(lang, Key::Contact)}</span>
+            <a class="phone" href=PHONE_LINK>{PHONE}</a>
             <a href=format!("mailto:{EMAIL}")>{EMAIL}</a>
             <a href=TELEGRAM target="_blank" rel="noopener">{tr(lang, Key::ContactTelegram)}</a>
         </p>
+        <p class="hint">{move || {
+            let lang = lang.get();
+            fill(t(lang, Key::Seller), &[SELLER_TIN, t(lang, Key::SellerAddress)])
+        }}</p>
         <h2>{tr(lang, Key::AboutRules)}</h2>
         <p>{move || {
             let lang = lang.get();

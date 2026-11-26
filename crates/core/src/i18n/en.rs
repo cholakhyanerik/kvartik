@@ -1053,6 +1053,10 @@ macro_rules! en {
     (LegalCurrentEdition) => { "Current edition" };
     (Contact) => { "Contact:" };
     (ContactTelegram) => { "Telegram" };
+    (Seller) => { "Seller: individual entrepreneur Erik Cholakhyan, TIN (ՀՎՀՀ) {}. Address: {}." };
+    (SellerAddress) => { "2\u{A0}Baghramyan, entrance\u{A0}1, floor\u{A0}5, apt\u{A0}13, Yerevan, Armenia" };
+    (SellerStreet) => { "2\u{A0}Baghramyan, entrance\u{A0}1, floor\u{A0}5, apt\u{A0}13" };
+    (SellerCity) => { "Yerevan" };
 
     (AnnualTitle) => { "Annual payments" };
     (AnnualYear) => { "{}" };
@@ -1334,6 +1338,10 @@ macro_rules! en {
     (BuyPlan) => { "“{}” key for a year" };
     (BuyPlanText) => { "Every feature of the app for one individual entrepreneur: the key is issued to their TIN (ՀՎՀՀ) and works on any number of their devices. The term is one year, paid up front for the whole term." };
     (BuyPlanProText) => { "For a bookkeeper: {} entrepreneurs in one app, {} per entrepreneur. The key is issued to your TIN (ՀՎՀՀ), and seats go to the entrepreneurs on the “{}” list in the order they were added; one with their own “{}” key takes no seat. The term is one year, paid up front for the whole term." };
+    (BuyCardTitle) => { "Card payment" };
+    (BuyCard) => { "Pay by card" };
+    (BuyCardSoon) => { "Payment by ArCa, Visa and Mastercard cards will start working once the bank has checked the site. Until then, the key is bought by bank transfer: see the steps below." };
+    (BuyRefund) => { "Refunds: license terms, section\u{A0}6" };
     (BuyHow) => { "How to buy" };
     (BuyStepWrite) => { "Write to {} with the plan, the TIN (ՀՎՀՀ) of your IE or organization, its name, where to send the key, and the words accepting the license terms:" };
     (BuyAccept) => { "I accept the Kvartik license terms in the edition of November 21, 2026" };
@@ -1364,6 +1372,7 @@ macro_rules! en {
     (FeedbackAbout) => { "If you've found a bug or know how to make Kvartik better, please write. The app's author reads every message, and fixes and improvements arrive in the next versions: the app updates itself." };
     (FeedbackTelegram) => { "Message on Telegram" };
     (FeedbackMailHint) => { "The email opens in your mail app with lines left for you to fill in. If it doesn't open, write to {}." };
+    (FeedbackPhone) => { "Or call {}." };
     (FeedbackWhat) => { "What to include" };
     (FeedbackVersion) => { "The app version: in the app, open “{}”, then “{}”." };
     (FeedbackDevice) => { "Your device and browser: for example, an iPhone and Safari, or a Windows computer and Chrome." };

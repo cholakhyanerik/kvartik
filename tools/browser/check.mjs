@@ -116,8 +116,10 @@ const PRICE = RELEASE.match(/pub const PRICE: Money = Money::new\(([\d_]+), Curr
 const PRO_PRICE = RELEASE.match(/pub const PRO_PRICE: Money = Money::new\(([\d_]+), Currency::Amd\);/)?.[1]?.replaceAll("_", "");
 const EMAIL = RELEASE.match(/pub const EMAIL: &str = "([^"]+)";/)?.[1];
 const TELEGRAM = RELEASE.match(/pub const TELEGRAM: &str = "([^"]+)";/)?.[1];
-if (!ACCOUNT || !PRICE || !PRO_PRICE || !EMAIL || !TELEGRAM) {
-  throw new Error("в crates/core/src/release.rs не нашлись ACCOUNT, PRICE, PRO_PRICE, EMAIL и TELEGRAM");
+// Телефон продавца (задача 90) — ссылкой `tel:` в подвале каждой страницы.
+const PHONE_LINK = RELEASE.match(/pub const PHONE_LINK: &str = "([^"]+)";/)?.[1];
+if (!ACCOUNT || !PRICE || !PRO_PRICE || !EMAIL || !TELEGRAM || !PHONE_LINK) {
+  throw new Error("в crates/core/src/release.rs не нашлись ACCOUNT, PRICE, PRO_PRICE, EMAIL, TELEGRAM и PHONE_LINK");
 }
 
 // Рабочий экран: база открыта, разделы прочитаны — под экраном копии встают
@@ -967,6 +969,28 @@ async function landing(browser) {
       // Кнопка «Pro» лендинга (задача 127) ведёт к карточке, которая здесь есть.
       checks.check(`«Купить» ${at}: якорь карточки «Pro» для лендинга`, await page.eval(`return document
         .querySelector('article.buy section.plan h2#plan-pro') ? true : null;`));
+      // Оплата картой (задача 90): кнопка на месте и выключена, пока банк не
+      // включил оплату; три логотипа пришли (файлы корня с хэшем, CSP их
+      // пускает) и стоят на белой плашке одной высоты; телефон продавца —
+      // в подвале.
+      checks.check(`«Купить» ${at}: оплата картой — выключенная кнопка, три логотипа, телефон в подвале`, await page.waitFor(`
+        const pay = document.querySelector("article.buy section.pay");
+        const marks = [...(pay?.querySelectorAll(".marks img") ?? [])];
+        const heights = new Set(marks.map((img) => img.getBoundingClientRect().height));
+        return pay?.querySelector("button.button")?.disabled === true
+          && pay.querySelector("button .label")?.textContent === ${JSON.stringify(t("BuyCard", lang))}
+          && marks.length === 3 && marks.every((img) => img.complete && img.naturalWidth > 0)
+          && heights.size === 1
+          && document.querySelector('footer a.phone[href="${PHONE_LINK}"]') ? true : null;`));
+      // «Возврат» ведёт к разделу о возврате в условиях своего языка: якорь
+      // там есть, и страница открывается на нём.
+      const refund = await page.eval(`return document.querySelector("article.buy section.pay a[href*='#p']")?.getAttribute("href") ?? null;`);
+      await page.go(`${ORIGIN}${refund}`);
+      checks.check(`«Купить» ${at}: «Возврат» — к разделу условий о возврате`, await page.waitFor(`
+        const target = document.getElementById(location.hash.slice(1));
+        return location.pathname === ${JSON.stringify(lang === "hy" ? "/terms/" : `/${lang}/terms/`)}
+          && target?.tagName === "H2" && /^6\\. / .test(target.textContent) ? true : null;`));
+      await page.go(`${ORIGIN}${at}`);
       // «Вопросы» (задача 93) — пять, раскрываются без скрипта (`<details>`),
       // и раскрытые все разом не растягивают страницу вбок.
       checks.check(`«Купить» ${at}: пять вопросов раскрываются, и без прокрутки вбок`, await page.eval(`

@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.211",
+      "date": "2026-11-26",
+      "hy": [
+        "«Գնել Kvartik-ը» էջում հայտնվել է «Վճարում քարտով» բաժինը՝ ArCa, Visa և Mastercard լոգոներով. քարտով վճարումը կաշխատի, երբ բանկը ստուգի կայքը, իսկ առայժմ բանալին գնում են փոխանցումով։ «Ծրագրի մասին»-ում և կայքի յուրաքանչյուր էջի ներքևում՝ վաճառողի հեռախոսն ու հասցեն։"
+      ],
+      "ru": [
+        "На странице «Купить Kvartik» появился раздел «Оплата картой» с логотипами ArCa, Visa и Mastercard: оплата картой заработает, когда банк проверит сайт, а пока ключ покупают переводом. В «О программе» и внизу каждой страницы сайта — телефон и адрес продавца."
+      ],
+      "en": [
+        "The “Buy Kvartik” page now has a “Card payment” section with ArCa, Visa and Mastercard logos: card payment will start working once the bank has checked the site, and until then the key is bought by bank transfer. About and the bottom of every site page show the seller’s phone and address."
+      ]
+    },
+    {
       "version": "0.0.210",
       "date": "2026-11-26",
       "hy": [
@@ -248,25 +261,6 @@
       ],
       "en": [
         "A new device that restores a backup takes its password with its own salt, not the file’s: the automatic backup key of another computer no longer opens this device’s manual backups."
-      ]
-    },
-    {
-      "version": "0.0.191",
-      "date": "2026-11-25",
-      "hy": [
-        "«Այլ սարք» էկրանում հակադարձ կոդն այլևս հետ չի ուղարկում առաջին սարքի այսօրվա փոփոխությունները՝ միայն այն, ինչ արվել է այստեղ։ Մինչ QR կոդերը շրջան են անում, հեռախոսի էկրանը չի մարում։",
-        "Ավտոմատ պատճենների թղթապանակից վերականգնվում է յուրաքանչյուր սարքի ամենաթարմ պատճենը՝ երկու համակարգիչների փոփոխությունները միասին, գաղտնաբառով մեկ անգամ։ Մի քանի ԱՁ ունեցող հաշվապահը մեկ ԱՁ-ի կոդին պատասխանում է միայն այդ ԱՁ-ի կոդով։",
-        "Եթե մատյանի ֆայլերն ավելի շատ են, քան փոխանցում են QR կոդերը, անդորրագրից հետո միանգամից մեկ գլխավոր կոճակ է՝ «Ուղարկել պատճենի ֆայլով», իսկ չափը՝ մեգաբայթերով։"
-      ],
-      "ru": [
-        "На экране «Другое устройство» встречный код больше не возвращает первому устройству его же сегодняшние правки — только то, что сделано здесь. Пока идут QR-коды, экран телефона не гаснет.",
-        "Из папки автокопий ложится самая свежая копия каждого устройства: правки двух компьютеров вместе, с паролем один раз. Бухгалтер с несколькими ИП отвечает на код одного ИП кодом только этого ИП.",
-        "Если файлов книги больше, чем передают QR-коды, после квитанции сразу одна главная кнопка — «Отправить копией файлом», а их вес — в мегабайтах."
-      ],
-      "en": [
-        "On the “Another device” screen, the code back no longer returns the first device’s own changes of today to it — only what was done here. While the QR codes circle, the phone screen stays on.",
-        "From the automatic backup folder, the newest backup of every device comes in: the changes of two computers together, with the password asked once. An accountant with several IEs answers a code of one IE with a code of that IE only.",
-        "If ledger files are more than QR codes carry, the receipt is followed by one main button — “Send as a backup file”, and their size is in megabytes."
       ]
     }
   ]
