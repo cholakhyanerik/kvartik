@@ -982,9 +982,12 @@ fn described(lang: Lang, app: &str) -> String {
 
 /// Продавец в данных для поисковиков (`Organization`) — один у страниц
 /// языков и страниц о налоге (задача 126): имя, сайт, значок, почта ядра,
-/// а с задачи 90 — телефон и адрес, те же, что в подвале. Адрес `@id` —
-/// один на сайте, и страница о налоге называет издателем того же продавца,
-/// что и программа.
+/// а с задачи 90 — телефон, тот же, что в подвале, и из адреса — только
+/// город и страна. Адрес целиком банк требует на странице, а не в разметке:
+/// там его видит человек в строке о продавце (`Key::Seller`), а из JSON-LD
+/// машины легче всего берут полный домашний адрес и связывают его с именем
+/// продавца (решение человека 2026-11-26). Адрес `@id` — один на сайте,
+/// и страница о налоге называет издателем того же продавца, что и программа.
 fn seller(lang: Lang, app: &str) -> serde_json::Value {
     serde_json::json!({
         "@type": "Organization",
@@ -996,7 +999,6 @@ fn seller(lang: Lang, app: &str) -> serde_json::Value {
         "telephone": PHONE,
         "address": {
             "@type": "PostalAddress",
-            "streetAddress": t(lang, Key::SellerStreet),
             "addressLocality": t(lang, Key::SellerCity),
             "addressCountry": "AM",
         },
@@ -4319,17 +4321,80 @@ mod tests {
         assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
-    /// Адрес продавца для глаз (`SellerAddress`) — с теми же улицей
-    /// и городом, что адрес для поисковиков (`SellerStreet`, `SellerCity`):
-    /// в подвале и в данных JSON-LD продавец живёт по одному адресу.
+    /// Адрес продавца — целиком в строке о продавце (`SellerAddress`: её
+    /// требует банк, задача 90), а в данных для поисковиков — только город
+    /// и страна (решение человека 2026-11-26): полный домашний адрес из
+    /// JSON-LD машины легче всего связывают с именем продавца. В каждом блоке
+    /// JSON-LD сайта адрес один — `PostalAddress` ровно с городом и страной,
+    /// город — тот, что в строке о продавце подвала той же страницы, а частей
+    /// адреса с цифрой (улица с домом, подъезд, этаж, квартира) в блоке нет
+    /// ни поля `streetAddress`, ни текстом.
     #[test]
     fn the_seller_address_is_one_in_words_and_in_data() {
-        for lang in Lang::ALL {
-            let full = t(lang, Key::SellerAddress);
-            for part in [Key::SellerStreet, Key::SellerCity] {
-                assert!(full.contains(t(lang, part)), "{lang:?}: в «{full}» нет «{}»", t(lang, part));
+        fn objects<'a>(value: &'a serde_json::Value, out: &mut Vec<&'a serde_json::Map<String, serde_json::Value>>) {
+            match value {
+                serde_json::Value::Object(map) => {
+                    out.push(map);
+                    map.values().for_each(|inner| objects(inner, out));
+                }
+                serde_json::Value::Array(list) => list.iter().for_each(|inner| objects(inner, out)),
+                _ => {}
             }
         }
+        let mut wrong = Vec::new();
+        let mut langs = Vec::new();
+        for (page, html) in every_page() {
+            let Some(json) = json_ld(&html) else { continue };
+            let lang = Lang::ALL
+                .into_iter()
+                .find(|lang| html.contains(&format!("<html lang=\"{}\">", lang.code())))
+                .expect("язык страницы");
+            let full = t(lang, Key::SellerAddress);
+            let line = escape(&fill(t(lang, Key::Seller), &[SELLER_TIN, full]));
+            if !html[html.find("<footer>").expect("подвал")..].contains(&format!("<p>{line}</p>")) {
+                wrong.push(format!("{page}: в подвале нет строки о продавце"));
+            }
+            let street: Vec<&str> = full.split(", ").filter(|part| part.contains(|c: char| c.is_ascii_digit())).collect();
+            assert!(!street.is_empty(), "{lang:?}: в «{full}» нет частей с цифрой — проверка улицы пуста");
+            for part in street {
+                if json.contains(part) {
+                    wrong.push(format!("{page}: в JSON-LD часть адреса «{part}»"));
+                }
+            }
+            let data: serde_json::Value = serde_json::from_str(&json).expect("JSON-LD — JSON");
+            let mut all = Vec::new();
+            objects(&data, &mut all);
+            let mut addresses = 0;
+            for object in all {
+                if object.contains_key("streetAddress") {
+                    wrong.push(format!("{page}: в JSON-LD поле streetAddress"));
+                }
+                if object.get("@type").and_then(serde_json::Value::as_str) != Some("PostalAddress") {
+                    continue;
+                }
+                addresses += 1;
+                let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+                keys.sort_unstable();
+                if keys != ["@type", "addressCountry", "addressLocality"] {
+                    wrong.push(format!("{page}: в адресе JSON-LD поля {keys:?}, а ждали только город и страну"));
+                }
+                let city = object.get("addressLocality").and_then(serde_json::Value::as_str).unwrap_or_default();
+                if city.is_empty() || !line.contains(&escape(city)) {
+                    wrong.push(format!("{page}: город JSON-LD «{city}» — не город строки о продавце «{line}»"));
+                }
+                if object.get("addressCountry").and_then(serde_json::Value::as_str) != Some("AM") {
+                    wrong.push(format!("{page}: страна в адресе JSON-LD — не AM"));
+                }
+            }
+            if addresses != 1 {
+                wrong.push(format!("{page}: адресов в JSON-LD {addresses}, а ждали один — продавца"));
+            }
+            if !langs.contains(&lang) {
+                langs.push(lang);
+            }
+        }
+        assert_eq!(langs.len(), Lang::ALL.len(), "JSON-LD нашёлся не на всех языках: {langs:?}");
+        assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
     /// Логотипы — настоящие файлы с размером, который видит сборка, и без
@@ -4447,10 +4512,10 @@ mod tests {
                 (
                     seller["telephone"] == PHONE
                         && seller["address"]["@type"] == "PostalAddress"
-                        && seller["address"]["streetAddress"] == t(lang, Key::SellerStreet)
+                        && seller["address"].get("streetAddress").is_none()
                         && seller["address"]["addressLocality"] == t(lang, Key::SellerCity)
                         && seller["address"]["addressCountry"] == "AM",
-                    "продавец с телефоном и адресом подвала (задача 90)",
+                    "продавец с телефоном, городом и страной, без улицы (задача 90; решение человека 2026-11-26)",
                 ),
             ];
             for (ok, what) in checks {

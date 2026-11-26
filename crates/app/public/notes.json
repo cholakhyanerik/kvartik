@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.212",
+      "date": "2026-11-27",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось."
+      ],
+      "en": [
+        "Nothing changed in the app."
+      ]
+    },
+    {
       "version": "0.0.211",
       "date": "2026-11-26",
       "hy": [
@@ -248,19 +261,6 @@
       ],
       "en": [
         "In Chrome and Edge, “Paste” no longer reads the clipboard by itself: it puts the cursor in the code field, and you paste — with Ctrl+V or from the keyboard suggestion. If you allowed the site to read the clipboard before, you can remove that permission in the site settings."
-      ]
-    },
-    {
-      "version": "0.0.192",
-      "date": "2026-11-25",
-      "hy": [
-        "Նոր սարքը, պատճենը վերականգնելով, նրա գաղտնաբառն իրեն է վերցնում սեփական աղով, ոչ թե ֆայլի. այլ համակարգչի ավտոմատ պատճենի բանալին այլևս չի բացի այս սարքի ձեռքով արված պատճենները։"
-      ],
-      "ru": [
-        "Новое устройство, восстановив копию, берёт её пароль себе со своей солью, а не с солью файла: ключ автокопии другого компьютера больше не откроет ручные копии этого устройства."
-      ],
-      "en": [
-        "A new device that restores a backup takes its password with its own salt, not the file’s: the automatic backup key of another computer no longer opens this device’s manual backups."
       ]
     }
   ]

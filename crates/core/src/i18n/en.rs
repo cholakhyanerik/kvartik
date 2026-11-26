@@ -1055,7 +1055,6 @@ macro_rules! en {
     (ContactTelegram) => { "Telegram" };
     (Seller) => { "Seller: individual entrepreneur Erik Cholakhyan, TIN (ՀՎՀՀ) {}. Address: {}." };
     (SellerAddress) => { "2\u{A0}Baghramyan, entrance\u{A0}1, floor\u{A0}5, apt\u{A0}13, Yerevan, Armenia" };
-    (SellerStreet) => { "2\u{A0}Baghramyan, entrance\u{A0}1, floor\u{A0}5, apt\u{A0}13" };
     (SellerCity) => { "Yerevan" };
 
     (AnnualTitle) => { "Annual payments" };
