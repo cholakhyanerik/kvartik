@@ -627,16 +627,7 @@ fn page(lang: Lang, css: &str, js: &str, app: &str, calc: &Calc, media: &Media, 
         calculator = calculator(lang, calc, app),
         look = look(lang, media),
         link = app_link(app, lang),
-        price = plan_card(
-            lang,
-            Tariff::Standard,
-            "price",
-            &format!(
-                "        <p class=\"actions\"><a class=\"button\" href=\"{}\"><span class=\"label\">{}</span></a></p>\n",
-                buy_path(lang),
-                text(Key::BuyLink)
-            )
-        ),
+        price = plans(lang),
         headline = text(Key::WelcomeHeadline),
         lead = text(Key::LandingLead),
         open = text(Key::LandingOpen),
@@ -901,6 +892,16 @@ impl Tariff {
         }
     }
 
+    /// Якорь карточки тарифа на странице «Купить»: на него ведёт и кнопка
+    /// карточки «Pro» лендинга (задача 127) — одно имя, и ссылка с ним не
+    /// разойдётся.
+    const fn buy_id(self) -> &'static str {
+        match self {
+            Tariff::Standard => "plan",
+            Tariff::Pro => "plan-pro",
+        }
+    }
+
     /// Цена на год.
     const fn price(self) -> Money {
         match self {
@@ -945,6 +946,32 @@ fn plan_card(lang: Lang, tariff: Tariff, id: &str, below: &str) -> String {
         title = escape(&fill(t(lang, Key::BuyPlan), &[tariff.name(lang)])),
         price = escape(&i18n::money(lang, tariff.price())),
         about = escape(&tariff.about(lang)),
+    )
+}
+
+/// Карточки ключей лендинга (задача 127): «Стандарт» и «Pro» рядом —
+/// бухгалтер и организация видят цену «Pro» и за ключ, и за ИП, не уходя на
+/// «Купить», а цены описания для поисковиков (`described`) видны на самой
+/// странице, как того требует Google. Карточки — те же, что на «Купить»
+/// (`plan_card`): слова и цены не разойдутся. Кнопка ведёт на «Купить» своего
+/// языка, а у «Pro» — к его карточке там (`Tariff::buy_id`). Рядом
+/// карточки стоят с 48rem, уже — одна под другой (`site/landing.css`).
+fn plans(lang: Lang) -> String {
+    let card = |tariff: Tariff, id: &str, href: &str| {
+        plan_card(
+            lang,
+            tariff,
+            id,
+            &format!(
+                "        <p class=\"actions\"><a class=\"button\" href=\"{href}\"><span class=\"label\">{}</span></a></p>\n",
+                escape(t(lang, Key::BuyLink))
+            ),
+        )
+    };
+    format!(
+        "      <div class=\"plans\">\n{}{}      </div>\n",
+        card(Tariff::Standard, "price", buy_path(lang)),
+        card(Tariff::Pro, "price-pro", &format!("{}#{}", buy_path(lang), Tariff::Pro.buy_id())),
     )
 }
 
@@ -1027,8 +1054,8 @@ fn buy_page(lang: Lang, css: &str, js: &str, app: &str, checked: Option<Date>) -
         top = top(lang, url(lang), buy_path),
         footer = footer(lang, app, checked),
         title = text(Key::BuyTitle),
-        standard_card = plan_card(lang, standard, "plan", ""),
-        pro_card = plan_card(lang, pro, "plan-pro", ""),
+        standard_card = plan_card(lang, standard, standard.buy_id(), ""),
+        pro_card = plan_card(lang, pro, pro.buy_id(), ""),
         trial = trial(lang),
         after_trial = text(Key::WelcomeWithoutKey),
         faq = faq(lang),
@@ -2613,6 +2640,82 @@ mod tests {
             }
         }
         assert!(sample(Lang::Ru).contains("24\u{A0}000\u{A0}֏"), "цена в рублёвой записи");
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// Карточки ключей лендинга (задача 127): «Стандарт» и «Pro» рядом, одной
+    /// обёрткой `plans`, у каждой — своя цена ядра, свой якорь и те же слова,
+    /// что у её карточки на «Купить»; кнопка ведёт на «Купить» своего языка,
+    /// а у «Pro» — прямо к его карточке там. Цены описания для поисковиков —
+    /// те же, что видны на карточках: Google требует, чтобы цена разметки
+    /// была на самой странице.
+    #[test]
+    fn the_landing_shows_both_keys_with_the_core_prices() {
+        let mut wrong = Vec::new();
+        for lang in Lang::ALL {
+            let html = sample(lang);
+            let buy = buy_sample(lang);
+            let Some(plans) = piece(&html, "<div class=\"plans\">", "      </div>\n") else {
+                wrong.push(format!("{lang:?}: нет обёртки карточек ключей"));
+                continue;
+            };
+            if plans.matches("<section class=\"card plan\"").count() != 2 || html.matches("class=\"card plan\"").count() != 2 {
+                wrong.push(format!("{lang:?}: карточек ключей не две"));
+            }
+            for (tariff, id, href) in [
+                (Tariff::Standard, "price", buy_path(lang).to_owned()),
+                (Tariff::Pro, "price-pro", format!("{}#{}", buy_path(lang), Tariff::Pro.buy_id())),
+            ] {
+                let head = format!("<section class=\"card plan\" aria-labelledby=\"{id}\" data-tilt>");
+                let Some(card) = piece(plans, &head, "</section>") else {
+                    wrong.push(format!("{lang:?}: нет карточки {id}"));
+                    continue;
+                };
+                let price = format!("<p class=\"price\">{}</p>", escape(&i18n::money(lang, tariff.price())));
+                let about = format!("<p>{}</p>", escape(&tariff.about(lang)));
+                let title = format!("<h2 id=\"{id}\">{}</h2>", escape(&fill(t(lang, Key::BuyPlan), &[tariff.name(lang)])));
+                let button = format!(
+                    "<a class=\"button\" href=\"{href}\"><span class=\"label\">{}</span></a>",
+                    escape(t(lang, Key::BuyLink))
+                );
+                for need in [&title, &price, &about, &button] {
+                    if !card.contains(need.as_str()) {
+                        wrong.push(format!("{lang:?} {id}: нет {need}"));
+                    }
+                }
+                // Те же слова и цена — у карточки этого тарифа на «Купить».
+                if !buy.contains(&about) || !buy.contains(&price) {
+                    wrong.push(format!("{lang:?} {id}: слова или цена не те, что на «Купить»"));
+                }
+            }
+            if !buy.contains(&format!("<h2 id=\"{}\">", Tariff::Pro.buy_id())) {
+                wrong.push(format!("{lang:?}: на «Купить» нет якоря карточки «Pro»"));
+            }
+            // Цены разметки — те же, что видны на карточках, по порядку.
+            let shown: Vec<String> = plans
+                .match_indices("<p class=\"price\">")
+                .filter_map(|(at, open)| {
+                    let rest = &plans[at + open.len()..];
+                    rest.find("</p>").map(|end| rest[..end].to_owned())
+                })
+                .collect();
+            let data: serde_json::Value = json_ld(&html)
+                .and_then(|json| serde_json::from_str(&json).ok())
+                .unwrap_or_default();
+            let offered: Vec<String> = data["@graph"][0]["offers"]
+                .as_array()
+                .map(|offers| {
+                    offers
+                        .iter()
+                        .filter_map(|offer| offer["price"].as_str()?.parse::<i64>().ok())
+                        .map(|price| escape(&i18n::money(lang, Money::new(price, Currency::Amd))))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if shown.len() != 2 || shown != offered {
+                wrong.push(format!("{lang:?}: на карточках {shown:?}, а в разметке {offered:?}"));
+            }
+        }
         assert!(wrong.is_empty(), "{wrong:#?}");
     }
 

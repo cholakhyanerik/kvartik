@@ -564,6 +564,32 @@ footer .links {
   line-height: var(--leading-tight);
 }
 
+/* Ключи на лендинге (задача 127): «Стандарт» и «Pro» — на телефоне одна
+   под другой, с 48rem — рядом, одной высоты, а «Купить» у обеих внизу
+   карточки, вровень. Уже 48rem цена «Pro» крупным шрифтом в половине
+   колонки стояла бы впритык к краю карточки. */
+main > .plans {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-8);
+}
+
+.plans > .card {
+  display: flex;
+  flex-direction: column;
+}
+
+.plans > .card .actions {
+  margin-top: auto;
+  padding-top: var(--space-4);
+}
+
+@media (min-width: 48rem) {
+  main > .plans {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* Страница «Купить»: читается, как юридический текст (`.legal`), а шаги
    покупки отделены воздухом больше, чем строки внутри шага. */
 .buy .plan {
@@ -921,12 +947,20 @@ footer .links {
     main > section:not(.hero, :has(.cards)),
     main > section > h2,
     .cards li,
+    .plans > .card,
     footer {
       animation-name: motion-in;
       animation-fill-mode: both;
       animation-timing-function: linear;
       animation-timeline: view();
       animation-range: entry 0% entry var(--motion-reveal);
+    }
+
+    /* Ключи рядом (задача 127) — второй чуть позже, как соседние карточки. */
+    @media (min-width: 48rem) {
+      .plans > .card:nth-child(2) {
+        animation-range: entry var(--motion-step) entry calc(var(--motion-reveal) + var(--motion-step));
+      }
     }
 
     @media (min-width: 40rem) {

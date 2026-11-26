@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.206",
+      "date": "2026-11-26",
+      "hy": [
+        "Ծրագրում ոչինչ չի փոխվել։"
+      ],
+      "ru": [
+        "В программе ничего не изменилось."
+      ],
+      "en": [
+        "Nothing changed in the app."
+      ]
+    },
+    {
       "version": "0.0.205",
       "date": "2026-11-25",
       "hy": [
@@ -254,22 +267,6 @@
       ],
       "en": [
         "After restoring a backup, taking a code or making one, the app says what came in by kind: invoices and acts, clients, ledger entries, ledger files, and separately how many records were already here."
-      ]
-    },
-    {
-      "version": "0.0.186",
-      "date": "2026-11-24",
-      "hy": [
-        "«Այլ սարք» էկրանին, երբ անդորրագիրն ասում է, որ կոդն ընդունված է, ծրագիրն անմիջապես նշում է, քանի ֆայլ այն չէր տանում, և ֆայլերի կոդը դառնում է գլխավոր կոճակը։",
-        "Եթե ֆայլերը չեն տեղավորվում կոդերի շարքում, «Ուղարկել պատճենի ֆայլով» կոճակը բացում է պատճենի էկրանն արդեն պատրաստ պատճենով՝ առանց գաղտնաբառը կրկին մուտքագրելու։"
-      ],
-      "ru": [
-        "На экране «Другое устройство», когда квитанция говорит, что код принят, программа сразу называет, сколько файлов он не нёс, и код файлов становится главной кнопкой.",
-        "Если файлы не помещаются в серию кодов, кнопка «Отправить копией файлом» открывает экран копии с готовой копией — без второго ввода пароля."
-      ],
-      "en": [
-        "On the “Another device” screen, once the receipt says the code was taken, the app tells you how many files it didn’t carry, and the code of files becomes the main button.",
-        "If the files don’t fit in a series of codes, “Send as a backup file” opens the backup screen with the backup already made, without typing the password again."
       ]
     }
   ]

@@ -877,9 +877,32 @@ async function landing(browser) {
       // прокрутки вбок не видела (Chrome 157, 2026-11-09).
       checks.check(`лендинг ${at}: без прокрутки вбок на 360`, await page.eval(`const d = document.documentElement;
         return d.clientWidth === 360 && d.scrollWidth <= d.clientWidth ? true : null;`));
-      checks.check(`лендинг ${at}: карточка цены ведёт на «Купить»`, await page.eval(`return document
-        .querySelector('section.plan .price')?.textContent.replace(/\\D/g, "") === ${JSON.stringify(PRICE)}
-        && document.querySelector('section.plan a.button[href="${buyPath(lang)}"]') ? true : null;`));
+      // Ключи (задачи 35 и 127): «Стандарт» и «Pro» — у каждой цена ядра
+      // и «Купить» своего языка, у «Pro» — прямо к его карточке там; на 360
+      // одна под другой, и ни цена, ни слова не шире карточки. Рядом — ниже,
+      // на 1280.
+      const PLANS = `const cards = [...document.querySelectorAll("main > .plans > section.card.plan")];
+        const prices = cards.map((c) => c.querySelector(".price")?.textContent.replace(/\\D/g, ""));
+        const links = cards.map((c) => c.querySelector("a.button")?.getAttribute("href"));
+        const [a, b] = cards.map((c) => c.getBoundingClientRect());
+        // Строки карточки — внутри её краёв, и ни одна не шире себя. Не
+        // \`scrollWidth\` самой карточки: блик \`[data-tilt]::after\` под её
+        // \`overflow: hidden\` вдвое шире её, и он был бы «вбок» всегда.
+        const fits = cards.every((c) => { const box = c.getBoundingClientRect();
+          return [...c.children].every((e) => { const r = e.getBoundingClientRect();
+            return r.left >= box.left - 0.5 && r.right <= box.right + 0.5 && e.scrollWidth <= e.clientWidth; }); });
+        const ok = cards.length === 2 && document.querySelectorAll("section.plan").length === 2 && fits
+          && prices.join() === ${JSON.stringify(`${PRICE},${PRO_PRICE}`)}
+          && links.join() === ${JSON.stringify(`${buyPath(lang)},${buyPath(lang)}#plan-pro`)}`;
+      checks.check(`лендинг ${at}: «Стандарт» и «Pro» с ценами ядра ведут на «Купить», на 360 — одна под другой`,
+        await page.eval(`${PLANS} && b.top >= a.bottom;
+          return ok ? true : { cards: cards.length, prices, links, fits, first: a?.bottom, second: b?.top };`));
+      await page.emulate(1280);
+      checks.check(`лендинг ${at}: на 1280 «Стандарт» и «Pro» рядом, одной высоты`,
+        await page.eval(`${PLANS} && Math.abs(a.top - b.top) < 1 && b.left >= a.right && Math.abs(a.height - b.height) < 1;
+          return ok ? true : { cards: cards.length, prices, links, fits, first: a && [a.left, a.top, a.right, a.height],
+            second: b && [b.left, b.top, b.right, b.height] };`));
+      await page.emulate(360);
       // Описание программы для поисковиков (задача 118): блок JSON-LD
       // разбирается, цена ключа — та же, что на карточке, и ни одного
       // отказа CSP на странице.
@@ -929,6 +952,9 @@ async function landing(browser) {
         && getComputedStyle(document.querySelector("h1")).fontFamily.includes("Kvartik Serif") ? true : null;`));
       checks.check(`«Купить» ${at}: без прокрутки вбок на 360`, await page.eval(`const d = document.documentElement;
         return d.clientWidth === 360 && d.scrollWidth <= d.clientWidth ? true : null;`));
+      // Кнопка «Pro» лендинга (задача 127) ведёт к карточке, которая здесь есть.
+      checks.check(`«Купить» ${at}: якорь карточки «Pro» для лендинга`, await page.eval(`return document
+        .querySelector('article.buy section.plan h2#plan-pro') ? true : null;`));
       // «Вопросы» (задача 93) — пять, раскрываются без скрипта (`<details>`),
       // и раскрытые все разом не растягивают страницу вбок.
       checks.check(`«Купить» ${at}: пять вопросов раскрываются, и без прокрутки вбок`, await page.eval(`
