@@ -719,7 +719,7 @@ fn PaymentCard(lang: ReadSignal<Lang>, card: Card) -> impl IntoView {
                     Some(Due::Day(day)) => rows.push(pair(t(lang, Key::AnnualDueLabel).to_owned(), i18n::date(lang, deadlines::last_day(day)))),
                     Some(Due::Monthly(day)) => rows.push(pair(
                         t(lang, Key::AnnualDueLabel).to_owned(),
-                        fill(t(lang, Key::AnnualHealthMonthDue), &[&day.to_string()]),
+                        fill(t(lang, Key::AnnualHealthMonthDue), &[&i18n::month_day(lang, day)]),
                     )),
                     None => {}
                 }

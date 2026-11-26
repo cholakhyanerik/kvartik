@@ -682,7 +682,7 @@ fn annual_lines(lang: Lang, annual: &Annual, today: Date, blocks: &mut Vec<Block
         ),
         Health::Month { monthly, due_day, .. } => fill(
             t(lang, Key::CalcHealthMonthly),
-            &[&amd(lang, monthly), &due_day.to_string()],
+            &[&amd(lang, monthly), &i18n::month_day(lang, due_day)],
         ),
         Health::Out(_) => none.to_owned(),
         Health::Unknown(_) | Health::Unclear(_) | Health::NoRule => unknown.to_owned(),

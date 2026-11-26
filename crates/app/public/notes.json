@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.208",
+      "date": "2026-11-26",
+      "hy": [
+        "Տարեկան վճարումների էկրանին անգլերենով առողջության ապահովագրավճարի ամսական ժամկետն այժմ գրվում է «by the 20th of the next month», ինչպես կայքի ուղեցույցներում։"
+      ],
+      "ru": [
+        "На экране годовых платежей по-английски срок помесячного взноса медстраховки теперь\u00a0— «by the 20th of the next month», как в руководствах на сайте."
+      ],
+      "en": [
+        "On the annual payments screen, the monthly health insurance deadline now reads “by the 20th of the next month”, as in the guides on the site."
+      ]
+    },
+    {
       "version": "0.0.207",
       "date": "2026-11-26",
       "hy": [
@@ -254,19 +267,6 @@
       ],
       "en": [
         "On the “Another device” screen, changes can now go both ways in one session: the device that received the code offers “Send the changes from here back” under the receipt, with the same key and no password. On the first device, scan that code where you scanned the receipt."
-      ]
-    },
-    {
-      "version": "0.0.188",
-      "date": "2026-11-24",
-      "hy": [
-        "«Այլ սարք» էկրանի QR կոդերը կարելի է բացել ամբողջ էկրանով՝ սպիտակ ֆոնի վրա և հնարավորինս մեծ. մյուս սարքի տեսախցիկը դրանք կարդում է մեկ մետրից։ Բարձրացրեք էկրանի պայծառությունը, և կոդը կկարդացվի ավելի արագ։"
-      ],
-      "ru": [
-        "QR-коды на экране «Другое устройство» можно открыть на весь экран — на белом и как можно крупнее: камера другого устройства читает их с метра. Поднимите яркость экрана, и код прочтётся быстрее."
-      ],
-      "en": [
-        "QR codes on the “Another device” screen can open full screen, on white and as large as possible, so the other device’s camera reads them from a metre away. Turn the screen brightness up and the code is read faster."
       ]
     }
   ]

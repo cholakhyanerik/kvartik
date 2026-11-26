@@ -176,6 +176,28 @@ fn the_answer_speaks_every_language() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
+/// Взнос медстраховки с 2027 года — помесячно, 10 800 ֏ (ՀՕ-459-Ն, ст. 13,
+/// ч. 1; ст. 45, ч. 1, п. 6), а срок по прочтению программы — до 20-го
+/// числа следующего месяца (ст. 14, ч. 4). Число месяца — словом языка,
+/// по-английски порядковым: «the 20th», а не «day 20» (правка человека
+/// 2026-11-26). Июнь 2027 года — годовые платежи уже за 2027 год.
+#[test]
+fn the_monthly_premium_names_its_day_in_words() {
+    let mut wrong = Vec::new();
+    let summer = day(2027, 6, 1);
+    for (lang, want) in [
+        (Lang::Ru, "10\u{a0}800\u{a0}֏ в месяц, до 20-го числа следующего месяца"),
+        (Lang::En, "AMD\u{a0}10,800 a month, by the 20th of the next month"),
+        (Lang::Am, "ամսական 10\u{a0}800\u{a0}֏, մինչև հաջորդ ամսվա 20-ը"),
+    ] {
+        let got = answer(lang, &raw(IncomeKind::HighTech, &i18n::amount(lang, Money::new(1_000_000, Currency::Amd))), summer);
+        if !got.blocks.iter().any(|block| block.text.contains(want)) {
+            wrong.push(format!("{lang:?}: нет «{want}» — {:#?}", got.blocks));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// Пустой оборот — подсказка без ошибки; не число и меньше нуля — ошибка
 /// поля словами, а чисел нет.
 #[test]

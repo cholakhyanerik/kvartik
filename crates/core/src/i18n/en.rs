@@ -1127,7 +1127,7 @@ macro_rules! en {
     (AnnualHealth) => { "Health insurance premium" };
     (AnnualHealthYearRate) => { "Annual rate in one payment" };
     (AnnualHealthYearWhy) => { "Your turnover for {} in the ledger is {}, over {}: for this year it's the annual rate in one payment (Law ՀՕ-459-Ն, Art.\u{A0}45 and\u{A0}46)." };
-    (AnnualHealthMonthDue) => { "by day {} of the next month" };
+    (AnnualHealthMonthDue) => { "by the {} of the next month" };
     (AnnualHealthMonthLaw) => { "Monthly, for every IE whatever the turnover (Law ՀՕ-459-Ն, Art.\u{A0}14(4))." };
     (AnnualHealthAfterYear) => { "If you paid the annual rate for last year, you're insured for 12\u{A0}months from the month after paying: the law doesn't say outright from which month to pay monthly\u{A0}— check with your accountant." };
     (AnnualHealthEmployed) => { "If you're also employed, your total premium for a month can't exceed the monthly rate: the Fund refunds any overpayment on request (Law ՀՕ-459-Ն, Art.\u{A0}14(7) and\u{A0}(8))." };
@@ -1297,6 +1297,9 @@ macro_rules! en {
     (GuideHealthDescription) => { "The universal health insurance premium of an individual entrepreneur in Armenia from {}: {} a month, by the {} of each month, who pays it and for whom the state pays\u{A0}— with the articles of Law ՀՕ-459-Ն." };
     (GuideHealthAnswer) => { "From {}, an IE who is an Armenian citizen or a foreigner with residence status pays the universal health insurance premium whatever the income: {} a month, {} a year, by the {} of each month after the month in which they became a payer. For an Armenian citizen aged {} or over who is a resident, the state pays. The law doesn't say which month each payment is for: in Kvartik's reading, the premium for January {} is due by {}, but it's safer to pay it in January, by {}; this page will be updated when the SRC answers." };
     (GuideHealthReading) => { "The law says the premium is paid by the {} of each month following the month in which the IE became a payer (Art.\u{A0}14(4)), but doesn't say directly which month each payment covers. The deadlines here are Kvartik's reading: each month's premium by the {} of the following month; check with your accountant." };
+    (GuideHealthFirstSafe) => { "Safer to pay in January, by {}\u{A0}— see {}" };
+    (GuideHealthAnswerHere) => { "the answer at the top" };
+    (GuideHealthAnswerThere) => { "the answer at the top of the health insurance page" };
     (GuideHealthWho) => { "Who pays" };
     (GuideHealthPayer) => { "The premium is paid by an IE who is an Armenian citizen or a foreigner with residence status (Law ՀՕ-459-Ն, Art.\u{A0}11(1); 11(2)(12); 14(4)). Without residence status, a foreigner isn't covered by health insurance, except asylum seekers and refugees." };
     (GuideHealthState) => { "For an IE who is an Armenian citizen aged {} or over and a resident of Armenia under the health insurance law (Art.\u{A0}2(1)(30)), the state pays the premium (Art.\u{A0}11(2)(2); Art.\u{A0}14(2)). The law doesn't name a foreigner with residence status in this group: after {} they still pay themselves." };
@@ -1384,7 +1387,7 @@ macro_rules! en {
     (CalcQuarterUnknown) => { "There's no rule for this type of activity in this quarter, so the example isn't calculated." };
     (CalcAnnualHead) => { "Annual payments for {}: an example" };
     (CalcAnnualTotal) => { "Total by {}: {}" };
-    (CalcHealthMonthly) => { "{} a month, by day {} of the next month" };
+    (CalcHealthMonthly) => { "{} a month, by the {} of the next month" };
     (CalcHealthYear) => { "{} in one payment by {}" };
     (CalcAskBirthYear) => { "Enter your year of birth: the social payment depends on it." };
     (CalcAskResidency) => { "Choose your citizenship: the social payment, stamp duty and health insurance premium depend on it." };

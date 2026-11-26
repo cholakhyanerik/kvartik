@@ -218,6 +218,65 @@ async fn annual_payments_are_shown_on_home_and_their_screen() {
     assert!(wrong.is_empty(), "годовые платежи: {wrong:#?}");
 }
 
+/// Срок помесячного взноса медстраховки — с 2027 года (ՀՕ-459-Ն, ст. 45,
+/// ч. 1, п. 6; по прочтению программы — до 20-го числа следующего месяца,
+/// ст. 14, ч. 4) — на экране годовых платежей словами языка, по-английски
+/// порядковым числом: «by the 20th of the next month», а не «by day 20»
+/// (правка человека 2026-11-26). Год с помесячным взносом — стрелкой вперёд
+/// от года ближайшего срока, а ждёт тест строку срока, а не время.
+#[wasm_bindgen_test]
+async fn the_monthly_premium_is_due_by_the_20th() {
+    let year = seed(Person {
+        birth_year: Some(1990),
+        pension_joined: None,
+        pension_applied: None,
+        residency: Some(Residency::Citizen),
+        resident: None,
+        registered: Date::new(2022, 5, 12),
+        turnover_applied: None,
+        stops: Vec::new(),
+    })
+    .await;
+    let lang = Lang::En;
+    Device::new().set_ui_lang(lang);
+    let (host, mounted) = mount_at(ANNUAL);
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::AnnualSumOf)).await {
+        wrong.push("экран годовых платежей не открылся".to_owned());
+    }
+    let monthly = year.max(2027);
+    for _ in year..monthly {
+        let next: Option<HtmlElement> = host
+            .query_selector(&format!("#annual button[aria-label=\"{}\"]", t(lang, Key::AnnualNextYear)))
+            .ok()
+            .flatten()
+            .map(JsCast::unchecked_into);
+        match next {
+            Some(next) => next.click(),
+            None => wrong.push("нет стрелки следующего года".to_owned()),
+        }
+    }
+    let due = (t(lang, Key::AnnualDueLabel).to_owned(), "by the 20th of the next month".to_owned());
+    let title = fill(t(lang, Key::AnnualYear), &[&monthly.to_string()]);
+    let mut got = None;
+    for _ in 0..100 {
+        got = pairs(&host, t(lang, Key::AnnualHealth));
+        let turned = text_of(&host, "#annual .quarter-name").is_some_and(|name| name.contains(&title));
+        if turned && got.as_ref().is_some_and(|pairs| pairs.contains(&due)) {
+            break;
+        }
+        sleep(50).await;
+    }
+    if !got.as_ref().is_some_and(|pairs| pairs.contains(&due)) {
+        wrong.push(format!("срок медстраховки {monthly} года: {got:?}, а не {due:?}"));
+    }
+    drop(mounted);
+    host.remove();
+    set_hash("");
+    forget_device();
+    assert!(wrong.is_empty(), "медстраховка помесячно: {wrong:#?}");
+}
+
 /// Нажать ответ `answer` в группе полей с заголовком `legend`; `false` —
 /// такой группы или ответа нет.
 fn choose(host: &HtmlElement, legend: &str, answer: &str) -> bool {
