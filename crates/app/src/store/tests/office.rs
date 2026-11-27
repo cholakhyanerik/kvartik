@@ -7,15 +7,21 @@ use kvartik_core::format::backup::{
     Entry, FILE_KINDS, Header, KDF_ITERATIONS, KINDS, SALT_BYTES, is_full, open as open_file,
 };
 use kvartik_core::license::{self, License, MAX_KEYS, OfficeLicense, Plan};
+use kvartik_core::model::attachment::{Attachment, FileBytes};
+use kvartik_core::model::client::{Client, ClientData};
+use kvartik_core::model::country::Country;
+use kvartik_core::model::money::Currency;
 use kvartik_core::model::office::{FIRST_BASE, Ip};
 use kvartik_core::model::profile::{Profile, ProfileData};
-use kvartik_core::model::text::Line;
+use kvartik_core::model::record::RecordId;
+use kvartik_core::model::text::{Line, Lines};
 use kvartik_core::model::tin::Tin;
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::platform::{clock, crypto};
+use crate::store::backup::probe::{Made, Text, Texts, make, make_all};
 use crate::store::backup::{
-    Failure, Made, Merged, OtherIe, Sealing, make, make_all, restore, restore_all, restore_new, unlock,
+    Failure, Handing, Merged, OtherIe, Sealing, Sheet, Sink, restore, restore_all, restore_new, unlock,
 };
 use crate::store::StoreError;
 use crate::store::office::{OFFICE_DB, keys as office_keys, list};
@@ -512,4 +518,308 @@ async fn keys_over_the_limit_do_not_land_as_a_new_ie() {
     drop(office);
     delete_database(OFFICE_DB).await;
     assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Файл книги проб в `len` байтов PDF.
+fn ledger_file(name: &str, len: usize) -> Attachment {
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    bytes.resize(len, b' ');
+    Attachment::create(RecordId::random(), name, FileBytes::new(bytes).expect("годный PDF"), clock::now())
+}
+
+/// Записать записи в базу `name` одним действием.
+async fn put_records<T: Stored>(name: &str, records: &[T]) {
+    let store = Store::open_base(name, |_| {}).await.expect("база открыта");
+    let mut writes = Writes::default();
+    for record in records {
+        writes.insert(record);
+    }
+    store.write().expect("транзакция").commit(writes).await.expect("записано");
+}
+
+/// Клиент проб — запись без файлов книги.
+fn client(name: &str) -> Client {
+    let data = ClientData {
+        name: Line::new(name).expect("имя"),
+        country: Country::from_code("US"),
+        address: Lines::default(),
+        tin: None,
+        tax_id: Line::default(),
+        currency: Some(Currency::Usd),
+        lang: Some(kvartik_core::i18n::Lang::En),
+        payment_days: Some(15),
+    };
+    Client::create(data, clock::now()).expect("годный клиент")
+}
+
+/// Контора проб: два ИП, у каждого — профиль, `clients` клиентов и `files`
+/// файлов книги по 3 000 байтов. Вернёт открытую базу первого, контору
+/// и второго ИП.
+async fn two_ies(clients: usize, files: usize) -> (Store, Store, Ip) {
+    delete_database(OFFICE_DB).await;
+    delete_database(DB_NAME).await;
+    let (today, now) = (clock::today().expect("сегодня"), clock::now());
+    let aram = named("IE Aram");
+    let anna = named("IE Anna");
+    let first = Ip::first(Some(&aram), today, now);
+    let mut second = Ip::new(today, now);
+    second.copy_profile(&anna, now);
+    delete_database(second.base()).await;
+    for (ip, profile, who) in [(&first, &aram, "aram"), (&second, &anna, "anna")] {
+        put_records(ip.base(), std::slice::from_ref(profile)).await;
+        let named: Vec<Client> = (0..clients).map(|n| client(&format!("{who} client {n}"))).collect();
+        put_records(ip.base(), &named).await;
+        let made: Vec<Attachment> = (0..files).map(|n| ledger_file(&format!("{who}-{n}.pdf"), 3_000)).collect();
+        put_records(ip.base(), &made).await;
+    }
+    let open = Store::open_base(DB_NAME, |_| {}).await.expect("база открыта");
+    let office = Store::open_office(|_| {}).await.expect("контора открыта");
+    let mut writes = Writes::default();
+    writes.insert(&first);
+    writes.insert(&second);
+    office.write().expect("транзакция").commit(writes).await.expect("записано");
+    (open, office, second)
+}
+
+/// Убрать базы конторы проб.
+async fn drop_office(second: &Ip) {
+    for name in [DB_NAME, second.base(), OFFICE_DB] {
+        delete_database(name).await;
+    }
+}
+
+/// Части копии `sheets` — расшифрованные, по порядку; что не так — в `wrong`.
+async fn parts_of(sheets: &[Text], wrong: &mut Vec<String>) -> Vec<Vec<Entry>> {
+    let of = sheets.len();
+    let copy = sheets.first().and_then(|sheet| sheet.part).map(|part| part.copy());
+    let mut parts = Vec::new();
+    for (index, sheet) in sheets.iter().enumerate() {
+        let sealed = open_file(&sheet.text).expect("часть открывается");
+        let part = sealed.header().part();
+        if part != sheet.part
+            || part.map(|part| (usize::from(part.number()), usize::from(part.of()), Some(part.copy())))
+                != Some((index + 1, of, copy))
+        {
+            wrong.push(format!("часть {}: {part:?}", index + 1));
+        }
+        let (entries, _) = unlock(FILE_KINDS, &sealed, &crypto::normalize(PASSWORD)).await.expect("расшифрована");
+        parts.push(entries);
+    }
+    parts
+}
+
+/// Ключ проб и шапка копии с пределом части `limit`.
+async fn sealing_parts(salt: &[u8]) -> (crypto::Key, Header) {
+    let key = crypto::derive(&crypto::normalize(PASSWORD), salt, KDF_ITERATIONS).await.expect("ключ");
+    (key, Header::new("0.0.213", clock::now()))
+}
+
+/// Копия всех ИП больше части (задача 122) — потоком, по базе за раз, а
+/// порядок — тот же, что у копии одного ИП: в каждой части ИП конторы и оба
+/// профиля, потом записи без файлов книги обоих ИП — все раньше любого
+/// файла, — потом файлы, у каждого ИП подряд; каждая запись — ровно в одной
+/// части. Части ложатся по одной на свежем устройстве, и после всех у каждого
+/// ИП — все его клиенты и файлы.
+#[wasm_bindgen_test]
+async fn a_backup_of_all_ies_in_parts_keeps_the_records_first() {
+    let (open, office, second) = two_ies(2, 3).await;
+    let salt = crypto::random(SALT_BYTES).expect("соль");
+    let (key, header) = sealing_parts(&salt).await;
+    let sealing = Sealing {
+        header: &header,
+        key: &key,
+        salt: &salt,
+        iterations: KDF_ITERATIONS,
+        limit: 10_000,
+    };
+    let made = make_all(&open, DB_NAME, &office, &sealing).await.expect("копия всех");
+    let mut wrong = Vec::new();
+    if made.sheets.len() < 3 || made.restarts != 0 {
+        wrong.push(format!("частей {}, собрана заново {} раз", made.sheets.len(), made.restarts));
+    }
+    if made.records != 2 + 2 + 4 + 6 || made.files.bytes != 6 * 3_000 {
+        wrong.push(format!("записей {}, файлов книги {:?}", made.records, made.files));
+    }
+    if made.size() != made.sheets.iter().map(|sheet| sheet.text.len() as u64).sum::<u64>() {
+        wrong.push("размер копии — не сумма частей".to_owned());
+    }
+    let parts = parts_of(&made.sheets, &mut wrong).await;
+    // Свои записи частей подряд: вид и чья база.
+    let mut own: Vec<(&str, Option<RecordId>)> = Vec::new();
+    for (index, entries) in parts.iter().enumerate() {
+        let shared = entries.iter().filter(|entry| entry.in_every_part()).count();
+        if shared != 4 {
+            wrong.push(format!("часть {}: общих записей {shared}", index + 1));
+        }
+        own.extend(entries.iter().filter(|entry| !entry.in_every_part()).map(|entry| (entry.kind(), entry.base())));
+    }
+    let clients = own.iter().filter(|(kind, _)| *kind == Client::KIND).count();
+    let files: Vec<Option<RecordId>> =
+        own.iter().filter(|(kind, _)| *kind == Attachment::KIND).map(|&(_, base)| base).collect();
+    if clients != 4 || files.len() != 6 {
+        wrong.push(format!("в частях клиентов {clients}, файлов {}", files.len()));
+    }
+    let first_file = own.iter().position(|(kind, _)| *kind == Attachment::KIND);
+    let last_client = own.iter().rposition(|(kind, _)| *kind == Client::KIND);
+    if first_file.zip(last_client).is_none_or(|(file, client)| client > file) {
+        wrong.push(format!("записи без файлов — не впереди: {own:?}"));
+    }
+    if files.windows(2).filter(|pair| pair[0] != pair[1]).count() != 1 {
+        wrong.push(format!("файлы ИП — не подряд: {files:?}"));
+    }
+    // Свежее устройство: части — по одной, с последней.
+    drop((open, office));
+    drop_office(&second).await;
+    let open = Store::open_base(DB_NAME, |_| {}).await.expect("база открыта");
+    let office = Store::open_office(|_| {}).await.expect("контора открыта");
+    for (index, entries) in parts.into_iter().enumerate().rev() {
+        let spare = (index + 1 == made.sheets.len()).then_some(DB_NAME);
+        match restore_all(&open, DB_NAME, &office, entries, None, spare).await {
+            Ok(done) if done.failed.is_none() => {}
+            Ok(done) => wrong.push(format!("часть {} легла не вся: {:?}", index + 1, done.failed)),
+            Err(failure) => wrong.push(format!("часть {} не легла: {failure:?}", index + 1)),
+        }
+    }
+    for ip in list(&office).await.expect("список").records {
+        let store = Store::open_base(ip.base(), |_| {}).await.expect("база открыта");
+        let tx = store.read().expect("чтение");
+        let landed = tx.list::<Attachment>().await.expect("файлы").records.len();
+        let clients = tx.list::<Client>().await.expect("клиенты").records.len();
+        if (landed, clients) != (3, 2) {
+            wrong.push(format!("у ИП {}: файлов книги {landed}, клиентов {clients}", ip.name(kvartik_core::i18n::Lang::En)));
+        }
+    }
+    drop((open, office));
+    drop_office(&second).await;
+    assert!(wrong.is_empty(), "копия всех ИП частями: {wrong:#?}");
+}
+
+/// Приёмник, который на первой части делает правку в базах обоих ИП —
+/// так, будто её сделали в другой вкладке посреди копии. Первая часть
+/// готова, пока читается первая база списка (в каком порядке идут ИП,
+/// решают их идентификаторы), и правку копия увидит во второй.
+struct Meddling {
+    texts: Texts,
+    bases: Vec<String>,
+    edit: fn(&str) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>,
+}
+
+impl Sink for Meddling {
+    fn put(&mut self, sheet: Sheet) -> Handing<'_> {
+        Box::pin(async move {
+            for base in std::mem::take(&mut self.bases) {
+                (self.edit)(&base).await;
+            }
+            self.texts.put(sheet).await
+        })
+    }
+
+    fn restart(&mut self) {
+        self.texts.restart();
+    }
+}
+
+/// Ещё четыре файла книги в базу.
+fn more_files(base: &str) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>> {
+    let base = base.to_owned();
+    Box::pin(async move {
+        let files: Vec<Attachment> = (0..4).map(|n| ledger_file(&format!("new-{n}.pdf"), 3_000)).collect();
+        put_records(&base, &files).await;
+    })
+}
+
+/// Профиль базы — с новым именем, той же командой, что форма профиля.
+fn renamed_profile(base: &str) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>> {
+    let base = base.to_owned();
+    Box::pin(async move {
+        let store = Store::open_base(&base, |_| {}).await.expect("база открыта");
+        let profiles = store.read().expect("чтение").all::<Profile>().await.expect("профили");
+        let before = Profile::current(profiles).expect("профиль");
+        let mut data = before.data().clone();
+        data.name.en = Line::new(&format!("{} renamed", data.name.en.as_str())).expect("имя");
+        let after = Profile::save(Some(before.clone()), data, clock::now()).expect("годный").expect("правка");
+        let mut writes = Writes::default();
+        writes.update(&before, &after);
+        store.write().expect("транзакция").commit(writes).await.expect("записано");
+    })
+}
+
+/// Копия всех ИП, у которой между проходами правили базы, — с правкой
+/// приёмника `edit`; вернёт копию, сколько раз её собирали заново и части.
+async fn meddled(clients: usize, files: usize, limit: usize, edit: Meddle) -> (crate::store::backup::Made, Meddling, Vec<Vec<Entry>>, Ip) {
+    let (open, office, second) = two_ies(clients, files).await;
+    let salt = crypto::random(SALT_BYTES).expect("соль");
+    let (key, header) = sealing_parts(&salt).await;
+    let sealing = Sealing {
+        header: &header,
+        key: &key,
+        salt: &salt,
+        iterations: KDF_ITERATIONS,
+        limit,
+    };
+    let mut sink = Meddling {
+        texts: Texts::default(),
+        bases: vec![DB_NAME.to_owned(), second.base().to_owned()],
+        edit,
+    };
+    let made = crate::store::backup::make_all(&open, DB_NAME, &office, &sealing, &mut sink).await.expect("копия всех");
+    let mut wrong = Vec::new();
+    let parts = parts_of(&sink.texts.sheets, &mut wrong).await;
+    assert!(wrong.is_empty(), "части: {wrong:#?}");
+    drop((open, office));
+    (made, sink, parts, second)
+}
+
+type Meddle = fn(&str) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>;
+
+/// База выросла между проходами копии всех ИП так, что частей нужно больше
+/// насчитанного (задача 122): копия собирается заново, приёмник забывает
+/// отданное, и в копии — все файлы, и новые тоже, а номера частей сходятся
+/// с их числом.
+#[wasm_bindgen_test]
+async fn a_backup_of_all_ies_starts_over_when_a_base_grew() {
+    let (made, sink, parts, second) = meddled(0, 3, 10_000, more_files).await;
+    let mut wrong = Vec::new();
+    if sink.texts.restarts != 1 {
+        wrong.push(format!("собрана заново {} раз", sink.texts.restarts));
+    }
+    if made.sheets != sink.texts.sheets.len() || made.records != 2 + 2 + 14 {
+        wrong.push(format!("частей {} из {}, записей {}", sink.texts.sheets.len(), made.sheets, made.records));
+    }
+    let files = parts.iter().flatten().filter(|entry| entry.kind() == Attachment::KIND).count();
+    if files != 14 {
+        wrong.push(format!("файлов книги в частях {files}"));
+    }
+    drop_office(&second).await;
+    assert!(wrong.is_empty(), "копия всех ИП заново: {wrong:#?}");
+}
+
+/// Профиль правили между проходами копии всех ИП (ревью задачи 122): в
+/// частях был бы прежний — он из первого прохода, — а записи второго прохода
+/// уже после правки. Копия собирается заново, и в каждой её части — профили
+/// после правки.
+#[wasm_bindgen_test]
+async fn a_backup_of_all_ies_starts_over_when_a_profile_changed() {
+    // Клиентов много, а часть мала: первая часть готова ещё на записях без
+    // файлов первой базы, до профиля второй.
+    let (_, sink, parts, second) = meddled(12, 1, 4_000, renamed_profile).await;
+    let mut wrong = Vec::new();
+    if sink.texts.restarts != 1 {
+        wrong.push(format!("собрана заново {} раз", sink.texts.restarts));
+    }
+    for (index, entries) in parts.iter().enumerate() {
+        let names: Vec<String> = entries
+            .iter()
+            .filter(|entry| entry.kind() == Profile::KIND)
+            .map(|entry| {
+                let profile: Profile = kvartik_core::format::decode(&entry.stored()).expect("профиль");
+                profile.data().name.en.as_str().to_owned()
+            })
+            .collect();
+        if names.len() != 2 || !names.iter().all(|name| name.ends_with(" renamed")) {
+            wrong.push(format!("часть {}: профили {names:?}", index + 1));
+        }
+    }
+    drop_office(&second).await;
+    assert!(wrong.is_empty(), "копия всех ИП после правки профиля: {wrong:#?}");
 }

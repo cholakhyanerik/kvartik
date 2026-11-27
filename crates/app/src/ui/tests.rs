@@ -2526,7 +2526,7 @@ async fn sealed_sheets(password: &str, limit: usize) -> Vec<String> {
         iterations: KDF_ITERATIONS,
         limit,
     };
-    let made = crate::store::backup::make(&store, KINDS, &sealing).await;
+    let made = crate::store::backup::probe::make(&store, KINDS, &sealing).await;
     made.map(|made| made.sheets.into_iter().map(|sheet| sheet.text).collect()).unwrap_or_default()
 }
 

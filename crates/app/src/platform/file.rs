@@ -136,6 +136,13 @@ impl Download {
         Self::bytes(text.as_bytes(), name, "application/octet-stream")
     }
 
+    /// Ссылка на уже собранный файл — часть копии из кусков ([`Pieces`]) —
+    /// под именем `name`. Байты не копируются: новый `File` ссылается на
+    /// прежний.
+    pub fn of(file: &File, name: &str) -> Option<Self> {
+        Self::new(&Array::of1(file), name, "application/octet-stream")
+    }
+
     /// Файл `name` из байтов с типом `mime` — PDF документа (задача 12).
     /// Тип — настоящий, `application/pdf`: обход WebKit bug 263608 нужен
     /// текстовым файлам, а PDF телефон и так сохраняет или показывает своей
@@ -179,6 +186,72 @@ impl Download {
 impl Drop for Download {
     fn drop(&mut self) {
         let _ = Url::revoke_object_url(&self.url);
+    }
+}
+
+/// Файл, который складывается в браузере кусками (задача 122): каждый кусок
+/// уходит из памяти wasm, как только готов, и файл части копии в сотню
+/// мегабайт целиком в ней не лежит. Куски — байтами UTF-8, как у
+/// [`Download::text`]: строка JS прошла бы через UTF-16.
+///
+/// И в JS они не копятся: набралось [`BATCH_BYTES`] — пачка ложится в файл
+/// браузера вместе с прежним (`new File([прежний, куски…])`), и её куски
+/// свободны. Иначе рядом с файлом части лежали бы все её куски — ещё один
+/// размер файла в памяти вкладки до сборки мусора.
+#[derive(Default)]
+pub struct Pieces {
+    /// Пачка: прежний файл — первым, потом куски.
+    batch: Array,
+    bytes: usize,
+    file: Option<File>,
+    failed: bool,
+}
+
+/// Сколько байтов кусков копится до того, как лечь в файл: у части копии
+/// в сотню мегабайт — меньше десятка складываний. Как браузер держит файл
+/// из файла и кусков — ссылкой на прежний или его копией, — не сверено;
+/// и копией это меньше десятка переписываний части за копию, а не по
+/// куску в 700 КБ на каждый из полутора сотен.
+const BATCH_BYTES: usize = 16 << 20;
+
+impl Pieces {
+    /// Ещё кусок.
+    pub fn push(&mut self, bytes: &[u8]) {
+        self.batch.push(&Uint8Array::from(bytes));
+        self.bytes += bytes.len();
+        if self.bytes >= BATCH_BYTES {
+            self.fold();
+        }
+    }
+
+    /// Пачку — в файл.
+    fn fold(&mut self) {
+        if self.failed {
+            return;
+        }
+        let options = FilePropertyBag::new();
+        options.set_type("application/octet-stream");
+        match File::new_with_buffer_source_sequence_and_options(&self.batch, "", &options) {
+            Ok(file) => {
+                self.batch = Array::of1(&file);
+                self.file = Some(file);
+                self.bytes = 0;
+            }
+            Err(error) => {
+                log("File", &error);
+                self.failed = true;
+                self.batch = Array::new();
+            }
+        }
+    }
+
+    /// Файл из кусков, без имени — его даёт тот, кто отдаёт файл человеку
+    /// ([`Download::of`]). `None` — браузер не дал собрать файл.
+    pub fn finish(mut self) -> Option<File> {
+        if self.bytes > 0 || self.file.is_none() {
+            self.fold();
+        }
+        if self.failed { None } else { self.file }
     }
 }
 

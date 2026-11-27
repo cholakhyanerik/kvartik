@@ -430,7 +430,7 @@ async fn opened_code(code: &str) -> Option<(kvartik_core::format::sync::Header, 
 async fn receipt_text(key: &crate::platform::crypto::Key, receipt: &kvartik_core::format::sync::Receipt) -> String {
     use kvartik_core::format::sync;
     let iv = crate::platform::crypto::random(kvartik_core::format::backup::IV_BYTES).expect("вектор");
-    let ciphertext = crate::platform::crypto::encrypt(key, &iv, &receipt.plain()).await.expect("шифр");
+    let ciphertext = crate::platform::crypto::encrypt(key, &iv, receipt.plain()).await.expect("шифр");
     sync::text_parts(&sync::seal_receipt(&iv, &ciphertext), 1).join("\n")
 }
 

@@ -123,7 +123,7 @@ async fn seal(picked: Picked, sealing: &Sealing<'_>) -> Result<Made, Unmade> {
         .map_err(Unmade::TooLarge)?;
     let iv = crypto::random(IV_BYTES)?;
     let lock = Lock::new(sealing.iterations, sealing.salt.to_vec(), iv).ok_or(CryptoError::Failed)?;
-    let ciphertext = crypto::encrypt(sealing.key, lock.iv(), &packed).await?;
+    let ciphertext = crypto::encrypt(sealing.key, lock.iv(), packed).await?;
     Ok(Made {
         code: sync::seal(&lock, &ciphertext),
         changed: picked.changed(sealing.header.since()),

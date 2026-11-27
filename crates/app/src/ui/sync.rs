@@ -1842,7 +1842,7 @@ async fn receipt(
 ) -> Option<ShownReceipt> {
     let receipt = Receipt::new(header, Device::new().sync_id(), continuity).from_device(name, issues);
     let iv = crypto::random(IV_BYTES).ok()?;
-    let ciphertext = crypto::encrypt(key, &iv, &receipt.plain()).await.ok()?;
+    let ciphertext = crypto::encrypt(key, &iv, receipt.plain()).await.ok()?;
     let sealed = sync::seal_receipt(&iv, &ciphertext);
     let code = sync::receipt_qr(&sealed, sync::transfer_id())?;
     Some(ShownReceipt {

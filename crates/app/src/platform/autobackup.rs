@@ -50,7 +50,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{
-    DomException, FileSystemDirectoryHandle, FileSystemFileHandle, FileSystemGetDirectoryOptions,
+    Blob, DomException, FileSystemDirectoryHandle, FileSystemFileHandle, FileSystemGetDirectoryOptions,
     FileSystemGetFileOptions, FileSystemHandle, FileSystemHandleKind, FileSystemWritableFileStream,
 };
 
@@ -302,6 +302,23 @@ pub async fn subfolder(folder: &FileSystemDirectoryHandle, name: &str) -> Result
     settle("getDirectoryHandle", folder.get_directory_handle_with_options(name, &options)).await
 }
 
+/// Записать файл `name` с байтами `bytes` в папку целиком ([`write_file`]).
+#[cfg(all(test, target_arch = "wasm32"))]
+pub async fn write(folder: &FileSystemDirectoryHandle, name: &str, bytes: &[u8]) -> Result<(), FolderError> {
+    write_data(folder, name, &Uint8Array::from(bytes)).await
+}
+
+/// Записать в папку файл `name` с содержимым файла браузера `data` — части
+/// копии, сложенной кусками (задача 122): её байты не возвращаются в wasm.
+pub async fn write_file(folder: &FileSystemDirectoryHandle, name: &str, data: &Blob) -> Result<(), FolderError> {
+    // `write` принимает и `Blob` (WHATWG File System, «write()»: BufferSource,
+    // Blob, строка), а привязка web-sys у него — по виду данных. Своя для
+    // `Blob` легла бы новым импортом в главный wasm (CLAUDE.md, Правило 6,
+    // «Импорт JS — в главном wasm»), поэтому — та же, что у байтов: проверки
+    // вида у привязки нет, и браузер получает сам `Blob`.
+    write_data(folder, name, data.unchecked_ref()).await
+}
+
 /// Записать файл `name` в папку целиком.
 ///
 /// Браузер пишет во временный файл рядом и подменяет им прежний только на
@@ -310,12 +327,12 @@ pub async fn subfolder(folder: &FileSystemDirectoryHandle, name: &str) -> Result
 /// `close`: Chrome закрывает временный файл после каждого `write`, и между
 /// ними его успевает занять синхронизатор облака или антивирус (Chromium
 /// issue 40729876, открыт).
-pub async fn write(folder: &FileSystemDirectoryHandle, name: &str, bytes: &[u8]) -> Result<(), FolderError> {
+async fn write_data(folder: &FileSystemDirectoryHandle, name: &str, data: &Uint8Array) -> Result<(), FolderError> {
     let options = FileSystemGetFileOptions::new();
     options.set_create(true);
     let file: FileSystemFileHandle = settle("getFileHandle", folder.get_file_handle_with_options(name, &options)).await?;
     let stream: FileSystemWritableFileStream = settle("createWritable", file.create_writable()).await?;
-    let written = match stream.write_with_js_u8_array(&Uint8Array::from(bytes)) {
+    let written = match stream.write_with_js_u8_array(data) {
         Ok(promise) => settle::<JsValue>("write", promise).await.map(drop),
         Err(error) => Err(failure("write", &error)),
     };

@@ -77,7 +77,7 @@ async fn single_file(name: &str) -> Rc<Sealed> {
         iterations: KDF_ITERATIONS,
         limit: kvartik_core::format::backup::PART_PLAIN_BYTES,
     };
-    let made = stored::make(&store, KINDS, &sealing).await.expect("копия");
+    let made = stored::probe::make(&store, KINDS, &sealing).await.expect("копия");
     Rc::new(open(&made.sheets[0].text).expect("файл открывается"))
 }
 
@@ -224,7 +224,7 @@ async fn a_full_backup_on_a_fresh_device_keeps_the_open_ie() {
             iterations: KDF_ITERATIONS,
             limit: kvartik_core::format::backup::PART_PLAIN_BYTES,
         };
-        let made = stored::make_all(&base, DB_NAME, &office_store, &sealing).await.expect("копия всех ИП");
+        let made = stored::probe::make_all(&base, DB_NAME, &office_store, &sealing).await.expect("копия всех ИП");
         Rc::new(open(&made.sheets[0].text).expect("файл открывается"))
     };
     drop(office_store);
@@ -326,7 +326,7 @@ async fn a_full_backup_landing_in_part_still_knows_the_app_was_empty() {
             iterations: KDF_ITERATIONS,
             limit: kvartik_core::format::backup::PART_PLAIN_BYTES,
         };
-        let made = stored::make_all(&base, DB_NAME, &office_store, &sealing).await.expect("копия всех ИП");
+        let made = stored::probe::make_all(&base, DB_NAME, &office_store, &sealing).await.expect("копия всех ИП");
         Rc::new(open(&made.sheets[0].text).expect("файл открывается"))
     };
     drop(office_store);
@@ -692,6 +692,100 @@ async fn auto_backup_in_parts_replaces_the_copy_of_the_day() {
     forget_device();
     crate::store::delete_database(crate::store::DB_NAME).await;
     assert!(wrong.is_empty(), "автокопия частями: {wrong:#?}");
+}
+
+/// Автокопия частями, оборванная посреди сборки (ревью задачи 122), папку
+/// не трогает: части ложатся в папку только целой копией, а не по одной,
+/// как готовы, — иначе новая часть 1 легла бы поверх части 1 прежней копии
+/// дня, и в папке остались бы части двух копий под именами одной.
+#[wasm_bindgen_test]
+async fn an_interrupted_auto_backup_leaves_the_copy_of_the_day() {
+    if !folders::available() {
+        web_sys::console::log_1(&"автокопии в этом браузере нет — тест пропущен".into());
+        return;
+    }
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    let _ = remembered::forget().await;
+    forget_device();
+    let device = Device::new();
+    let tag = DeviceTag::parse(TAG).expect("метка");
+    device.set_auto_tag(tag);
+    let store = Rc::new(Store::open(|_| {}).await.expect("база открыта"));
+    let mut writes = Writes::default();
+    for name in ["Acme ֏", "Beispiel GmbH", "Example LLC"] {
+        let data = ClientData {
+            name: Line::new(name).expect("имя"),
+            country: Country::from_code("US"),
+            address: Lines::default(),
+            tin: None,
+            tax_id: Line::default(),
+            currency: Some(Currency::Usd),
+            lang: Some(Lang::En),
+            payment_days: Some(15),
+        };
+        writes.insert(&Client::create(data, clock::now()).expect("годный клиент"));
+    }
+    store.write().expect("транзакция").commit(writes).await.expect("клиенты записаны");
+    let (chosen, scratch_name) = scratch().await;
+    let backups = backups_over(Rc::clone(&store));
+    device.set_backup_key(&device_password(PASSWORD).await);
+    let folder = match run(backups, enabling(&chosen, PASSWORD, None)).await {
+        Ok(Made::Status(Some(place))) => place.folder,
+        _ => panic!("автокопия не включилась"),
+    };
+    let mut wrong = Vec::new();
+    // Каждая запись — своей частью: три клиента — три файла.
+    PART_LIMIT.with(|limit| limit.set(1));
+    if !matches!(run(backups, Job::Auto).await, Ok(Made::Ran(Ok(_)))) {
+        wrong.push("первая автокопия не записалась".to_owned());
+    }
+    let stem = autobackup::file_name(clock::today().expect("часы с датой"), tag);
+    let stem = stem.strip_suffix(".json").expect("имя файла дня").to_owned();
+    let parts: Vec<String> = (1..=3).map(|n| format!("{stem}-{n}of3.json")).collect();
+    let mut before = Vec::new();
+    for name in &parts {
+        before.push(read_file(&folder, name).await);
+    }
+    // Вторая — с правкой в базе и сбоем шифра на второй части.
+    let mut writes = Writes::default();
+    writes.insert(&Client::create(
+        ClientData {
+            name: Line::new("Late Client").expect("имя"),
+            country: Country::from_code("US"),
+            address: Lines::default(),
+            tin: None,
+            tax_id: Line::default(),
+            currency: Some(Currency::Usd),
+            lang: Some(Lang::En),
+            payment_days: Some(15),
+        },
+        clock::now(),
+    )
+    .expect("годный клиент"));
+    store.write().expect("транзакция").commit(writes).await.expect("клиент записан");
+    crate::store::backup::probe::FAIL_AT_PART.with(|at| at.set(2));
+    let interrupted = run(backups, Job::Auto).await;
+    crate::store::backup::probe::FAIL_AT_PART.with(|at| at.set(0));
+    PART_LIMIT.with(|limit| limit.set(backup::PART_PLAIN_BYTES));
+    if !matches!(interrupted, Ok(Made::Ran(Err(_)))) {
+        wrong.push("оборванная автокопия не сказала о сбое".to_owned());
+    }
+    let mut names = folders::names(&folder, "").await.expect("папка читается");
+    names.sort_unstable();
+    if names != parts {
+        wrong.push(format!("в папке {names:?}, а не {parts:?}"));
+    }
+    for (name, was) in parts.iter().zip(&before) {
+        if read_file(&folder, name).await != *was || was.is_none() {
+            wrong.push(format!("{name} тронут оборванной копией"));
+        }
+    }
+    drop(store);
+    let _ = remembered::forget().await;
+    drop_scratch(&scratch_name).await;
+    forget_device();
+    crate::store::delete_database(crate::store::DB_NAME).await;
+    assert!(wrong.is_empty(), "оборванная автокопия: {wrong:#?}");
 }
 
 /// Две работы под одной блокировкой не идут разом: вторая начинается,

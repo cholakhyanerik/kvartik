@@ -18,7 +18,7 @@ use super::*;
 use crate::platform::crypto::{self, CryptoError, Key};
 use crate::platform::file::{self as files, Download, FileError};
 use crate::store::backup::{
-    Failure, Made, Merged, OtherIe, Restored, Sealing, make, restore, restore_all as restore_by_ip, unlock,
+    Failure, Merged, OtherIe, Restored, Sealing, probe::{Made, make}, restore, restore_all as restore_by_ip, unlock,
 };
 use crate::store::office::{OFFICE_DB, list as office_list};
 use crate::store::device::Device;
@@ -146,7 +146,7 @@ async fn encryption_round_trips_and_detects_tampering() {
     let iv = crypto::random(12).expect("вектор");
     let key = key_for(PASSWORD, &salt).await;
     let plain = "Ереван ֏ «копия»".as_bytes();
-    let data = crypto::encrypt(&key, &iv, plain)
+    let data = crypto::encrypt(&key, &iv, plain.to_vec())
         .await
         .expect("зашифровано");
     assert_ne!(&data[..plain.len()], plain);

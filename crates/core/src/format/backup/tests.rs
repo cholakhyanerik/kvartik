@@ -1649,7 +1649,7 @@ fn backup_round_trips() {
 /// Пустая база — тоже копия: с пустым списком записей.
 #[test]
 fn empty_base_makes_an_empty_backup() {
-    let collected = collect(KINDS_UNDER_TEST, []).expect("собрано");
+    let collected = collect(KINDS_UNDER_TEST, Vec::<Raw<'_>>::new()).expect("собрано");
     let text = plaintext(&sample_header(), collected.entries());
     assert_eq!(
         text,
@@ -3394,4 +3394,350 @@ fn part_file_names_carry_the_number() {
     );
     assert_eq!(part_of_name("2of3"), Some((2, 3)));
     assert_eq!(part_of_name("1of1"), None);
+}
+
+/// Открытый текст из сжатого по записи ([`Packer`], задача 122) — тот же
+/// текст, что [`plaintext`], байт в байт: и пустой, и с частью в шапке,
+/// и с метками баз.
+#[test]
+fn the_packer_gives_the_plaintext() {
+    let ip = RecordId::random();
+    let mut tagged: Vec<Entry> = (1..=4).map(|n| sized(Note::KIND, n, 3_000, Some(ip))).collect();
+    tagged.push(sized(Attachment::KIND, 5, 700_000, Some(ip)));
+    let plain: Vec<Entry> = collect(KINDS_UNDER_TEST, stored_pair()).expect("собрано").entries;
+    let cases: [(Header, &[Entry]); 4] = [
+        (sample_header(), &[]),
+        (sample_header(), &plain),
+        (sample_header().with_part(part(2, 3)), &plain),
+        (sample_header().with_part(part(1, 2)), &tagged),
+    ];
+    let mut wrong = Vec::new();
+    for (index, (header, entries)) in cases.iter().enumerate() {
+        let packed = pack(header, *entries);
+        let unpacked = unpack(&packed, MAX_PLAIN_BYTES).expect("разжимается");
+        if unpacked != plaintext(header, *entries).into_bytes() {
+            wrong.push(format!("случай {index}: другой текст"));
+        }
+        // И без места под сжатое заранее: буфер растёт сам.
+        let mut packer = Packer::new(header, 0);
+        for entry in *entries {
+            packer.add(entry);
+        }
+        if unpack(&packer.finish().packed, MAX_PLAIN_BYTES).ok() != Some(unpacked) {
+            wrong.push(format!("случай {index}: без места заранее — другой текст"));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Файл кусками ([`seal_pieces`], задача 122) — тот же файл, что [`seal`]:
+/// шапка до кавычки `data`, base64 — кусками по три байта шифротекста
+/// целиком, хвост; длина — его длина.
+#[test]
+fn sealed_pieces_are_the_sealed_file() {
+    let ciphertext: Vec<u8> = (0..1_500_000u32).map(|n| (n % 251) as u8).collect();
+    let header = sample_header().with_part(part(2, 3));
+    let mut pieces: Vec<String> = Vec::new();
+    let length = at_once(seal_pieces(
+        &header,
+        &sample_lock(),
+        &ciphertext,
+        &mut |piece: &str| pieces.push(piece.to_owned()),
+        &mut no_pause,
+    ));
+    let whole = seal(&header, &sample_lock(), &ciphertext);
+    let mut wrong = Vec::new();
+    if pieces.concat() != whole {
+        wrong.push("куски — не тот файл".to_owned());
+    }
+    if length != whole.len() {
+        wrong.push(format!("длина {length}, а файл — {}", whole.len()));
+    }
+    if pieces.len() < 4 {
+        wrong.push(format!("кусков — {}", pieces.len()));
+    }
+    if !pieces.first().is_some_and(|head| head.ends_with(r#""data":""#)) {
+        wrong.push("первый кусок — не шапка".to_owned());
+    }
+    if pieces.last().map(String::as_str) != Some("\"}") {
+        wrong.push("последний кусок — не хвост".to_owned());
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Записи копии всех ИП для проб раскладки: ИП конторы, у базы — профиль,
+/// записи без файлов и файлы вперемешку, как их отдаёт база.
+fn office_entries() -> Vec<Entry> {
+    let ip = RecordId::random();
+    let mut entries = vec![sized(Ip::KIND, 1, 200, None)];
+    for n in 2..=19 {
+        let kind = if n % 3 == 0 { Attachment::KIND } else { Note::KIND };
+        let bytes = if kind == Attachment::KIND { 40_000 } else { 3_000 };
+        entries.push(sized(kind, n, bytes, Some(ip)));
+    }
+    entries.push(sized(Profile::KIND, 30, 500, Some(ip)));
+    entries
+}
+
+/// Общие записи, их вес и остальные в порядке частей — для проб раскладки.
+fn laid_out(entries: &[Entry]) -> (Vec<Entry>, usize, Vec<&Entry>) {
+    let shared: Vec<Entry> = entries.iter().filter(|entry| entry.in_every_part()).cloned().collect();
+    let bytes = shared.iter().map(Entry::plain_bytes).sum();
+    let ordered = in_order(entries.iter().filter(|entry| !entry.in_every_part())).collect();
+    (shared, bytes, ordered)
+}
+
+/// Раскладка по одним размерам ([`plan`]) — та же, что у [`split`]: столько
+/// же частей, и у каждой открытый текст не больше насчитанного; копия, что
+/// влезает целиком, — одна часть.
+#[test]
+fn the_plan_is_the_split() {
+    let entries = office_entries();
+    let (_, shared, ordered) = laid_out(&entries);
+    let sizes: Vec<usize> = ordered.iter().map(|entry| entry.plain_bytes()).collect();
+    let mut wrong = Vec::new();
+    for limit in [30_000, 50_000, 100_000, 160_000, 1 << 20] {
+        let planned = plan(shared, sizes.iter().copied(), limit);
+        let parts = split(&sample_header(), &entries, limit);
+        if planned.len() != parts.len() {
+            wrong.push(format!("предел {limit}: по плану {} частей, а split — {}", planned.len(), parts.len()));
+            continue;
+        }
+        for (number, (bytes, (header, records))) in planned.iter().zip(&parts).enumerate() {
+            let text = plaintext(header, records.iter().copied());
+            if text.len() > *bytes {
+                wrong.push(format!("предел {limit}, часть {}: текст {} больше плана {bytes}", number + 1, text.len()));
+            }
+        }
+    }
+    if plan(shared, sizes.iter().copied(), 1 << 20).len() != 1 {
+        wrong.push("влезающая копия — не одна часть".to_owned());
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Поля записей открытого текста части — по порядку.
+fn records_of(text: &[u8]) -> Vec<String> {
+    let plain: PlainIn<'_> = serde_json::from_slice(text).expect("текст части");
+    plain.records.iter().map(|item| item.record.get().to_owned()).collect()
+}
+
+/// Части потоком ([`Stream`], задача 122) — те же, что у [`split`]: те же
+/// записи в тех же частях, номера по порядку, копия у всех одна, а сжатый
+/// текст каждой разжимается в открытый текст своей части.
+#[test]
+fn a_stream_lays_parts_as_the_split() {
+    let entries = office_entries();
+    let (shared, shared_bytes, ordered) = laid_out(&entries);
+    let mut wrong = Vec::new();
+    for limit in [30_000, 100_000, 1 << 20] {
+        let planned = plan(shared_bytes, ordered.iter().map(|entry| entry.plain_bytes()), limit);
+        let mut stream = Stream::new(&sample_header(), shared.clone(), planned.clone(), limit);
+        let mut got: Vec<Packed> = Vec::new();
+        for entry in &ordered {
+            match at_once(stream.add(entry, &mut no_pause)) {
+                Ok(full) => got.extend(full),
+                Err(Grew) => wrong.push(format!("предел {limit}: выросла без роста")),
+            }
+        }
+        got.extend(stream.finish());
+        let parts = split(&sample_header(), &entries, limit);
+        if got.len() != parts.len() {
+            wrong.push(format!("предел {limit}: частей {}, а split — {}", got.len(), parts.len()));
+            continue;
+        }
+        let copy = got[0].header.part().map(|part| part.copy());
+        let of = u16::try_from(parts.len()).expect("частей мало");
+        for (index, (made, (header, records))) in got.iter().zip(&parts).enumerate() {
+            let number = u16::try_from(index + 1).expect("частей мало");
+            let expected = if of < 2 { None } else { copy.map(|copy| Part { copy, number, of }) };
+            if made.header.part() != expected {
+                wrong.push(format!("предел {limit}, часть {number}: шапка {:?}", made.header.part()));
+            }
+            let mut ours = records_of(&unpack(&made.packed, MAX_PLAIN_BYTES).expect("разжимается"));
+            let mut theirs = records_of(plaintext(header, records.iter().copied()).as_bytes());
+            if of < 2 {
+                // Одним файлом split оставляет записи в порядке копии.
+                ours.sort();
+                theirs.sort();
+            }
+            if ours != theirs {
+                wrong.push(format!("предел {limit}, часть {number}: другие записи"));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// База выросла между проходами так, что частей нужно больше насчитанного,
+/// — [`Grew`]: шапки готовых частей обещают другое число, копию собирают
+/// заново. И копия, насчитанная одним файлом, выросшая за предел, — тоже.
+#[test]
+fn a_stream_that_grew_says_so() {
+    let entries = office_entries();
+    let (shared, shared_bytes, ordered) = laid_out(&entries);
+    let mut wrong = Vec::new();
+    // План — без последних шести записей, файлов книги: при первом пределе
+    // по плану две части, при втором — один файл.
+    for (limit, of) in [(30_000, 2), (100_000, 1)] {
+        let fewer = &ordered[..ordered.len() - 6];
+        let planned = plan(shared_bytes, fewer.iter().map(|entry| entry.plain_bytes()), limit);
+        if planned.len() != of {
+            wrong.push(format!("предел {limit}: по плану {} частей, а ждали {of}", planned.len()));
+        }
+        let mut stream = Stream::new(&sample_header(), shared.clone(), planned.clone(), limit);
+        let grew = ordered
+            .iter()
+            .any(|entry| matches!(at_once(stream.add(entry, &mut no_pause)), Err(Grew)));
+        if !grew {
+            wrong.push(format!("предел {limit} ({} частей по плану): рост не замечен", planned.len()));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Записей стало меньше, чем насчитано, — частей столько, сколько обещано
+/// в шапке: недостающие — с одними общими записями, и каждая читается сама
+/// (`whole`: записям с меткой базы есть куда лечь).
+#[test]
+fn a_stream_that_shrank_fills_the_parts() {
+    let ip = collect(OFFICE_KINDS, [raw("ip", IP_ID, STORED_IP)]).expect("собрано").entries;
+    let base = ip[0].meta().id();
+    let notes: Vec<Entry> = (1..=6).map(|n| sized(Note::KIND, n, 20_000, Some(base))).collect();
+    let limit = 50_000;
+    let shared_bytes: usize = ip.iter().map(Entry::plain_bytes).sum();
+    let planned = plan(shared_bytes, notes.iter().map(Entry::plain_bytes), limit);
+    assert!(planned.len() >= 3, "частей по плану — {}", planned.len());
+    let mut stream = Stream::new(&sample_header(), ip.clone(), planned.clone(), limit);
+    let mut got: Vec<Packed> = Vec::new();
+    // Легли только две записи из шести.
+    for entry in &notes[..2] {
+        got.extend(at_once(stream.add(entry, &mut no_pause)).expect("не выросла"));
+    }
+    got.extend(stream.finish());
+    let mut wrong = Vec::new();
+    if got.len() != planned.len() {
+        wrong.push(format!("частей {}, а обещано {}", got.len(), planned.len()));
+    }
+    let of = u16::try_from(planned.len()).expect("частей мало");
+    let mut read_back = 0;
+    for (index, made) in got.iter().enumerate() {
+        let number = u16::try_from(index + 1).expect("частей мало");
+        if made.header.part().map(|part| (part.number(), part.of())) != Some((number, of)) {
+            wrong.push(format!("часть {number}: шапка {:?}", made.header.part()));
+        }
+        let file = seal(&made.header, &sample_lock(), &(200..220).collect::<Vec<u8>>());
+        let sealed = open(&file).expect("файл части открывается");
+        match read(FULL_KINDS_UNDER_TEST, &sealed, &made.packed) {
+            Ok(records) => {
+                if records.iter().filter(|entry| entry.kind() == Ip::KIND).count() != 1 {
+                    wrong.push(format!("часть {number}: без ИП конторы"));
+                }
+                read_back += records.iter().filter(|entry| entry.kind() == Note::KIND).count();
+            }
+            Err(error) => wrong.push(format!("часть {number} не читается: {error:?}")),
+        }
+    }
+    if read_back != 2 {
+        wrong.push(format!("записей прочитано {read_back}"));
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Размер записи без разбора ([`measure`], задача 122) — тот же, что у
+/// разобранной ([`Entry::plain_bytes`]): у записи текущей версии в конверте
+/// программы. Запись прежней версии, профиль и ИП конторы — в разбор: первой
+/// длину знает только он, а вторые нужны частям целиком.
+#[test]
+fn measure_knows_the_size_without_parsing() {
+    let mut wrong = Vec::new();
+    for (kind, id, text) in [("note", NOTE_ID, STORED_NOTE), ("tag", TAG_ID, STORED_TAG)] {
+        let entry = collect(KINDS_UNDER_TEST, [raw(kind, id, text)]).expect("собрано").entries.remove(0);
+        let measured = measure(raw(kind, id, text));
+        let expected = Measured::Sized {
+            bytes: entry.plain_bytes(),
+            file: false,
+        };
+        if measured != expected {
+            wrong.push(format!("{kind}: {measured:?}, а разбор — {expected:?}"));
+        }
+    }
+    if !matches!(measure(raw(Attachment::KIND, NOTE_ID, STORED_NOTE)), Measured::Sized { file: true, .. }) {
+        wrong.push("файл книги не назван файлом".to_owned());
+    }
+    for (kind, text) in [
+        ("note", STORED_NOTE_V1),
+        (Profile::KIND, STORED_NOTE),
+        (Ip::KIND, STORED_NOTE),
+        ("note", r#"{"format_version":270,"record":{}}"#),
+        ("note", r#"{"record":{},"format_version":27}"#),
+        ("note", "не JSON"),
+    ] {
+        if measure(raw(kind, NOTE_ID, text)) != Measured::Parse {
+            wrong.push(format!("{kind} {text}: не в разбор"));
+        }
+    }
+    if measure(Raw { kind: "note", id: NOTE_ID, text: None }) != Measured::Parse {
+        wrong.push("значение не строка — не в разбор".to_owned());
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Первый проход по базе ([`measure_sliced`], задача 122): размеры — те же,
+/// что у разобранных записей, в порядке базы, файлы книги — отдельно от
+/// остальных; запись прежней версии — по разбору, испорченная пропущена,
+/// ИП конторы — в общих записях целиком; запись новее программы — отказ.
+#[test]
+fn the_first_pass_measures_a_base() {
+    let file_text = STORED_NOTE.replace(NOTE_ID, "6f4c0b1e-2d3a-4b5c-8d9e-0a1b2c3d4e5f");
+    let items = [
+        raw(Attachment::KIND, "6f4c0b1e-2d3a-4b5c-8d9e-0a1b2c3d4e5f", &file_text),
+        raw("ip", IP_ID, STORED_IP),
+        raw("note", NOTE_ID, STORED_NOTE),
+        raw("note", "00000000-0000-4000-8000-000000000001", "не JSON"),
+        raw("tag", TAG_ID, STORED_TAG_V1),
+    ];
+    let measured = at_once(measure_sliced(FULL_KINDS_UNDER_TEST, items, &mut no_pause)).expect("измерено");
+    let entries = collect(FULL_KINDS_UNDER_TEST, items).expect("собрано").entries;
+    let by = |kind: &str| entries.iter().find(|entry| entry.kind() == kind).expect("запись").plain_bytes();
+    let file_bytes = file_text.len() - r#"{"format_version":27,"record":}"#.len() + RECORD_FRAME_BYTES;
+    let mut wrong = Vec::new();
+    if measured.records != [by("note"), by("tag")] || measured.files != [file_bytes] {
+        wrong.push(format!("размеры {:?} и файлов {:?}", measured.records, measured.files));
+    }
+    if measured.shared.len() != 1 || measured.shared[0].kind() != Ip::KIND {
+        wrong.push(format!("общие {:?}", measured.shared.iter().map(Entry::kind).collect::<Vec<_>>()));
+    }
+    // Двести записей прежней версии — разбор, и с паузами: полмегабайта
+    // разобранного — пауза.
+    let old: Vec<(String, String)> = (0..200)
+        .map(|n| {
+            let id = format!("00000000-0000-4000-8000-{n:012}");
+            (STORED_TAG_V1.replace(TAG_ID, &id), id)
+        })
+        .collect();
+    let mut pauses = 0;
+    let mut pause = || {
+        pauses += 1;
+        std::future::ready(())
+    };
+    let raws = old.iter().map(|(text, id)| raw("tag", id, text));
+    let many = at_once(measure_sliced(KINDS_UNDER_TEST, raws, &mut pause)).expect("измерено");
+    if many.records.len() != 200 || pauses == 0 {
+        wrong.push(format!("двести прежних: размеров {}, пауз {pauses}", many.records.len()));
+    }
+    let newer = [raw("note", NOTE_ID, r#"{"format_version":99,"record":{}}"#)];
+    if !matches!(at_once(measure_sliced(KINDS_UNDER_TEST, newer, &mut no_pause)), Err(FormatError::Newer { found: 99 })) {
+        wrong.push("запись новее программы не остановила проход".to_owned());
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Файлы книги копии всех ИП — суммой по базам (задача 122).
+#[test]
+fn files_add_up() {
+    let one = Files { bytes: 3, removed: 1 };
+    let two = Files { bytes: 5, removed: 0 };
+    assert_eq!(one.plus(two), Files { bytes: 8, removed: 1 });
+    assert_eq!(Files::default().plus(one), one);
 }

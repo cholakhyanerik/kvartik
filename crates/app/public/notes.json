@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "0.0.213",
+      "date": "2026-11-27",
+      "hy": [
+        "Մեծ պահուստային պատճենն այժմ գրեթե երկու անգամ քիչ հիշողություն է զբաղեցնում. դրա յուրաքանչյուր մասը պահպանվում է անմիջապես, երբ պատրաստ է, իսկ բոլոր ԱՁ-ների պատճենը հավաքվում է ԱՁ առ ԱՁ։ Հեռախոսում դիտարկիչն ավելի հազվադեպ կփակի ներդիրը նման պատճենի ժամանակ։"
+      ],
+      "ru": [
+        "Большая резервная копия занимает теперь почти вдвое меньше памяти: каждая её часть сохраняется сразу, как готова, а копия всех ИП собирается по одному ИП. На телефоне браузер реже закроет вкладку посреди такой копии."
+      ],
+      "en": [
+        "A large backup now takes almost half the memory: each part is saved as soon as it is ready, and a backup of all IEs is put together one IE at a time. On a phone the browser is less likely to close the tab in the middle of such a backup."
+      ]
+    },
+    {
       "version": "0.0.212",
       "date": "2026-11-27",
       "hy": [
@@ -248,19 +261,6 @@
       ],
       "en": [
         "“Paste” in Chrome and Edge puts the cursor in the code field even when the browser didn’t manage to do it on the tap itself."
-      ]
-    },
-    {
-      "version": "0.0.193",
-      "date": "2026-11-25",
-      "hy": [
-        "Chrome-ում և Edge-ում «Տեղադրել» կոճակն այլևս ինքը չի կարդում սեղմատախտակը. այն կուրսորը դնում է կոդի դաշտում, և կոդը տեղադրում եք Ctrl+V-ով կամ ստեղնաշարի հուշումով։ Եթե նախկինում թույլ էիք տվել կայքին կարդալ սեղմատախտակը, այդ թույլտվությունը կարող եք հանել կայքի կարգավորումներում։"
-      ],
-      "ru": [
-        "В Chrome и Edge «Вставить» больше не читает буфер обмена само: курсор встаёт в поле кода, а вставляете вы — Ctrl+V или из подсказки клавиатуры. Если раньше вы разрешали сайту читать буфер, это разрешение можно убрать в настройках сайта."
-      ],
-      "en": [
-        "In Chrome and Edge, “Paste” no longer reads the clipboard by itself: it puts the cursor in the code field, and you paste — with Ctrl+V or from the keyboard suggestion. If you allowed the site to read the clipboard before, you can remove that permission in the site settings."
       ]
     }
   ]

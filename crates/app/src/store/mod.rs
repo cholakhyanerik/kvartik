@@ -73,7 +73,7 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 
 use js_sys::{Array, Object, Promise, Reflect};
-use kvartik_core::format::backup::{Entry, Raw};
+use kvartik_core::format::backup::{AsRaw, Entry, Raw};
 use kvartik_core::format::{self, FORMAT_VERSION, FormatError, Stored};
 use kvartik_core::model::record::RecordId;
 use wasm_bindgen::closure::Closure;
@@ -521,6 +521,56 @@ impl<M> Tx<M> {
             .collect())
     }
 
+    /// Записи базы тех видов, что пропускает `keep`, — как они лежат
+    /// (задача 122): копия всех ИП читает базу второй раз дважды — записи без
+    /// файлов книги, потом файлы, — и каждый раз только нужное. Сначала все
+    /// ключи — они маленькие, — потом значения подряд идущих нужных ключей
+    /// диапазоном от первого до последнего (`IDBKeyRange.bound`): ключи
+    /// отсортированы, и между соседними других нет. Все запросы — в одной
+    /// транзакции, один за другим, без чужого ожидания (шапка модуля): база
+    /// между ними не меняется.
+    pub async fn dump_kinds(&self, keep: impl Fn(&str) -> bool) -> Result<Vec<Dumped>, StoreError> {
+        let request = self
+            .records
+            .get_all_keys()
+            .map_err(|error| failure("getAllKeys", Some(error)))?;
+        let keys: Array = wait(request).await?.dyn_into().map_err(|_| StoreError::Damaged)?;
+        let part = |key: &JsValue, at| Reflect::get_u32(key, at).ok().and_then(|v| v.as_string());
+        let kept = |at| keep(&part(&keys.get(at), 0).unwrap_or_default());
+        let total = keys.length();
+        let mut dumped = Vec::new();
+        let mut at = 0;
+        while at < total {
+            if !kept(at) {
+                at += 1;
+                continue;
+            }
+            let start = at;
+            while at < total && kept(at) {
+                at += 1;
+            }
+            let range = IdbKeyRange::bound(&keys.get(start), &keys.get(at - 1))
+                .map_err(|error| failure("bound", Some(error)))?;
+            let request = self
+                .records
+                .get_all_with_key(&range)
+                .map_err(|error| failure("getAll", Some(error)))?;
+            let values: Array = wait(request).await?.dyn_into().map_err(|_| StoreError::Damaged)?;
+            if values.length() != at - start {
+                return Err(StoreError::Damaged);
+            }
+            for (index, value) in (start..at).zip(values.iter()) {
+                let key = keys.get(index);
+                dumped.push(Dumped {
+                    kind: part(&key, 0).unwrap_or_default(),
+                    id: part(&key, 1).unwrap_or_default(),
+                    text: value.as_string(),
+                });
+            }
+        }
+        Ok(dumped)
+    }
+
     /// Есть ли в базе хоть одна запись, включая удалённые.
     pub async fn is_empty(&self) -> Result<bool, StoreError> {
         let request = self
@@ -562,6 +612,14 @@ impl Dumped {
             id: &self.id,
             text: self.text.as_deref(),
         }
+    }
+}
+
+/// Выгрузку копия отдаёт ядру по своей (задача 122): текст записи уходит из
+/// памяти, как только запись разобрана.
+impl AsRaw for Dumped {
+    fn as_raw(&self) -> Raw<'_> {
+        self.raw()
     }
 }
 

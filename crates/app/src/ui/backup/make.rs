@@ -666,14 +666,14 @@ async fn sealed_copy(backups: Backups, key: &crypto::Key, device_key: &DeviceKey
         iterations: device_key.iterations(),
         limit: part_limit(),
     };
-    let made = make_file(backups, &store, &sealing).await?;
-    let size = made.size();
-    let downloads = downloads(made.sheets, &backup::file_name(today))?;
+    let name = backup::file_name(today);
+    let mut downloads = Downloads::new(&name);
+    let made = make_file(backups, &store, &sealing, &mut downloads).await?;
     Ok(Ready {
-        downloads,
+        downloads: downloads.into_files(),
         records: made.records,
         unreadable: made.unreadable,
-        size,
+        size: made.size,
         files: made.files,
     })
 }
@@ -698,33 +698,39 @@ pub(super) async fn make_client(backups: Backups, typed: &str, repeat: &str) -> 
         iterations: KDF_ITERATIONS,
         limit: part_limit(),
     };
-    let made = stored::make(&store, KINDS, &sealing).await?;
-    // ՀՎՀՀ — из профиля этой базы; не читается — имя без него.
+    // ՀՎՀՀ — из профиля этой базы; не читается — имя без него. До копии:
+    // файлы уходят в ссылки с именем, как только готовы (задача 122).
     let tin = match store.read() {
         Ok(tx) => tx.all::<Profile>().await.ok().and_then(Profile::current).and_then(|profile| profile.data().tin.clone()),
         Err(_) => None,
     };
-    let size = made.size();
-    let downloads = downloads(made.sheets, &backup::client_file_name(tin.as_ref(), today))?;
+    let name = backup::client_file_name(tin.as_ref(), today);
+    let mut downloads = Downloads::new(&name);
+    let made = stored::make(&store, KINDS, &sealing, &mut downloads).await?;
     Ok(Ready {
-        downloads,
+        downloads: downloads.into_files(),
         records: made.records,
         unreadable: made.unreadable,
-        size,
+        size: made.size,
         files: made.files,
     })
 }
 
 /// Копия программы — ручная и автокопия: у кого список ИП (задача 38) —
-/// всех ИП одним файлом ([`stored::make_all`]), у кого его нет — базы
-/// открытого ИП, как всегда.
-pub(super) async fn make_file(backups: Backups, store: &Store, sealing: &Sealing<'_>) -> Result<stored::Made, Failure> {
+/// всех ИП ([`stored::make_all`]), у кого его нет — базы открытого ИП, как
+/// всегда. Файлы — приёмнику `sink`, по одному.
+pub(super) async fn make_file(
+    backups: Backups,
+    store: &Store,
+    sealing: &Sealing<'_>,
+    sink: &mut dyn stored::Sink,
+) -> Result<stored::Made, Failure> {
     if let Some(office) = backups.office()
         && let Some((office, open_name)) = office.full().await?
     {
-        return stored::make_all(store, &open_name, &office, sealing).await;
+        return stored::make_all(store, &open_name, &office, sealing, sink).await;
     }
-    stored::make(store, KINDS, sealing).await
+    stored::make(store, KINDS, sealing, sink).await
 }
 
 /// Проверить пароль копий: тот ли, что на устройстве.

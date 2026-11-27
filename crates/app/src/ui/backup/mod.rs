@@ -203,7 +203,9 @@ impl From<Failure> for Hitch {
         match failure {
             Failure::Store(error) => Self::Store(error),
             Failure::Crypto(CryptoError::Unavailable) => Self::NoCrypto,
-            Failure::Crypto(_) | Failure::File(_) | Failure::TooManyIps(_) | Failure::TooManyKeys => Self::Failed,
+            Failure::Crypto(_) | Failure::File(_) | Failure::TooManyIps(_) | Failure::TooManyKeys | Failure::Handed => {
+                Self::Failed
+            }
             Failure::TooLarge => Self::TooLarge,
         }
     }
@@ -730,6 +732,7 @@ impl From<Failure> for Problem {
             // ключей одного ИП — программа не пишет (с 0.0.135), значит, и файл
             // не её (ревью задачи 38): «не копия программы» о нём верно.
             Failure::TooManyKeys => Self::Say(Key::BackupNotOurs),
+            Failure::Handed => Self::Say(Key::BackupFailed),
         }
     }
 }
@@ -798,16 +801,38 @@ struct Ready {
     files: Files,
 }
 
-/// Файлы сделанной копии — ссылками для человека: имя части — с её номером
-/// (`backup::part_file_name`). Текст файла уходит в браузер по одному, и
-/// в памяти wasm он больше не нужен.
-pub(super) fn downloads(sheets: Vec<stored::Sheet>, name: &str) -> Result<Vec<Download>, Problem> {
-    sheets
-        .into_iter()
-        .map(|sheet| {
-            Download::text(&sheet.text, &backup::part_file_name(name, sheet.part)).ok_or(Problem::Say(Key::BackupFailed))
+/// Файлы копии — ссылками для человека, по одному, как только файл готов
+/// (задача 122): имя части — с её номером (`backup::part_file_name`). Файл
+/// уже в браузере, и ссылка его не копирует.
+pub(super) struct Downloads<'a> {
+    name: &'a str,
+    files: Vec<Download>,
+}
+
+impl<'a> Downloads<'a> {
+    /// Ссылки на файлы копии с именем `name`.
+    pub(super) const fn new(name: &'a str) -> Self {
+        Self { name, files: Vec::new() }
+    }
+
+    /// Ссылки по порядку частей.
+    pub(super) fn into_files(self) -> Vec<Download> {
+        self.files
+    }
+}
+
+impl stored::Sink for Downloads<'_> {
+    fn put(&mut self, sheet: stored::Sheet) -> stored::Handing<'_> {
+        let download = Download::of(&sheet.file, &backup::part_file_name(self.name, sheet.part));
+        Box::pin(async move {
+            self.files.push(download.ok_or(Failure::Handed)?);
+            Ok(())
         })
-        .collect()
+    }
+
+    fn restart(&mut self) {
+        self.files.clear();
+    }
 }
 
 /// Сколько открытого текста кладётся в один файл копии

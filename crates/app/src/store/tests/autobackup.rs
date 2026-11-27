@@ -188,7 +188,7 @@ async fn device_base_keeps_the_folder_and_the_key() {
                 wrong.push("замок, пароль устройства или имя папки не те".to_owned());
             }
             let iv = crypto::random(12).expect("вектор");
-            let sealed = crypto::encrypt(&key, &iv, "копия ֏".as_bytes()).await.expect("зашифровано");
+            let sealed = crypto::encrypt(&key, &iv, "копия ֏".as_bytes().to_vec()).await.expect("зашифровано");
             let reopened = crypto::Key::stored(loaded.key, password.check().to_vec());
             if crypto::decrypt(&reopened, &iv, &sealed).await.as_deref() != Ok("копия ֏".as_bytes()) {
                 wrong.push("ключ из базы не расшифровал".to_owned());

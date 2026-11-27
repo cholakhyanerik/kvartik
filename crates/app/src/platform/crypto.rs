@@ -129,15 +129,21 @@ pub async fn derive(password: &str, salt: &[u8], iterations: u32) -> Result<Key,
     Ok(Key { aes, check })
 }
 
-/// Зашифровать: шифротекст вместе с меткой подлинности.
-pub async fn encrypt(key: &Key, iv: &[u8], plain: &[u8]) -> Result<Vec<u8>, CryptoError> {
+/// Зашифровать: шифротекст вместе с меткой подлинности. Открытый текст —
+/// по своей (задача 122): он уходит из памяти wasm, как только скопирован
+/// в JS, — до того, как придёт шифротекст. У части копии в сотню мегабайт
+/// иначе в ней лежали бы оба, а память wasm не убывает.
+pub async fn encrypt(key: &Key, iv: &[u8], plain: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
     let subtle = subtle()?;
     let params = gcm(iv)?;
-    let data: ArrayBuffer = call(
-        "encrypt",
-        subtle.encrypt_with_object_and_js_u8_array(&params, &key.aes, &Uint8Array::from(plain)),
-    )
-    .await?;
+    let copy = Uint8Array::from(plain.as_slice());
+    drop(plain);
+    let promise = subtle.encrypt_with_object_and_js_u8_array(&params, &key.aes, &copy);
+    // WebCrypto копирует данные к себе в самом вызове (по спецификации
+    // WebCrypto, `encrypt()`: «get a copy of the bytes held by the data
+    // parameter»), и своя копия JS ему больше не нужна.
+    drop(copy);
+    let data: ArrayBuffer = call("encrypt", promise).await?;
     Ok(Uint8Array::new(&data).to_vec())
 }
 

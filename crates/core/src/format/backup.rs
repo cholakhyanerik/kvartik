@@ -104,8 +104,10 @@
 //! совпадут, и слияние молча положило бы их рядом.
 
 mod laid;
+mod stream;
 
 pub use laid::Laid;
+pub use stream::{Grew, Layout, Packed, Packer, Stream, plan};
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -181,8 +183,7 @@ const SEALED_HEAD_BYTES: usize = 1 << 10;
 /// здесь с запасом, по килобайту на мегабайт; потом метка подлинности шифра
 /// и base64: три байта — четыре знака.
 pub const fn sealed_bound(plain: usize) -> usize {
-    let packed = plain + plain / 1024 + 1024;
-    SEALED_HEAD_BYTES + (packed + TAG_BYTES).div_ceil(3) * 4
+    SEALED_HEAD_BYTES + (packed_bound(plain) + TAG_BYTES).div_ceil(3) * 4
 }
 
 const _: () = assert!(sealed_bound(PART_PLAIN_BYTES) <= MAX_FILE_BYTES as usize);
@@ -531,6 +532,25 @@ impl Entry {
         &self.meta
     }
 
+    /// Сколько байтов — не больше — запись займёт в открытом тексте копии:
+    /// по этому числу копия делится на части ([`split`], [`Layout`]).
+    pub fn plain_bytes(&self) -> usize {
+        self.record.get().len() + RECORD_FRAME_BYTES
+    }
+
+    /// Идёт ли запись в каждую часть копии: по ней восстановление узнаёт
+    /// часть (шапка модуля, «Частями»). Профиль — ни один ли это ИП
+    /// ([`relation`]), ИП конторы — куда лечь записям с меткой его базы
+    /// ([`whole`]). Их мало и они маленькие.
+    pub fn in_every_part(&self) -> bool {
+        self.kind == Profile::KIND || self.kind == Ip::KIND
+    }
+
+    /// Файл ли это книги: файлы идут в частях после остальных записей.
+    pub fn is_file(&self) -> bool {
+        is_file_kind(self.kind)
+    }
+
     /// Строка для базы — та же, что дал бы `format::encode`.
     pub fn stored(&self) -> String {
         wrap(self.record.get())
@@ -555,6 +575,21 @@ pub struct Raw<'a> {
     pub kind: &'a str,
     pub id: &'a str,
     pub text: Option<&'a str>,
+}
+
+/// Запись базы для [`collect`] — займом ([`Raw`]) или своей: выгрузка окна,
+/// отданная по своей, отпускает текст каждой записи сразу после её разбора
+/// (задача 122). Займом выгрузка и разобранные записи лежали бы в памяти
+/// разом — два размера копии, а у копии с файлами книги это сотни мегабайт.
+pub trait AsRaw {
+    /// Запись как она лежит.
+    fn as_raw(&self) -> Raw<'_>;
+}
+
+impl AsRaw for Raw<'_> {
+    fn as_raw(&self) -> Raw<'_> {
+        *self
+    }
 }
 
 /// Запись базы, разобранная своим видом и проверенная по ключу.
@@ -632,27 +667,27 @@ impl Collected {
 /// пишет более новая версия в другой вкладке, и копию сделает она. Нечитаемая
 /// запись копию не останавливает — без копии остальные остались бы без
 /// страховки, — а пропускается и называется в [`Collected::unreadable`].
-pub fn collect<'a>(
-    kinds: &[Kind],
-    raw: impl IntoIterator<Item = Raw<'a>>,
-) -> Result<Collected, FormatError> {
+pub fn collect<R: AsRaw>(kinds: &[Kind], raw: impl IntoIterator<Item = R>) -> Result<Collected, FormatError> {
     at_once(collect_sliced(kinds, raw, &mut no_pause))
 }
 
 /// [`collect`] кусками: пауза — после каждого мегабайта разобранных записей.
-pub async fn collect_sliced<'a, P, F>(
+/// Запись, отданная по своей, уходит из памяти, как только разобрана.
+pub async fn collect_sliced<R, P, F>(
     kinds: &[Kind],
-    raw: impl IntoIterator<Item = Raw<'a>>,
+    raw: impl IntoIterator<Item = R>,
     pause: &mut P,
 ) -> Result<Collected, FormatError>
 where
+    R: AsRaw,
     P: FnMut() -> F,
     F: Future<Output = ()>,
 {
     let mut meter = Meter::new(pause);
     let mut entries = Vec::new();
     let mut unreadable = Vec::new();
-    for item in raw {
+    for owned in raw {
+        let item = owned.as_raw();
         match read_stored(kinds, item) {
             Ok(entry) => entries.push(entry),
             Err(FormatError::Newer { found }) => return Err(FormatError::Newer { found }),
@@ -660,7 +695,9 @@ where
                 unreadable.push(format!("{} {}: {why}", item.kind, item.id));
             }
         }
-        meter.add(item.text.map_or(0, str::len).max(RECORD_WEIGHT)).await;
+        let bytes = item.text.map_or(0, str::len).max(RECORD_WEIGHT);
+        drop(owned);
+        meter.add(bytes).await;
     }
     Ok(Collected {
         entries,
@@ -835,19 +872,55 @@ pub fn plaintext<'e>(header: &Header, entries: impl IntoIterator<Item = &'e Entr
     .expect("копия в JSON не падает: записи уже в JSON, остальное — строки и числа")
 }
 
+/// Шапка открытого текста до записей: `{"file":…,"part":…,"records":[` —
+/// тот же текст, с которого начинается [`plaintext`].
+fn plain_head(header: &Header) -> String {
+    #[derive(Serialize)]
+    struct HeadOut<'a> {
+        file: &'static str,
+        format_version: u32,
+        app_version: &'a str,
+        created: Timestamp,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        part: Option<Part>,
+    }
+    let mut head = serde_json::to_string(&HeadOut {
+        file: FILE_MARK,
+        format_version: header.format_version,
+        app_version: &header.app_version,
+        created: header.created,
+        part: header.part,
+    })
+    .expect("шапка в JSON не падает: в ней только строки и числа");
+    head.pop();
+    head.push_str(r#","records":["#);
+    head
+}
+
+/// Конец открытого текста после записей.
+const PLAIN_TAIL: &str = "]}";
+
 /// То, что окно шифрует: открытый текст копии ([`plaintext`]), сжатый
 /// DEFLATE (RFC 1951) — так пишет версия формата 6 и новее.
 pub fn pack<'e>(header: &Header, entries: impl IntoIterator<Item = &'e Entry>) -> Vec<u8> {
     at_once(pack_sliced(header, entries, &mut no_pause))
 }
 
-/// [`pack`] кусками: пауза — после каждого мегабайта сжатого текста.
+/// [`pack`] кусками: пауза — после каждого мегабайта записей. Открытый
+/// текст целиком не собирается: записи идут в сжатие по одной ([`Packer`]).
 pub async fn pack_sliced<'e, P, F>(header: &Header, entries: impl IntoIterator<Item = &'e Entry>, pause: &mut P) -> Vec<u8>
 where
     P: FnMut() -> F,
     F: Future<Output = ()>,
 {
-    deflate_sliced(plaintext(header, entries).as_bytes(), PACK_LEVEL, pause).await
+    let entries: Vec<&Entry> = entries.into_iter().collect();
+    let mut packer = Packer::new(header, plain_len(&entries));
+    let mut meter = Meter::new(pause);
+    for entry in entries {
+        packer.add(entry);
+        meter.add(entry.record.get().len().max(RECORD_WEIGHT)).await;
+    }
+    packer.finish().packed
 }
 
 /// Сколько байтов открытого текста — не больше — занимает запись вокруг
@@ -858,17 +931,14 @@ const RECORD_FRAME_BYTES: usize = 128;
 /// Шапка открытого текста — не длиннее: метка, версии, момент и часть.
 const PLAIN_HEAD_BYTES: usize = 512;
 
-/// Сколько байтов — не больше — запись займёт в открытом тексте копии.
-fn plain_bytes(entry: &Entry) -> usize {
-    entry.record.get().len() + RECORD_FRAME_BYTES
-}
-
-/// Запись, которая идёт в каждую часть копии: по ней восстановление узнаёт
-/// часть (шапка модуля, «Частями»). Профиль — ни один ли это ИП
-/// ([`relation`]), ИП конторы — куда лечь записям с меткой его базы
-/// ([`whole`]). Их мало и они маленькие.
-fn in_every_part(entry: &Entry) -> bool {
-    entry.kind == Profile::KIND || entry.kind == Ip::KIND
+/// Сколько байтов — не больше — займёт открытый текст части с записями
+/// `entries`, вместе с шапкой: по нему окно проверяет, что файл части
+/// уложится в [`MAX_FILE_BYTES`] ([`sealed_bound`]), ещё до первой части.
+pub fn plain_len(entries: &[&Entry]) -> usize {
+    entries
+        .iter()
+        .map(|entry| entry.plain_bytes())
+        .fold(PLAIN_HEAD_BYTES, usize::saturating_add)
 }
 
 /// Копия, разложенная по частям (задача 117): шапка и записи каждой. Влезает
@@ -883,33 +953,26 @@ fn in_every_part(entry: &Entry) -> bool {
 /// больше [`MAX_FILE_BYTES`], который окно не отдаст; у программы таких нет:
 /// файл книги — не больше 2 МБ (`model::attachment::MAX_BYTES`).
 ///
-/// `limit` окна — [`PART_PLAIN_BYTES`]; тесты делят мелко.
+/// `limit` окна — [`PART_PLAIN_BYTES`]; тесты делят мелко. Где кончается
+/// часть, решает [`Layout`] — по одним размерам записей; им же копия всех
+/// ИП делится, не держа в памяти всех записей ([`Stream`], задача 122).
 pub fn split<'e>(header: &Header, entries: &'e [Entry], limit: usize) -> Vec<(Header, Vec<&'e Entry>)> {
-    let total = entries.iter().map(plain_bytes).fold(PLAIN_HEAD_BYTES, usize::saturating_add);
-    if total <= limit {
-        return vec![(header.clone(), entries.iter().collect())];
+    let all: Vec<&Entry> = entries.iter().collect();
+    if plain_len(&all) <= limit {
+        return vec![(header.clone(), all)];
     }
-    let shared: Vec<&Entry> = entries.iter().filter(|entry| in_every_part(entry)).collect();
-    let shared_bytes = shared.iter().map(|entry| plain_bytes(entry)).fold(PLAIN_HEAD_BYTES, usize::saturating_add);
-    let file = |entry: &&Entry| entry.kind == Attachment::KIND;
-    let rest = entries
-        .iter()
-        .filter(|entry| !in_every_part(entry) && !file(entry))
-        .chain(entries.iter().filter(file));
-    let mut parts: Vec<Vec<&Entry>> = Vec::new();
-    let mut part = shared.clone();
-    let mut used = shared_bytes;
-    for entry in rest {
-        let bytes = plain_bytes(entry);
-        // В части уже есть своё, кроме общего, — новая часть.
-        if used.saturating_add(bytes) > limit && part.len() > shared.len() {
-            parts.push(std::mem::replace(&mut part, shared.clone()));
-            used = shared_bytes;
+    let shared: Vec<&Entry> = entries.iter().filter(|entry| entry.in_every_part()).collect();
+    let shared_bytes = shared.iter().map(|entry| entry.plain_bytes()).fold(0, usize::saturating_add);
+    let mut layout = Layout::new(shared_bytes, limit);
+    let mut parts: Vec<Vec<&Entry>> = vec![shared.clone()];
+    for entry in in_order(entries.iter().filter(|entry| !entry.in_every_part())) {
+        if layout.add(entry.plain_bytes()) {
+            parts.push(shared.clone());
         }
-        part.push(entry);
-        used = used.saturating_add(bytes);
+        if let Some(part) = parts.last_mut() {
+            part.push(entry);
+        }
     }
-    parts.push(part);
     let of = u16::try_from(parts.len()).unwrap_or(u16::MAX);
     if of < 2 {
         return vec![(header.clone(), entries.iter().collect())];
@@ -921,6 +984,131 @@ pub fn split<'e>(header: &Header, entries: &'e [Entry], limit: usize) -> Vec<(He
         .collect()
 }
 
+/// Записи одной базы глазами первого прохода копии всех ИП
+/// ([`measure_sliced`], задача 122).
+#[derive(Debug, Default)]
+pub struct Measures {
+    /// Размеры записей без файлов книги в открытом тексте
+    /// ([`Entry::plain_bytes`]) — кроме общих — в порядке базы.
+    pub records: Vec<usize>,
+    /// Размеры файлов книги — в порядке базы.
+    pub files: Vec<usize>,
+    /// Общие записи частей ([`Entry::in_every_part`]) — разобранные.
+    pub shared: Vec<Entry>,
+}
+
+/// Первый проход копии всех ИП по выгрузке одной базы (задача 122): размеры
+/// записей и общие записи — для [`plan`]. Размер записи
+/// текущей версии известен без разбора ([`measure`]), а прочие разбираются,
+/// как у [`collect_sliced`], с паузой после каждого мегабайта разобранного.
+/// Нечитаемая запись пропускается молча — её назовёт второй проход,
+/// [`collect_sliced`]; запись новее программы — отказ, как там же.
+pub async fn measure_sliced<R, P, F>(
+    kinds: &[Kind],
+    raw: impl IntoIterator<Item = R>,
+    pause: &mut P,
+) -> Result<Measures, FormatError>
+where
+    R: AsRaw,
+    P: FnMut() -> F,
+    F: Future<Output = ()>,
+{
+    let mut meter = Meter::new(pause);
+    let (mut records, mut files, mut shared) = (Vec::new(), Vec::new(), Vec::new());
+    for owned in raw {
+        let item = owned.as_raw();
+        let (bytes, file) = match measure(item) {
+            Measured::Sized { bytes, file } => (bytes, file),
+            Measured::Parse => {
+                let weight = item.text.map_or(0, str::len).max(RECORD_WEIGHT);
+                let parsed = read_stored(kinds, item);
+                meter.add(weight).await;
+                match parsed {
+                    Ok(entry) if entry.in_every_part() => {
+                        shared.push(entry);
+                        continue;
+                    }
+                    Ok(entry) => (entry.plain_bytes(), entry.is_file()),
+                    Err(FormatError::Newer { found }) => return Err(FormatError::Newer { found }),
+                    Err(FormatError::Damaged(_)) => continue,
+                }
+            }
+        };
+        if file {
+            files.push(bytes);
+        } else {
+            records.push(bytes);
+        }
+    }
+    Ok(Measures { records, files, shared })
+}
+
+/// Файлы ли это книги — по виду записи в ключе базы: файлы копия всех ИП
+/// кладёт после всех записей без файлов ([`in_order`]) и читает из базы
+/// отдельно от них (задача 122).
+pub fn is_file_kind(kind: &str) -> bool {
+    kind == Attachment::KIND
+}
+
+/// Запись базы глазами первого прохода копии всех ИП ([`measure`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Measured {
+    /// Размер записи в открытом тексте ([`Entry::plain_bytes`]); `file` —
+    /// файл книги ([`Entry::is_file`]).
+    Sized { bytes: usize, file: bool },
+    /// Её надо разобрать: общая запись частей ([`Entry::in_every_part`]) —
+    /// она нужна целиком, — или запись, чей размер в копии знает только
+    /// разбор.
+    Parse,
+}
+
+/// Размер записи базы в открытом тексте копии — без разбора, где можно
+/// (задача 122): запись текущей версии в конверте программы (`format::wrap`)
+/// идёт в копию тем же текстом ([`check`]: «запись текущей версии ложится
+/// тем же текстом»), и [`Entry::plain_bytes`] у неё — длина этого текста
+/// с рамкой. Запись прежней версии разбор переводит в текущую — её длину
+/// знает только он. Первый проход копии всех ИП так узнаёт число частей,
+/// не разбирая файлы книги дважды: второй разбор стоил копии в 135 МБ
+/// около секунды (замер задачи 122). Испорченная запись, которую разбор
+/// отверг бы, здесь сосчитана — частей по плану тогда больше, и лишние
+/// выходят с одними общими записями ([`Stream::finish`]).
+fn measure(raw: Raw<'_>) -> Measured {
+    if raw.kind == Profile::KIND || raw.kind == Ip::KIND {
+        return Measured::Parse;
+    }
+    let inner = raw
+        .text
+        .and_then(|text| text.strip_prefix(r#"{"format_version":"#))
+        .and_then(|text| {
+            let digits = text.bytes().take_while(u8::is_ascii_digit).count();
+            let (version, rest) = text.split_at(digits);
+            (version.parse::<u32>().ok() == Some(FORMAT_VERSION)).then_some(rest)
+        })
+        .and_then(|rest| rest.strip_prefix(r#","record":"#))
+        .and_then(|rest| rest.strip_suffix('}'));
+    match inner {
+        Some(record) => Measured::Sized {
+            bytes: record.len() + RECORD_FRAME_BYTES,
+            file: is_file_kind(raw.kind),
+        },
+        None => Measured::Parse,
+    }
+}
+
+/// Записи частей по порядку: без файлов книги — впереди, файлы — за ними,
+/// и те и другие — в порядке копии. У программы записи без файлов почти
+/// всегда влезают в первую часть, и восстановивший её одну видит счета
+/// и книгу целиком (задача 117).
+pub fn in_order<'e, I>(entries: I) -> impl Iterator<Item = &'e Entry>
+where
+    I: Iterator<Item = &'e Entry> + Clone,
+{
+    entries
+        .clone()
+        .filter(|entry| !entry.is_file())
+        .chain(entries.filter(|entry| entry.is_file()))
+}
+
 /// Сжатие DEFLATE без обёртки (RFC 1951) уровнем `level` кусками по
 /// [`SLICE_BYTES`] — поток один, и разжимается он целиком, как сжатый одним
 /// куском.
@@ -929,34 +1117,75 @@ where
     P: FnMut() -> F,
     F: Future<Output = ()>,
 {
-    use miniz_oxide::deflate::core::{
-        CompressorOxide, TDEFLFlush, TDEFLStatus, compress, create_comp_flags_from_zip_params,
-    };
-    // Окно 0 — без обёртки zlib, как у `compress_to_vec`.
-    let flags = create_comp_flags_from_zip_params(i32::from(level), 0, 0);
-    let mut compressor = CompressorOxide::new(flags);
-    let mut output = vec![0; input.len() / 2 + 1024];
-    let mut written = 0;
+    let mut deflater = Deflater::new(level, input.len() / 2 + 1024);
     let mut meter = Meter::new(pause);
-    let mut rest = input;
-    loop {
-        let (mut chunk, after) = rest.split_at(rest.len().min(SLICE_BYTES));
-        let last = after.is_empty();
-        let flush = if last { TDEFLFlush::Finish } else { TDEFLFlush::None };
-        let taken = chunk.len();
+    for chunk in input.chunks(SLICE_BYTES) {
+        deflater.push(chunk);
+        meter.add(chunk.len()).await;
+    }
+    deflater.finish()
+}
+
+/// Сколько байтов — не больше — займёт сжатый текст из `plain` байтов:
+/// сжатие, которому нечего сжать, пишет блоки «как есть» и прибавляет к ним
+/// по 5 байтов на 64 КиБ (RFC 1951, §3.2.4) — здесь с запасом, по килобайту
+/// на мегабайт.
+const fn packed_bound(plain: usize) -> usize {
+    plain + plain / 1024 + 1024
+}
+
+/// Сжатие DEFLATE без обёртки потоком: текст приходит кусками, а сжатое
+/// копится в одном буфере (задача 122). Ёмкость буфера берётся сразу —
+/// сколько скажут, — а длина растёт по куску внутри неё: буфер не
+/// переезжает, растя, и копия в сотню мегабайт не лежит в памяти дважды
+/// на время переезда; страницы памяти, до которых сжатое не дошло, браузер
+/// не трогает.
+struct Deflater {
+    compressor: Box<miniz_oxide::deflate::core::CompressorOxide>,
+    output: Vec<u8>,
+    written: usize,
+}
+
+impl Deflater {
+    /// Уровнем `level`, с ёмкостью на `capacity` байтов сжатого.
+    fn new(level: u8, capacity: usize) -> Self {
+        use miniz_oxide::deflate::core::{CompressorOxide, create_comp_flags_from_zip_params};
+        // Окно 0 — без обёртки zlib, как у `compress_to_vec`.
+        let flags = create_comp_flags_from_zip_params(i32::from(level), 0, 0);
+        Self {
+            compressor: Box::new(CompressorOxide::new(flags)),
+            output: Vec::with_capacity(capacity),
+            written: 0,
+        }
+    }
+
+    /// Ещё кусок текста.
+    fn push(&mut self, input: &[u8]) {
+        self.feed(input, miniz_oxide::deflate::core::TDEFLFlush::None);
+    }
+
+    /// Конец текста: сжатое целиком.
+    fn finish(mut self) -> Vec<u8> {
+        self.feed(&[], miniz_oxide::deflate::core::TDEFLFlush::Finish);
+        self.output.truncate(self.written);
+        self.output
+    }
+
+    fn feed(&mut self, mut input: &[u8], flush: miniz_oxide::deflate::core::TDEFLFlush) {
+        use miniz_oxide::deflate::core::{TDEFLFlush, TDEFLStatus, compress};
         loop {
-            if output.len() - written < 1024 {
-                output.resize(output.len() * 2 + 1024, 0);
+            if self.output.len() - self.written < 1024 {
+                // Внутри ёмкости — кусками, дальше — вдвое, как растёт `Vec`.
+                let room = self.output.capacity() - self.output.len();
+                let step = if room >= 1024 { room.min(SLICE_BYTES) } else { self.output.len() + 1024 };
+                self.output.resize(self.output.len() + step, 0);
             }
-            let (status, used, made) = compress(&mut compressor, chunk, &mut output[written..], flush);
-            chunk = &chunk[used..];
-            written += made;
+            let (status, used, made) = compress(&mut self.compressor, input, &mut self.output[self.written..], flush);
+            input = &input[used..];
+            self.written += made;
             match status {
-                TDEFLStatus::Done => {
-                    output.truncate(written);
-                    return output;
-                }
-                TDEFLStatus::Okay if chunk.is_empty() && !last => break,
+                TDEFLStatus::Done => return,
+                TDEFLStatus::Okay if input.is_empty() && flush == TDEFLFlush::None => return,
                 // Нужно больше места — или конец ещё не записан.
                 TDEFLStatus::Okay => {}
                 // С постоянными параметрами и без своего обработчика вывода
@@ -966,8 +1195,18 @@ where
                 }
             }
         }
-        rest = after;
-        meter.add(taken).await;
+    }
+}
+
+/// Записи идут в сжатие прямо из `serde_json`, без своей копии текста.
+impl std::io::Write for Deflater {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.push(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
 
@@ -1048,7 +1287,28 @@ where
     P: FnMut() -> F,
     F: Future<Output = ()>,
 {
-    let mut file = serde_json::to_string(&SealedOut {
+    let mut file = String::with_capacity(SEALED_HEAD_BYTES + ciphertext.len().div_ceil(3) * 4);
+    seal_pieces(header, lock, ciphertext, &mut |piece: &str| file.push_str(piece), pause).await;
+    file
+}
+
+/// Файл копии кусками (задача 122): шапка с замком до кавычки `data`, потом
+/// base64 шифротекста по [`SLICE_BYTES`] с паузой, потом хвост — `piece`
+/// получает их по порядку, и вместе они — тот же текст, что [`seal`]. Окно
+/// кладёт куски прямо в файл браузера: файл части в сотню мегабайт целиком
+/// в памяти wasm не нужен. Вернёт длину файла.
+pub async fn seal_pieces<P, F>(
+    header: &Header,
+    lock: &Lock,
+    ciphertext: &[u8],
+    piece: &mut impl FnMut(&str),
+    pause: &mut P,
+) -> usize
+where
+    P: FnMut() -> F,
+    F: Future<Output = ()>,
+{
+    let mut head = serde_json::to_string(&SealedOut {
         file: FILE_MARK,
         format_version: header.format_version,
         app_version: &header.app_version,
@@ -1069,18 +1329,21 @@ where
     // Данные встают в конец, между кавычками `"data":""}`, а не идут через
     // serde: тот прошёл бы по десяткам мегабайт ещё раз, ища, что
     // экранировать, а в base64 нет ни кавычек, ни обратной косой черты.
-    let tail = file.split_off(file.len() - 2);
+    let tail = head.split_off(head.len() - 2);
     debug_assert_eq!(tail, "\"}");
-    file.reserve(ciphertext.len().div_ceil(3) * 4 + tail.len());
+    let mut length = head.len() + tail.len();
+    piece(&head);
+    drop(head);
     // Куски — по три байта целиком: base64 кусков подряд — base64 целого.
-    let piece = SLICE_BYTES / 3 * 3;
     let mut meter = Meter::new(pause);
-    for chunk in ciphertext.chunks(piece) {
-        file.push_str(&base64::encode(chunk));
+    for chunk in ciphertext.chunks(SLICE_BYTES / 3 * 3) {
+        let text = base64::encode(chunk);
+        length += text.len();
+        piece(&text);
         meter.add(chunk.len()).await;
     }
-    file.push_str(&tail);
-    file
+    piece(&tail);
+    length
 }
 
 /// Почему файл копии не открыт.
@@ -1652,6 +1915,17 @@ pub struct Files {
     pub bytes: u64,
     /// Из них — убранных из записей.
     pub removed: u64,
+}
+
+impl Files {
+    /// Вместе с файлами `other` — копия всех ИП считает их по базе
+    /// (задача 122).
+    pub const fn plus(self, other: Self) -> Self {
+        Self {
+            bytes: self.bytes.saturating_add(other.bytes),
+            removed: self.removed.saturating_add(other.removed),
+        }
+    }
 }
 
 /// Файлы книги в записях копии ([`Files`]). Байты — по длине base64 в записи,

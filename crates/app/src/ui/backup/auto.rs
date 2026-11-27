@@ -439,6 +439,29 @@ pub(super) async fn enable(
     })))
 }
 
+/// Файлы автокопии — до папки (задача 122): копия отдаёт их по одному, как
+/// только файл готов, и в памяти wasm их нет, — они уже в браузере. А в папку
+/// они ложатся только целой копией, когда готовы все: части пишутся под
+/// именем дня (`-1of3`), поверх частей прежней копии дня, и копия, оборванная
+/// посреди сборки — закрыли вкладку, другая вкладка обновила базу, — оставила
+/// бы в папке части двух копий, похожие на одну (ревью задачи 122).
+struct Held {
+    name: String,
+    files: Vec<(String, web_sys::File)>,
+}
+
+impl stored::Sink for Held {
+    fn put(&mut self, sheet: stored::Sheet) -> stored::Handing<'_> {
+        self.files.push((backup::part_file_name(&self.name, sheet.part), sheet.file));
+        Box::pin(std::future::ready(Ok(())))
+    }
+
+    // Копию собирают заново: отданное — не её.
+    fn restart(&mut self) {
+        self.files.clear();
+    }
+}
+
 /// Записать автокопию — или сказать, что помешало.
 pub(super) async fn write_auto(backups: Backups) -> Made {
     match write_file(backups).await {
@@ -484,16 +507,19 @@ pub(super) async fn write_file(backups: Backups) -> Result<Option<Wrote>, Hitch>
         iterations: saved.lock.iterations(),
         limit: part_limit(),
     };
-    let made = make_file(backups, &store, &sealing).await?;
-    let (size, parts) = (made.size(), made.sheets.len());
-    // Копия частями (задача 117) — файлы частей рядом, по одному: текст
-    // записанного больше не нужен.
-    let name = autobackup::file_name(today, tag);
-    let mut written = Vec::with_capacity(parts);
-    for sheet in made.sheets {
-        let file = backup::part_file_name(&name, sheet.part);
-        folders::write(&saved.folder, &file, sheet.text.as_bytes()).await?;
-        written.push(file);
+    // Копия частями (задача 117) — файлы частей рядом, по одному, как только
+    // часть готова (задача 122).
+    let mut held = Held {
+        name: autobackup::file_name(today, tag),
+        files: Vec::new(),
+    };
+    let made = make_file(backups, &store, &sealing, &mut held).await?;
+    let (size, parts) = (made.size, made.sheets);
+    // Копия частями (задача 117) — файлы частей рядом, по одному.
+    let mut written = Vec::with_capacity(held.files.len());
+    for (name, file) in held.files {
+        folders::write_file(&saved.folder, &name, &file).await?;
+        written.push(name);
     }
     // Старые свои файлы и брошенные временные — уже после нового: не
     // убрались — копия всё равно записана, а лишнее уберёт следующая.
