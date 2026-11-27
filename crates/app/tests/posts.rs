@@ -39,14 +39,32 @@ fn posts() -> String {
     flat(&text)
 }
 
+/// Месяцы по-английски полностью, как их пишет `Key::BuyAccept`. Свои:
+/// полные английские месяцы `i18n::locale` наружу не отдаёт, а код
+/// программы ради теста не меняется.
+const EN_MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
 /// День редакции так, как его пишут слова согласия: «15.11.2026»
-/// по-русски и по-армянски, «November 15, 2026» по-английски — от месяца
-/// здесь только день и год, как в тесте юридических текстов
-/// (`crates/sw/src/legal.rs`).
+/// по-русски и по-армянски, «November 15, 2026» по-английски — полностью,
+/// с месяцем: одни число и год («20, 2026») нашлись бы и в любой другой
+/// английской дате того же числа, «December 20, 2026», и тест краснел бы зря.
 fn edition_day(lang: Lang, day: Date) -> String {
     match lang {
         Lang::Am | Lang::Ru => format!("{:02}.{:02}.{}", day.day(), day.month(), day.year()),
-        Lang::En => format!(" {}, {}", day.day(), day.year()),
+        Lang::En => format!("{} {}, {}", EN_MONTHS[usize::from(day.month() - 1)], day.day(), day.year()),
     }
 }
 
@@ -83,7 +101,7 @@ fn posts_ask_for_the_current_terms_edition() {
         for &day in Legal::Terms.earlier() {
             let old = edition_day(lang, day);
             if posts.contains(&old) {
-                wrong.push(format!("{lang:?}: день прежней редакции условий «{}»", old.trim()));
+                wrong.push(format!("{lang:?}: день прежней редакции условий «{old}»"));
             }
         }
     }
