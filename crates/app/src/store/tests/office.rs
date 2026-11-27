@@ -700,8 +700,12 @@ async fn a_backup_of_all_ies_in_parts_keeps_the_records_first() {
 /// решают их идентификаторы), и правку копия увидит во второй.
 struct Meddling {
     texts: Texts,
+    /// Базы, которые правятся на первой части попытки; правка их забирает.
     bases: Vec<String>,
-    edit: fn(&str) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>,
+    /// Базы для правки на каждой следующей попытке — другая вкладка правит
+    /// без остановки; пусто — правка одна.
+    again: Vec<String>,
+    edit: Meddle,
 }
 
 impl Sink for Meddling {
@@ -716,6 +720,7 @@ impl Sink for Meddling {
 
     fn restart(&mut self) {
         self.texts.restart();
+        self.bases.clone_from(&self.again);
     }
 }
 
@@ -745,8 +750,15 @@ fn renamed_profile(base: &str) -> std::pin::Pin<Box<dyn std::future::Future<Outp
 }
 
 /// Копия всех ИП, у которой между проходами правили базы, — с правкой
-/// приёмника `edit`; вернёт копию, сколько раз её собирали заново и части.
-async fn meddled(clients: usize, files: usize, limit: usize, edit: Meddle) -> (crate::store::backup::Made, Meddling, Vec<Vec<Entry>>, Ip) {
+/// приёмника `edit`, а с `every` — на каждой попытке; вернёт итог копии,
+/// приёмник (сколько раз её собирали заново) и части.
+async fn meddled(
+    clients: usize,
+    files: usize,
+    limit: usize,
+    edit: Meddle,
+    every: bool,
+) -> (Result<crate::store::backup::Made, Failure>, Meddling, Vec<Vec<Entry>>, Ip) {
     let (open, office, second) = two_ies(clients, files).await;
     let salt = crypto::random(SALT_BYTES).expect("соль");
     let (key, header) = sealing_parts(&salt).await;
@@ -757,12 +769,14 @@ async fn meddled(clients: usize, files: usize, limit: usize, edit: Meddle) -> (c
         iterations: KDF_ITERATIONS,
         limit,
     };
+    let bases = vec![DB_NAME.to_owned(), second.base().to_owned()];
     let mut sink = Meddling {
         texts: Texts::default(),
-        bases: vec![DB_NAME.to_owned(), second.base().to_owned()],
+        again: if every { bases.clone() } else { Vec::new() },
+        bases,
         edit,
     };
-    let made = crate::store::backup::make_all(&open, DB_NAME, &office, &sealing, &mut sink).await.expect("копия всех");
+    let made = crate::store::backup::make_all(&open, DB_NAME, &office, &sealing, &mut sink).await;
     let mut wrong = Vec::new();
     let parts = parts_of(&sink.texts.sheets, &mut wrong).await;
     assert!(wrong.is_empty(), "части: {wrong:#?}");
@@ -778,7 +792,8 @@ type Meddle = fn(&str) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>
 /// с их числом.
 #[wasm_bindgen_test]
 async fn a_backup_of_all_ies_starts_over_when_a_base_grew() {
-    let (made, sink, parts, second) = meddled(0, 3, 10_000, more_files).await;
+    let (made, sink, parts, second) = meddled(0, 3, 10_000, more_files, false).await;
+    let made = made.expect("копия всех");
     let mut wrong = Vec::new();
     if sink.texts.restarts != 1 {
         wrong.push(format!("собрана заново {} раз", sink.texts.restarts));
@@ -802,8 +817,11 @@ async fn a_backup_of_all_ies_starts_over_when_a_base_grew() {
 async fn a_backup_of_all_ies_starts_over_when_a_profile_changed() {
     // Клиентов много, а часть мала: первая часть готова ещё на записях без
     // файлов первой базы, до профиля второй.
-    let (_, sink, parts, second) = meddled(12, 1, 4_000, renamed_profile).await;
+    let (made, sink, parts, second) = meddled(12, 1, 4_000, renamed_profile, false).await;
     let mut wrong = Vec::new();
+    if let Err(failure) = made {
+        wrong.push(format!("копия не сделана: {failure:?}"));
+    }
     if sink.texts.restarts != 1 {
         wrong.push(format!("собрана заново {} раз", sink.texts.restarts));
     }
@@ -822,4 +840,28 @@ async fn a_backup_of_all_ies_starts_over_when_a_profile_changed() {
     }
     drop_office(&second).await;
     assert!(wrong.is_empty(), "копия всех ИП после правки профиля: {wrong:#?}");
+}
+
+/// Базы растут между проходами на каждой попытке — другая вкладка правит без
+/// остановки (ревью 0.0.213): копия всех ИП собирается заново `ATTEMPTS` раз
+/// и отказывает своим словом — данные менялись, — а не отказом хранилища:
+/// «браузер ответил ошибкой» было бы неправдой о причине. У приёмника не
+/// остаётся ни одной части: отданные раньше — не этой копии.
+#[wasm_bindgen_test]
+async fn a_backup_of_all_ies_that_keeps_changing_says_so() {
+    let (made, sink, parts, second) = meddled(0, 3, 10_000, more_files, true).await;
+    let mut wrong = Vec::new();
+    match made {
+        Err(Failure::Changing) => {}
+        Err(failure) => wrong.push(format!("отказ {failure:?}, а не «данные менялись»")),
+        Ok(made) => wrong.push(format!("копия сделана: частей {}, записей {}", made.sheets, made.records)),
+    }
+    if sink.texts.restarts != crate::store::backup::ATTEMPTS {
+        wrong.push(format!("собрана заново {} раз", sink.texts.restarts));
+    }
+    if !sink.texts.sheets.is_empty() || !parts.is_empty() {
+        wrong.push(format!("у приёмника частей {}", sink.texts.sheets.len()));
+    }
+    drop_office(&second).await;
+    assert!(wrong.is_empty(), "копия всех ИП, пока данные меняются: {wrong:#?}");
 }

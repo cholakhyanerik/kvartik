@@ -1,16 +1,32 @@
 {
   "notes": [
     {
+      "version": "0.0.214",
+      "date": "2026-11-27",
+      "hy": [
+        "Եթե բոլոր ԱՁ-ների պատճենը չհավաքվեց, որովհետև տվյալներն անընդհատ փոխվում էին (հավանաբար մեկ այլ ներդիրում), ծրագիրն այժմ ասում է դա և խորհուրդ է տալիս փակել Kvartik-ի մյուս ներդիրները, այլ ոչ թե գրում, որ դիտարկիչը սխալ տվեց։",
+        "Ուղղում՝ նախորդ տարբերակի մասին. մեծ պատճենի մասերը չեն պահպանվում անմիջապես, երբ պատրաստ են. դրանց հղումները հայտնվում են, երբ պատրաստ են բոլորը, իսկ ավտոմատ պատճենը թղթապանակում դնում է միայն ամբողջական պատճեն։"
+      ],
+      "ru": [
+        "Если копия всех ИП не собралась, потому что данные всё время менялись (наверное, в другой вкладке), программа говорит теперь это словами и советует закрыть другие вкладки Kvartik, а не пишет, что браузер ответил ошибкой.",
+        "Поправка к заметке о прошлой версии: части большой копии не сохраняются сразу, как готовы, — ссылки на них появляются, когда готовы все, а автокопия кладёт в папку только целую копию."
+      ],
+      "en": [
+        "If a backup of all IEs couldn’t be put together because the data kept changing (probably in another tab), the app now says so and suggests closing other Kvartik tabs, instead of saying the browser returned an error.",
+        "A correction to the previous version’s note: the parts of a large backup aren’t saved as soon as each is ready; the links appear once all of them are, and the automatic backup puts only a whole backup in the folder."
+      ]
+    },
+    {
       "version": "0.0.213",
       "date": "2026-11-27",
       "hy": [
-        "Մեծ պահուստային պատճենն այժմ գրեթե երկու անգամ քիչ հիշողություն է զբաղեցնում. դրա յուրաքանչյուր մասը պահպանվում է անմիջապես, երբ պատրաստ է, իսկ բոլոր ԱՁ-ների պատճենը հավաքվում է ԱՁ առ ԱՁ։ Հեռախոսում դիտարկիչն ավելի հազվադեպ կփակի ներդիրը նման պատճենի ժամանակ։"
+        "Մեծ պահուստային պատճենին այժմ անհրաժեշտ է ծրագրի գրեթե երկու անգամ ավելի քիչ հիշողություն. պատճենի մասերը հավաքվում են մեկ առ մեկ, իսկ բոլոր ԱՁ-ների պատճենը՝ ԱՁ առ ԱՁ։"
       ],
       "ru": [
-        "Большая резервная копия занимает теперь почти вдвое меньше памяти: каждая её часть сохраняется сразу, как готова, а копия всех ИП собирается по одному ИП. На телефоне браузер реже закроет вкладку посреди такой копии."
+        "Большой резервной копии теперь нужно почти вдвое меньше памяти программы: части копии собираются по одной, а копия всех ИП — по одному ИП."
       ],
       "en": [
-        "A large backup now takes almost half the memory: each part is saved as soon as it is ready, and a backup of all IEs is put together one IE at a time. On a phone the browser is less likely to close the tab in the middle of such a backup."
+        "A large backup now needs almost half as much of the app's memory: its parts are put together one at a time, and a backup of all IEs one IE at a time."
       ]
     },
     {
@@ -248,19 +264,6 @@
       ],
       "en": [
         "A backup now takes one tap: after the first backup with the password, “Make a backup” is a single button without the password field. The app asks for the password once every 30 days so you don’t forget it."
-      ]
-    },
-    {
-      "version": "0.0.194",
-      "date": "2026-11-25",
-      "hy": [
-        "Chrome-ում և Edge-ում «Տեղադրել» կոճակը կուրսորը կոդի դաշտում դնում է նաև այն դեպքում, երբ զննարկիչը չի հասցրել դա անել հենց սեղմման պահին։"
-      ],
-      "ru": [
-        "«Вставить» в Chrome и Edge ставит курсор в поле кода и тогда, когда браузер не успел поставить его в самом нажатии."
-      ],
-      "en": [
-        "“Paste” in Chrome and Edge puts the cursor in the code field even when the browser didn’t manage to do it on the tap itself."
       ]
     }
   ]

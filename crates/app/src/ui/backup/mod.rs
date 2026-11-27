@@ -146,6 +146,11 @@ enum Hitch {
     Store(StoreError),
     /// Копия не уложилась и частями (`store::backup::Failure::TooLarge`).
     TooLarge,
+    /// Данные менялись, пока собиралась копия всех ИП
+    /// (`store::backup::Failure::Changing`): сбой временный — следующая
+    /// попытка по расписанию, а папка не тронута, в неё пишется только целая
+    /// копия.
+    Changing,
     /// Шифра нет: страница открыта не по HTTPS.
     NoCrypto,
     /// Прочее; подробность — в консоли.
@@ -171,6 +176,7 @@ impl Hitch {
             Self::Damaged => Key::AutoDamaged,
             Self::Store(error) => error_key(error),
             Self::TooLarge => return Problem::Oversized,
+            Self::Changing => Key::AutoChanging,
             Self::NoCrypto => Key::BackupNoCrypto,
             Self::Failed => Key::AutoFailed,
         })
@@ -207,6 +213,7 @@ impl From<Failure> for Hitch {
                 Self::Failed
             }
             Failure::TooLarge => Self::TooLarge,
+            Failure::Changing => Self::Changing,
         }
     }
 }
@@ -733,6 +740,7 @@ impl From<Failure> for Problem {
             // не её (ревью задачи 38): «не копия программы» о нём верно.
             Failure::TooManyKeys => Self::Say(Key::BackupNotOurs),
             Failure::Handed => Self::Say(Key::BackupFailed),
+            Failure::Changing => Self::Say(Key::BackupChanging),
         }
     }
 }

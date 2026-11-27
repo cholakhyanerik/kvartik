@@ -207,6 +207,7 @@ macro_rules! en {
     (BackupFileUnreadable) => { "The browser couldn't read the file. Choose it again." };
     (BackupNoCrypto) => { "The browser won't encrypt here: the app isn't open over a secure connection. Open it at an address starting with https://." };
     (BackupFailed) => { "That didn't work: the browser returned an error. Reload the page and try again." };
+    (BackupChanging) => { "The backup wasn't made: the data kept changing while it was being put together, probably in another tab. Close other Kvartik tabs and try again." };
 
     (BackupGoTo) => { "Go to backup" };
     (BackupHeadline) => { "Keep your data safe" };
@@ -236,6 +237,7 @@ macro_rules! en {
     (AutoGone) => { "The folder is gone: it was deleted or renamed, or the drive was disconnected. Choose a folder again." };
     (AutoFull) => { "The automatic backup wasn't saved: the drive is full. Free up some space, and the app will try again after the next change." };
     (AutoFailed) => { "The automatic backup wasn't saved: the browser returned an error. The app will try again after the next change." };
+    (AutoChanging) => { "The automatic backup wasn't saved: the data kept changing while it was being put together, probably in another tab. The app will try again on its own." };
     (AutoPickFailed) => { "The browser didn't open the folder picker. Reload the page and try again." };
     (AutoPasswordChanged) => { "The backup password changed, but automatic backups used the old one and are now waiting. Enter the new password, and they'll continue in the same folder." };
     (AutoRenew) => { "Enter the new password" };
