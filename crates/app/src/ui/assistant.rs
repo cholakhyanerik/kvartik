@@ -39,7 +39,20 @@ use crate::store::device::Device;
 /// «Загрузить снова». Ожидание одно, на загрузку, а не опрос (Правило 1).
 const LOAD_MILLIS: i32 = 20_000;
 
+/// Срок ожидания рамки: браузерный тест ждёт не двадцать секунд, а долю
+/// секунды.
+fn load_wait() -> std::time::Duration {
+    #[cfg(test)]
+    if let Some(wait) = LOAD_WAIT.with(std::cell::Cell::get) {
+        return wait;
+    }
+    std::time::Duration::from_millis(LOAD_MILLIS as u64)
+}
+
 thread_local! {
+    /// Срок ожидания рамки в браузерных тестах; `None` — [`LOAD_MILLIS`].
+    #[cfg(test)]
+    pub static LOAD_WAIT: std::cell::Cell<Option<std::time::Duration>> = const { std::cell::Cell::new(None) };
     /// Какой ИИ подключён в рамке — по её слову, записью устройства:
     /// строка на экране налога знает его и без рамки.
     static BY: ArcRwSignal<Option<Provider>> =
@@ -272,20 +285,26 @@ pub fn AssistantFrame(ctx: tax::Ctx, router: Router) -> impl IntoView {
         }
     });
     // Рамка не встала за отведённое — слова о сбое; ожидание одно, на
-    // загрузку этой рамки.
+    // загрузку этой рамки. Окно сняли раньше срока — ожидание снято с ним:
+    // таймер, переживший окно, читал его освобождённые сигналы, и паника
+    // роняла программу (CI 0.0.214, Firefox; Правило 6, «Задача, пережившая
+    // своё окно»). `try_` — на случай, если срок и снятие пришли в один миг.
     Effect::new(move |_| {
         let mine = generation.get();
         if load.get_untracked() != Load::Loading {
             return;
         }
-        set_timeout(
+        let timer = set_timeout_with_handle(
             move || {
-                if generation.get_untracked() == mine && load.get_untracked() == Load::Loading {
-                    load.set(Load::Failed);
+                if generation.try_get_untracked() == Some(mine) && load.try_get_untracked() == Some(Load::Loading) {
+                    load.try_set(Load::Failed);
                 }
             },
-            std::time::Duration::from_millis(LOAD_MILLIS as u64),
+            load_wait(),
         );
+        if let Ok(timer) = timer {
+            on_cleanup(move || timer.clear());
+        }
     });
     let retry = move || {
         busy.set(false);

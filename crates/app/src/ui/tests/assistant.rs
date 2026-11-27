@@ -9,13 +9,14 @@
 use js_sys::{Array, Function, JSON, Reflect};
 use kvartik_core::ai::{Provider, Setup};
 use kvartik_core::i18n::{Key, Lang, fill, t};
+use leptos::prelude::Owner;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_test::wasm_bindgen_test;
 use web_sys::HtmlElement;
 
-use super::{mount_at, opened, sleep, wait_for};
+use super::{button, mount_at, opened, sleep, wait_for};
 use crate::store::device::Device;
-use crate::ui::assistant::TEST_ORIGIN;
+use crate::ui::assistant::{LOAD_WAIT, TEST_ORIGIN};
 use crate::ui::route::Screen;
 
 /// Подождать, пока условие станет истинным; `false` — не дождались за пять
@@ -61,6 +62,32 @@ fn got(window: &JsValue) -> String {
         .and_then(|got| JSON::stringify(&got).ok())
         .and_then(|text| text.as_string())
         .unwrap_or_default()
+}
+
+thread_local! {
+    static PANICKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Была ли паника, пока шло `wait`, — в таймере, задаче, обработчике:
+/// хук отмечает её и отдаёт прежнему, а после — прежний на месте.
+async fn panics_while(wait: impl std::future::Future<Output = ()>) -> bool {
+    type Hook = dyn Fn(&std::panic::PanicHookInfo<'_>) + Send + Sync;
+    PANICKED.with(|panicked| panicked.set(false));
+    let previous: std::sync::Arc<Hook> = std::panic::take_hook().into();
+    let chained = std::sync::Arc::clone(&previous);
+    std::panic::set_hook(Box::new(move |info| {
+        PANICKED.with(|panicked| panicked.set(true));
+        chained(info);
+    }));
+    wait.await;
+    // После паники хук не сменить: для std поток так и паникует — `abort`
+    // в wasm счёт паник не снимает, — и тест красный в любом случае.
+    if PANICKED.with(std::cell::Cell::get) {
+        return true;
+    }
+    drop(std::panic::take_hook());
+    std::panic::set_hook(Box::new(move |info| previous(info)));
+    false
 }
 
 /// Рамка — окну: сообщение строкой, как шлёт рамка.
@@ -160,5 +187,52 @@ async fn the_assistant_is_a_frame_of_its_own_origin_and_the_window_answers_it() 
     TEST_ORIGIN.with_borrow_mut(|test| *test = None);
     device.clear_ai();
     device.set_ai_by(None);
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// Рамка не встала в срок — слова о сбое и «Загрузить снова», а нажатие снова
+/// ждёт её. Окно, снятое посреди ожидания, снимает и его: таймер, переживший
+/// окно, читал его освобождённые сигналы, и паника роняла программу — в CI
+/// Firefox 0.0.214 она оборвала прогон посреди чужого теста.
+#[wasm_bindgen_test]
+async fn a_frame_that_does_not_come_says_so_and_its_wait_goes_with_the_window() {
+    let lang = Lang::Ru;
+    Device::new().set_ui_lang(lang);
+    let origin = web_sys::window().and_then(|window| window.location().origin().ok()).expect("у страницы тестов есть адрес");
+    TEST_ORIGIN.with_borrow_mut(|test| *test = Some(origin));
+    // Рамка тестов — пустая страница: «встала» она не скажет никогда.
+    LOAD_WAIT.with(|wait| wait.set(Some(std::time::Duration::from_millis(300))));
+    // Окно — под своим владельцем теста: снятое окно в прогоне тестов держит
+    // начатая им работа, и его сигналы живы, пока она идёт, — в CI их
+    // освободило, а здесь освобождает тест сам (`Owner::cleanup`).
+    let root = Owner::new();
+    let (host, mounted) = root.with(|| mount_at("#/ask"));
+    let mut wrong = Vec::new();
+    if !wait_for(&host, t(lang, Key::AiFrameFailed)).await {
+        wrong.push("рамка не встала, а слов о сбое нет".to_owned());
+    }
+    if !opened(&host, lang).await {
+        wrong.push("база окна не открылась".to_owned());
+    }
+    // «Загрузить снова» — новое ожидание, и окно снято посреди него.
+    LOAD_WAIT.with(|wait| wait.set(Some(std::time::Duration::from_millis(500))));
+    match button(&host, &[t(lang, Key::AiFrameRetry)]) {
+        Some(retry) => retry.click(),
+        None => wrong.push("нет «Загрузить снова»".to_owned()),
+    }
+    if !until(|| !host.text_content().unwrap_or_default().contains(t(lang, Key::AiFrameFailed))).await {
+        wrong.push("после «Загрузить снова» слова о сбое остались".to_owned());
+    }
+    drop(mounted);
+    host.remove();
+    root.cleanup();
+    // Срок нового ожидания проходит уже без окна. Паника в таймере — вне
+    // теста, и раннер её тесту не засчитывает: wasm после неё ещё отвечает,
+    // а в CI следующий тест повис. Поэтому её ловит хук на время ожидания.
+    if panics_while(sleep(900)).await {
+        wrong.push("паника: ожидание рамки пережило окно".to_owned());
+    }
+    LOAD_WAIT.with(|wait| wait.set(None));
+    TEST_ORIGIN.with_borrow_mut(|test| *test = None);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
