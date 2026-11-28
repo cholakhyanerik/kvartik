@@ -2589,12 +2589,15 @@ mod tests {
     const LANDING_CSS: &str = include_str!("../../app/site/landing.css");
     const LANDING_JS: &str = include_str!("../../app/site/landing.js");
     /// Утверждённые юридические тексты (задача 32) и прежние редакции условий
-    /// (задачи 93, 99, 103, 106, 102 и 113) и политики (задачи 106, 102, 113
-    /// и 115) — те, что берёт сборка.
-    const LEGAL: [(&str, &str); 36] = [
+    /// (задачи 93, 99, 103, 106, 102, 113 и 33) и политики (задачи 106, 102,
+    /// 113 и 115) — те, что берёт сборка.
+    const LEGAL: [(&str, &str); 39] = [
         ("terms.hy.md", include_str!("../../../docs/legal/terms.hy.md")),
         ("terms.ru.md", include_str!("../../../docs/legal/terms.ru.md")),
         ("terms.en.md", include_str!("../../../docs/legal/terms.en.md")),
+        ("terms.2026-11-21.hy.md", include_str!("../../../docs/legal/terms.2026-11-21.hy.md")),
+        ("terms.2026-11-21.ru.md", include_str!("../../../docs/legal/terms.2026-11-21.ru.md")),
+        ("terms.2026-11-21.en.md", include_str!("../../../docs/legal/terms.2026-11-21.en.md")),
         ("terms.2026-11-20.hy.md", include_str!("../../../docs/legal/terms.2026-11-20.hy.md")),
         ("terms.2026-11-20.ru.md", include_str!("../../../docs/legal/terms.2026-11-20.ru.md")),
         ("terms.2026-11-20.en.md", include_str!("../../../docs/legal/terms.2026-11-20.en.md")),
@@ -4908,8 +4911,8 @@ mod tests {
         sources(&edition);
         fs::create_dir_all(edition.0.join("stage")).expect("папка сборки");
         let (_, terms) = LEGAL.iter().find(|(name, _)| *name == "terms.en.md").expect("текст есть");
-        assert!(terms.contains("November 21, 2026"), "в условиях — та редакция, что ждёт тест");
-        edition.put("legal/terms.en.md", &terms.replace("November 21, 2026", "December 1, 2026"));
+        assert!(terms.contains("November 28, 2026"), "в условиях — та редакция, что ждёт тест");
+        edition.put("legal/terms.en.md", &terms.replace("November 28, 2026", "December 1, 2026"));
         let error = build(&edition).expect_err("слов согласия нет в условиях");
         assert!(error.contains("terms.en.md") && error.contains("Key::BuyAccept"), "{error}");
         assert!(names(&edition.0.join("stage")).is_empty(), "в сайт что-то легло");

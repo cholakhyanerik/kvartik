@@ -59,10 +59,9 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ed25519_dalek::{Signer, SigningKey};
-use kvartik_core::license::{self, Key, PUBLIC_KEY_BYTES, Plan};
+use kvartik_core::license::{self, Key, MAX_SEATS, PUBLIC_KEY_BYTES, Plan};
 use kvartik_core::release::PRO_SEATS;
 use kvartik_core::model::date::Date;
-use kvartik_core::model::office::MAX_IPS;
 use kvartik_core::model::tin::Tin;
 
 /// Папка закрытого ключа и журнала в домашнем каталоге автора. Любой путь
@@ -291,8 +290,8 @@ impl Order {
             (Some(text), Plan::Pro) => Some(
                 text.parse::<u8>()
                     .ok()
-                    .filter(|&seats| seats > 0 && usize::from(seats) <= MAX_IPS)
-                    .ok_or_else(|| format!("--seats {text}: мест — от 1 до {MAX_IPS}, столько ИП бывает в программе"))?,
+                    .filter(|&seats| seats > 0 && seats <= MAX_SEATS)
+                    .ok_or_else(|| format!("--seats {text}: мест — от 1 до {MAX_SEATS}, столько бывает у ключа «Pro»"))?,
             ),
         };
         let trial = match (trial, again) {
@@ -858,7 +857,7 @@ mod tests {
             })
         );
         assert_eq!(
-            Order::parse(&args(&format!("--tin 00054321 --plan pro --seats {MAX_IPS} --renew"))).map(|order| order.seats),
+            Order::parse(&args(&format!("--tin 00054321 --plan pro --seats {MAX_SEATS} --renew"))).map(|order| order.seats),
             Ok(Some(100))
         );
         // «Pro» без ИНН — подарок на пробу: в ключе восемь нулей (решение
@@ -874,7 +873,7 @@ mod tests {
                 key: None,
             })
         );
-        assert!(USAGE.contains(&format!("от 1 до {MAX_IPS}")), "в подсказке — не тот предел мест");
+        assert!(USAGE.contains(&format!("от 1 до {MAX_SEATS}")), "в подсказке — не тот предел мест");
         assert!(USAGE.contains(&format!("иначе {PRO_SEATS},")), "в подсказке — не то число мест по умолчанию");
         let mut accepted = Vec::new();
         for line in [

@@ -1,11 +1,13 @@
 # Kvartik License Terms
 
-> **Редакция от 21.11.2026** (задача 113): перевод нового п. 3, п. 4.4
-> и 6 и даты русского текста той же редакции; утвердил человек
-> вместе с русским текстом 2026-11-20.
+> **Редакция от 28.11.2026** (задача 33): перевод нового п. 4.5 и даты
+> русского текста той же редакции; утвердил человек вместе с русским
+> текстом 2026-11-28.
 >
-> Прежние редакции — от 20.11.2026
-> ([terms.2026-11-20.en.md](terms.2026-11-20.en.md), на сайте —
+> Прежние редакции — от 21.11.2026
+> ([terms.2026-11-21.en.md](terms.2026-11-21.en.md), на сайте —
+> /en/terms/2026-11-21/), от 20.11.2026
+> ([terms.2026-11-20.en.md](terms.2026-11-20.en.md),
 > /en/terms/2026-11-20/), от 18.11.2026
 > ([terms.2026-11-18.en.md](terms.2026-11-18.en.md),
 > /en/terms/2026-11-18/), от 17.11.2026
@@ -22,7 +24,7 @@
 > «Для проверки» — только в русском тексте. Квадратные скобки заполнены
 > 2026-11-09 вместе с русским текстом.
 
-**Edition of November 21, 2026. Public offer.**
+**Edition of November 28, 2026. Public offer.**
 
 ## 1. Parties and subject
 
@@ -38,7 +40,7 @@ individual entrepreneurs and organizations and only for their business.
    cholakhyanerik@gmail.com: the plan, the TIN (ՀՎՀՀ) of their IE or
    organization, its name, a contact to send the key to, and the words
    “I accept the Kvartik license terms in the edition of
-   November 21, 2026”.
+   November 28, 2026”.
 2. The user pays for the key. The contract is made upon payment.
 3. The seller sends the key to that contact within one business day after
    payment, together with the settlement document.
@@ -91,6 +93,12 @@ periods without a key.
    works always: the data, drafts, income and expenses, the tax on screen,
    PDFs of issued documents, export and backup. The user's data remains
    the user's.
+5. At the seller's discretion, a key may be issued free of charge, for a
+   longer term or with more seats than on the “Buy” page, for example to
+   beta test participants. To get such a key, the user writes to the
+   seller with the details and the words from section 2.1. Such a key is
+   governed by these terms in the edition of the day it is issued, except
+   price and payment.
 
 ## 5. Price and payment
 

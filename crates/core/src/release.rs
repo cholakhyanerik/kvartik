@@ -116,8 +116,11 @@ impl Legal {
 }
 
 /// Прежние редакции условий лицензии (`Legal::earlier`), от новой к старой:
-/// от 20.11.2026 — до редакции от 21.11.2026 (задача 113, пробный ключ
-/// продавца вместо 14 дней без ключа, п. 3, 4.4 и 6); от 18.11.2026 — по ней
+/// от 21.11.2026 — до редакции от 28.11.2026 (задача 33, ключ бесплатно,
+/// на больший срок или с большим числом мест по решению продавца — участникам
+/// беты, п. 4.5); от 20.11.2026 — до редакции от 21.11.2026 (задача 113,
+/// пробный ключ продавца вместо 14 дней без ключа, п. 3, 4.4 и 6); от
+/// 18.11.2026 — по ней
 /// продавались ключи до редакции от 20.11.2026
 /// (задача 102, ответы ИИ-помощника — не консультация, п. 8); от 17.11.2026 —
 /// до редакции от 18.11.2026 (задача 106, пробный период и по ՀՎՀՀ, п. 3);
@@ -126,7 +129,8 @@ impl Legal {
 /// 13.11.2026 — до редакции от 15.11.2026 (задача 99, пробный период с
 /// первого дня данных, п. 3); от 09.11.2026 — первая, до редакции от
 /// 13.11.2026 (задача 93, продление заранее, п. 4.1).
-const TERMS_EARLIER: [Date; 6] = [
+const TERMS_EARLIER: [Date; 7] = [
+    Date::new(2026, 11, 21).expect("21 ноября 2026 года в календаре есть"),
     Date::new(2026, 11, 20).expect("20 ноября 2026 года в календаре есть"),
     Date::new(2026, 11, 18).expect("18 ноября 2026 года в календаре есть"),
     Date::new(2026, 11, 17).expect("17 ноября 2026 года в календаре есть"),
@@ -570,12 +574,13 @@ mod tests {
                 }
             }
         }
-        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[0]), "/ru/terms/2026-11-20/");
-        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[1]), "/ru/terms/2026-11-18/");
-        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[2]), "/ru/terms/2026-11-17/");
-        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[3]), "/ru/terms/2026-11-15/");
-        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[4]), "/ru/terms/2026-11-13/");
-        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[5]), "/ru/terms/2026-11-09/");
+        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[0]), "/ru/terms/2026-11-21/");
+        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[1]), "/ru/terms/2026-11-20/");
+        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[2]), "/ru/terms/2026-11-18/");
+        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[3]), "/ru/terms/2026-11-17/");
+        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[4]), "/ru/terms/2026-11-15/");
+        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[5]), "/ru/terms/2026-11-13/");
+        assert_eq!(Legal::Terms.earlier_path(Lang::Ru, Legal::Terms.earlier()[6]), "/ru/terms/2026-11-09/");
         assert_eq!(Legal::Privacy.earlier_path(Lang::Am, Legal::Privacy.earlier()[0]), "/privacy/2026-11-21/");
         assert_eq!(Legal::Privacy.earlier_path(Lang::Am, Legal::Privacy.earlier()[1]), "/privacy/2026-11-20/");
         assert_eq!(Legal::Privacy.earlier_path(Lang::Am, Legal::Privacy.earlier()[2]), "/privacy/2026-11-18/");

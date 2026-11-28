@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "0.0.216",
+      "date": "2026-11-28",
+      "hy": [
+        "Լիցենզիայի պայմանների նոր խմբագրությունը՝ 28.11.2026. վաճառողը կարող է բանալին տալ անվճար, ավելի երկար ժամկետով կամ ավելի շատ տեղերով, քան «Գնել» էջում է, օրինակ՝ բետա-թեստի մասնակիցներին։ Վաճառողին գրվող նամակում համաձայնության բառերը՝ նոր խմբագրության։",
+        "Ծրագրում կարող է լինել մինչև 300 ԱՁ՝ ներառյալ ցանկից հեռացվածները, ոչ թե 100. 100 տեղով «Pro» բանալի ունեցող հաշվապահը կավելացնի հարյուրերորդ ԱՁ-ն նույնիսկ այն դեպքում, երբ հեռացրել է նրանց, ում հաշվառումն այլևս չի վարում։"
+      ],
+      "ru": [
+        "Новая редакция условий лицензии — от 28.11.2026: продавец может выдать ключ бесплатно, на больший срок или с большим числом мест, чем на странице «Купить», например участникам бета-теста. Слова согласия в письме продавцу — новой редакции.",
+        "В программе может быть до 300 ИП вместе с убранными из списка, а не до 100: бухгалтер с ключом «Pro» на 100 мест заведёт сотого ИП, даже убрав тех, кого больше не ведёт."
+      ],
+      "en": [
+        "A new edition of the license terms, of November 28, 2026: the seller may issue a key free of charge, for a longer term or with more seats than on the “Buy” page, for example to beta test participants. The words of consent in the email to the seller are those of the new edition.",
+        "The app holds up to 300 entrepreneurs, counting those removed from the list, instead of 100: an accountant with a 100-seat “Pro” key can add the hundredth one even after removing those whose books they no longer keep."
+      ]
+    },
+    {
       "version": "0.0.215",
       "date": "2026-11-27",
       "hy": [
@@ -251,19 +267,6 @@
       ],
       "en": [
         "“My devices” on the “Another device” screen: names of this and other devices, the day of the last exchange and which one issues invoices and acts. You choose the issuing device here or in Settings, and the app won’t let two devices issue silently. Codes are of a new version: an earlier version of the app will ask you to reload the page."
-      ]
-    },
-    {
-      "version": "0.0.196",
-      "date": "2026-11-25",
-      "hy": [
-        "Android-ում տեղադրված ծրագրում մեսենջերից կոդը կամ պատճենի ֆայլը կարելի է «Կիսվել» ընտրացանկով ուղարկել անմիջապես Kvartik. կոդը կհայտնվի «Այլ սարք» էկրանի դաշտում, իսկ պատճենը կվերականգնվի՝ ինչպես ընտրված ֆայլ։"
-      ],
-      "ru": [
-        "На Android в установленной программе код или файл копии из мессенджера можно отправить меню «Поделиться» прямо в Kvartik: код встанет в поле «Другого устройства», а копия ляжет, как выбранный файл."
-      ],
-      "en": [
-        "On Android, in the installed app, a code or a backup file from a messenger can go straight to Kvartik through the “Share” menu: the code lands in the field of “Another device”, and the backup is restored like a chosen file."
       ]
     }
   ]

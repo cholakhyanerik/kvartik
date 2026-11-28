@@ -175,6 +175,24 @@ fn too_many_ips_are_refused() {
     );
 }
 
+/// Контора с ключом «Pro» на все `license::MAX_SEATS` мест, убравшая из
+/// списка хоть одного ИП, принимает и сотого живого (задача 90): убранные
+/// в пределе считаются, а до 0.0.216 предел был равен числу мест, и
+/// бухгалтер беты со ста местами упирался в него, убрав первого же клиента.
+#[test]
+fn a_full_pro_office_with_a_removed_ip_takes_one_more() {
+    let seats = usize::from(crate::license::MAX_SEATS);
+    let mut local: Vec<Ip> = (0..seats as i64).map(|n| ip_of(None, 1_000 + n)).collect();
+    local[0].remove(at(2_000));
+    let anna = profile("IE Anna Hakobyan", Some("87654321"), 1_000);
+    let stranger = ip_of(Some(&anna), 5_000);
+    assert_eq!(
+        route(full_backup(&[(&stranger, &anna)]), &local, None).map(|route| route.office.len()),
+        Ok(1),
+        "живых ИП стало бы {seats}"
+    );
+}
+
 /// Свежее устройство: списка нет, своя `kvartik` пуста — в неё ложится ИП
 /// копии, добавленный раньше всех из тех, у кого здесь нет пары, а не встаёт
 /// рядом с пустой базой. Остальные — в новые базы, убранный — тоже.

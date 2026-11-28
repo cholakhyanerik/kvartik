@@ -1019,7 +1019,7 @@ macro_rules! en {
     (OfficeRemovedAbout) => { "A removed entrepreneur's data stays on this device and in the backup of all entrepreneurs, and you can bring them back at any time." };
     (OfficeBringBack) => { "Bring back" };
     (OfficeBusy) => { "Finish what you've started first: close the open form and wait until it's saved." };
-    (OfficeTooMany) => { "The app holds at most {} entrepreneurs: remove the ones you don't need." };
+    (OfficeTooMany) => { "The app holds at most {} entrepreneurs, counting those removed from the list." };
     (OfficeUnreadable) => { "Entrepreneur list entries that can't be read: {}." };
     (OfficeBar) => { "Open: {}" };
     (OfficeSwitch) => { "Switch" };
@@ -1345,7 +1345,7 @@ macro_rules! en {
     (BuyRefund) => { "Refunds: license terms, section\u{A0}6" };
     (BuyHow) => { "How to buy" };
     (BuyStepWrite) => { "Write to {} with the plan, the TIN (ՀՎՀՀ) of your IE or organization, its name, where to send the key, and the words accepting the license terms:" };
-    (BuyAccept) => { "I accept the Kvartik license terms in the edition of November 21, 2026" };
+    (BuyAccept) => { "I accept the Kvartik license terms in the edition of November 28, 2026" };
     (BuyWrite) => { "Write an email" };
     (BuyMailSubject) => { "Kvartik key" };
     (BuyMailBody) => { "Plan (“{}” or “{}”):\nTIN (ՀՎՀՀ) of the IE or organization:\nName:\nWhere to send the key:\n\n{}" };
